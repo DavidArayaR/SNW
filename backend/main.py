@@ -18,7 +18,6 @@ from db import conectar
 from motor_envio import obtener_canal"""
 from backend.db import conectar
 from backend.motor_envio import obtener_canal
-
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
