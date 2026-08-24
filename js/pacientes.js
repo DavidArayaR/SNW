@@ -2,6 +2,7 @@ const API_URL = "api/pacientes.php";
 
 let pacientes = [];
 let filtro = "";
+let filtroEstado = "todos";
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -30,13 +31,14 @@ async function cargar() {
 
 function render() {
   const q = filtro.trim().toLowerCase();
-  const visibles = !q
-    ? pacientes
-    : pacientes.filter((p) =>
-        [p.nombre,p.apellido, p.telefono, p.info_extra]
+  const visibles = pacientes.filter(
+    (p) =>
+      (filtroEstado === "todos" || p.estado === filtroEstado) &&
+      (!q ||
+        [p.nombre, p.telefono, p.info_extra]
           .filter(Boolean)
-          .some((v) => v.toLowerCase().includes(q))
-      );
+          .some((v) => v.toLowerCase().includes(q)))
+  );
 
   tbodyEl.innerHTML = "";
 
@@ -60,16 +62,36 @@ function render() {
     if (conteo[p.estado] !== undefined) conteo[p.estado]++;
   }
 
+  const activo = (estado) => (filtroEstado === estado ? " activo" : "");
   statsEl.innerHTML =
-    `<span class="stat stat--total">Total <strong>${conteo.total}</strong></span>` +
-    `<span class="stat stat--pendiente">Pendientes <strong>${conteo.pendiente}</strong></span>` +
-    `<span class="stat stat--enviado">Enviados <strong>${conteo.enviado}</strong></span>` +
-    `<span class="stat stat--error">Errores <strong>${conteo.error}</strong></span>`;
+    `<button type="button" class="stat stat--total${activo("todos")}" data-estado="todos">Total <strong>${conteo.total}</strong></button>` +
+    `<button type="button" class="stat stat--pendiente${activo("pendiente")}" data-estado="pendiente">Pendientes <strong>${conteo.pendiente}</strong></button>` +
+    `<button type="button" class="stat stat--enviado${activo("enviado")}" data-estado="enviado">Enviados <strong>${conteo.enviado}</strong></button>` +
+    `<button type="button" class="stat stat--error${activo("error")}" data-estado="error">Errores <strong>${conteo.error}</strong></button>`;
+
+  document.querySelectorAll(".filtro-btn").forEach((b) => {
+    b.classList.toggle("activo", b.dataset.estado === filtroEstado);
+  });
+}
+
+function setFiltro(estado) {
+  filtroEstado = estado;
+  render();
 }
 
 buscadorEl.addEventListener("input", () => {
   filtro = buscadorEl.value;
   render();
+});
+
+document.querySelectorAll(".filtro-btn").forEach((btn) => {
+  btn.addEventListener("click", () => setFiltro(btn.dataset.estado));
+});
+
+statsEl.addEventListener("click", (e) => {
+  const btn = e.target.closest(".stat");
+  if (!btn) return;
+  setFiltro(btn.dataset.estado);
 });
 
 $("#btnActualizar").addEventListener("click", cargar);

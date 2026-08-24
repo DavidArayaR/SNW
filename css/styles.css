@@ -23,6 +23,7 @@ body {
 button { font: inherit; cursor: pointer; }
 
 .topbar {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -49,7 +50,14 @@ button { font: inherit; cursor: pointer; }
 
 .topbar__right { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 
-.nav { display: flex; gap: 6px; }
+.nav {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  gap: 6px;
+}
 .nav a {
   color: #fff;
   text-decoration: none;

@@ -19,8 +19,17 @@
   padding: 6px 14px;
   font-size: .82rem;
   font-weight: 600;
+  font-family: inherit;
   color: var(--texto-suave);
   background: #fafbfc;
+  cursor: pointer;
+  transition: all .15s;
+}
+.stat:hover { background: #f0f4f6; color: var(--texto); }
+.stat.activo {
+  border-color: var(--verde);
+  background: #e7f3f1;
+  color: var(--verde-oscuro);
 }
 .stat strong { color: var(--texto); font-size: .95rem; }
 .stat::before {
