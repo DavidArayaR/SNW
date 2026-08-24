@@ -10,12 +10,14 @@ from pathlib import Path
 import pymysql
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
-from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-
+"""
 from db import conectar
-from motor_envio import obtener_canal
+from motor_envio import obtener_canal"""
+from backend.db import conectar
+from backend.motor_envio import obtener_canal
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
@@ -93,6 +95,9 @@ def slug(texto: str) -> str:
 
 @app.get("/")
 def raiz():
+    landing = BASE_DIR / "index.html"
+    if landing.exists():
+        return FileResponse(landing)
     return RedirectResponse("/pacientes.html")
 
 

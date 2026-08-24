@@ -2,6 +2,37 @@ const API_PACIENTES = "api/pacientes";
 const API_PLANTILLAS = "api/plantillas";
 const API_ENVIAR = "api/notificaciones/enviar";
 
+let demoMode = false;
+
+function mostrarCintaDemo() {
+  if (document.getElementById("cintaDemo")) return;
+  const cinta = document.createElement("div");
+  cinta.id = "cintaDemo";
+  cinta.className = "cinta-demo";
+  cinta.textContent = "Modo demostración — sin servidor conectado; los datos son de ejemplo.";
+  document.body.prepend(cinta);
+}
+
+function activarDemo() {
+  demoMode = true;
+  mostrarCintaDemo();
+  $("#badgeEntorno").textContent = "Modo demo";
+  config = { entorno: "desarrollo", metodo_envio: "simulado", numeros_prueba: ["+56993921740"], intervalo_ms: 600 };
+  pacientes = [
+    { id: 7, nombre: "David", apellido: "Araya", telefono: "+56993921740", info_extra: "Control Médico 15:30 hrs", estado: "enviado", actualizado: "24-08-2026 10:12" },
+    { id: 8, nombre: "María", apellido: "López", telefono: "+56941508435", info_extra: "Reunión de Control 16:00 hrs", estado: "pendiente", actualizado: "24-08-2026 09:40" },
+    { id: 9, nombre: "Pedro", apellido: "Soto", telefono: "+56988887777", info_extra: "Examen de sangre en ayunas", estado: "error", actualizado: "23-08-2026 18:05" },
+    { id: 10, nombre: "Sergio", apellido: "Ramírez", telefono: "+56941508435", info_extra: "", estado: "pendiente", actualizado: "22-08-2026 12:20" },
+    { id: 11, nombre: "Carla", apellido: "Díaz", telefono: "+56961234567", info_extra: "Consulta dental 09:00 hrs", estado: "enviado", actualizado: "21-08-2026 16:45" },
+  ];
+  plantillas = [
+    { id: 1, clave: "recordatorio_cita", nombre: "Recordatorio de cita médica",
+      texto: "Hola {nombre}, le recordamos que su cita es el lunes 31-08-2026 a las 10:30 en Consulta Nº 4.\nPor favor confirme respondiendo este mensaje.", actualizada: Date.now() - 172800000 },
+    { id: 2, clave: "resultado_disponible", nombre: "Resultado disponible",
+      texto: "Hola {nombre}, sus resultados ya están disponibles para retiro en sucursal.", actualizada: Date.now() - 86400000 },
+  ];
+}
+
 let pacientes = [];
 let plantillas = [];
 let config = null;
@@ -51,7 +82,8 @@ async function cargar() {
 
     render();
   } catch {
-    toast("No se pudo conectar con la base de datos.", "error");
+    activarDemo();
+    render();
   }
 }
 
@@ -246,6 +278,8 @@ $("#btnCerrarModal").addEventListener("click", () => {
 });
 
 $("#btnLanzarEnvio").addEventListener("click", async () => {
+  if (demoMode) return lanzarEnvioDemo();
+
   $("#btnLanzarEnvio").hidden = true;
 
   try {
@@ -272,6 +306,87 @@ $("#btnLanzarEnvio").addEventListener("click", async () => {
     $("#btnLanzarEnvio").hidden = false;
   }
 });
+
+function normalizarTelefonoJs(crudo) {
+  const limpio = String(crudo ?? "").trim().replace(/[^\d+]/g, "");
+  const d = limpio.replace(/\D/g, "");
+  if (limpio.startsWith("+")) {
+    if (d.length === 11 && d.startsWith("569")) return "+" + d;
+    if (d.length === 10 && d.startsWith("56")) return "+569" + d.slice(2);
+    if (d.length === 9 && d.startsWith("9")) return "+56" + d;
+    return null;
+  }
+  if (d.length === 11 && d.startsWith("569")) return "+" + d;
+  if (d.length === 10 && d.startsWith("56")) return "+569" + d.slice(2);
+  if (d.length === 9 && d.startsWith("9")) return "+56" + d;
+  if (d.length === 8 && d.startsWith("9")) return "+569" + d;
+  return null;
+}
+
+async function lanzarEnvioDemo() {
+  $("#btnLanzarEnvio").hidden = true;
+
+  const tpl = plantillas.find((t) => t.id === plantillaId);
+  const autorizados = new Set(config?.numeros_prueba ?? []);
+  const enDev = config?.entorno === "desarrollo";
+
+  const rechazados = [];
+  const cola = [];
+
+  for (const id of seleccionados) {
+    const p = pacientes.find((x) => x.id === id);
+    if (!p) continue;
+    const tel = normalizarTelefonoJs(p.telefono);
+    const nombre = [p.nombre, p.apellido].filter(Boolean).join(" ");
+    if (!tel) {
+      rechazados.push({ nombre, telefono: p.telefono, motivo: "Formato de teléfono inválido" });
+      p.estado = "error";
+      continue;
+    }
+    if (enDev && !autorizados.has(tel)) {
+      rechazados.push({ nombre, telefono: tel, motivo: "No está en la lista de números de prueba (entorno desarrollo)" });
+      continue;
+    }
+    let msg = tpl.texto
+      .replaceAll("{nombre}", p.nombre || "")
+      .replaceAll("{apellido}", p.apellido || "")
+      .replaceAll("{info_extra}", p.info_extra || "");
+    cola.push({ p, nombre, telefono: tel, mensaje: msg });
+  }
+
+  pintarRechazados(rechazados);
+
+  if (!cola.length) {
+    toast("Ningún destinatario válido. Envío no iniciado.", "error");
+    render();
+    return;
+  }
+
+  $("#faseConfig").hidden = true;
+  $("#faseProgreso").hidden = false;
+
+  const intervalo = Math.min(config?.intervalo_ms ?? 600, 900);
+  let enviados = 0, fallidos = 0, i = 0;
+
+  await new Promise((resolve) => {
+    const paso = () => {
+      const d = cola[i];
+      $("#progresoTexto").textContent = `Enviando a ${d.nombre}... (simulado)`;
+      d.p.estado = "enviado";
+      enviados++;
+      i++;
+      const hechos = enviados + fallidos;
+      $("#barraFill").style.width = `${Math.round((hechos / cola.length) * 100)}%`;
+      $("#progresoNumeros").textContent = `${hechos} / ${cola.length}`;
+      if (i < cola.length) setTimeout(paso, intervalo);
+      else resolve();
+    };
+    setTimeout(paso, intervalo);
+  });
+
+  finalizar(`Envío completado (demo): ${enviados} enviado(s), ${fallidos} fallido(s).`, false);
+  render();
+}
 
 function pintarRechazados(rechazados) {
   const ul = $("#listaRechazados");

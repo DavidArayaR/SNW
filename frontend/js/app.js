@@ -27,6 +27,31 @@ const DATOS_EJEMPLO = {
   info_extra: "su cita es el lunes 31-08-2026 a las 10:30 en Consulta Nº 4",
 };
 
+const LS_DEMO_KEY = "snw_plantillas_demo";
+let demoMode = false;
+
+function activarDemo() {
+  if (demoMode) return;
+  demoMode = true;
+  mostrarCintaDemo();
+  plantillas = JSON.parse(localStorage.getItem(LS_DEMO_KEY)) ?? [
+    { id: 1, clave: "recordatorio_cita", nombre: "Recordatorio de cita médica",
+      texto: "Hola {nombre}, le recordamos que su cita es el lunes 31-08-2026 a las 10:30 en Consulta Nº 4.\nPor favor confirme respondiendo este mensaje.",
+      actualizada: Date.now() - 86400000 * 2 },
+    { id: 2, clave: "resultado_disponible", nombre: "Resultado disponible",
+      texto: "Hola {nombre}, sus resultados ya están disponibles para retiro en sucursal.",
+      actualizada: Date.now() - 86400000 },
+    { id: 3, clave: "feliz_cumpleanos", nombre: "Feliz cumpleaños",
+      texto: "¡Hola {nombre}! 🎂\nTodo el equipo de Prosalud le desea un muy feliz cumpleaños. ¡Gracias por confiar en nosotros!",
+      actualizada: Date.now() - 3600000 },
+  ];
+  renderLista(buscadorEl.value);
+}
+
+function guardarDemo() {
+  localStorage.setItem(LS_DEMO_KEY, JSON.stringify(plantillas));
+}
+
 async function cargar() {
   try {
     const res = await fetch(API_URL, { cache: "no-store" });
@@ -34,7 +59,9 @@ async function cargar() {
     plantillas = await res.json();
     renderLista(buscadorEl.value);
   } catch {
-    toast("No se pudo conectar con la base de datos.", "error");
+    activarDemo();
+    toast("Modo demostración: los cambios se guardan solo en este navegador.", "ok");
+    renderLista(buscadorEl.value);
   }
 }
 
@@ -256,6 +283,29 @@ formEl.addEventListener("submit", async (e) => {
     return toast("Ya existe una plantilla con ese nombre.", "error");
   }
 
+  if (demoMode) {
+    let fila;
+    if (activaId) {
+      fila = plantillas.find((p) => p.id === activaId);
+      fila.nombre = nombre;
+      fila.texto = texto;
+      fila.actualizada = Date.now();
+      toast("Plantilla actualizada (demo).", "ok");
+    } else {
+      const base = slug(nombre) || "plantilla";
+      let id = base;
+      let n = 2;
+      while (plantillas.some((p) => p.id === id)) id = `${base}_${n++}`;
+      fila = { id, clave: id, nombre, texto, actualizada: Date.now() };
+      plantillas.push(fila);
+      toast("Plantilla creada (demo).", "ok");
+      activaId = fila.id;
+    }
+    guardarDemo();
+    abrir(fila.id);
+    return;
+  }
+
   try {
     let fila;
     if (activaId) {
@@ -287,8 +337,9 @@ $("#btnModalCancelar").addEventListener("click", () => (modalEl.hidden = true));
 
 $("#btnModalConfirmar").addEventListener("click", async () => {
   try {
-    await eliminarPlantilla(activaId);
+    if (!demoMode) await eliminarPlantilla(activaId);
     plantillas = plantillas.filter((x) => x.id !== activaId);
+    if (demoMode) guardarDemo();
     modalEl.hidden = true;
     toast("Plantilla eliminada.", "ok");
     modoVacia();
