@@ -52,6 +52,7 @@ snw/
    - `SNW_METODO_ENVIO`: `simulado`, `whatsapp_web` o `api_oficial`
    - `SNW_NUMEROS_PRUEBA`: números autorizados separados por coma
    - `SNW_INTERVALO_MS`: pausa entre mensajes
+   - `SNW_WA_TOKEN` y `SNW_WA_PHONE_ID`: credenciales de la API oficial de Meta (solo si `SNW_METODO_ENVIO=api_oficial`)
    - `DB_HOST`, `DB_PUERTO`, `DB_USUARIO`, `DB_CONTRASENA`, `DB_NOMBRE`
 4. Iniciar el servidor (puerto 8000):
    ```
@@ -109,7 +110,7 @@ Integrado en la página de Pacientes: se marcan pacientes con checkboxes (o "sel
 - **Validaciones previas:** existencia del paciente y de la plantilla, formato internacional `+569XXXXXXXXX`, disponibilidad del canal.
 - **Descartes sin interrumpir la cola:** teléfonos inválidos o no autorizados se reportan como rechazados con su motivo.
 - **Filtro de entorno desarrollo:** solo salen mensajes hacia los números autorizados en `SNW_NUMEROS_PRUEBA` (archivo `.env`).
-- **Motor intercambiable** (`motor_envio.py`): `whatsapp_web` (actual, abre `wa.me` con el mensaje por destinatario), `simulado` y `api_oficial`; el método se elige en `.env`, con intervalo entre mensajes configurable.
+- **Motor intercambiable** (`motor_envio.py`): `whatsapp_web` (abre `wa.me`/WhatsApp Web por destinatario), `simulado` y `api_oficial` (**implementado**: envía vía Graph API de Meta con `SNW_WA_TOKEN` y `SNW_WA_PHONE_ID`); el método se elige en `.env`, con intervalo entre mensajes configurable.
 - **Estados por paciente:** cada envío actualiza `pacientes.estado` (pendiente / enviado / error).
 - **Historial:** cada intento (enviado, error, nº inválido) se registra en la tabla `log_envios` con fecha, paciente, teléfono, plantilla y detalle del fallo; consultable en `historial.html` con búsqueda y filtros.
 

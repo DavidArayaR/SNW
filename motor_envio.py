@@ -1,5 +1,11 @@
+import json
+import os
+import urllib.error
 import urllib.parse
+import urllib.request
 import webbrowser
+
+GRAPH_URL = "https://graph.facebook.com/v21.0/{phone_id}/messages"
 
 
 class MotorSimulado:
@@ -28,21 +34,50 @@ class MotorWhatsAppWeb:
         return False, "No se pudo abrir WhatsApp Web en el navegador"
 
 
-class MotorNoImplementado:
-    nombre = ""
+class MotorApiOficial:
+    nombre = "api_oficial"
 
     def __init__(self):
-        self._error = f"El método '{self.nombre}' aún no está implementado en este prototipo"
+        self.token = os.getenv("SNW_WA_TOKEN", "").strip()
+        self.phone_id = os.getenv("SNW_WA_PHONE_ID", "").strip()
 
     def disponible(self) -> bool:
-        return False
+        return bool(self.token) and bool(self.phone_id)
 
     def enviar(self, telefono: str, mensaje: str):
-        return False, self._error
+        url = GRAPH_URL.format(phone_id=self.phone_id)
+        payload = json.dumps({
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": telefono.lstrip("+"),
+            "type": "text",
+            "text": {"preview_url": False, "body": mensaje},
+        }).encode("utf-8")
 
+        peticion = urllib.request.Request(
+            url,
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {self.token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
 
-class MotorApiOficial(MotorNoImplementado):
-    nombre = "api_oficial"
+        try:
+            with urllib.request.urlopen(peticion, timeout=30) as resp:
+                datos = json.loads(resp.read().decode("utf-8"))
+            if datos.get("messages"):
+                return True, None
+            return False, f"Respuesta inesperada de la API: {json.dumps(datos)[:200]}"
+        except urllib.error.HTTPError as e:
+            try:
+                detalle = json.loads(e.read().decode("utf-8")).get("error", {}).get("message", "")
+            except Exception:
+                detalle = ""
+            return False, f"Error HTTP {e.code}: {detalle or 'sin detalle'}"
+        except Exception as e:
+            return False, f"Fallo de conexión con la API de Meta: {e}"
 
 
 _MOTORES = {
