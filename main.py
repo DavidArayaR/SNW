@@ -210,15 +210,31 @@ def actualizar_estado_paciente(paciente_id: int, estado: str) -> None:
         conn.commit()
 
 
+def registrar_historial(paciente_id, nombre, telefono, clave_plantilla, mensaje, estado, error=None) -> None:
+    try:
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO log_envios (paciente_id, nombre_paciente, numero_telefono, mensaje,"
+                " plantilla_clave, estado_envio, descripcion_error) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                (paciente_id, nombre, telefono, mensaje, clave_plantilla, estado, error),
+            )
+            conn.commit()
+    except Exception as e:
+        print(f"[HISTORIAL] No se pudo registrar: {e}")
+
+
 def procesar_job(job_id: str) -> None:
     job = JOBS[job_id]
     cfg = leer_config()
     canal = obtener_canal(cfg)
+    clave = job.get("plantilla", {}).get("clave")
 
     if canal is None or not canal.disponible():
         for d in job["destinatarios"]:
             actualizar_estado_paciente(d["id"], "error")
             job["fallidos"] += 1
+            registrar_historial(d["id"], d["nombre"], d["telefono"], clave,
+                                d["mensaje"], "error", f"Canal no disponible: {canal.nombre if canal else 'desconocido'}")
         job["estado"] = "error"
         job["detalle"] = f"Canal de envío no disponible ({cfg.get('metodo_envio')})"
         return
@@ -236,6 +252,9 @@ def procesar_job(job_id: str) -> None:
         else:
             job["fallidos"] += 1
             job["errores"].append({"id": d["id"], "telefono": d["telefono"], "detalle": error})
+
+        registrar_historial(d["id"], d["nombre"], d["telefono"], clave,
+                            d["mensaje"], "enviado" if ok else "error", error)
 
         if i < total - 1 and intervalo > 0:
             time.sleep(intervalo)
@@ -276,11 +295,15 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks):
             rechazados.append({"id": p["id"], "nombre": nombre_completo, "telefono": telefono,
                                "motivo": "Formato de teléfono inválido"})
             actualizar_estado_paciente(p["id"], "error")
+            registrar_historial(p["id"], nombre_completo, telefono, plantilla["clave"],
+                                "", "numero_invalido", "Formato de teléfono inválido")
             continue
 
         if en_desarrollo and telefono not in autorizados:
             rechazados.append({"id": p["id"], "nombre": nombre_completo, "telefono": telefono,
                                "motivo": "No está en la lista de números de prueba (entorno desarrollo)"})
+            registrar_historial(p["id"], nombre_completo, telefono, plantilla["clave"],
+                                "", "error", "Número no autorizado en entorno desarrollo")
             continue
 
         destinatarios.append({
@@ -302,6 +325,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks):
         "actual": "",
         "errores": [],
         "detalle": "",
+        "plantilla": {"id": plantilla["id"], "clave": plantilla["clave"]},
         "destinatarios": destinatarios,
     }
 
@@ -316,6 +340,38 @@ def estado_job(job_id: str):
         raise HTTPException(404, detail="Envío no encontrado")
 
     return {k: v for k, v in job.items() if k != "destinatarios"}
+
+
+@app.get("/api/notificaciones/historial")
+def listar_historial(q: str | None = Query(None), estado: str | None = Query(None)):
+    sql = ("SELECT id, paciente_id, nombre_paciente, numero_telefono, plantilla_clave,"
+           " estado_envio, descripcion_error, fecha_hora FROM log_envios")
+    condiciones: list[str] = []
+    args: list = []
+
+    if q and q.strip():
+        like = f"%{q.strip()}%"
+        condiciones.append(
+            "(nombre_paciente LIKE %s OR numero_telefono LIKE %s OR plantilla_clave LIKE %s"
+            " OR descripcion_error LIKE %s)"
+        )
+        args += [like, like, like, like]
+
+    if estado in ("enviado", "error", "numero_invalido"):
+        condiciones.append("estado_envio = %s")
+        args.append(estado)
+
+    if condiciones:
+        sql += " WHERE " + " AND ".join(condiciones)
+    sql += " ORDER BY id DESC LIMIT 300"
+
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(sql, tuple(args) or None)
+        filas = cur.fetchall()
+
+    for f in filas:
+        f["fecha"] = f.pop("fecha_hora").strftime("%d-%m-%Y %H:%M")
+    return filas
 
 
 app.mount("/", StaticFiles(directory=ROOT, html=True), name="static")

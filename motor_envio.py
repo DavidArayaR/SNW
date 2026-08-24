@@ -1,3 +1,7 @@
+import urllib.parse
+import webbrowser
+
+
 class MotorSimulado:
     nombre = "simulado"
 
@@ -8,6 +12,20 @@ class MotorSimulado:
         vista = mensaje.replace("\n", " ")[:60]
         print(f"[MOTOR {self.nombre}] -> {telefono}: {vista}...")
         return True, None
+
+
+class MotorWhatsAppWeb:
+    nombre = "whatsapp_web"
+
+    def disponible(self) -> bool:
+        return True
+
+    def enviar(self, telefono: str, mensaje: str):
+        numero = telefono.lstrip("+")
+        url = f"https://web.whatsapp.com/send?phone={numero}&text={urllib.parse.quote(mensaje)}"
+        if webbrowser.open(url):
+            return True, None
+        return False, "No se pudo abrir WhatsApp Web en el navegador"
 
 
 class MotorNoImplementado:
@@ -21,10 +39,6 @@ class MotorNoImplementado:
 
     def enviar(self, telefono: str, mensaje: str):
         return False, self._error
-
-
-class MotorWhatsAppWeb(MotorNoImplementado):
-    nombre = "whatsapp_web"
 
 
 class MotorApiOficial(MotorNoImplementado):

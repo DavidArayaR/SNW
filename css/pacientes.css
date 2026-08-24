@@ -42,6 +42,7 @@
 .stat--pendiente::before { background: #e2a03f; }
 .stat--enviado::before { background: #2fa96e; }
 .stat--error::before { background: var(--rojo); }
+.stat--invalido::before { background: #8e6bd8; }
 
 .toolbar-pacientes {
   display: flex;
@@ -192,6 +193,7 @@ td.campo-id { color: var(--texto-suave); font-family: Consolas, monospace; }
 .estado-pendiente { background: #fdf3e0; color: #a06b08; border: 1px solid #ecd9ac; }
 .estado-enviado { background: #e5f6ec; color: #1e7d4d; border: 1px solid #bfe5cf; }
 .estado-error { background: #fdecec; color: #b23b37; border: 1px solid #eec2c1; }
+.estado-numero_invalido { background: #f1ecfb; color: #5c3fa8; border: 1px solid #d9cdf2; }
 
 .tabla-vacia {
   text-align: center;

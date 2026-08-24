@@ -1,0 +1,1 @@
+ALTER TABLE log_envios ADD COLUMN IF NOT EXISTS plantilla_clave VARCHAR(50) DEFAULT NULL AFTER mensaje;

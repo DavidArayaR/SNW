@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SNW · Historial</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="css/pacientes.css">
+</head>
+<body>
+
+  <header class="topbar">
+    <div class="topbar__brand">
+      <div>
+        <h1>Notificaciones WhatsApp</h1>
+        <p>Sistema de Notificaciones SNW</p>
+      </div>
+    </div>
+    <div class="topbar__right">
+      <span class="badge badge--dev" id="badgeEntorno">Ambiente: —</span>
+      <nav class="nav">
+        <a href="pacientes.html">Pacientes</a>
+        <a href="plantillas.html">Plantillas</a>
+        <a href="historial.html" class="activo">Historial</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="layout layout--ancho">
+
+    <section class="panel">
+      <div class="panel__head">
+        <h2>Historial de mensajes</h2>
+        <button id="btnActualizar" class="btn btn--ghost" type="button">Actualizar</button>
+      </div>
+
+      <div class="stats" id="stats"></div>
+
+      <div class="toolbar-pacientes">
+        <input type="search" id="buscador" placeholder="Buscar por paciente, teléfono, plantilla o detalle..." autocomplete="off">
+        <span id="contador" class="contador-sel"></span>
+      </div>
+
+      <div class="tabla-wrap">
+        <table id="tablaHistorial">
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Paciente</th>
+              <th>Teléfono</th>
+              <th>Plantilla</th>
+              <th>Estado</th>
+              <th>Detalle</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <p id="tablaVacia" class="tabla-vacia" hidden>Sin registros.</p>
+      </div>
+    </section>
+
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="js/historial.js"></script>
+</body>
+</html>

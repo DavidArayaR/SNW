@@ -26,6 +26,7 @@ snw/
 ├── .env.example             Plantilla de configuración
 ├── pacientes.html           Pacientes + módulo de envío integrado
 ├── plantillas.html          Editor de plantillas (CRUD)
+├── historial.html           Historial de mensajes enviados
 ├── css/
 │   ├── styles.css           Estilos compartidos
 │   └── pacientes.css        Estilos de la tabla y del envío
@@ -96,6 +97,7 @@ Cada creación, edición o eliminación desde la interfaz reescribe el archivo.
 | DELETE | `/api/plantillas/{id}` | Eliminar plantilla |
 | POST | `/api/notificaciones/enviar` | Iniciar envío `{pacientes: [ids], plantilla_id}` |
 | GET | `/api/notificaciones/jobs/{job_id}` | Progreso del envío en curso |
+| GET | `/api/notificaciones/historial?q=&estado=` | Historial de mensajes |
 | GET | `/api/configuracion` | Configuración actual |
 | PUT | `/api/configuracion` | Actualizar configuración |
 
@@ -107,8 +109,9 @@ Integrado en la página de Pacientes: se marcan pacientes con checkboxes (o "sel
 - **Validaciones previas:** existencia del paciente y de la plantilla, formato internacional `+569XXXXXXXXX`, disponibilidad del canal.
 - **Descartes sin interrumpir la cola:** teléfonos inválidos o no autorizados se reportan como rechazados con su motivo.
 - **Filtro de entorno desarrollo:** solo salen mensajes hacia los números autorizados en `SNW_NUMEROS_PRUEBA` (archivo `.env`).
-- **Motor intercambiable** (`motor_envio.py`): `simulado` (actual), `whatsapp_web` y `api_oficial` reservados; el método se elige en configuración, con intervalo entre mensajes configurable.
+- **Motor intercambiable** (`motor_envio.py`): `whatsapp_web` (actual, abre `wa.me` con el mensaje por destinatario), `simulado` y `api_oficial`; el método se elige en `.env`, con intervalo entre mensajes configurable.
 - **Estados por paciente:** cada envío actualiza `pacientes.estado` (pendiente / enviado / error).
+- **Historial:** cada intento (enviado, error, nº inválido) se registra en la tabla `log_envios` con fecha, paciente, teléfono, plantilla y detalle del fallo; consultable en `historial.html` con búsqueda y filtros.
 
 ## Funcionalidades actuales
 
@@ -120,6 +123,5 @@ Integrado en la página de Pacientes: se marcan pacientes con checkboxes (o "sel
 
 ## Pendientes (siguiente etapa)
 
-- Historial de envíos.
-- Motor de envío real (WhatsApp Web o API Oficial Business).
+- Motor de envío real vía API Oficial Business (envío sin intervención del usuario).
 - Logs del sistema y autenticación SSO por roles.
