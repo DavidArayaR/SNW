@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# Variables de entorno y credenciales
+.env
+.env.*
+config.local.php
+
+# Dependencias / builds
+node_modules/
+dist/
+
+# IDEs y editores
+.vscode/
+.idea/
+*.sublime-*
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs y respaldos locales
+*.log
+*.bak
+dump_*.sql
+*_backup.sql

@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SNW Plantillas</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+  <header class="topbar">
+    <div class="topbar__brand">
+      <div>
+        <h1>Notificaciones WhatsApp</h1>
+        <p>Sistema de Notificaciones SNW</p>
+      </div>
+    </div>
+    <div class="topbar__right">
+      <nav class="nav">
+        <a href="pacientes.html">Pacientes</a>
+        <a href="plantillas.html" class="activo">Plantillas</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="layout">
+
+    <aside class="panel panel--list">
+      <div class="panel__head">
+        <h2>Plantillas</h2>
+        <button id="btnNueva" class="btn btn--primary" type="button">+ Nueva</button>
+      </div>
+      <div class="searchbox">
+        <input type="search" id="buscador" placeholder="Buscar..." autocomplete="off">
+      </div>
+      <ul id="listaPlantillas" class="tpl-list" aria-label="Listado de plantillas"></ul>
+    </aside>
+
+    <section class="panel panel--editor">
+      <div class="panel__head">
+        <h2 id="tituloFormulario">Nueva plantilla</h2>
+        <div class="panel__actions">
+          <button id="btnEliminar" class="btn btn--danger-ghost" type="button" hidden>Eliminar</button>
+        </div>
+      </div>
+
+      <form id="formPlantilla" novalidate>
+        <div class="field">
+          <label for="inpNombre">Nombre</label>
+          <input type="text" id="inpNombre" maxlength="60" placeholder="Ej: Recordatorio de cita médica" autocomplete="off">
+        </div>
+
+        <div class="field">
+          <label for="inpMensaje">Mensaje</label>
+          <textarea id="inpMensaje" rows="8" placeholder="Escribe el mensaje..."></textarea>
+        </div>
+
+        <div class="wildcards" role="group" aria-label="Comodines disponibles">
+          <button type="button" class="chip" data-wc="{nombre}">{nombre}</button>
+          <button type="button" class="chip" data-wc="{info_extra}">{info_extra}</button>
+          <button type="button" class="chip" data-wc="{fecha}">{fecha}</button>
+          <button type="button" class="chip" data-wc="{hora}">{hora}</button>
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" id="btnGuardar" class="btn btn--primary btn--lg">Guardar</button>
+          <button type="button" id="btnCancelar" class="btn btn--ghost btn--lg">Cancelar</button>
+        </div>
+      </form>
+
+      <div id="estadoVacio" class="empty-state">
+        <h3>No hay plantilla seleccionada</h3>
+        <button type="button" class="btn btn--primary" id="btnNuevaEmpty">Crear plantilla</button>
+      </div>
+    </section>
+
+  </main>
+
+  <div id="modalEliminar" class="modal" hidden>
+    <div class="modal__card" role="dialog" aria-modal="true" aria-labelledby="modalTitulo">
+      <h3 id="modalTitulo">¿Eliminar "<span id="modalNombre"></span>"?</h3>
+      <div class="modal__actions">
+        <button type="button" class="btn btn--ghost" id="btnModalCancelar">Cancelar</button>
+        <button type="button" class="btn btn--danger" id="btnModalConfirmar">Eliminar</button>
+      </div>
+    </div>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="js/app.js"></script>
+</body>
+</html>

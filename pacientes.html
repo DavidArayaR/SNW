@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SNW Pacientes</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="css/pacientes.css">
+</head>
+<body>
+
+  <header class="topbar">
+    <div class="topbar__brand">
+      <div>
+        <h1>Notificaciones WhatsApp</h1>
+        <p>Sistema de Notificaciones SNW</p>
+      </div>
+    </div>
+    <div class="topbar__right">
+      <nav class="nav">
+        <a href="pacientes.html" class="activo">Pacientes</a>
+        <a href="plantillas.html">Plantillas</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="layout layout--ancho">
+
+    <section class="panel">
+      <div class="panel__head">
+        <h2>Pacientes</h2>
+        <button id="btnActualizar" class="btn btn--ghost" type="button">Actualizar</button>
+      </div>
+
+      <div class="stats" id="stats"></div>
+
+      <div class="searchbox searchbox--tabla">
+        <input type="search" id="buscador" placeholder="Buscar por nombre, teléfono o info..." autocomplete="off">
+      </div>
+
+      <div class="tabla-wrap">
+        <table id="tablaPacientes">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Nombre</th>
+              <th>Apellido</th>
+              <th>Teléfono</th>
+              <th>Estado</th>
+              <th>Info extra</th>
+              <th>Actualizado</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <p id="tablaVacia" class="tabla-vacia" hidden>Sin resultados.</p>
+      </div>
+    </section>
+
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="js/pacientes.js"></script>
+</body>
+</html>

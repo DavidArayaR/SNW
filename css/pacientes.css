@@ -1,0 +1,101 @@
+.layout--ancho {
+  max-width: 1300px;
+  grid-template-columns: 1fr;
+}
+
+.stats {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 14px 18px 0;
+}
+
+.stat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--borde);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: .82rem;
+  font-weight: 600;
+  color: var(--texto-suave);
+  background: #fafbfc;
+}
+.stat strong { color: var(--texto); font-size: .95rem; }
+.stat::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+.stat--total::before { background: #7f8c99; }
+.stat--pendiente::before { background: #e2a03f; }
+.stat--enviado::before { background: #2fa96e; }
+.stat--error::before { background: var(--rojo); }
+
+.searchbox--tabla {
+  margin: 14px 18px 8px;
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+  background: #fbfcfd;
+}
+
+.tabla-wrap { overflow-x: auto; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .88rem;
+}
+
+thead th {
+  text-align: left;
+  padding: 11px 16px;
+  color: var(--texto-suave);
+  font-size: .74rem;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  border-bottom: 2px solid var(--borde);
+  white-space: nowrap;
+}
+
+tbody td {
+  padding: 11px 16px;
+  border-bottom: 1px solid #edf0f3;
+  vertical-align: top;
+}
+
+tbody tr:hover { background: #f7fafb; }
+tbody tr:last-child td { border-bottom: none; }
+
+td.campo-id { color: var(--texto-suave); font-family: Consolas, monospace; }
+
+.campo-nombre { font-weight: 600; }
+.campo-tel { font-family: Consolas, monospace; white-space: nowrap; }
+.campo-info { max-width: 260px; color: var(--texto-suave); }
+.campo-fecha { white-space: nowrap; color: var(--texto-suave); font-size: .82rem; }
+
+.estado-badge {
+  display: inline-block;
+  padding: 3px 11px;
+  border-radius: 999px;
+  font-size: .72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.estado-pendiente { background: #fdf3e0; color: #a06b08; border: 1px solid #ecd9ac; }
+.estado-enviado { background: #e5f6ec; color: #1e7d4d; border: 1px solid #bfe5cf; }
+.estado-error { background: #fdecec; color: #b23b37; border: 1px solid #eec2c1; }
+
+.tabla-vacia {
+  text-align: center;
+  color: var(--texto-suave);
+  padding: 30px 0;
+}
+
+@media (max-width: 700px) {
+  thead th, tbody td { padding: 9px 10px; }
+  .campo-info { max-width: 150px; }
+}
