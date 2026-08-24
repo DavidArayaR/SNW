@@ -52,11 +52,13 @@ function render() {
 
   for (const r of visibles) {
     const tr = document.createElement("tr");
+    tr.dataset.id = r.id;
     tr.innerHTML =
       `<td class="campo-fecha">${escaparHtml(r.fecha)}</td>` +
       `<td class="campo-nombre">${escaparHtml(r.nombre_paciente ?? "—")}</td>` +
       `<td class="campo-tel">${escaparHtml(r.numero_telefono ?? "—")}</td>` +
       `<td>${escaparHtml(r.plantilla_clave ?? "—")}</td>` +
+      `<td class="campo-mensaje" title="${escaparHtml(r.mensaje ?? "")}">${escaparHtml(r.mensaje ?? "—")}</td>` +
       `<td><span class="estado-badge estado-${escaparHtml(r.estado_envio)}">${escaparHtml(rotular(r.estado_envio))}</span></td>` +
       `<td class="campo-info">${escaparHtml(r.descripcion_error ?? "")}</td>`;
     tbodyEl.appendChild(tr);
@@ -108,6 +110,46 @@ statsEl.addEventListener("click", (e) => {
 });
 
 $("#btnActualizar").addEventListener("click", cargar);
+
+const modalEl = $("#modalDetalle");
+
+tbodyEl.addEventListener("click", (e) => {
+  const tr = e.target.closest("tr");
+  if (!tr || !tbodyEl.contains(tr)) return;
+  const registro = registros.find((r) => r.id === Number(tr.dataset.id));
+  if (registro) abrirDetalle(registro);
+});
+
+function abrirDetalle(r) {
+  const campos = [
+    ["Fecha", r.fecha],
+    ["Paciente", r.nombre_paciente ?? "—"],
+    ["ID paciente", r.paciente_id ?? "—"],
+    ["Teléfono", r.numero_telefono ?? "—"],
+    ["Plantilla", r.plantilla_clave ?? "—"],
+    ["Estado", rotular(r.estado_envio)],
+  ];
+
+  $("#detalleCampos").innerHTML = campos
+    .map(
+      ([k, v]) =>
+        `<div class="detalle-fila"><dt>${escaparHtml(k)}</dt><dd>${escaparHtml(v)}</dd></div>`
+    )
+    .join("");
+
+  $("#detalleMensaje").textContent = r.mensaje || "(sin contenido registrado)";
+
+  const errBox = $("#detalleError");
+  errBox.hidden = !r.descripcion_error;
+  errBox.textContent = r.descripcion_error ? `Error: ${r.descripcion_error}` : "";
+
+  modalEl.hidden = false;
+}
+
+$("#btnCerrarDetalle").addEventListener("click", () => (modalEl.hidden = true));
+modalEl.addEventListener("click", (e) => {
+  if (e.target === modalEl) modalEl.hidden = true;
+});
 
 let toastTimer;
 function toast(msg, tipo = "ok") {

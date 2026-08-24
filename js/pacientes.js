@@ -136,6 +136,17 @@ chkTodos.addEventListener("change", () => {
   render();
 });
 
+tbodyEl.addEventListener("click", (e) => {
+  if (e.target.tagName === "INPUT") return;
+  const tr = e.target.closest("tr");
+  if (!tr || !tbodyEl.contains(tr)) return;
+  const chk = tr.querySelector("input[type=checkbox]");
+  if (!chk) return;
+  chk.checked = !chk.checked;
+  chk.checked ? seleccionados.add(Number(chk.dataset.id)) : seleccionados.delete(Number(chk.dataset.id));
+  refrescarSeleccion();
+});
+
 buscadorEl.addEventListener("input", () => {
   filtro = buscadorEl.value;
   render();
@@ -180,9 +191,8 @@ function abrirModal() {
 
   $("#faseConfig").hidden = false;
   $("#faseProgreso").hidden = true;
-  $("#accionesModal").hidden = false;
-  $("#accionesCierre").hidden = true;
-  $("#btnLanzarEnvio").disabled = plantillaId === null;
+  $("#btnLanzarEnvio").hidden = true;
+  $("#btnCerrarModal").hidden = true;
   $("#listaRechazados").innerHTML = "";
   $("#listaRechazados").hidden = true;
   $("#barraFill").style.width = "0%";
@@ -205,7 +215,7 @@ function renderPlantillasModal() {
       plantillaId = t.id;
       cont.querySelectorAll(".tpl-card").forEach((c) => c.classList.remove("seleccionada"));
       label.classList.add("seleccionada");
-      $("#btnLanzarEnvio").disabled = false;
+      $("#btnLanzarEnvio").hidden = false;
     });
     cont.appendChild(label);
   }
@@ -213,19 +223,26 @@ function renderPlantillasModal() {
 
 const avisoDevEl = $("#avisoDev");
 
-$("#btnCancelarEnvio").addEventListener("click", () => (modalEl.hidden = true));
+$("#btnCancelarEnvio").addEventListener("click", () => {
+  clearInterval(timerPolling);
+  modalEl.hidden = true;
+});
 modalEl.addEventListener("click", (e) => {
-  if (e.target === modalEl) modalEl.hidden = true;
+  if (e.target === modalEl) {
+    clearInterval(timerPolling);
+    modalEl.hidden = true;
+  }
 });
 $("#btnCerrarModal").addEventListener("click", () => {
   clearInterval(timerPolling);
   seleccionados.clear();
+  plantillaId = null;
   modalEl.hidden = true;
   render();
 });
 
 $("#btnLanzarEnvio").addEventListener("click", async () => {
-  $("#btnLanzarEnvio").disabled = true;
+  $("#btnLanzarEnvio").hidden = true;
 
   try {
     const res = await fetch(API_ENVIAR, {
@@ -236,11 +253,9 @@ $("#btnLanzarEnvio").addEventListener("click", async () => {
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail ?? `Error ${res.status}`);
 
-    $("#accionesModal").hidden = true;
-    $("#accionesCierre").hidden = false;
+    pintarRechazados(data.rechazados ?? []);
 
     if (!data.iniciado) {
-      pintarRechazados(data.rechazados ?? []);
       toast("Ningún destinatario válido. Envío no iniciado.", "error");
       return;
     }
@@ -250,7 +265,7 @@ $("#btnLanzarEnvio").addEventListener("click", async () => {
     seguirProgreso(data.job_id, data.total);
   } catch (err) {
     toast(`Error al iniciar el envío: ${err.message}`, "error");
-    $("#btnLanzarEnvio").disabled = false;
+    $("#btnLanzarEnvio").hidden = false;
   }
 });
 

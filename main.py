@@ -21,7 +21,31 @@ load_dotenv()
 
 ROOT = Path(__file__).parent
 DATA_FILE = ROOT / "data" / "plantillas.json"
-PATRON_TELEFONO = re.compile(r"^\+569\d{8}$")
+
+
+def normalizar_telefono(crudo: str) -> str | None:
+    """Corrige variantes comunes de números móviles chilenos al formato +569XXXXXXXX."""
+    limpio = re.sub(r"[^\d+]", "", crudo.strip())
+    digitos = re.sub(r"\D", "", limpio)
+
+    if limpio.startswith("+"):
+        if len(digitos) == 11 and digitos.startswith("569"):
+            return "+" + digitos
+        if len(digitos) == 10 and digitos.startswith("56"):
+            return "+569" + digitos[2:]
+        if len(digitos) == 9 and digitos.startswith("9"):
+            return "+56" + digitos
+        return None
+
+    if len(digitos) == 11 and digitos.startswith("569"):
+        return "+" + digitos
+    if len(digitos) == 10 and digitos.startswith("56"):
+        return "+569" + digitos[2:]
+    if len(digitos) == 9 and digitos.startswith("9"):
+        return "+56" + digitos
+    if len(digitos) == 8 and digitos.startswith("9"):
+        return "+569" + digitos
+    return None
 
 app = FastAPI(title="SNW - API de Notificaciones WhatsApp")
 
@@ -210,6 +234,12 @@ def actualizar_estado_paciente(paciente_id: int, estado: str) -> None:
         conn.commit()
 
 
+def actualizar_telefono(paciente_id: int, telefono: str) -> None:
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("UPDATE pacientes SET telefono = %s WHERE id = %s", (telefono, paciente_id))
+        conn.commit()
+
+
 def registrar_historial(paciente_id, nombre, telefono, clave_plantilla, mensaje, estado, error=None) -> None:
     try:
         with conectar() as conn, conn.cursor() as cur:
@@ -288,16 +318,20 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks):
     destinatarios: list[dict] = []
 
     for p in filas:
-        telefono = (p.get("telefono") or "").strip()
+        telefono_crudo = (p.get("telefono") or "").strip()
         nombre_completo = " ".join(x for x in [p.get("nombre"), p.get("apellido")] if x)
 
-        if not PATRON_TELEFONO.match(telefono):
-            rechazados.append({"id": p["id"], "nombre": nombre_completo, "telefono": telefono,
+        telefono = normalizar_telefono(telefono_crudo)
+        if telefono is None:
+            rechazados.append({"id": p["id"], "nombre": nombre_completo, "telefono": telefono_crudo,
                                "motivo": "Formato de teléfono inválido"})
             actualizar_estado_paciente(p["id"], "error")
-            registrar_historial(p["id"], nombre_completo, telefono, plantilla["clave"],
-                                "", "numero_invalido", "Formato de teléfono inválido")
+            registrar_historial(p["id"], nombre_completo, telefono_crudo, plantilla["clave"],
+                                "", "numero_invalido", f"Formato de teléfono inválido: '{telefono_crudo}'")
             continue
+
+        if telefono != telefono_crudo:
+            actualizar_telefono(p["id"], telefono)
 
         if en_desarrollo and telefono not in autorizados:
             rechazados.append({"id": p["id"], "nombre": nombre_completo, "telefono": telefono,
@@ -345,7 +379,7 @@ def estado_job(job_id: str):
 @app.get("/api/notificaciones/historial")
 def listar_historial(q: str | None = Query(None), estado: str | None = Query(None)):
     sql = ("SELECT id, paciente_id, nombre_paciente, numero_telefono, plantilla_clave,"
-           " estado_envio, descripcion_error, fecha_hora FROM log_envios")
+           " estado_envio, descripcion_error, fecha_hora, mensaje FROM log_envios")
     condiciones: list[str] = []
     args: list = []
 

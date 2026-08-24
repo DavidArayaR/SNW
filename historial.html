@@ -49,6 +49,7 @@
               <th>Paciente</th>
               <th>Teléfono</th>
               <th>Plantilla</th>
+              <th>Mensaje</th>
               <th>Estado</th>
               <th>Detalle</th>
             </tr>
@@ -60,6 +61,19 @@
     </section>
 
   </main>
+
+  <div id="modalDetalle" class="modal" hidden>
+    <div class="modal__card modal__card--detalle" role="dialog" aria-modal="true">
+      <h3>Detalle del envío</h3>
+      <div id="detalleCampos"></div>
+      <p class="detalle-subtitulo">Mensaje enviado</p>
+      <div class="bubble-msg" id="detalleMensaje"></div>
+      <div class="detalle-error" id="detalleError" hidden></div>
+      <div class="modal__actions">
+        <button type="button" class="btn btn--primary" id="btnCerrarDetalle">Cerrar</button>
+      </div>
+    </div>
+  </div>
 
   <div id="toast" class="toast" hidden></div>
 

@@ -68,7 +68,32 @@
 .col-check { width: 36px; text-align: center; }
 .col-check input { width: 17px; height: 17px; accent-color: var(--verde); cursor: pointer; }
 
-.modal__card--envio { max-width: 520px; }
+.modal__card--envio {
+  max-width: 520px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+#modalEnvio .modal__actions {
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 22px;
+}
+
+.acciones-derecha {
+  display: flex;
+  gap: 14px;
+}
+
+#listaPlantillasModal {
+  display: grid;
+  gap: 8px;
+  max-height: 45vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+#listaPlantillasModal .tpl-card { padding: 9px 12px; }
 
 .tpl-radio { display: grid; gap: 10px; }
 
@@ -146,6 +171,52 @@
   margin-bottom: 6px;
 }
 
+.modal__card--detalle { max-width: 560px; }
+
+.detalle-fila {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 9px 2px;
+  border-bottom: 1px solid #edf0f3;
+  font-size: .89rem;
+}
+.detalle-fila:last-child { border-bottom: none; }
+.detalle-fila dt { color: var(--texto-suave); }
+.detalle-fila dd { margin: 0; font-weight: 600; text-align: right; word-break: break-word; }
+
+.detalle-subtitulo {
+  margin: 16px 0 6px;
+  font-size: .78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--texto-suave);
+}
+
+.bubble-msg {
+  position: relative;
+  background: #dcf8c6;
+  border-radius: 10px;
+  border-top-left-radius: 2px;
+  padding: 11px 14px;
+  font-size: .92rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, .1);
+}
+
+.detalle-error {
+  margin-top: 12px;
+  padding: 11px 15px;
+  border-radius: 10px;
+  border-left: 4px solid var(--rojo);
+  background: #fdecec;
+  color: #8c2f2c;
+  font-size: .86rem;
+}
+
 .tabla-wrap { overflow-x: auto; }
 
 table {
@@ -171,7 +242,16 @@ tbody td {
   vertical-align: top;
 }
 
-tbody tr:hover { background: #f7fafb; }
+tbody tr { cursor: pointer; user-select: none; }
+tbody tr:hover { background: #e8f1ef; }
+
+.campo-mensaje {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--texto);
+}
 tbody tr:last-child td { border-bottom: none; }
 
 td.campo-id { color: var(--texto-suave); font-family: Consolas, monospace; }
