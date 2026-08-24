@@ -215,13 +215,10 @@ JOB_LOCK = threading.Lock()
 
 
 def renderizar_mensaje(texto: str, paciente: dict) -> str:
-    ahora = time.localtime()
     reemplazos = {
         "{nombre}": paciente.get("nombre") or "",
         "{apellido}": paciente.get("apellido") or "",
         "{info_extra}": paciente.get("info_extra") or "",
-        "{fecha}": time.strftime("%d-%m-%Y", ahora),
-        "{hora}": time.strftime("%H:%M", ahora),
     }
     for clave, valor in reemplazos.items():
         texto = texto.replace(clave, valor)

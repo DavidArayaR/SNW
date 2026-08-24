@@ -28,13 +28,6 @@
     "actualizada": 1787598298569
   },
   {
-    "id": 5,
-    "clave": "nueva_plantilla",
-    "nombre": "nueva plantilla",
-    "texto": "Hola {nombre}, \n\nte recordamos que el día {fecha} a las {hora} tienes {info_extra}",
-    "actualizada": 1787601982252
-  },
-  {
     "id": 6,
     "clave": "consultar",
     "nombre": "Consultar",

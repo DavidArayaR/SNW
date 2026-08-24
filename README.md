@@ -114,7 +114,7 @@ Integrado en la página de Pacientes: se marcan pacientes con checkboxes (o "sel
 
 ## Funcionalidades actuales
 
-- Editor de plantillas: crear, editar, eliminar, con comodines `{nombre}`, `{apellido}`, `{info_extra}`, `{fecha}`, `{hora}`.
+- Editor de plantillas: crear, editar, eliminar, con vista previa en vivo y comodines `{nombre}`, `{apellido}`, `{info_extra}`.
 - Persistencia de plantillas en archivo JSON.
 - Listado de pacientes desde MySQL con búsqueda, filtro por estado y contadores clicables.
 - Módulo de envío en 3 pasos con cola asíncrona, validaciones y progreso en vivo.

@@ -191,17 +191,86 @@ button { font: inherit; cursor: pointer; }
 .field textarea:focus { border-color: var(--verde); outline: none; }
 .field input.invalido, .field textarea.invalido { border-color: var(--rojo); }
 
+.field__foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+.field__hint { margin: 6px 0 0; font-size: .78rem; color: var(--texto-suave); }
+.field__hint.atajos { margin-top: 14px; text-align: center; }
+.char-count { font-size: .78rem; color: var(--texto-suave); white-space: nowrap; }
+.char-count--limite { color: var(--rojo); font-weight: 700; }
+
+.warn {
+  margin: -6px 0 14px;
+  padding: 10px 13px;
+  border-radius: 8px;
+  background: #fdf6e7;
+  border: 1px solid #ecd9ac;
+  color: #8a6410;
+  font-size: .84rem;
+}
+
+.preview-wrap { margin-bottom: 22px; }
+.preview-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.preview-head h3 { margin: 0; font-size: .92rem; }
+.preview-note { font-size: .78rem; color: var(--texto-suave); }
+
+.phone {
+  background:
+    linear-gradient(rgba(7, 94, 84, .06), rgba(7, 94, 84, .06)),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='60' viewBox='0 0 60 60'%3E%3Cg fill='%23128c7e' fill-opacity='.05'%3E%3Ccircle cx='15' cy='15' r='2'/%3E%3Ccircle cx='45' cy='40' r='2.5'/%3E%3Cpath d='M30 25l4 4M52 10l3 3' stroke='%23128c7e' stroke-opacity='.08'/%3E%3C/g%3E%3C/svg%3E");
+  background-color: #ece5dd;
+  border: 1px solid var(--borde);
+  border-radius: 14px;
+  padding: 18px;
+  min-height: 120px;
+}
+
+.chat { display: flex; flex-direction: column; }
+
+.bubble {
+  position: relative;
+  align-self: flex-start;
+  max-width: 85%;
+  background: #dcf8c6;
+  border-radius: 10px;
+  border-top-left-radius: 2px;
+  padding: 10px 34px 12px 12px;
+  font-size: .92rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, .1);
+}
+.bubble--vacia { color: #97a3ad; font-style: italic; }
+
+.bubble__time {
+  position: absolute;
+  right: 9px;
+  bottom: 5px;
+  font-size: .68rem;
+  color: #5a7a56;
+}
+.bubble__time::after {
+  content: " ✓✓";
+  color: #53bdeb;
+  letter-spacing: -2px;
+}
+
 .wildcards {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
   padding: 12px 14px;
-  margin-bottom: 20px;
+  margin-bottom: 14px;
   background: #f4faf8;
   border: 1px dashed #bcd9d2;
   border-radius: 10px;
 }
+.wildcards__label { font-size: .82rem; font-weight: 600; color: var(--verde-oscuro); }
 
 .chip {
   border: 1px solid var(--verde);

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SNW Plantillas</title>
+  <title>SNW · Plantillas</title>
   <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
@@ -16,6 +16,7 @@
       </div>
     </div>
     <div class="topbar__right">
+      <span class="badge badge--dev">Ambiente: Desarrollo</span>
       <nav class="nav">
         <a href="pacientes.html">Pacientes</a>
         <a href="plantillas.html" class="activo">Plantillas</a>
@@ -49,24 +50,46 @@
         <div class="field">
           <label for="inpNombre">Nombre</label>
           <input type="text" id="inpNombre" maxlength="60" placeholder="Ej: Recordatorio de cita médica" autocomplete="off">
+          <p class="field__hint">Es el nombre que verás al elegir la plantilla antes de un envío.</p>
         </div>
 
         <div class="field">
           <label for="inpMensaje">Mensaje</label>
-          <textarea id="inpMensaje" rows="8" placeholder="Escribe el mensaje..."></textarea>
+          <textarea id="inpMensaje" rows="7" placeholder="Escribe aquí el mensaje que recibirán los pacientes..."></textarea>
+          <div class="field__foot">
+            <p class="field__hint">Usa los botones verdes para insertar datos automáticos en el texto.</p>
+            <span id="contador" class="char-count">0 / 4096</span>
+          </div>
         </div>
 
-        <div class="wildcards" role="group" aria-label="Comodines disponibles">
-          <button type="button" class="chip" data-wc="{nombre}">{nombre}</button>
-          <button type="button" class="chip" data-wc="{info_extra}">{info_extra}</button>
-          <button type="button" class="chip" data-wc="{fecha}">{fecha}</button>
-          <button type="button" class="chip" data-wc="{hora}">{hora}</button>
+        <div class="wildcards" role="group" aria-label="Datos automáticos">
+          <span class="wildcards__label">Insertar dato automático:</span>
+          <button type="button" class="chip" data-wc="{nombre}" title="Nombre del paciente">{nombre}</button>
+          <button type="button" class="chip" data-wc="{apellido}" title="Apellido del paciente">{apellido}</button>
+          <button type="button" class="chip" data-wc="{info_extra}" title="Información adicional del paciente (ej: fecha y hora de la cita)">{info_extra}</button>
+        </div>
+        <p id="avisoComodines" class="warn" hidden></p>
+
+        <div class="preview-wrap">
+          <div class="preview-head">
+            <h3>Vista previa</h3>
+            <span class="preview-note">Así lo recibirá el paciente (datos de ejemplo)</span>
+          </div>
+          <div class="phone">
+            <div class="chat">
+              <div class="bubble">
+                <div id="previewTexto"></div>
+                <span class="bubble__time" id="previewHora"></span>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div class="form-actions">
           <button type="submit" id="btnGuardar" class="btn btn--primary btn--lg">Guardar</button>
           <button type="button" id="btnCancelar" class="btn btn--ghost btn--lg">Cancelar</button>
         </div>
+        <p class="field__hint atajos">Atajos: Ctrl+S guarda · Esc cancela la edición</p>
       </form>
 
       <div id="estadoVacio" class="empty-state">
@@ -80,6 +103,7 @@
   <div id="modalEliminar" class="modal" hidden>
     <div class="modal__card" role="dialog" aria-modal="true" aria-labelledby="modalTitulo">
       <h3 id="modalTitulo">¿Eliminar "<span id="modalNombre"></span>"?</h3>
+      <p>Los envíos ya realizados con esta plantilla no se verán afectados.</p>
       <div class="modal__actions">
         <button type="button" class="btn btn--ghost" id="btnModalCancelar">Cancelar</button>
         <button type="button" class="btn btn--danger" id="btnModalConfirmar">Eliminar</button>

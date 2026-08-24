@@ -11,11 +11,21 @@ const buscadorEl = $("#buscador");
 const formEl = $("#formPlantilla");
 const inpNombre = $("#inpNombre");
 const inpMensaje = $("#inpMensaje");
+const contadorEl = $("#contador");
+const avisoComodines = $("#avisoComodines");
+const previewTexto = $("#previewTexto");
+const previewHora = $("#previewHora");
 const tituloForm = $("#tituloFormulario");
 const estadoVacio = $("#estadoVacio");
 const btnEliminar = $("#btnEliminar");
 const modalEl = $("#modalEliminar");
 const toastEl = $("#toast");
+
+const DATOS_EJEMPLO = {
+  nombre: "David",
+  apellido: "Araya",
+  info_extra: "su cita es el lunes 31-08-2026 a las 10:30 en Consulta Nº 4",
+};
 
 async function cargar() {
   try {
@@ -105,6 +115,54 @@ function renderLista(filtro = "") {
   }
 }
 
+function actualizarPreview() {
+  const texto = inpMensaje.value.trim();
+
+  if (!texto) {
+    previewTexto.textContent = "Aquí verás cómo llega el mensaje al paciente...";
+    previewTexto.parentElement.classList.add("bubble--vacia");
+  } else {
+    let reemplazado = texto;
+    for (const [clave, valor] of Object.entries(DATOS_EJEMPLO)) {
+      reemplazado = reemplazado.replaceAll(`{${clave}}`, valor);
+    }
+    previewTexto.textContent = reemplazado;
+    previewTexto.parentElement.classList.remove("bubble--vacia");
+  }
+
+  previewHora.textContent = new Date().toLocaleTimeString("es-CL", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function actualizarContador() {
+  const largo = inpMensaje.value.length;
+  contadorEl.textContent = `${largo} / 4096`;
+  contadorEl.classList.toggle("char-count--limite", largo > 4096);
+}
+
+function validarComodines() {
+  const desconocidos = [...inpMensaje.value.matchAll(/\{([^{}]+)\}/g)]
+    .map((m) => m[1].trim())
+    .filter((t) => !["nombre", "apellido", "info_extra"].includes(t));
+
+  if (desconocidos.length) {
+    const unicos = [...new Set(desconocidos)].map((t) => `{${t}}`).join(", ");
+    avisoComodines.textContent =
+      `Atención: ${unicos} no ${desconocidos.length > 1 ? "son datos reconocidos" : "es un dato reconocido"}. Revisa los botones disponibles arriba.`;
+    avisoComodines.hidden = false;
+  } else {
+    avisoComodines.hidden = true;
+  }
+}
+
+function refrescarEditor() {
+  actualizarContador();
+  validarComodines();
+  actualizarPreview();
+}
+
 function marcarSnapshot() {
   snapshot = JSON.stringify([inpNombre.value, inpMensaje.value]);
 }
@@ -125,6 +183,7 @@ function abrir(id) {
   btnEliminar.hidden = false;
   inpNombre.classList.remove("invalido");
   inpMensaje.classList.remove("invalido");
+  refrescarEditor();
   marcarSnapshot();
   renderLista(buscadorEl.value);
 }
@@ -139,6 +198,7 @@ function modoNueva() {
   btnEliminar.hidden = true;
   inpNombre.classList.remove("invalido");
   inpMensaje.classList.remove("invalido");
+  refrescarEditor();
   marcarSnapshot();
   renderLista(buscadorEl.value);
   inpNombre.focus();
@@ -167,6 +227,11 @@ function intentarNueva() {
     return;
   }
   modoNueva();
+}
+
+function cancelarEdicion() {
+  if (hayCambios() && !confirm("¿Descartar los cambios?")) return;
+  activaId ? abrir(activaId) : modoVacia();
 }
 
 formEl.addEventListener("submit", async (e) => {
@@ -233,10 +298,7 @@ $("#btnModalConfirmar").addEventListener("click", async () => {
   }
 });
 
-$("#btnCancelar").addEventListener("click", () => {
-  if (hayCambios() && !confirm("¿Descartar los cambios?")) return;
-  activaId ? abrir(activaId) : modoVacia();
-});
+$("#btnCancelar").addEventListener("click", cancelarEdicion);
 
 document.querySelectorAll(".chip").forEach((chip) => {
   chip.addEventListener("click", () => {
@@ -248,6 +310,7 @@ document.querySelectorAll(".chip").forEach((chip) => {
     const nuevaPos = pos + token.length;
     inpMensaje.focus();
     inpMensaje.setSelectionRange(nuevaPos, nuevaPos);
+    refrescarEditor();
   });
 });
 
@@ -255,6 +318,16 @@ inpNombre.addEventListener("input", () => inpNombre.classList.remove("invalido")
 buscadorEl.addEventListener("input", () => renderLista(buscadorEl.value));
 $("#btnNueva").addEventListener("click", intentarNueva);
 $("#btnNuevaEmpty").addEventListener("click", intentarNueva);
+
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+    e.preventDefault();
+    if (formEl.style.display !== "none") formEl.requestSubmit();
+  }
+  if (e.key === "Escape" && modalEl.hidden && formEl.style.display !== "none") {
+    cancelarEdicion();
+  }
+});
 
 let toastTimer;
 function toast(msg, tipo = "ok") {
