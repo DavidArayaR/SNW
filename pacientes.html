@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SNW Pacientes</title>
+  <title>SNW · Pacientes</title>
   <link rel="stylesheet" href="css/styles.css">
   <link rel="stylesheet" href="css/pacientes.css">
 </head>
@@ -17,6 +17,7 @@
       </div>
     </div>
     <div class="topbar__right">
+      <span class="badge badge--dev" id="badgeEntorno">Ambiente: —</span>
       <nav class="nav">
         <a href="pacientes.html" class="activo">Pacientes</a>
         <a href="plantillas.html">Plantillas</a>
@@ -29,30 +30,26 @@
     <section class="panel">
       <div class="panel__head">
         <h2>Pacientes</h2>
-        <button id="btnActualizar" class="btn btn--ghost" type="button">Actualizar</button>
+        <div class="panel__actions">
+          <button id="btnActualizar" class="btn btn--ghost" type="button">Actualizar</button>
+          <button id="btnIniciar" class="btn btn--primary" type="button" disabled>Iniciar envío</button>
+        </div>
       </div>
 
       <div class="stats" id="stats"></div>
-      <!--
-      <div class="filtros" role="group" aria-label="Filtrar por estado">
-        <button type="button" class="filtro-btn activo" data-estado="todos">Todos</button>
-        <button type="button" class="filtro-btn" data-estado="enviado">Enviados</button>
-        <button type="button" class="filtro-btn" data-estado="pendiente">Pendientes</button>
-        <button type="button" class="filtro-btn" data-estado="error">Errores</button>
-      </div>
-      -->
-
-      <div class="searchbox searchbox--tabla">
+      
+      <div class="toolbar-pacientes">
         <input type="search" id="buscador" placeholder="Buscar por nombre, teléfono o info..." autocomplete="off">
+        <span id="contadorSel" class="contador-sel"></span>
       </div>
 
       <div class="tabla-wrap">
         <table id="tablaPacientes">
           <thead>
             <tr>
+              <th class="col-check"><input type="checkbox" id="chkTodos" title="Seleccionar todos los visibles"></th>
               <th>ID</th>
               <th>Nombre</th>
-              <th>Apellido</th>
               <th>Teléfono</th>
               <th>Estado</th>
               <th>Info extra</th>
@@ -66,6 +63,36 @@
     </section>
 
   </main>
+
+  <div id="modalEnvio" class="modal" hidden>
+    <div class="modal__card modal__card--envio" role="dialog" aria-modal="true">
+      <h3>Enviar mensaje</h3>
+
+      <div id="faseConfig">
+        <div id="listaPlantillasModal" class="tpl-radio"></div>
+        <p class="resumen-linea" id="resumenLinea"></p>
+        <div class="aviso-dev" id="avisoDev" hidden></div>
+      </div>
+
+      <div id="faseProgreso" hidden>
+        <div class="progreso-info">
+          <span id="progresoTexto">Preparando envío...</span>
+          <span id="progresoNumeros" class="progreso-numeros"></span>
+        </div>
+        <div class="barra"><div class="barra__fill" id="barraFill"></div></div>
+      </div>
+
+      <ul id="listaRechazados" class="rechazados" hidden></ul>
+
+      <div class="modal__actions" id="accionesModal">
+        <button type="button" class="btn btn--ghost" id="btnCancelarEnvio">Cancelar</button>
+        <button type="button" class="btn btn--primary" id="btnLanzarEnvio" disabled>Iniciar Envío</button>
+      </div>
+      <div class="modal__actions" id="accionesCierre" hidden>
+        <button type="button" class="btn btn--primary" id="btnCerrarModal">Cerrar</button>
+      </div>
+    </div>
+  </div>
 
   <div id="toast" class="toast" hidden></div>
 

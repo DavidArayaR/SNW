@@ -19,16 +19,19 @@ Documentación de diseño: ver `context.md` y `features.md` en el repositorio.
 snw/
 ├── main.py                  Servidor FastAPI (API + archivos estáticos)
 ├── db.py                    Conexión MySQL (PyMySQL)
+├── motor_envio.py           Motor de envío intercambiable (simulado/whatsapp_web/api_oficial)
 ├── data/
-│   └── plantillas.json      Almacenamiento de plantillas
-├── pacientes.html           Lista de pacientes
+│   ├── plantillas.json      Almacenamiento de plantillas
+├── .env                     Configuración local (no se sube al repositorio)
+├── .env.example             Plantilla de configuración
+├── pacientes.html           Pacientes + módulo de envío integrado
 ├── plantillas.html          Editor de plantillas (CRUD)
 ├── css/
 │   ├── styles.css           Estilos compartidos
-│   └── pacientes.css        Estilos de la tabla de pacientes
+│   └── pacientes.css        Estilos de la tabla y del envío
 ├── js/
 │   ├── app.js               Lógica del editor de plantillas
-│   └── pacientes.js         Lógica del listado de pacientes
+│   └── pacientes.js         Lógica de listado y envío
 ├── sql/
 │   ├── setup.sql            Columna nombre en plantillas (histórico)
 │   └── paciente_prueba.sql  Alta de paciente de prueba
@@ -42,12 +45,18 @@ snw/
    ```
    pip install -r requirements.txt
    ```
-2. MySQL activo (XAMPP) con la base `snw_pacientes`. Revisar credenciales en `db.py`.
-3. Iniciar el servidor (puerto 8000):
+2. MySQL activo (XAMPP) con la base `snw_pacientes`.
+3. Copiar `.env.example` como `.env` y completar credenciales de MySQL y parámetros del sistema:
+   - `SNW_ENTORNO`: `desarrollo` o `produccion`
+   - `SNW_METODO_ENVIO`: `simulado`, `whatsapp_web` o `api_oficial`
+   - `SNW_NUMEROS_PRUEBA`: números autorizados separados por coma
+   - `SNW_INTERVALO_MS`: pausa entre mensajes
+   - `DB_HOST`, `DB_PUERTO`, `DB_USUARIO`, `DB_CONTRASENA`, `DB_NOMBRE`
+4. Iniciar el servidor (puerto 8000):
    ```
    python main.py
    ```
-4. Abrir:
+5. Abrir:
    - Pacientes: http://localhost:8000/pacientes.html
    - Plantillas: http://localhost:8000/plantillas.html
    - Documentación interactiva de la API: http://localhost:8000/docs
@@ -85,16 +94,32 @@ Cada creación, edición o eliminación desde la interfaz reescribe el archivo.
 | POST | `/api/plantillas` | Crear plantilla `{nombre, texto}` |
 | PUT | `/api/plantillas/{id}` | Actualizar plantilla `{nombre, texto}` |
 | DELETE | `/api/plantillas/{id}` | Eliminar plantilla |
+| POST | `/api/notificaciones/enviar` | Iniciar envío `{pacientes: [ids], plantilla_id}` |
+| GET | `/api/notificaciones/jobs/{job_id}` | Progreso del envío en curso |
+| GET | `/api/configuracion` | Configuración actual |
+| PUT | `/api/configuracion` | Actualizar configuración |
+
+## Módulo de envío
+
+Integrado en la página de Pacientes: se marcan pacientes con checkboxes (o "seleccionar todos" sobre los filtrados) y se presiona "Iniciar envío".
+
+- **Cola asíncrona:** el envío se procesa en segundo plano; un modal muestra progreso en vivo mediante polling.
+- **Validaciones previas:** existencia del paciente y de la plantilla, formato internacional `+569XXXXXXXXX`, disponibilidad del canal.
+- **Descartes sin interrumpir la cola:** teléfonos inválidos o no autorizados se reportan como rechazados con su motivo.
+- **Filtro de entorno desarrollo:** solo salen mensajes hacia los números autorizados en `SNW_NUMEROS_PRUEBA` (archivo `.env`).
+- **Motor intercambiable** (`motor_envio.py`): `simulado` (actual), `whatsapp_web` y `api_oficial` reservados; el método se elige en configuración, con intervalo entre mensajes configurable.
+- **Estados por paciente:** cada envío actualiza `pacientes.estado` (pendiente / enviado / error).
 
 ## Funcionalidades actuales
 
-- Editor de plantillas: crear, editar, eliminar, con comodines `{nombre}`, `{info_extra}`, `{fecha}`, `{hora}`.
+- Editor de plantillas: crear, editar, eliminar, con comodines `{nombre}`, `{apellido}`, `{info_extra}`, `{fecha}`, `{hora}`.
 - Persistencia de plantillas en archivo JSON.
 - Listado de pacientes desde MySQL con búsqueda, filtro por estado y contadores clicables.
+- Módulo de envío en 3 pasos con cola asíncrona, validaciones y progreso en vivo.
 - Navegación unificada entre módulos.
 
 ## Pendientes (siguiente etapa)
 
-- Motor de envío WhatsApp (WhatsApp Web o API Oficial Business).
-- Envío individual/masivo con cola asíncrona y validación de teléfonos.
-- Historial de envíos, logs y autenticación SSO por roles.
+- Historial de envíos.
+- Motor de envío real (WhatsApp Web o API Oficial Business).
+- Logs del sistema y autenticación SSO por roles.

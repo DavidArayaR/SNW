@@ -1,19 +1,27 @@
 import json
+import os
 import re
+import threading
 import time
 import unicodedata
+import uuid
 from pathlib import Path
 
 import pymysql
-from fastapi import FastAPI, HTTPException, Query
+from dotenv import load_dotenv
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from db import conectar
+from motor_envio import obtener_canal
+
+load_dotenv()
 
 ROOT = Path(__file__).parent
 DATA_FILE = ROOT / "data" / "plantillas.json"
+PATRON_TELEFONO = re.compile(r"^\+569\d{8}$")
 
 app = FastAPI(title="SNW - API de Notificaciones WhatsApp")
 
@@ -22,6 +30,18 @@ class PlantillaIn(BaseModel):
     nombre: str
     texto: str
     clave: str | None = None
+
+
+class EnvioIn(BaseModel):
+    pacientes: list[int]
+    plantilla_id: int
+
+
+class ConfigIn(BaseModel):
+    entorno: str | None = None
+    metodo_envio: str | None = None
+    numeros_prueba: list[str] | None = None
+    intervalo_ms: int | None = None
 
 
 def leer_plantillas() -> list:
@@ -127,6 +147,175 @@ def eliminar_plantilla(plantilla_id: int):
 
     escribir_plantillas(restantes)
     return {"ok": True}
+
+
+def leer_config() -> dict:
+    return {
+        "entorno": os.getenv("SNW_ENTORNO", "desarrollo"),
+        "metodo_envio": os.getenv("SNW_METODO_ENVIO", "simulado"),
+        "numeros_prueba": [
+            n.strip() for n in os.getenv("SNW_NUMEROS_PRUEBA", "").split(",") if n.strip()
+        ],
+        "intervalo_ms": int(os.getenv("SNW_INTERVALO_MS", "1000")),
+    }
+
+
+@app.get("/api/configuracion")
+def obtener_configuracion():
+    return leer_config()
+
+
+@app.put("/api/configuracion")
+def actualizar_configuracion(body: ConfigIn):
+    if body.entorno is not None:
+        if body.entorno not in ("desarrollo", "produccion"):
+            raise HTTPException(400, detail="Entorno inválido")
+        os.environ["SNW_ENTORNO"] = body.entorno
+
+    if body.metodo_envio is not None:
+        if body.metodo_envio not in ("simulado", "whatsapp_web", "api_oficial"):
+            raise HTTPException(400, detail="Método de envío inválido")
+        os.environ["SNW_METODO_ENVIO"] = body.metodo_envio
+
+    if body.numeros_prueba is not None:
+        os.environ["SNW_NUMEROS_PRUEBA"] = ",".join(n.strip() for n in body.numeros_prueba if n.strip())
+
+    if body.intervalo_ms is not None:
+        os.environ["SNW_INTERVALO_MS"] = str(max(0, int(body.intervalo_ms)))
+
+    return leer_config()
+
+
+JOBS: dict = {}
+JOB_LOCK = threading.Lock()
+
+
+def renderizar_mensaje(texto: str, paciente: dict) -> str:
+    ahora = time.localtime()
+    reemplazos = {
+        "{nombre}": paciente.get("nombre") or "",
+        "{apellido}": paciente.get("apellido") or "",
+        "{info_extra}": paciente.get("info_extra") or "",
+        "{fecha}": time.strftime("%d-%m-%Y", ahora),
+        "{hora}": time.strftime("%H:%M", ahora),
+    }
+    for clave, valor in reemplazos.items():
+        texto = texto.replace(clave, valor)
+    return texto
+
+
+def actualizar_estado_paciente(paciente_id: int, estado: str) -> None:
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("UPDATE pacientes SET estado = %s WHERE id = %s", (estado, paciente_id))
+        conn.commit()
+
+
+def procesar_job(job_id: str) -> None:
+    job = JOBS[job_id]
+    cfg = leer_config()
+    canal = obtener_canal(cfg)
+
+    if canal is None or not canal.disponible():
+        for d in job["destinatarios"]:
+            actualizar_estado_paciente(d["id"], "error")
+            job["fallidos"] += 1
+        job["estado"] = "error"
+        job["detalle"] = f"Canal de envío no disponible ({cfg.get('metodo_envio')})"
+        return
+
+    intervalo = max(0, int(cfg.get("intervalo_ms", 1000))) / 1000
+    total = len(job["destinatarios"])
+
+    for i, d in enumerate(job["destinatarios"]):
+        job["actual"] = d["nombre"]
+        ok, error = canal.enviar(d["telefono"], d["mensaje"])
+        actualizar_estado_paciente(d["id"], "enviado" if ok else "error")
+
+        if ok:
+            job["enviados"] += 1
+        else:
+            job["fallidos"] += 1
+            job["errores"].append({"id": d["id"], "telefono": d["telefono"], "detalle": error})
+
+        if i < total - 1 and intervalo > 0:
+            time.sleep(intervalo)
+
+    job["actual"] = ""
+    job["estado"] = "completado"
+
+
+@app.post("/api/notificaciones/enviar", status_code=202)
+def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks):
+    if not body.pacientes:
+        raise HTTPException(400, detail="No se seleccionaron pacientes")
+
+    cfg = leer_config()
+    en_desarrollo = cfg.get("entorno") == "desarrollo"
+    autorizados = set(cfg.get("numeros_prueba", []))
+
+    plantilla = next((p for p in leer_plantillas() if p["id"] == body.plantilla_id), None)
+    if plantilla is None:
+        raise HTTPException(404, detail="Plantilla no encontrada")
+
+    placeholders = ", ".join("%s" for _ in body.pacientes)
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"SELECT id, nombre, apellido, telefono, info_extra FROM pacientes WHERE id IN ({placeholders})",
+            tuple(body.pacientes),
+        )
+        filas = cur.fetchall()
+
+    rechazados: list[dict] = []
+    destinatarios: list[dict] = []
+
+    for p in filas:
+        telefono = (p.get("telefono") or "").strip()
+        nombre_completo = " ".join(x for x in [p.get("nombre"), p.get("apellido")] if x)
+
+        if not PATRON_TELEFONO.match(telefono):
+            rechazados.append({"id": p["id"], "nombre": nombre_completo, "telefono": telefono,
+                               "motivo": "Formato de teléfono inválido"})
+            actualizar_estado_paciente(p["id"], "error")
+            continue
+
+        if en_desarrollo and telefono not in autorizados:
+            rechazados.append({"id": p["id"], "nombre": nombre_completo, "telefono": telefono,
+                               "motivo": "No está en la lista de números de prueba (entorno desarrollo)"})
+            continue
+
+        destinatarios.append({
+            "id": p["id"],
+            "nombre": nombre_completo,
+            "telefono": telefono,
+            "mensaje": renderizar_mensaje(plantilla["texto"], p),
+        })
+
+    if not destinatarios:
+        return {"iniciado": False, "total": 0, "rechazados": rechazados}
+
+    job_id = uuid.uuid4().hex[:8]
+    JOBS[job_id] = {
+        "estado": "en_proceso",
+        "total": len(destinatarios),
+        "enviados": 0,
+        "fallidos": 0,
+        "actual": "",
+        "errores": [],
+        "detalle": "",
+        "destinatarios": destinatarios,
+    }
+
+    background_tasks.add_task(procesar_job, job_id)
+    return {"iniciado": True, "job_id": job_id, "total": len(destinatarios), "rechazados": rechazados}
+
+
+@app.get("/api/notificaciones/jobs/{job_id}")
+def estado_job(job_id: str):
+    job = JOBS.get(job_id)
+    if job is None:
+        raise HTTPException(404, detail="Envío no encontrado")
+
+    return {k: v for k, v in job.items() if k != "destinatarios"}
 
 
 app.mount("/", StaticFiles(directory=ROOT, html=True), name="static")
