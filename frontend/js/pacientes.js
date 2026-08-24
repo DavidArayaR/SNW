@@ -38,7 +38,11 @@ async function cargar() {
     ]);
     if (!rp.ok || !rt.ok || !rc.ok) throw new Error();
 
-    pacientes = await rp.json();
+    pacientes = (await rp.json()).map((p) => ({
+      ...p,
+      estado: p.estado || "pendiente",
+      info_extra: p.info_extra || "",
+    }));
     plantillas = await rt.json();
     config = await rc.json();
 

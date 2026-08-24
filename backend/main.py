@@ -17,10 +17,11 @@ from pydantic import BaseModel
 from db import conectar
 from motor_envio import obtener_canal
 
-load_dotenv()
+BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")
 
-ROOT = Path(__file__).parent
-DATA_FILE = ROOT / "data" / "plantillas.json"
+DATA_FILE = BASE_DIR / "data" / "plantillas.json"
+FRONTEND_DIR = BASE_DIR / "frontend"
 
 
 def normalizar_telefono(crudo: str) -> str | None:
@@ -98,8 +99,10 @@ def raiz():
 @app.get("/api/pacientes")
 def listar_pacientes(q: str | None = Query(None)):
     sql = (
-        "SELECT id, nombre, apellido, telefono, info_extra, estado, "
-        "fecha_actualizacion FROM pacientes"
+        "SELECT id, nombre, apellido, telefono,"
+        " COALESCE(NULLIF(estado, ''), 'pendiente') AS estado,"
+        " COALESCE(info_extra, '') AS info_extra,"
+        " fecha_actualizacion FROM pacientes"
     )
     args: list = []
     if q and q.strip():
@@ -405,7 +408,7 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
     return filas
 
 
-app.mount("/", StaticFiles(directory=ROOT, html=True), name="static")
+app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="static")
 
 
 if __name__ == "__main__":

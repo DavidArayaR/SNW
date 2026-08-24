@@ -27,7 +27,12 @@ async function cargar() {
       fetch("api/configuracion", { cache: "no-store" }),
     ]);
     if (!rh.ok || !rc.ok) throw new Error();
-    registros = await rh.json();
+    registros = (await rh.json()).map((r) => ({
+      ...r,
+      estado_envio: r.estado_envio || "error",
+      nombre_paciente: r.nombre_paciente || "(paciente eliminado)",
+      descripcion_error: r.descripcion_error || "",
+    }));
     const config = await rc.json();
     $("#badgeEntorno").textContent =
       `Ambiente: ${config.entorno === "produccion" ? "Producción" : "Desarrollo"}`;

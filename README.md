@@ -15,25 +15,21 @@ Prototipo web del módulo de notificaciones WhatsApp para pacientes. Backend en 
 
 ```
 snw/
-├── main.py                  Servidor FastAPI (API + archivos estáticos)
-├── db.py                    Conexión MySQL (PyMySQL)
-├── motor_envio.py           Motor de envío intercambiable (simulado/whatsapp_web/api_oficial)
+├── backend/                 Código Python
+│   ├── main.py              Servidor FastAPI (API + archivos estáticos)
+│   ├── db.py                Conexión MySQL (PyMySQL)
+│   └── motor_envio.py       Motor de envío intercambiable (simulado/whatsapp_web/api_oficial)
+├── frontend/                Interfaz web
+│   ├── pacientes.html       Pacientes + módulo de envío integrado
+│   ├── plantillas.html      Editor de plantillas (CRUD)
+│   ├── historial.html       Historial de mensajes enviados
+│   ├── css/                 Estilos (styles.css compartido, pacientes.css)
+│   └── js/                  Lógica de cada página
 ├── data/
-│   ├── plantillas.json      Almacenamiento de plantillas
+│   └── plantillas.json      Almacenamiento de plantillas
+├── sql/                     Scripts de base de datos
 ├── .env                     Configuración local (no se sube al repositorio)
 ├── .env.example             Plantilla de configuración
-├── pacientes.html           Pacientes + módulo de envío integrado
-├── plantillas.html          Editor de plantillas (CRUD)
-├── historial.html           Historial de mensajes enviados
-├── css/
-│   ├── styles.css           Estilos compartidos
-│   └── pacientes.css        Estilos de la tabla y del envío
-├── js/
-│   ├── app.js               Lógica del editor de plantillas
-│   └── pacientes.js         Lógica de listado y envío
-├── sql/
-│   ├── setup.sql            Columna nombre en plantillas (histórico)
-│   └── paciente_prueba.sql  Alta de paciente de prueba
 ├── requirements.txt         Dependencias Python
 └── README.md
 ```
@@ -54,7 +50,11 @@ snw/
    - `DB_HOST`, `DB_PUERTO`, `DB_USUARIO`, `DB_CONTRASENA`, `DB_NOMBRE`
 4. Iniciar el servidor (puerto 8000):
    ```
-   python main.py
+   python backend/main.py
+   ```
+   o bien:
+   ```
+   python -m uvicorn main:app --app-dir backend --host localhost --port 8000
    ```
 5. Abrir:
    - Pacientes: http://localhost:8000/pacientes.html
