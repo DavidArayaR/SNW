@@ -2,7 +2,6 @@
 
 Prototipo web del módulo de notificaciones WhatsApp para pacientes. Backend en **Python (FastAPI)**: pacientes desde **MySQL** y plantillas en **archivo JSON**.
 
-
 ## Stack
 
 | Componente | Tecnología |
