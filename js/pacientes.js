@@ -1,4 +1,4 @@
-const API_URL = "api/pacientes.php";
+const API_URL = "api/pacientes";
 
 let pacientes = [];
 let filtro = "";

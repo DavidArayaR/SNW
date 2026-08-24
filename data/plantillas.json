@@ -1,0 +1,23 @@
+[
+  {
+    "id": 1,
+    "clave": "default",
+    "nombre": "Default",
+    "texto": "Hola, {nombre} 👋\n\nTe recordamos que tienes pendiente agendar tu hora para tu próxima atención.\n\n📅 Agenda tu cita con anticipación para asegurar tu horario.\n\n📞 Si necesitas ayuda para agendar, comunícate con nosotros.\n\n¡Te esperamos! 🏥✨",
+    "actualizada": 1787565579000
+  },
+  {
+    "id": 2,
+    "clave": "recordatorio_cita",
+    "nombre": "Recordatorio cita",
+    "texto": "Hola {nombre}, le recordamos su cita médica. {info_extra}. Por favor confirme su asistencia respondiendo este mensaje.",
+    "actualizada": 1787565579000
+  },
+  {
+    "id": 3,
+    "clave": "resultado_disponible",
+    "nombre": "Resultado disponible",
+    "texto": "Hola {nombre}, sus resultados ya están disponibles. {info_extra}",
+    "actualizada": 1787565579000
+  }
+]

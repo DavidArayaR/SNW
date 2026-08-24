@@ -1,4 +1,4 @@
-const API_URL = "api/plantillas.php";
+const API_URL = "api/plantillas";
 
 let plantillas = [];
 let activaId = null;
@@ -35,25 +35,25 @@ async function crearPlantilla(nombre, texto) {
     body: JSON.stringify({ clave: slug(nombre), nombre, texto }),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error ?? `Error ${res.status}`);
+  if (!res.ok) throw new Error(data.detail ?? data.error ?? `Error ${res.status}`);
   return data;
 }
 
 async function actualizarPlantilla(id, nombre, texto) {
-  const res = await fetch(`${API_URL}?id=${id}`, {
+  const res = await fetch(`${API_URL}/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ nombre, texto }),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error ?? `Error ${res.status}`);
+  if (!res.ok) throw new Error(data.detail ?? data.error ?? `Error ${res.status}`);
   return data;
 }
 
 async function eliminarPlantilla(id) {
-  const res = await fetch(`${API_URL}?id=${id}`, { method: "DELETE" });
+  const res = await fetch(`${API_URL}/${id}`, { method: "DELETE" });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error ?? `Error ${res.status}`);
+  if (!res.ok) throw new Error(data.detail ?? data.error ?? `Error ${res.status}`);
 }
 
 function slug(texto) {
