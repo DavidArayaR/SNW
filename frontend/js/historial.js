@@ -1,6 +1,12 @@
 const API_HISTORIAL = "api/notificaciones/historial";
 const ESTADOS = ["todos", "enviado", "error", "numero_invalido"];
 
+function authHeaders(extra = {}) {
+  return { Authorization: "Bearer " + (localStorage.getItem("snw_token") || ""), ...extra };
+}
+
+if (!localStorage.getItem("snw_token")) location.replace("login.html");
+
 let registros = [];
 let filtro = "";
 let filtroEstado = "todos";
@@ -22,10 +28,12 @@ function escaparHtml(texto) {
 
 async function cargar() {
   try {
+    const amb = localStorage.getItem("snw_ambiente_admin") || "produccion";
     const [rh, rc] = await Promise.all([
-      fetch(API_HISTORIAL, { cache: "no-store" }),
-      fetch("api/configuracion", { cache: "no-store" }),
+      fetch(`${API_HISTORIAL}?ambiente=${amb}`, { headers: authHeaders(), cache: "no-store" }),
+      fetch(`api/configuracion?ambiente=${amb}`, { headers: authHeaders(), cache: "no-store" }),
     ]);
+    if (rh.status === 401 || rc.status === 401) { window.snwSalir(); return; }
     if (!rh.ok || !rc.ok) throw new Error();
     registros = (await rh.json()).map((r) => ({
       ...r,
@@ -35,7 +43,7 @@ async function cargar() {
     }));
     const config = await rc.json();
     $("#badgeEntorno").textContent =
-      `Ambiente: ${config.entorno === "produccion" ? "Producción" : "Desarrollo"}`;
+      `${config.entorno === "produccion" ? "BD Producción" : "BD Desarrollo"} · ${config.base_datos ?? ""}`;
     render();
   } catch {
     activarDemo();

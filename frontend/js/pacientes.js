@@ -4,6 +4,16 @@ const API_ENVIAR = "api/notificaciones/enviar";
 
 let demoMode = false;
 
+function authHeaders(extra = {}) {
+  return { Authorization: "Bearer " + (localStorage.getItem("snw_token") || ""), ...extra };
+}
+
+if (!localStorage.getItem("snw_token")) location.replace("login.html");
+else if (localStorage.getItem("snw_rol") !== "administrador") location.replace("mensajeria.html");
+
+let ambienteAdmin = localStorage.getItem("snw_ambiente_admin");
+let _ambienteInicializado = false;
+
 function mostrarCintaDemo() {
   if (document.getElementById("cintaDemo")) return;
   const cinta = document.createElement("div");
@@ -16,8 +26,8 @@ function mostrarCintaDemo() {
 function activarDemo() {
   demoMode = true;
   mostrarCintaDemo();
-  $("#badgeEntorno").textContent = "Modo demo";
-  config = { entorno: "desarrollo", metodo_envio: "simulado", numeros_prueba: ["+56993921740"], intervalo_ms: 600 };
+  $("#nombreBd").textContent = "(demo)";
+  config = { entorno: "desarrollo", metodo_envio: "simulado", numeros_autorizados: ["+56993921740"], intervalo_ms: 600 };
   pacientes = [
     { id: 7, nombre: "David", apellido: "Araya", telefono: "+56993921740", info_extra: "Control Médico 15:30 hrs", estado: "enviado", actualizado: "24-08-2026 10:12" },
     { id: 8, nombre: "María", apellido: "López", telefono: "+56941508435", info_extra: "Reunión de Control 16:00 hrs", estado: "pendiente", actualizado: "24-08-2026 09:40" },
@@ -41,6 +51,17 @@ let filtroEstado = "todos";
 let seleccionados = new Set();
 let plantillaId = null;
 let timerPolling = null;
+let envioEnCurso = false;
+
+function setBloqueoEnvio(bloquear) {
+  envioEnCurso = bloquear;
+  document.querySelectorAll("button, input, select, textarea").forEach((el) => {
+    // No bloquear el toast ni la barra de progreso (no son inputs)
+    el.disabled = bloquear;
+  });
+  // Si se desbloquea, restaurar estados correctos vía render
+  if (!bloquear) render();
+}
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -53,6 +74,26 @@ const contadorSel = $("#contadorSel");
 const btnIniciar = $("#btnIniciar");
 const modalEl = $("#modalEnvio");
 const toastEl = $("#toast");
+const selAmbiente = $("#selAmbiente");
+
+if (ambienteAdmin) selAmbiente.value = ambienteAdmin;
+selAmbiente.addEventListener("change", async () => {
+  ambienteAdmin = selAmbiente.value;
+  localStorage.setItem("snw_ambiente_admin", ambienteAdmin);
+  // Sincroniza también el .env global (solo admin)
+  try {
+    await fetch("api/configuracion", {
+      method: "PUT",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ entorno: ambienteAdmin }),
+    });
+  } catch {}
+  cargar();
+});
+
+function ambienteActual() {
+  return selAmbiente.value;
+}
 
 function escaparHtml(texto) {
   const div = document.createElement("div");
@@ -62,12 +103,27 @@ function escaparHtml(texto) {
 
 async function cargar() {
   try {
+    // Si no hay preferencia guardada, usar el entorno global del .env como default
+    if (!_ambienteInicializado && !localStorage.getItem("snw_ambiente_admin")) {
+      try {
+        const r0 = await fetch("api/configuracion", { headers: authHeaders(), cache: "no-store" });
+        if (r0.ok) {
+          const c0 = await r0.json();
+          ambienteAdmin = c0.entorno;
+          selAmbiente.value = ambienteAdmin;
+          localStorage.setItem("snw_ambiente_admin", ambienteAdmin);
+        }
+      } catch {}
+      _ambienteInicializado = true;
+    }
+    const amb = ambienteActual() || ambienteAdmin || "desarrollo";
     const [rp, rt, rc] = await Promise.all([
-      fetch(API_PACIENTES, { cache: "no-store" }),
-      fetch(API_PLANTILLAS, { cache: "no-store" }),
-      fetch("api/configuracion", { cache: "no-store" }),
+      fetch(`${API_PACIENTES}?ambiente=${amb}`, { headers: authHeaders(), cache: "no-store" }),
+      fetch(API_PLANTILLAS, { headers: authHeaders(), cache: "no-store" }),
+      fetch(`api/configuracion?ambiente=${amb}`, { headers: authHeaders(), cache: "no-store" }),
     ]);
-    if (!rp.ok || !rt.ok || !rc.ok) throw new Error();
+    if (rp.status === 401 || rt.status === 401 || rc.status === 401) { window.snwSalir(); return; }
+    if (rp.status === 403) { location.href = "mensajeria.html"; return; }
 
     pacientes = (await rp.json()).map((p) => ({
       ...p,
@@ -77,8 +133,7 @@ async function cargar() {
     plantillas = await rt.json();
     config = await rc.json();
 
-    $("#badgeEntorno").textContent =
-      `Ambiente: ${config.entorno === "produccion" ? "Producción" : "Desarrollo"}`;
+    $("#nombreBd").textContent = config.base_datos ?? "";
 
     render();
   } catch {
@@ -108,10 +163,17 @@ function render() {
       `<td class="campo-id">${p.id}</td>` +
       `<td class="campo-nombre">${escaparHtml(nombreCompleto)}</td>` +
       `<td class="campo-tel">${escaparHtml(p.telefono)}</td>` +
-      `<td><span class="estado-badge estado-${escaparHtml(p.estado)}">${escaparHtml(p.estado)}</span></td>` +
+      `<td class="campo-estado">` +
+        `<span class="estado-badge estado-${escaparHtml(p.estado)}" data-editable data-id="${p.id}" title="Click para cambiar estado">${escaparHtml(p.estado)}</span>` +
+        `<select class="estado-select" data-id="${p.id}" hidden>` +
+          `<option value="pendiente"${p.estado === "pendiente" ? " selected" : ""}>pendiente</option>` +
+          `<option value="enviado"${p.estado === "enviado" ? " selected" : ""}>enviado</option>` +
+          `<option value="error"${p.estado === "error" ? " selected" : ""}>error</option>` +
+        `</select>` +
+      `</td>` +
       `<td class="campo-info">${escaparHtml(p.info_extra ?? "—")}</td>` +
       `<td class="campo-fecha">${escaparHtml(p.actualizado)}</td>`;
-    tr.querySelector("input").addEventListener("change", (e) => {
+    tr.querySelector('input[type="checkbox"]').addEventListener("change", (e) => {
       e.target.checked ? seleccionados.add(p.id) : seleccionados.delete(p.id);
       refrescarSeleccion();
     });
@@ -173,6 +235,7 @@ chkTodos.addEventListener("change", () => {
 });
 
 tbodyEl.addEventListener("click", (e) => {
+  if (e.target.closest(".estado-badge, .estado-select")) return;
   if (e.target.tagName === "INPUT") return;
   const tr = e.target.closest("tr");
   if (!tr || !tbodyEl.contains(tr)) return;
@@ -181,6 +244,87 @@ tbodyEl.addEventListener("click", (e) => {
   chk.checked = !chk.checked;
   chk.checked ? seleccionados.add(Number(chk.dataset.id)) : seleccionados.delete(Number(chk.dataset.id));
   refrescarSeleccion();
+});
+
+// Edición inline del estado
+tbodyEl.addEventListener("click", (e) => {
+  const badge = e.target.closest(".estado-badge[data-editable]");
+  if (!badge) return;
+  e.stopPropagation();
+  const id = badge.dataset.id;
+  const sel = tbodyEl.querySelector(`.estado-select[data-id="${id}"]`);
+  if (!sel) return;
+  badge.hidden = true;
+  sel.hidden = false;
+  sel.focus();
+});
+
+tbodyEl.addEventListener("change", async (e) => {
+  const sel = e.target;
+  if (!sel.classList.contains("estado-select")) return;
+  e.stopPropagation();
+  const id = Number(sel.dataset.id);
+  const nuevoEstado = sel.value;
+  const paciente = pacientes.find((p) => p.id === id);
+  const estadoAnterior = paciente ? paciente.estado : null;
+  if (paciente && paciente.estado === nuevoEstado) {
+    const badge = tbodyEl.querySelector(`.estado-badge[data-id="${id}"]`);
+    if (badge) badge.hidden = false;
+    sel.hidden = true;
+    return;
+  }
+  sel.disabled = true;
+  try {
+    if (demoMode) {
+      if (paciente) paciente.estado = nuevoEstado;
+      await new Promise((r) => setTimeout(r, 150));
+    } else {
+      const amb = ambienteActual();
+      const res = await fetch(`api/pacientes/${id}?ambiente=${encodeURIComponent(amb)}`, {
+        method: "PUT",
+        headers: authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ estado: nuevoEstado }),
+      });
+      if (res.status === 401) { window.snwSalir(); return; }
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "No se pudo actualizar el estado");
+      }
+      const actualizado = await res.json();
+      if (paciente) {
+        paciente.estado = actualizado.estado;
+        paciente.actualizado = actualizado.actualizado;
+      }
+    }
+    toast(`Estado actualizado a "${nuevoEstado}"`, "ok");
+    render();
+  } catch (err) {
+    toast(err.message || "No se pudo actualizar el estado", "error");
+    if (paciente) sel.value = estadoAnterior || "pendiente";
+    const badge = tbodyEl.querySelector(`.estado-badge[data-id="${id}"]`);
+    if (badge) badge.hidden = false;
+    sel.hidden = true;
+    sel.disabled = false;
+  }
+});
+
+tbodyEl.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && e.target.classList.contains("estado-select")) {
+    const sel = e.target;
+    const badge = tbodyEl.querySelector(`.estado-badge[data-id="${sel.dataset.id}"]`);
+    if (badge) badge.hidden = false;
+    sel.hidden = true;
+    sel.blur();
+  }
+});
+
+document.addEventListener("click", (e) => {
+  if (e.target.closest(".estado-badge, .estado-select")) return;
+  tbodyEl.querySelectorAll(".estado-select:not([hidden])").forEach((sel) => {
+    const badge = tbodyEl.querySelector(`.estado-badge[data-id="${sel.dataset.id}"]`);
+    if (badge) badge.hidden = false;
+    sel.hidden = true;
+  });
 });
 
 buscadorEl.addEventListener("input", () => {
@@ -215,14 +359,15 @@ function abrirModal() {
   renderPlantillasModal();
 
   $("#resumenLinea").textContent =
-    `${seleccionados.size} paciente${seleccionados.size === 1 ? "" : "s"} · método: ${config?.metodo_envio ?? "—"}`;
+    `${seleccionados.size} paciente${seleccionados.size === 1 ? "" : "s"} · método: ${config?.metodo_envio ?? "-"}`;
 
-  const dev = config?.entorno === "desarrollo";
-  avisoDevEl.hidden = !dev;
-  if (dev) {
-    const nums = (config?.numeros_prueba ?? []).join(", ") || "ninguno";
-    avisoDevEl.textContent =
-      `Entorno desarrollo: solo se enviará a los números de prueba autorizados (${nums}). El resto será descartado.`;
+  const esDev = config?.entorno === "desarrollo";
+  if (!esDev) {
+    avisoDevEl.hidden = true;
+  } else {
+    avisoDevEl.hidden = false;
+    const nums = (config?.numeros_autorizados ?? []).join(", ") || "ninguno";
+    avisoDevEl.textContent = `Base de datos desarrollo: solo se enviará a los números autorizados (${nums}). El resto será descartado.`;
   }
 
   $("#faseConfig").hidden = false;
@@ -260,16 +405,19 @@ function renderPlantillasModal() {
 const avisoDevEl = $("#avisoDev");
 
 $("#btnCancelarEnvio").addEventListener("click", () => {
+  if (envioEnCurso) return;
   clearInterval(timerPolling);
   modalEl.hidden = true;
 });
 modalEl.addEventListener("click", (e) => {
+  if (envioEnCurso) return;
   if (e.target === modalEl) {
     clearInterval(timerPolling);
     modalEl.hidden = true;
   }
 });
 $("#btnCerrarModal").addEventListener("click", () => {
+  if (envioEnCurso) return;
   clearInterval(timerPolling);
   seleccionados.clear();
   plantillaId = null;
@@ -279,22 +427,27 @@ $("#btnCerrarModal").addEventListener("click", () => {
 
 $("#btnLanzarEnvio").addEventListener("click", async () => {
   if (demoMode) return lanzarEnvioDemo();
+  if (envioEnCurso) return;
 
   $("#btnLanzarEnvio").hidden = true;
+  setBloqueoEnvio(true);
 
   try {
     const res = await fetch(API_ENVIAR, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pacientes: [...seleccionados], plantilla_id: plantillaId }),
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ pacientes: [...seleccionados], plantilla_id: plantillaId, ambiente: ambienteActual() }),
     });
     const data = await res.json();
+    if (res.status === 401) { window.snwSalir(); setBloqueoEnvio(false); return; }
     if (!res.ok) throw new Error(data.detail ?? `Error ${res.status}`);
 
     pintarRechazados(data.rechazados ?? []);
 
     if (!data.iniciado) {
       toast("Ningún destinatario válido. Envío no iniciado.", "error");
+      setBloqueoEnvio(false);
+      $("#btnLanzarEnvio").hidden = false;
       return;
     }
 
@@ -303,6 +456,7 @@ $("#btnLanzarEnvio").addEventListener("click", async () => {
     seguirProgreso(data.job_id, data.total);
   } catch (err) {
     toast(`Error al iniciar el envío: ${err.message}`, "error");
+    setBloqueoEnvio(false);
     $("#btnLanzarEnvio").hidden = false;
   }
 });
@@ -324,7 +478,9 @@ function normalizarTelefonoJs(crudo) {
 }
 
 async function lanzarEnvioDemo() {
+  if (envioEnCurso) return;
   $("#btnLanzarEnvio").hidden = true;
+  setBloqueoEnvio(true);
 
   const tpl = plantillas.find((t) => t.id === plantillaId);
   const autorizados = new Set(config?.numeros_prueba ?? []);
@@ -358,6 +514,8 @@ async function lanzarEnvioDemo() {
 
   if (!cola.length) {
     toast("Ningún destinatario válido. Envío no iniciado.", "error");
+    setBloqueoEnvio(false);
+    $("#btnLanzarEnvio").hidden = false;
     render();
     return;
   }
@@ -371,7 +529,7 @@ async function lanzarEnvioDemo() {
   await new Promise((resolve) => {
     const paso = () => {
       const d = cola[i];
-      $("#progresoTexto").textContent = `Enviando a ${d.nombre}... (simulado)`;
+      $("#progresoTexto").textContent = `Enviando mensajes... (${i + 1}/${cola.length})`;
       d.p.estado = "enviado";
       enviados++;
       i++;
@@ -385,6 +543,7 @@ async function lanzarEnvioDemo() {
   });
 
   finalizar(`Envío completado (demo): ${enviados} enviado(s), ${fallidos} fallido(s).`, false);
+  setBloqueoEnvio(false);
   render();
 }
 
@@ -403,7 +562,11 @@ function seguirProgreso(jobId, total) {
   clearInterval(timerPolling);
   timerPolling = setInterval(async () => {
     try {
-      const res = await fetch(`api/notificaciones/jobs/${jobId}`, { cache: "no-store" });
+      const res = await fetch(`api/notificaciones/jobs/${jobId}`, {
+        headers: authHeaders(),
+        cache: "no-store",
+      });
+      if (res.status === 401) { window.snwSalir(); return; }
       if (!res.ok) throw new Error();
       const job = await res.json();
 
@@ -414,9 +577,7 @@ function seguirProgreso(jobId, total) {
       $("#progresoTexto").textContent =
         job.estado === "completado"
           ? "Envío finalizado."
-          : job.actual
-            ? `Enviando a ${job.actual}...`
-            : "Enviando...";
+          : `Enviando mensajes... (${hechos}/${total})`;
 
       if (job.estado === "completado" || job.estado === "error") {
         clearInterval(timerPolling);
@@ -424,11 +585,13 @@ function seguirProgreso(jobId, total) {
           ? `Error del canal: ${job.detalle}`
           : `Envío completado: ${job.enviados} enviado(s), ${job.fallidos} fallido(s).`;
         finalizar(msg, job.estado === "error");
+        setBloqueoEnvio(false);
         cargar();
       }
     } catch {
       clearInterval(timerPolling);
       finalizar("Se perdió la conexión con el servidor.", true);
+      setBloqueoEnvio(false);
     }
   }, 700);
 }
@@ -436,6 +599,9 @@ function seguirProgreso(jobId, total) {
 function finalizar(mensaje, esError) {
   $("#progresoTexto").textContent = mensaje;
   toast(mensaje, esError ? "error" : "ok");
+  // Habilitar solo el botón Cerrar para poder salir del modal
+  const btnCerrar = document.getElementById("btnCerrarModal");
+  if (btnCerrar) btnCerrar.disabled = false;
 }
 
 let toastTimer;

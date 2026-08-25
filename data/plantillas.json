@@ -3,22 +3,8 @@
     "id": 1,
     "clave": "default",
     "nombre": "Default",
-    "texto": "Hola, {nombre} 👋\n\nTe recordamos que tienes pendiente agendar tu hora para tu próxima atención.\n\n📅 Agenda tu cita con anticipación para asegurar tu horario.\n\n📞 Si necesitas ayuda para agendar, comunícate con nosotros.\n\n¡Te esperamos! 🏥✨",
-    "actualizada": 1787565579000
-  },
-  {
-    "id": 2,
-    "clave": "recordatorio_cita",
-    "nombre": "Recordatorio cita",
-    "texto": "Hola {nombre}, le recordamos su cita médica. {info_extra}. Por favor confirme su asistencia respondiendo este mensaje.",
-    "actualizada": 1787565579000
-  },
-  {
-    "id": 3,
-    "clave": "resultado_disponible",
-    "nombre": "Resultado disponible",
-    "texto": "Hola {nombre}, sus resultados ya están disponibles. {info_extra}",
-    "actualizada": 1787565579000
+    "texto": "Hola, {nombre} {apellido} 👋\n\nTe recordamos que tienes pendiente agendar tu hora para tu próxima atención.\n\n📅 Agenda tu cita con anticipación para asegurar tu horario.\n\n📞 Si necesitas ayuda para agendar, comunícate con nosotros.\n\n¡Te esperamos! 🏥✨",
+    "actualizada": 1787685107858
   },
   {
     "id": 4,
@@ -26,12 +12,5 @@
     "nombre": "Lorem Ipsum",
     "texto": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspendisse hendrerit, augue sed maximus scelerisque, neque massa ultrices libero, a commodo neque dui ac dui. Nunc ac nisi eu eros porttitor sagittis id id justo. Integer tempor pharetra eros eget sodales. Nunc eu lobortis tellus. Quisque dolor lacus, tempor ac fringilla eu, pellentesque sed nibh. Vivamus convallis consectetur egestas. Vivamus auctor felis non bibendum bibendum. Donec ullamcorper suscipit arcu, id vulputate lacus consequat sed.\n\nNullam ullamcorper erat nec tortor porta, a tempor tortor lacinia. Etiam at tellus vitae turpis venenatis semper quis sit amet velit. Fusce fermentum, nibh a sollicitudin varius, orci turpis congue arcu, vitae dapibus ipsum nunc egestas dolor. Quisque sapien lectus, ornare tempus quam non, sagittis consequat metus. Aenean molestie sem ac augue facilisis, et sollicitudin dui tincidunt. Donec odio quam, ullamcorper et quam eu, pellentesque porttitor lorem. Vestibulum viverra tellus vitae pretium fringilla.\n\nNulla porta sollicitudin fringilla. Sed auctor auctor nulla ut ultricies. In eget iaculis sapien. Integer mollis maximus ipsum at volutpat. Sed porta, mi vel luctus consectetur, odio lorem tempus velit, eget efficitur odio diam nec massa. Etiam tincidunt ultrices eros. Class aptent taciti sociosqu ad litora torquent per conubia nostra, per inceptos himenaeos. Aliquam vulputate massa erat, quis placerat eros interdum a. In molestie nisl sit amet nulla maximus ornare.\n\nVivamus facilisis purus porta tellus sollicitudin, quis ullamcorper sem efficitur. Donec eu eleifend orci. In placerat metus vitae odio auctor mollis. Vivamus efficitur dictum sem, in venenatis turpis faucibus in. Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas. Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia curae; Cras aliquam a sapien a venenatis.\n\nAenean imperdiet ligula in felis volutpat, vitae pretium lectus vulputate. Quisque aliquam rhoncus suscipit. Integer dolor tortor, bibendum eu eros vitae, convallis venenatis velit. Phasellus nec sagittis metus. Mauris semper massa sed nulla blandit elementum. Curabitur eget dolor at tortor tempus ultrices a quis arcu. Cras ut cursus magna. Mauris in commodo nunc, eget consectetur lorem.",
     "actualizada": 1787598298569
-  },
-  {
-    "id": 6,
-    "clave": "consultar",
-    "nombre": "Consultar",
-    "texto": "Hola {nombre}!\n\n¿Ya agendaste tu hora?\n\nPuedes escribirnos directamente a este número para agendar!",
-    "actualizada": 1787602065284
   }
 ]
