@@ -46,7 +46,14 @@ button { font: inherit; cursor: pointer; }
   box-shadow: var(--sombra);
 }
 
-.topbar__brand { display: flex; align-items: center; gap: 12px; }
+.topbar__brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+  color: inherit;
+}
+.topbar__brand:hover h1 { text-decoration: underline; text-decoration-color: rgba(255,255,255,.5); text-underline-offset: 3px; }
 
 .topbar__logo {
   display: grid;
@@ -82,6 +89,65 @@ button { font: inherit; cursor: pointer; }
 }
 .nav a:hover { opacity: 1; background: rgba(255, 255, 255, .12); }
 .nav a.activo { background: rgba(255, 255, 255, .2); opacity: 1; }
+
+.hamburger {
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+  width: 42px;
+  height: 38px;
+  border: none;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, .15);
+  cursor: pointer;
+}
+.hamburger span {
+  width: 18px;
+  height: 2px;
+  border-radius: 2px;
+  background: #fff;
+  transition: transform .2s, opacity .2s;
+}
+.hamburger.abierto span:nth-child(1) { transform: translateY(6px) rotate(45deg); }
+.hamburger.abierto span:nth-child(2) { opacity: 0; }
+.hamburger.abierto span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
+
+@media (max-width: 760px) {
+  .topbar { padding: 10px 14px; }
+  .topbar p { display: none; }
+  .topbar h1 { font-size: .95rem; }
+  .badge--dev { font-size: .68rem; padding: 4px 9px; }
+
+  .hamburger { display: flex; }
+
+  .nav {
+    display: none;
+    left: auto;
+    right: 12px;
+    top: calc(100% + 8px);
+    bottom: auto;
+    transform: none;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 210px;
+    background: #fff;
+    border-radius: 14px;
+    padding: 8px;
+    box-shadow: 0 14px 40px rgba(0, 0, 0, .22);
+  }
+  .nav.abierto { display: flex; }
+  .nav a {
+    color: var(--texto);
+    opacity: 1;
+    padding: 11px 14px;
+    border-radius: 9px;
+    font-size: .92rem;
+  }
+  .nav a:hover { background: #f2f7f6; }
+  .nav a.activo { background: #e7f3f1; color: var(--verde-oscuro); }
+}
 
 .badge {
   padding: 5px 12px;

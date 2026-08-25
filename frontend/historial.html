@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="UTF-8">
@@ -10,15 +10,19 @@
 <body>
 
   <header class="topbar">
-    <div class="topbar__brand">
+    <a class="topbar__brand" href="index.html" title="Volver al inicio">
       <div>
         <h1>Notificaciones WhatsApp</h1>
         <p>Sistema de Notificaciones SNW</p>
       </div>
-    </div>
+    </a>
     <div class="topbar__right">
       <span class="badge badge--dev" id="badgeEntorno">Ambiente: —</span>
-      <nav class="nav">
+      <button class="hamburger" id="btnMenu" aria-label="Abrir menú" aria-expanded="false">
+        <span></span><span></span><span></span>
+      </button>
+      <nav class="nav" id="menuNav">
+        <a href="index.html">Inicio</a>
         <a href="pacientes.html">Pacientes</a>
         <a href="plantillas.html">Plantillas</a>
         <a href="historial.html" class="activo">Historial</a>
@@ -78,5 +82,24 @@
   <div id="toast" class="toast" hidden></div>
 
   <script src="js/historial.js"></script>
+  <script>
+    (function () {
+      const b = document.getElementById("btnMenu"), n = document.getElementById("menuNav");
+      if (!b || !n) return;
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const o = n.classList.toggle("abierto");
+        b.classList.toggle("abierto", o);
+        b.setAttribute("aria-expanded", o);
+      });
+      document.addEventListener("click", (e) => {
+        if (!b.contains(e.target) && !n.contains(e.target)) {
+          n.classList.remove("abierto");
+          b.classList.remove("abierto");
+          b.setAttribute("aria-expanded", "false");
+        }
+      });
+    })();
+  </script>
 </body>
 </html>

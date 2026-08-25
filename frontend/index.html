@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="UTF-8">
@@ -109,6 +109,10 @@
       color: #8a6410;
       font-size: .88rem;
     }
+    @media (max-width: 640px) {
+      header { padding: 40px 18px 52px; }
+      header h1 { font-size: 1.5rem; }
+    }
   </style>
 </head>
 <body>
@@ -162,7 +166,7 @@
   </section>
 
   <section class="info">
-    <h2> Tecnologías</h2>
+    <h2>Tecnologías</h2>
     <div class="chips">
       <span class="chip">Python · FastAPI</span>
       <span class="chip">MySQL / MariaDB</span>
@@ -176,7 +180,7 @@
     <h2>Ejecutar la versión completa en tu equipo</h2>
     <p>Esta página es una <strong>demostración estática</strong>: los datos son de ejemplo y los cambios no persisten en un servidor. Para usar el sistema real necesitas Python, MySQL (XAMPP) y ejecutar:</p>
 <pre>pip install -r requirements.txt
-cp .env.example .env   <# y completar credenciales #>
+cp .env.example .env   # y completar credenciales
 python backend/main.py</pre>
     <p>Luego abre <code>http://localhost:8000</code>. Las instrucciones completas están en el README del repositorio.</p>
     <div class="aviso">⚠️ En esta demo los botones de guardado y envío simulan el comportamiento; ningún mensaje real sale por WhatsApp.</div>

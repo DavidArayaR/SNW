@@ -10,7 +10,6 @@ from pathlib import Path
 import pymysql
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -54,6 +53,13 @@ def normalizar_telefono(crudo: str) -> str | None:
 app = FastAPI(title="SNW - API de Notificaciones WhatsApp")
 
 
+@app.middleware("http")
+async def sin_cache(request, call_next):
+    respuesta = await call_next(request)
+    respuesta.headers["Cache-Control"] = "no-store"
+    return respuesta
+
+
 class PlantillaIn(BaseModel):
     nombre: str
     texto: str
@@ -92,14 +98,6 @@ def slug(texto: str) -> str:
     t = "".join(c for c in t if unicodedata.category(c) != "Mn")
     t = re.sub(r"[^a-z0-9]+", "_", t).strip("_")
     return t[:40] or "plantilla"
-
-
-@app.get("/")
-def raiz():
-    landing = BASE_DIR / "index.html"
-    if landing.exists():
-        return FileResponse(landing)
-    return RedirectResponse("/pacientes.html")
 
 
 @app.get("/api/pacientes")
