@@ -13,12 +13,12 @@ from dotenv import load_dotenv
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-
+"""
 from db import conectar, entorno_valido, nombre_base
 from motor_envio import obtener_canal
 """
 from backend.db import conectar
-from backend.motor_envio import obtener_canal"""
+from backend.motor_envio import obtener_canal
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
