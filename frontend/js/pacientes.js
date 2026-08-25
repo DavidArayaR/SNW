@@ -78,7 +78,7 @@ async function cargar() {
     config = await rc.json();
 
     $("#badgeEntorno").textContent =
-      `Ambiente: ${config.entorno === "produccion" ? "Producción" : "Desarrollo"}`;
+      `Ambiente: ${config.entorno === "produccion" ? "Producción" : "Desarrollo"} · BD: ${config.base_datos ?? "?"}`;
 
     render();
   } catch {

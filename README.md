@@ -42,12 +42,15 @@ snw/
    ```
 2. MySQL activo (XAMPP) con la base `snw_pacientes`.
 3. Copiar `.env.example` como `.env` y completar credenciales de MySQL y parámetros del sistema:
-   - `SNW_ENTORNO`: `desarrollo` o `produccion`
+   - `SNW_ENTORNO`: `desarrollo` o `produccion` — define a qué base de datos se conecta
    - `SNW_METODO_ENVIO`: `simulado`, `whatsapp_web` o `api_oficial`
-   - `SNW_NUMEROS_PRUEBA`: números autorizados separados por coma
+   - `SNW_NUMEROS_PRUEBA`: números autorizados separados por coma (solo aplican en desarrollo)
    - `SNW_INTERVALO_MS`: pausa entre mensajes
    - `SNW_WA_TOKEN` y `SNW_WA_PHONE_ID`: credenciales de la API oficial de Meta (solo si `SNW_METODO_ENVIO=api_oficial`)
-   - `DB_HOST`, `DB_PUERTO`, `DB_USUARIO`, `DB_CONTRASENA`, `DB_NOMBRE`
+   - Base de **desarrollo**: `DB_DEV_HOST`, `DB_DEV_PUERTO`, `DB_DEV_USUARIO`, `DB_DEV_CONTRASENA`, `DB_DEV_NOMBRE`
+   - Base de **producción**: `DB_PROD_HOST`, `DB_PROD_PUERTO`, `DB_PROD_USUARIO`, `DB_PROD_CONTRASENA`, `DB_PROD_NOMBRE`
+
+Ambas bases quedan configuradas de forma simultánea; el sistema conecta a la que corresponde según `SNW_ENTORNO`, y puede cambiarse en caliente con `PUT /api/configuracion`. El script `sql/produccion.sql` crea la base de producción con su esquema.
 4. Iniciar el servidor (puerto 8000):
    ```
    python backend/main.py

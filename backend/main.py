@@ -13,7 +13,7 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from db import conectar
+from db import conectar, entorno_valido, nombre_base
 from motor_envio import obtener_canal
 """
 from backend.db import conectar
@@ -183,6 +183,7 @@ def eliminar_plantilla(plantilla_id: int):
 def leer_config() -> dict:
     return {
         "entorno": os.getenv("SNW_ENTORNO", "desarrollo"),
+        "base_datos": nombre_base(),
         "metodo_envio": os.getenv("SNW_METODO_ENVIO", "simulado"),
         "numeros_prueba": [
             n.strip() for n in os.getenv("SNW_NUMEROS_PRUEBA", "").split(",") if n.strip()
