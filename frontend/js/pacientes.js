@@ -11,7 +11,8 @@ function authHeaders(extra = {}) {
 if (!localStorage.getItem("snw_token")) location.replace("login.html");
 else if (localStorage.getItem("snw_rol") !== "administrador") location.replace("mensajeria.html");
 
-let ambienteAdmin = localStorage.getItem("snw_ambiente_admin") || "desarrollo";
+let ambienteAdmin = localStorage.getItem("snw_ambiente_admin");
+let _ambienteInicializado = false;
 
 function mostrarCintaDemo() {
   if (document.getElementById("cintaDemo")) return;
@@ -50,6 +51,17 @@ let filtroEstado = "todos";
 let seleccionados = new Set();
 let plantillaId = null;
 let timerPolling = null;
+let envioEnCurso = false;
+
+function setBloqueoEnvio(bloquear) {
+  envioEnCurso = bloquear;
+  document.querySelectorAll("button, input, select, textarea").forEach((el) => {
+    // No bloquear el toast ni la barra de progreso (no son inputs)
+    el.disabled = bloquear;
+  });
+  // Si se desbloquea, restaurar estados correctos vía render
+  if (!bloquear) render();
+}
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -64,10 +76,18 @@ const modalEl = $("#modalEnvio");
 const toastEl = $("#toast");
 const selAmbiente = $("#selAmbiente");
 
-selAmbiente.value = ambienteAdmin;
-selAmbiente.addEventListener("change", () => {
+if (ambienteAdmin) selAmbiente.value = ambienteAdmin;
+selAmbiente.addEventListener("change", async () => {
   ambienteAdmin = selAmbiente.value;
   localStorage.setItem("snw_ambiente_admin", ambienteAdmin);
+  // Sincroniza también el .env global (solo admin)
+  try {
+    await fetch("api/configuracion", {
+      method: "PUT",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ entorno: ambienteAdmin }),
+    });
+  } catch {}
   cargar();
 });
 
@@ -83,7 +103,20 @@ function escaparHtml(texto) {
 
 async function cargar() {
   try {
-    const amb = ambienteActual();
+    // Si no hay preferencia guardada, usar el entorno global del .env como default
+    if (!_ambienteInicializado && !localStorage.getItem("snw_ambiente_admin")) {
+      try {
+        const r0 = await fetch("api/configuracion", { headers: authHeaders(), cache: "no-store" });
+        if (r0.ok) {
+          const c0 = await r0.json();
+          ambienteAdmin = c0.entorno;
+          selAmbiente.value = ambienteAdmin;
+          localStorage.setItem("snw_ambiente_admin", ambienteAdmin);
+        }
+      } catch {}
+      _ambienteInicializado = true;
+    }
+    const amb = ambienteActual() || ambienteAdmin || "desarrollo";
     const [rp, rt, rc] = await Promise.all([
       fetch(`${API_PACIENTES}?ambiente=${amb}`, { headers: authHeaders(), cache: "no-store" }),
       fetch(API_PLANTILLAS, { headers: authHeaders(), cache: "no-store" }),
@@ -328,11 +361,14 @@ function abrirModal() {
   $("#resumenLinea").textContent =
     `${seleccionados.size} paciente${seleccionados.size === 1 ? "" : "s"} · método: ${config?.metodo_envio ?? "-"}`;
 
-  avisoDevEl.hidden = false;
   const esDev = config?.entorno === "desarrollo";
-  const nums = (config?.numeros_autorizados ?? []).join(", ") || "ninguno";
-  avisoDevEl.textContent =
-    `${esDev ? "Base de datos desarrollo" : "Base de datos producción"}: solo se enviará a los números autorizados (${nums}). El resto será descartado.`;
+  if (!esDev) {
+    avisoDevEl.hidden = true;
+  } else {
+    avisoDevEl.hidden = false;
+    const nums = (config?.numeros_autorizados ?? []).join(", ") || "ninguno";
+    avisoDevEl.textContent = `Base de datos desarrollo: solo se enviará a los números autorizados (${nums}). El resto será descartado.`;
+  }
 
   $("#faseConfig").hidden = false;
   $("#faseProgreso").hidden = true;
@@ -369,16 +405,19 @@ function renderPlantillasModal() {
 const avisoDevEl = $("#avisoDev");
 
 $("#btnCancelarEnvio").addEventListener("click", () => {
+  if (envioEnCurso) return;
   clearInterval(timerPolling);
   modalEl.hidden = true;
 });
 modalEl.addEventListener("click", (e) => {
+  if (envioEnCurso) return;
   if (e.target === modalEl) {
     clearInterval(timerPolling);
     modalEl.hidden = true;
   }
 });
 $("#btnCerrarModal").addEventListener("click", () => {
+  if (envioEnCurso) return;
   clearInterval(timerPolling);
   seleccionados.clear();
   plantillaId = null;
@@ -388,8 +427,10 @@ $("#btnCerrarModal").addEventListener("click", () => {
 
 $("#btnLanzarEnvio").addEventListener("click", async () => {
   if (demoMode) return lanzarEnvioDemo();
+  if (envioEnCurso) return;
 
   $("#btnLanzarEnvio").hidden = true;
+  setBloqueoEnvio(true);
 
   try {
     const res = await fetch(API_ENVIAR, {
@@ -398,13 +439,15 @@ $("#btnLanzarEnvio").addEventListener("click", async () => {
       body: JSON.stringify({ pacientes: [...seleccionados], plantilla_id: plantillaId, ambiente: ambienteActual() }),
     });
     const data = await res.json();
-    if (res.status === 401) { window.snwSalir(); return; }
+    if (res.status === 401) { window.snwSalir(); setBloqueoEnvio(false); return; }
     if (!res.ok) throw new Error(data.detail ?? `Error ${res.status}`);
 
     pintarRechazados(data.rechazados ?? []);
 
     if (!data.iniciado) {
       toast("Ningún destinatario válido. Envío no iniciado.", "error");
+      setBloqueoEnvio(false);
+      $("#btnLanzarEnvio").hidden = false;
       return;
     }
 
@@ -413,6 +456,7 @@ $("#btnLanzarEnvio").addEventListener("click", async () => {
     seguirProgreso(data.job_id, data.total);
   } catch (err) {
     toast(`Error al iniciar el envío: ${err.message}`, "error");
+    setBloqueoEnvio(false);
     $("#btnLanzarEnvio").hidden = false;
   }
 });
@@ -434,7 +478,9 @@ function normalizarTelefonoJs(crudo) {
 }
 
 async function lanzarEnvioDemo() {
+  if (envioEnCurso) return;
   $("#btnLanzarEnvio").hidden = true;
+  setBloqueoEnvio(true);
 
   const tpl = plantillas.find((t) => t.id === plantillaId);
   const autorizados = new Set(config?.numeros_prueba ?? []);
@@ -468,6 +514,8 @@ async function lanzarEnvioDemo() {
 
   if (!cola.length) {
     toast("Ningún destinatario válido. Envío no iniciado.", "error");
+    setBloqueoEnvio(false);
+    $("#btnLanzarEnvio").hidden = false;
     render();
     return;
   }
@@ -481,7 +529,7 @@ async function lanzarEnvioDemo() {
   await new Promise((resolve) => {
     const paso = () => {
       const d = cola[i];
-      $("#progresoTexto").textContent = `Enviando a ${d.nombre}... (simulado)`;
+      $("#progresoTexto").textContent = `Enviando mensajes... (${i + 1}/${cola.length})`;
       d.p.estado = "enviado";
       enviados++;
       i++;
@@ -495,6 +543,7 @@ async function lanzarEnvioDemo() {
   });
 
   finalizar(`Envío completado (demo): ${enviados} enviado(s), ${fallidos} fallido(s).`, false);
+  setBloqueoEnvio(false);
   render();
 }
 
@@ -528,9 +577,7 @@ function seguirProgreso(jobId, total) {
       $("#progresoTexto").textContent =
         job.estado === "completado"
           ? "Envío finalizado."
-          : job.actual
-            ? `Enviando a ${job.actual}...`
-            : "Enviando...";
+          : `Enviando mensajes... (${hechos}/${total})`;
 
       if (job.estado === "completado" || job.estado === "error") {
         clearInterval(timerPolling);
@@ -538,11 +585,13 @@ function seguirProgreso(jobId, total) {
           ? `Error del canal: ${job.detalle}`
           : `Envío completado: ${job.enviados} enviado(s), ${job.fallidos} fallido(s).`;
         finalizar(msg, job.estado === "error");
+        setBloqueoEnvio(false);
         cargar();
       }
     } catch {
       clearInterval(timerPolling);
       finalizar("Se perdió la conexión con el servidor.", true);
+      setBloqueoEnvio(false);
     }
   }, 700);
 }
@@ -550,6 +599,9 @@ function seguirProgreso(jobId, total) {
 function finalizar(mensaje, esError) {
   $("#progresoTexto").textContent = mensaje;
   toast(mensaje, esError ? "error" : "ok");
+  // Habilitar solo el botón Cerrar para poder salir del modal
+  const btnCerrar = document.getElementById("btnCerrarModal");
+  if (btnCerrar) btnCerrar.disabled = false;
 }
 
 let toastTimer;

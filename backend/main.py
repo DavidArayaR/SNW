@@ -104,6 +104,25 @@ def guardar_sesiones() -> None:
     )
 
 
+def _actualizar_env(clave: str, valor: str) -> None:
+    env_path = BASE_DIR / ".env"
+    try:
+        texto = env_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        texto = ""
+    lineas = texto.splitlines()
+    nueva = f"{clave}={valor}"
+    encontrada = False
+    for i, lin in enumerate(lineas):
+        if lin.strip().startswith(f"{clave}="):
+            lineas[i] = nueva
+            encontrada = True
+            break
+    if not encontrada:
+        lineas.append(nueva)
+    env_path.write_text("\n".join(lineas) + "\n", encoding="utf-8")
+
+
 SESIONES: dict[str, dict] = _cargar_sesiones()
 
 
@@ -296,6 +315,8 @@ def eliminar_plantilla(plantilla_id: int, sesion: dict = Depends(sesion_actual))
 
 
 def leer_config(ambiente: str | None = None) -> dict:
+    # Recargar .env para que ediciones manuales surtan efecto sin reiniciar
+    load_dotenv(BASE_DIR / ".env", override=True)
     ent = entorno_valido(ambiente)
     var_numeros = ("SNW_NUMEROS_PRUEBA_DEV" if ent == "desarrollo"
                    else "SNW_NUMEROS_PRUEBA_PROD")
@@ -334,24 +355,28 @@ def actualizar_configuracion(body: ConfigIn, sesion: dict = Depends(solo_admin))
         if body.entorno not in ("desarrollo", "produccion"):
             raise HTTPException(400, detail="Entorno inválido")
         os.environ["SNW_ENTORNO"] = body.entorno
+        _actualizar_env("SNW_ENTORNO", body.entorno)
 
     if body.metodo_envio is not None:
         if body.metodo_envio not in ("simulado", "whatsapp_web", "api_oficial"):
             raise HTTPException(400, detail="Método de envío inválido")
         os.environ["SNW_METODO_ENVIO"] = body.metodo_envio
+        _actualizar_env("SNW_METODO_ENVIO", body.metodo_envio)
 
     if body.numeros_prueba_dev is not None:
-        os.environ["SNW_NUMEROS_PRUEBA_DEV"] = ",".join(
-            n.strip() for n in body.numeros_prueba_dev if n.strip()
-        )
+        val = ",".join(n.strip() for n in body.numeros_prueba_dev if n.strip())
+        os.environ["SNW_NUMEROS_PRUEBA_DEV"] = val
+        _actualizar_env("SNW_NUMEROS_PRUEBA_DEV", val)
 
     if body.numeros_prueba_prod is not None:
-        os.environ["SNW_NUMEROS_PRUEBA_PROD"] = ",".join(
-            n.strip() for n in body.numeros_prueba_prod if n.strip()
-        )
+        val = ",".join(n.strip() for n in body.numeros_prueba_prod if n.strip())
+        os.environ["SNW_NUMEROS_PRUEBA_PROD"] = val
+        _actualizar_env("SNW_NUMEROS_PRUEBA_PROD", val)
 
     if body.intervalo_ms is not None:
-        os.environ["SNW_INTERVALO_MS"] = str(max(0, int(body.intervalo_ms)))
+        val = str(max(0, int(body.intervalo_ms)))
+        os.environ["SNW_INTERVALO_MS"] = val
+        _actualizar_env("SNW_INTERVALO_MS", val)
 
     return leer_config()
 
@@ -521,7 +546,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         if telefono != telefono_crudo:
             actualizar_telefono(p["id"], telefono, amb)
 
-        if telefono not in autorizados:
+        if amb == "desarrollo" and telefono not in autorizados:
             rechazados.append({"id": p["id"], "nombre": nombre_completo, "telefono": telefono,
                                "motivo": f"No está en los números autorizados de la base {amb}"})
             registrar_historial(p["id"], nombre_completo, telefono, plantilla["clave"],

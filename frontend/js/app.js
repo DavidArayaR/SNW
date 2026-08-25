@@ -58,6 +58,11 @@ function guardarDemo() {
   localStorage.setItem(LS_DEMO_KEY, JSON.stringify(plantillas));
 }
 
+function seleccionarDefault() {
+  const def = plantillas.find((p) => p.clave === "default" || String(p.nombre || "").toLowerCase() === "default");
+  if (def) abrir(def.id);
+}
+
 async function cargar() {
   for (let intento = 1; intento <= 2; intento++) {
     try {
@@ -67,11 +72,13 @@ async function cargar() {
       plantillas = await res.json();
       if (!Array.isArray(plantillas)) throw new Error("formato inválido");
       renderLista(buscadorEl.value);
+      if (activaId === null) seleccionarDefault();
       return;
     } catch (err) {
       if (intento === 2) {
         activarDemo();
         renderLista(buscadorEl.value);
+        if (activaId === null) seleccionarDefault();
         toast("Modo demostración: los cambios se guardan solo en este navegador.", "ok");
       } else {
         await new Promise((r) => setTimeout(r, 900));
@@ -420,9 +427,58 @@ function toast(msg, tipo = "ok") {
   toastTimer = setTimeout(() => toastEl.classList.remove("visible"), 2800);
 }
 
+const badgeEntornoMensajeria = document.getElementById("badgeEntorno");
 const modalConf = $("#modalConfirmar");
-let ambienteConf = localStorage.getItem("snw_ambiente") || "desarrollo";
+let ambienteConf = localStorage.getItem("snw_ambiente_admin") || localStorage.getItem("snw_ambiente") || "desarrollo";
 let timerPollingConf = null;
+let envioEnCursoConf = false;
+
+function setBloqueoEnvioConf(bloquear) {
+  envioEnCursoConf = bloquear;
+  document.querySelectorAll("button, input, select, textarea").forEach((el) => {
+    el.disabled = bloquear;
+  });
+}
+
+// Sincronizar con el .env global: si el archivo cambió a produccion/desarrollo, actualizar la selección
+fetch("api/configuracion", { headers: authHeaders(), cache: "no-store" })
+  .then((r) => (r.ok ? r.json() : null))
+  .then((cfg) => {
+    if (cfg && cfg.entorno && cfg.entorno !== ambienteConf) {
+      ambienteConf = cfg.entorno;
+      localStorage.setItem("snw_ambiente_admin", ambienteConf);
+      localStorage.setItem("snw_ambiente", ambienteConf);
+      actualizarBadgeMensajeria();
+    }
+  })
+  .catch(() => {});
+
+async function actualizarBadgeMensajeria() {
+  try {
+    const r = await fetch(`api/configuracion?ambiente=${ambienteConf}`, { headers: authHeaders(), cache: "no-store" });
+    if (!r.ok) return;
+    const cfg = await r.json();
+    if (badgeEntornoMensajeria) {
+      badgeEntornoMensajeria.textContent = `Base de datos ${cfg.entorno === "produccion" ? "producción" : "desarrollo"} · ${cfg.base_datos ?? ""}`;
+    }
+  } catch {}
+}
+
+// Si nunca se eligió base de datos, adoptar el entorno global del servidor
+if (!localStorage.getItem("snw_ambiente_admin") && !localStorage.getItem("snw_ambiente")) {
+  fetch("api/configuracion", { headers: authHeaders(), cache: "no-store" })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((cfg) => {
+      if (cfg && cfg.entorno && cfg.entorno !== ambienteConf) {
+        ambienteConf = cfg.entorno;
+        localStorage.setItem("snw_ambiente_admin", ambienteConf);
+        localStorage.setItem("snw_ambiente", ambienteConf);
+        actualizarBadgeMensajeria();
+      }
+    })
+    .catch(() => {});
+}
+actualizarBadgeMensajeria();
 
 function abrirModalConf() {
   const p = plantillas.find((x) => x.id === activaId);
@@ -460,6 +516,8 @@ document.querySelectorAll('input[name="ambienteConf"]').forEach((r) => {
   r.addEventListener("change", () => {
     ambienteConf = document.querySelector('input[name="ambienteConf"]:checked').value;
     localStorage.setItem("snw_ambiente", ambienteConf);
+    localStorage.setItem("snw_ambiente_admin", ambienteConf);
+    actualizarBadgeMensajeria();
     refrescarAvisoDevConf();
     actualizarResumenConf();
   });
@@ -468,13 +526,14 @@ document.querySelectorAll('input[name="ambienteConf"]').forEach((r) => {
 function refrescarAvisoDevConf() {
   const box = $("#confAvisoDev");
   const esDev = ambienteConf === "desarrollo";
-  box.hidden = false;
+  box.hidden = !esDev;
+  if (!esDev) return;
   fetch(`api/configuracion?ambiente=${ambienteConf}`, { headers: authHeaders() })
     .then((r) => (r.ok ? r.json() : {}))
     .then((cfg) => {
       const nums = (cfg.numeros_autorizados ?? []).join(", ") || "ninguno";
       box.textContent =
-        `${esDev ? "Base de datos desarrollo" : "Base de datos producción"}: solo se enviará a los números autorizados (${nums}). El resto será descartado.`;
+        `Base de datos desarrollo: solo se enviará a los números autorizados (${nums}). El resto será descartado.`;
     })
     .catch(() => {});
 }
@@ -500,23 +559,28 @@ async function actualizarResumenConf() {
 }
 
 $("#btnCancelarConf").addEventListener("click", () => {
+  if (envioEnCursoConf) return;
   clearInterval(timerPollingConf);
   modalConf.hidden = true;
 });
 modalConf.addEventListener("click", (e) => {
+  if (envioEnCursoConf) return;
   if (e.target === modalConf) {
     clearInterval(timerPollingConf);
     modalConf.hidden = true;
   }
 });
 $("#btnCerrarConf").addEventListener("click", () => {
+  if (envioEnCursoConf) return;
   clearInterval(timerPollingConf);
   modalConf.hidden = true;
 });
 
 $("#btnLanzarConf").addEventListener("click", async () => {
+  if (envioEnCursoConf) return;
   $("#btnLanzarConf").hidden = true;
   $("#btnCancelarConf").hidden = true;
+  setBloqueoEnvioConf(true);
 
   try {
     const res = await fetch("api/notificaciones/enviar", {
@@ -524,13 +588,14 @@ $("#btnLanzarConf").addEventListener("click", async () => {
       headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ plantilla_id: activaId, ambiente: ambienteConf }),
     });
-    if (res.status === 401) { window.snwSalir(); return; }
+    if (res.status === 401) { window.snwSalir(); setBloqueoEnvioConf(false); return; }
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail ?? `Error ${res.status}`);
 
     pintarRechazadosConf(data.rechazados ?? []);
 
     if (!data.iniciado) {
+      setBloqueoEnvioConf(false);
       finalizarConf(`Ningún destinatario válido en la base ${data.ambiente}.`, true);
       return;
     }
@@ -539,7 +604,7 @@ $("#btnLanzarConf").addEventListener("click", async () => {
     seguirProgresoConf(data.job_id, data.total);
   } catch (err) {
     toast(`Error al iniciar el envío: ${err.message}`, "error");
-    $("#btnLanzarEnvioTpl")?.remove();
+    setBloqueoEnvioConf(false);
     $("#btnLanzarConf").hidden = false;
     $("#btnCancelarConf").hidden = false;
   }
@@ -574,9 +639,7 @@ function seguirProgresoConf(jobId, total) {
       $("#progresoTextoConf").textContent =
         job.estado === "completado"
           ? "Envío finalizado."
-          : job.actual
-            ? `Enviando a ${job.actual}...`
-            : "Enviando...";
+          : `Enviando mensajes... (${hechos}/${total})`;
 
       if (job.estado === "completado" || job.estado === "error") {
         clearInterval(timerPollingConf);
@@ -584,11 +647,13 @@ function seguirProgresoConf(jobId, total) {
           ? `Error del canal: ${job.detalle}`
           : `Envío completado: ${job.enviados} enviado(s), ${job.fallidos} fallido(s).`;
         finalizarConf(msg, job.estado === "error");
+        setBloqueoEnvioConf(false);
         cargar();
       }
     } catch {
       clearInterval(timerPollingConf);
       finalizarConf("Se perdió la conexión con el servidor.", true);
+      setBloqueoEnvioConf(false);
     }
   }, 700);
 }
@@ -596,7 +661,9 @@ function seguirProgresoConf(jobId, total) {
 function finalizarConf(mensaje, esError) {
   $("#progresoTextoConf").textContent = mensaje;
   $("#btnCerrarConf").hidden = false;
+  $("#btnCerrarConf").disabled = false;
   $("#btnCancelarConf").hidden = true;
+  setBloqueoEnvioConf(false);
   toast(mensaje, esError ? "error" : "ok");
 }
 
