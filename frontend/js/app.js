@@ -27,6 +27,12 @@ const DATOS_EJEMPLO = {
   info_extra: "su cita es el lunes 31-08-2026 a las 10:30 en Consulta Nº 4",
 };
 
+if (!localStorage.getItem("snw_token")) location.replace("login.html");
+
+function authHeaders(extra = {}) {
+  return { Authorization: "Bearer " + (localStorage.getItem("snw_token") || ""), ...extra };
+}
+
 const LS_DEMO_KEY = "snw_plantillas_demo";
 let demoMode = false;
 
@@ -53,24 +59,34 @@ function guardarDemo() {
 }
 
 async function cargar() {
-  try {
-    const res = await fetch(API_URL, { cache: "no-store" });
-    if (!res.ok) throw new Error(res.status);
-    plantillas = await res.json();
-    renderLista(buscadorEl.value);
-  } catch {
-    activarDemo();
-    toast("Modo demostración: los cambios se guardan solo en este navegador.", "ok");
-    renderLista(buscadorEl.value);
+  for (let intento = 1; intento <= 2; intento++) {
+    try {
+      const res = await fetch(API_URL, { headers: authHeaders(), cache: "no-store" });
+      if (res.status === 401) { window.snwSalir(); return; }
+      if (!res.ok) throw new Error(res.status);
+      plantillas = await res.json();
+      if (!Array.isArray(plantillas)) throw new Error("formato inválido");
+      renderLista(buscadorEl.value);
+      return;
+    } catch (err) {
+      if (intento === 2) {
+        activarDemo();
+        renderLista(buscadorEl.value);
+        toast("Modo demostración: los cambios se guardan solo en este navegador.", "ok");
+      } else {
+        await new Promise((r) => setTimeout(r, 900));
+      }
+    }
   }
 }
 
 async function crearPlantilla(nombre, texto) {
   const res = await fetch(API_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ clave: slug(nombre), nombre, texto }),
   });
+  if (res.status === 401) { window.snwSalir(); return Promise.reject(new Error("Sesión expirada")); }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.detail ?? data.error ?? `Error ${res.status}`);
   return data;
@@ -79,16 +95,18 @@ async function crearPlantilla(nombre, texto) {
 async function actualizarPlantilla(id, nombre, texto) {
   const res = await fetch(`${API_URL}/${id}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ nombre, texto }),
   });
+  if (res.status === 401) { window.snwSalir(); return Promise.reject(new Error("Sesión expirada")); }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.detail ?? data.error ?? `Error ${res.status}`);
   return data;
 }
 
 async function eliminarPlantilla(id) {
-  const res = await fetch(`${API_URL}/${id}`, { method: "DELETE" });
+  const res = await fetch(`${API_URL}/${id}`, { method: "DELETE", headers: authHeaders() });
+  if (res.status === 401) { window.snwSalir(); return Promise.reject(new Error("Sesión expirada")); }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.detail ?? data.error ?? `Error ${res.status}`);
 }
@@ -112,12 +130,12 @@ function escaparHtml(texto) {
 function renderLista(filtro = "") {
   const q = filtro.trim().toLowerCase();
   const visibles = [...plantillas]
-    .sort((a, b) => b.actualizada - a.actualizada)
+    .sort((a, b) => (b.actualizada || 0) - (a.actualizada || 0))
     .filter(
       (p) =>
         !q ||
-        p.nombre.toLowerCase().includes(q) ||
-        p.texto.toLowerCase().includes(q)
+        String(p.nombre || "").toLowerCase().includes(q) ||
+        String(p.texto || "").toLowerCase().includes(q)
     );
 
   listaEl.innerHTML = "";
@@ -131,12 +149,13 @@ function renderLista(filtro = "") {
   }
 
   for (const p of visibles) {
+    const primeraLinea = String(p.texto ?? "").split("\n")[0] || "(sin contenido)";
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "tpl-item" + (p.id === activaId ? " tpl-item--activa" : "");
     btn.innerHTML =
-      `<span class="tpl-item__nombre">${escaparHtml(p.nombre)}</span>` +
-      `<span class="tpl-item__vista">${escaparHtml(p.texto.split("\n")[0])}</span>`;
+      `<span class="tpl-item__nombre">${escaparHtml(p.nombre ?? "(sin nombre)")}</span>` +
+      `<span class="tpl-item__vista">${escaparHtml(primeraLinea)}</span>`;
     btn.addEventListener("click", () => intentarAbrir(p.id));
     listaEl.appendChild(btn);
   }
@@ -283,6 +302,18 @@ formEl.addEventListener("submit", async (e) => {
     return toast("Ya existe una plantilla con ese nombre.", "error");
   }
 
+  const claveNueva = slug(nombre);
+  const choqueClave = plantillas.find(
+    (p) => p.clave === claveNueva && p.id !== activaId
+  );
+  if (choqueClave) {
+    inpNombre.classList.add("invalido");
+    return toast(
+      `Ese nombre genera la clave "${claveNueva}", que ya usa "${choqueClave.nombre}". Elige otro nombre.`,
+      "error"
+    );
+  }
+
   if (demoMode) {
     let fila;
     if (activaId) {
@@ -366,6 +397,7 @@ document.querySelectorAll(".chip").forEach((chip) => {
 });
 
 inpNombre.addEventListener("input", () => inpNombre.classList.remove("invalido"));
+inpMensaje.addEventListener("input", refrescarEditor);
 buscadorEl.addEventListener("input", () => renderLista(buscadorEl.value));
 $("#btnNueva").addEventListener("click", intentarNueva);
 $("#btnNuevaEmpty").addEventListener("click", intentarNueva);
@@ -386,6 +418,186 @@ function toast(msg, tipo = "ok") {
   toastEl.textContent = msg;
   toastEl.className = `toast visible toast--${tipo}`;
   toastTimer = setTimeout(() => toastEl.classList.remove("visible"), 2800);
+}
+
+const modalConf = $("#modalConfirmar");
+let ambienteConf = localStorage.getItem("snw_ambiente") || "desarrollo";
+let timerPollingConf = null;
+
+function abrirModalConf() {
+  const p = plantillas.find((x) => x.id === activaId);
+  $("#confNombre").textContent = p?.nombre ?? "";
+
+  document.querySelectorAll('input[name="ambienteConf"]').forEach((r) => {
+    r.checked = r.value === ambienteConf;
+  });
+  refrescarAvisoDevConf();
+  actualizarResumenConf();
+
+  $("#confProgreso").hidden = true;
+  $("#listaRechazadosConf").innerHTML = "";
+  $("#listaRechazadosConf").hidden = true;
+  $("#btnCerrarConf").hidden = true;
+  $("#btnLanzarConf").disabled = true;
+  $("#btnLanzarConf").hidden = false;
+  $("#btnCancelarConf").hidden = false;
+
+  modalConf.hidden = false;
+}
+
+$("#btnEnviarActual").addEventListener("click", () => {
+  if (!activaId) return toast("Guarda la plantilla antes de enviarla.", "error");
+  if (hayCambios()) {
+    return toast("Hay cambios sin guardar. Presiona Guardar primero (Ctrl+S).", "error");
+  }
+  if (demoMode) {
+    return toast("El envío requiere el servidor local (no disponible en demo).", "error");
+  }
+  abrirModalConf();
+});
+
+document.querySelectorAll('input[name="ambienteConf"]').forEach((r) => {
+  r.addEventListener("change", () => {
+    ambienteConf = document.querySelector('input[name="ambienteConf"]:checked').value;
+    localStorage.setItem("snw_ambiente", ambienteConf);
+    refrescarAvisoDevConf();
+    actualizarResumenConf();
+  });
+});
+
+function refrescarAvisoDevConf() {
+  const box = $("#confAvisoDev");
+  const esDev = ambienteConf === "desarrollo";
+  box.hidden = false;
+  fetch(`api/configuracion?ambiente=${ambienteConf}`, { headers: authHeaders() })
+    .then((r) => (r.ok ? r.json() : {}))
+    .then((cfg) => {
+      const nums = (cfg.numeros_autorizados ?? []).join(", ") || "ninguno";
+      box.textContent =
+        `${esDev ? "Base de datos desarrollo" : "Base de datos producción"}: solo se enviará a los números autorizados (${nums}). El resto será descartado.`;
+    })
+    .catch(() => {});
+}
+
+async function actualizarResumenConf() {
+  const dd = $("#confDestinatarios");
+  dd.textContent = "Contando...";
+  $("#btnLanzarConf").disabled = true;
+
+  try {
+    const res = await fetch("api/notificaciones/destinatarios", {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ ambiente: ambienteConf }),
+    });
+    if (res.status === 401) { window.snwSalir(); return; }
+    const data = await res.json();
+    dd.textContent = `${data.pendientes} pendiente(s) · base: ${data.base_datos}`;
+    $("#btnLanzarConf").disabled = data.pendientes === 0;
+  } catch {
+    dd.textContent = "No se pudieron contar.";
+  }
+}
+
+$("#btnCancelarConf").addEventListener("click", () => {
+  clearInterval(timerPollingConf);
+  modalConf.hidden = true;
+});
+modalConf.addEventListener("click", (e) => {
+  if (e.target === modalConf) {
+    clearInterval(timerPollingConf);
+    modalConf.hidden = true;
+  }
+});
+$("#btnCerrarConf").addEventListener("click", () => {
+  clearInterval(timerPollingConf);
+  modalConf.hidden = true;
+});
+
+$("#btnLanzarConf").addEventListener("click", async () => {
+  $("#btnLanzarConf").hidden = true;
+  $("#btnCancelarConf").hidden = true;
+
+  try {
+    const res = await fetch("api/notificaciones/enviar", {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ plantilla_id: activaId, ambiente: ambienteConf }),
+    });
+    if (res.status === 401) { window.snwSalir(); return; }
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail ?? `Error ${res.status}`);
+
+    pintarRechazadosConf(data.rechazados ?? []);
+
+    if (!data.iniciado) {
+      finalizarConf(`Ningún destinatario válido en la base ${data.ambiente}.`, true);
+      return;
+    }
+
+    $("#confProgreso").hidden = false;
+    seguirProgresoConf(data.job_id, data.total);
+  } catch (err) {
+    toast(`Error al iniciar el envío: ${err.message}`, "error");
+    $("#btnLanzarEnvioTpl")?.remove();
+    $("#btnLanzarConf").hidden = false;
+    $("#btnCancelarConf").hidden = false;
+  }
+});
+
+function pintarRechazadosConf(rechazados) {
+  const ul = $("#listaRechazadosConf");
+  ul.innerHTML = "";
+  for (const r of rechazados) {
+    const li = document.createElement("li");
+    li.textContent = `${r.nombre} (${r.telefono || "sin teléfono"}): ${r.motivo}`;
+    ul.appendChild(li);
+  }
+  ul.hidden = rechazados.length === 0;
+}
+
+function seguirProgresoConf(jobId, total) {
+  clearInterval(timerPollingConf);
+  timerPollingConf = setInterval(async () => {
+    try {
+      const res = await fetch(`api/notificaciones/jobs/${jobId}`, {
+        headers: authHeaders(),
+        cache: "no-store",
+      });
+      if (res.status === 401) { window.snwSalir(); return; }
+      if (!res.ok) throw new Error();
+      const job = await res.json();
+
+      const hechos = job.enviados + job.fallidos;
+      $("#barraFillConf").style.width = `${total ? Math.round((hechos / total) * 100) : 100}%`;
+      $("#progresoNumerosConf").textContent = `${hechos} / ${total}`;
+      $("#progresoTextoConf").textContent =
+        job.estado === "completado"
+          ? "Envío finalizado."
+          : job.actual
+            ? `Enviando a ${job.actual}...`
+            : "Enviando...";
+
+      if (job.estado === "completado" || job.estado === "error") {
+        clearInterval(timerPollingConf);
+        const msg = job.estado === "error"
+          ? `Error del canal: ${job.detalle}`
+          : `Envío completado: ${job.enviados} enviado(s), ${job.fallidos} fallido(s).`;
+        finalizarConf(msg, job.estado === "error");
+        cargar();
+      }
+    } catch {
+      clearInterval(timerPollingConf);
+      finalizarConf("Se perdió la conexión con el servidor.", true);
+    }
+  }, 700);
+}
+
+function finalizarConf(mensaje, esError) {
+  $("#progresoTextoConf").textContent = mensaje;
+  $("#btnCerrarConf").hidden = false;
+  $("#btnCancelarConf").hidden = true;
+  toast(mensaje, esError ? "error" : "ok");
 }
 
 modoVacia();

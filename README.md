@@ -123,6 +123,15 @@ Integrado en la página de Pacientes: se marcan pacientes con checkboxes (o "sel
 - Módulo de envío en 3 pasos con cola asíncrona, validaciones y progreso en vivo.
 - Navegación unificada entre módulos.
 
+## Usuarios del prototipo
+
+| Usuario | Contraseña | Rol | Acceso |
+|---|---|---|---|
+| `admin` | `admin123` | administrador | Todo: pacientes, plantillas, envío integrado, historial, configuración |
+| `usuario` | `usuario123` | usuario | Plantillas, historial y envío con selector de base de datos (no ve pacientes) |
+
+Las credenciales viven en `data/usuarios.json` (contraseñas hasheadas en SHA-256). El envío del usuario final va dirigido a todos los pacientes con estado `pendiente` de la base seleccionada (desarrollo o producción); en desarrollo solo saldrán los números autorizados.
+
 ## Pendientes (siguiente etapa)
 
 - Motor de envío real vía API Oficial Business (envío sin intervención del usuario).

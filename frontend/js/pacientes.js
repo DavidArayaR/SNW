@@ -4,6 +4,15 @@ const API_ENVIAR = "api/notificaciones/enviar";
 
 let demoMode = false;
 
+function authHeaders(extra = {}) {
+  return { Authorization: "Bearer " + (localStorage.getItem("snw_token") || ""), ...extra };
+}
+
+if (!localStorage.getItem("snw_token")) location.replace("login.html");
+else if (localStorage.getItem("snw_rol") !== "administrador") location.replace("mensajeria.html");
+
+let ambienteAdmin = localStorage.getItem("snw_ambiente_admin") || "desarrollo";
+
 function mostrarCintaDemo() {
   if (document.getElementById("cintaDemo")) return;
   const cinta = document.createElement("div");
@@ -16,8 +25,8 @@ function mostrarCintaDemo() {
 function activarDemo() {
   demoMode = true;
   mostrarCintaDemo();
-  $("#badgeEntorno").textContent = "Modo demo";
-  config = { entorno: "desarrollo", metodo_envio: "simulado", numeros_prueba: ["+56993921740"], intervalo_ms: 600 };
+  $("#nombreBd").textContent = "(demo)";
+  config = { entorno: "desarrollo", metodo_envio: "simulado", numeros_autorizados: ["+56993921740"], intervalo_ms: 600 };
   pacientes = [
     { id: 7, nombre: "David", apellido: "Araya", telefono: "+56993921740", info_extra: "Control Médico 15:30 hrs", estado: "enviado", actualizado: "24-08-2026 10:12" },
     { id: 8, nombre: "María", apellido: "López", telefono: "+56941508435", info_extra: "Reunión de Control 16:00 hrs", estado: "pendiente", actualizado: "24-08-2026 09:40" },
@@ -53,6 +62,18 @@ const contadorSel = $("#contadorSel");
 const btnIniciar = $("#btnIniciar");
 const modalEl = $("#modalEnvio");
 const toastEl = $("#toast");
+const selAmbiente = $("#selAmbiente");
+
+selAmbiente.value = ambienteAdmin;
+selAmbiente.addEventListener("change", () => {
+  ambienteAdmin = selAmbiente.value;
+  localStorage.setItem("snw_ambiente_admin", ambienteAdmin);
+  cargar();
+});
+
+function ambienteActual() {
+  return selAmbiente.value;
+}
 
 function escaparHtml(texto) {
   const div = document.createElement("div");
@@ -62,12 +83,14 @@ function escaparHtml(texto) {
 
 async function cargar() {
   try {
+    const amb = ambienteActual();
     const [rp, rt, rc] = await Promise.all([
-      fetch(API_PACIENTES, { cache: "no-store" }),
-      fetch(API_PLANTILLAS, { cache: "no-store" }),
-      fetch("api/configuracion", { cache: "no-store" }),
+      fetch(`${API_PACIENTES}?ambiente=${amb}`, { headers: authHeaders(), cache: "no-store" }),
+      fetch(API_PLANTILLAS, { headers: authHeaders(), cache: "no-store" }),
+      fetch(`api/configuracion?ambiente=${amb}`, { headers: authHeaders(), cache: "no-store" }),
     ]);
-    if (!rp.ok || !rt.ok || !rc.ok) throw new Error();
+    if (rp.status === 401 || rt.status === 401 || rc.status === 401) { window.snwSalir(); return; }
+    if (rp.status === 403) { location.href = "mensajeria.html"; return; }
 
     pacientes = (await rp.json()).map((p) => ({
       ...p,
@@ -77,8 +100,7 @@ async function cargar() {
     plantillas = await rt.json();
     config = await rc.json();
 
-    $("#badgeEntorno").textContent =
-      `Ambiente: ${config.entorno === "produccion" ? "Producción" : "Desarrollo"} · BD: ${config.base_datos ?? "?"}`;
+    $("#nombreBd").textContent = config.base_datos ?? "";
 
     render();
   } catch {
@@ -108,10 +130,17 @@ function render() {
       `<td class="campo-id">${p.id}</td>` +
       `<td class="campo-nombre">${escaparHtml(nombreCompleto)}</td>` +
       `<td class="campo-tel">${escaparHtml(p.telefono)}</td>` +
-      `<td><span class="estado-badge estado-${escaparHtml(p.estado)}">${escaparHtml(p.estado)}</span></td>` +
+      `<td class="campo-estado">` +
+        `<span class="estado-badge estado-${escaparHtml(p.estado)}" data-editable data-id="${p.id}" title="Click para cambiar estado">${escaparHtml(p.estado)}</span>` +
+        `<select class="estado-select" data-id="${p.id}" hidden>` +
+          `<option value="pendiente"${p.estado === "pendiente" ? " selected" : ""}>pendiente</option>` +
+          `<option value="enviado"${p.estado === "enviado" ? " selected" : ""}>enviado</option>` +
+          `<option value="error"${p.estado === "error" ? " selected" : ""}>error</option>` +
+        `</select>` +
+      `</td>` +
       `<td class="campo-info">${escaparHtml(p.info_extra ?? "—")}</td>` +
       `<td class="campo-fecha">${escaparHtml(p.actualizado)}</td>`;
-    tr.querySelector("input").addEventListener("change", (e) => {
+    tr.querySelector('input[type="checkbox"]').addEventListener("change", (e) => {
       e.target.checked ? seleccionados.add(p.id) : seleccionados.delete(p.id);
       refrescarSeleccion();
     });
@@ -173,6 +202,7 @@ chkTodos.addEventListener("change", () => {
 });
 
 tbodyEl.addEventListener("click", (e) => {
+  if (e.target.closest(".estado-badge, .estado-select")) return;
   if (e.target.tagName === "INPUT") return;
   const tr = e.target.closest("tr");
   if (!tr || !tbodyEl.contains(tr)) return;
@@ -181,6 +211,87 @@ tbodyEl.addEventListener("click", (e) => {
   chk.checked = !chk.checked;
   chk.checked ? seleccionados.add(Number(chk.dataset.id)) : seleccionados.delete(Number(chk.dataset.id));
   refrescarSeleccion();
+});
+
+// Edición inline del estado
+tbodyEl.addEventListener("click", (e) => {
+  const badge = e.target.closest(".estado-badge[data-editable]");
+  if (!badge) return;
+  e.stopPropagation();
+  const id = badge.dataset.id;
+  const sel = tbodyEl.querySelector(`.estado-select[data-id="${id}"]`);
+  if (!sel) return;
+  badge.hidden = true;
+  sel.hidden = false;
+  sel.focus();
+});
+
+tbodyEl.addEventListener("change", async (e) => {
+  const sel = e.target;
+  if (!sel.classList.contains("estado-select")) return;
+  e.stopPropagation();
+  const id = Number(sel.dataset.id);
+  const nuevoEstado = sel.value;
+  const paciente = pacientes.find((p) => p.id === id);
+  const estadoAnterior = paciente ? paciente.estado : null;
+  if (paciente && paciente.estado === nuevoEstado) {
+    const badge = tbodyEl.querySelector(`.estado-badge[data-id="${id}"]`);
+    if (badge) badge.hidden = false;
+    sel.hidden = true;
+    return;
+  }
+  sel.disabled = true;
+  try {
+    if (demoMode) {
+      if (paciente) paciente.estado = nuevoEstado;
+      await new Promise((r) => setTimeout(r, 150));
+    } else {
+      const amb = ambienteActual();
+      const res = await fetch(`api/pacientes/${id}?ambiente=${encodeURIComponent(amb)}`, {
+        method: "PUT",
+        headers: authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ estado: nuevoEstado }),
+      });
+      if (res.status === 401) { window.snwSalir(); return; }
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "No se pudo actualizar el estado");
+      }
+      const actualizado = await res.json();
+      if (paciente) {
+        paciente.estado = actualizado.estado;
+        paciente.actualizado = actualizado.actualizado;
+      }
+    }
+    toast(`Estado actualizado a "${nuevoEstado}"`, "ok");
+    render();
+  } catch (err) {
+    toast(err.message || "No se pudo actualizar el estado", "error");
+    if (paciente) sel.value = estadoAnterior || "pendiente";
+    const badge = tbodyEl.querySelector(`.estado-badge[data-id="${id}"]`);
+    if (badge) badge.hidden = false;
+    sel.hidden = true;
+    sel.disabled = false;
+  }
+});
+
+tbodyEl.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && e.target.classList.contains("estado-select")) {
+    const sel = e.target;
+    const badge = tbodyEl.querySelector(`.estado-badge[data-id="${sel.dataset.id}"]`);
+    if (badge) badge.hidden = false;
+    sel.hidden = true;
+    sel.blur();
+  }
+});
+
+document.addEventListener("click", (e) => {
+  if (e.target.closest(".estado-badge, .estado-select")) return;
+  tbodyEl.querySelectorAll(".estado-select:not([hidden])").forEach((sel) => {
+    const badge = tbodyEl.querySelector(`.estado-badge[data-id="${sel.dataset.id}"]`);
+    if (badge) badge.hidden = false;
+    sel.hidden = true;
+  });
 });
 
 buscadorEl.addEventListener("input", () => {
@@ -215,15 +326,13 @@ function abrirModal() {
   renderPlantillasModal();
 
   $("#resumenLinea").textContent =
-    `${seleccionados.size} paciente${seleccionados.size === 1 ? "" : "s"} · método: ${config?.metodo_envio ?? "—"}`;
+    `${seleccionados.size} paciente${seleccionados.size === 1 ? "" : "s"} · método: ${config?.metodo_envio ?? "-"}`;
 
-  const dev = config?.entorno === "desarrollo";
-  avisoDevEl.hidden = !dev;
-  if (dev) {
-    const nums = (config?.numeros_prueba ?? []).join(", ") || "ninguno";
-    avisoDevEl.textContent =
-      `Entorno desarrollo: solo se enviará a los números de prueba autorizados (${nums}). El resto será descartado.`;
-  }
+  avisoDevEl.hidden = false;
+  const esDev = config?.entorno === "desarrollo";
+  const nums = (config?.numeros_autorizados ?? []).join(", ") || "ninguno";
+  avisoDevEl.textContent =
+    `${esDev ? "Base de datos desarrollo" : "Base de datos producción"}: solo se enviará a los números autorizados (${nums}). El resto será descartado.`;
 
   $("#faseConfig").hidden = false;
   $("#faseProgreso").hidden = true;
@@ -285,10 +394,11 @@ $("#btnLanzarEnvio").addEventListener("click", async () => {
   try {
     const res = await fetch(API_ENVIAR, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pacientes: [...seleccionados], plantilla_id: plantillaId }),
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ pacientes: [...seleccionados], plantilla_id: plantillaId, ambiente: ambienteActual() }),
     });
     const data = await res.json();
+    if (res.status === 401) { window.snwSalir(); return; }
     if (!res.ok) throw new Error(data.detail ?? `Error ${res.status}`);
 
     pintarRechazados(data.rechazados ?? []);
@@ -403,7 +513,11 @@ function seguirProgreso(jobId, total) {
   clearInterval(timerPolling);
   timerPolling = setInterval(async () => {
     try {
-      const res = await fetch(`api/notificaciones/jobs/${jobId}`, { cache: "no-store" });
+      const res = await fetch(`api/notificaciones/jobs/${jobId}`, {
+        headers: authHeaders(),
+        cache: "no-store",
+      });
+      if (res.status === 401) { window.snwSalir(); return; }
       if (!res.ok) throw new Error();
       const job = await res.json();
 

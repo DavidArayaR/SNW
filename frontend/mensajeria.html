@@ -1,10 +1,11 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SNW · Plantillas</title>
+  <title>SNW · Mensajería</title>
   <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="css/pacientes.css">
 </head>
 <body>
 
@@ -22,8 +23,8 @@
       </button>
       <nav class="nav" id="menuNav">
         <a href="index.html">Inicio</a>
-        <a href="pacientes.html">Pacientes</a>
-        <a href="plantillas.html" class="activo">Plantillas</a>
+        <a href="pacientes.html" data-solo-admin>Pacientes</a>
+        <a href="mensajeria.html" class="activo">Mensajería</a>
         <a href="historial.html">Historial</a>
       </nav>
     </div>
@@ -92,6 +93,7 @@
         <div class="form-actions">
           <button type="submit" id="btnGuardar" class="btn btn--primary btn--lg">Guardar</button>
           <button type="button" id="btnCancelar" class="btn btn--ghost btn--lg">Cancelar</button>
+          <button type="button" id="btnEnviarActual" class="btn btn--primary btn--lg" hidden>Enviar mensaje</button>
         </div>
         <p class="field__hint atajos">Atajos: Ctrl+S guarda · Esc cancela la edición</p>
       </form>
@@ -115,6 +117,76 @@
     </div>
   </div>
 
+  <div id="modalConfirmar" class="modal" hidden>
+    <div class="modal__card modal__card--envio" role="dialog" aria-modal="true">
+      <h3>Confirmar env&iacute;o</h3>
+
+      <dl class="detalles">
+        <div class="detalle-fila">
+          <dt>Plantilla</dt>
+          <dd id="confNombre">&mdash;</dd>
+        </div>
+        <div class="detalle-fila">
+          <dt>Destinatarios</dt>
+          <dd id="confDestinatarios">Contando...</dd>
+        </div>
+        <div class="detalle-fila">
+          <dt>Base de datos</dt>
+          <dd class="conf-radios">
+            <label><input type="radio" name="ambienteConf" value="desarrollo"> Desarrollo</label>
+            <label><input type="radio" name="ambienteConf" value="produccion"> Producci&oacute;n</label>
+          </dd>
+        </div>
+      </dl>
+
+      <div class="aviso-dev" id="confAvisoDev" hidden></div>
+
+      <div id="confProgreso" hidden>
+        <div class="progreso-info">
+          <span id="progresoTextoConf">Preparando env&iacute;o...</span>
+          <span id="progresoNumerosConf" class="progreso-numeros"></span>
+        </div>
+        <div class="barra"><div class="barra__fill" id="barraFillConf"></div></div>
+      </div>
+
+      <ul id="listaRechazadosConf" class="rechazados" hidden></ul>
+
+      <div class="modal__actions">
+        <button type="button" class="btn btn--ghost" id="btnCancelarConf">Cancelar</button>
+        <div class="acciones-derecha">
+          <button type="button" class="btn btn--primary" id="btnCerrarConf" hidden>Cerrar</button>
+          <button type="button" class="btn btn--primary" id="btnLanzarConf" disabled>Iniciar Env&iacute;o</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<div id="toast" class="toast" hidden></div>
+
+  <script>
+    (function () {
+      const token = localStorage.getItem("snw_token"), rol = localStorage.getItem("snw_rol");
+      if (!token) { location.replace("login.html"); return; }
+      window.snwSalir = function () {
+        ["snw_token", "snw_rol", "snw_nombre"].forEach(k => localStorage.removeItem(k));
+        location.replace("login.html");
+      };
+      if (rol !== "administrador") {
+        document.querySelectorAll("[data-solo-admin]").forEach(a => a.remove());
+      }
+      const n = document.getElementById("menuNav");
+      const salir = document.createElement("a");
+      salir.href = "#";
+      salir.textContent = "Cerrar sesión · " + (localStorage.getItem("snw_nombre") || "");
+      salir.addEventListener("click", async (e) => {
+        e.preventDefault();
+        try { await fetch("api/auth/logout", { method: "POST", headers: { Authorization: "Bearer " + token } }); } catch {}
+        localStorage.clear();
+        location.href = "login.html";
+      });
+      n.appendChild(salir);
+    })();
+  </script>
   <script src="js/app.js"></script>
   <script>
     (function () {

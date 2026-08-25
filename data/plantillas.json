@@ -33,5 +33,33 @@
     "nombre": "Consultar",
     "texto": "Hola {nombre}!\n\n¿Ya agendaste tu hora?\n\nPuedes escribirnos directamente a este número para agendar!",
     "actualizada": 1787602065284
+  },
+  {
+    "id": 7,
+    "clave": "hola_como_estas",
+    "nombre": "hola como estas",
+    "texto": "asddsadadasdsa",
+    "actualizada": 1787675379023
+  },
+  {
+    "id": 8,
+    "clave": "dsds",
+    "nombre": "dsdssdadas",
+    "texto": "saddsadasda",
+    "actualizada": 1787675464106
+  },
+  {
+    "id": 9,
+    "clave": "dsad",
+    "nombre": "dsad",
+    "texto": "adsd",
+    "actualizada": 1787675468121
+  },
+  {
+    "id": 10,
+    "clave": "asd",
+    "nombre": "asd",
+    "texto": "asd",
+    "actualizada": 1787676000297
   }
 ]

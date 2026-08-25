@@ -118,7 +118,7 @@ button { font: inherit; cursor: pointer; }
   .topbar { padding: 10px 14px; }
   .topbar p { display: none; }
   .topbar h1 { font-size: .95rem; }
-  .badge--dev { font-size: .68rem; padding: 4px 9px; }
+  .badge--bd, select.badge--select { font-size: .68rem; padding: 4px 9px; }
 
   .hamburger { display: flex; }
 
@@ -154,6 +154,24 @@ button { font: inherit; cursor: pointer; }
   border-radius: 999px;
   font-size: .75rem;
   font-weight: 600;
+}
+
+select.badge--select {
+  appearance: none;
+  -webkit-appearance: none;
+  border: none;
+  font-family: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  background: var(--verde-oscuro);
+  color: #fff;
+  padding-right: 26px;
+}
+.badge--bd {
+  background: rgba(255, 255, 255, .18);
+  color: #fff;
+  font-weight: 600;
+  font-size: .72rem;
 }
 
 .layout {

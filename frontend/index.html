@@ -113,6 +113,24 @@
       header { padding: 40px 18px 52px; }
       header h1 { font-size: 1.5rem; }
     }
+    .nav-paginas {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px;
+      margin-top: 30px;
+    }
+    .nav-paginas a {
+      color: #fff;
+      text-decoration: none;
+      padding: 9px 20px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.14);
+      font-size: .88rem;
+      font-weight: 600;
+      transition: background .15s;
+    }
+    .nav-paginas a:hover { background: rgba(255,255,255,.28); }
   </style>
 </head>
 <body>
@@ -121,6 +139,13 @@
   <span class="badge">PROTOTIPO · VERSIÓN DEMO</span>
   <h1>Sistema de Notificaciones WhatsApp (SNW)</h1>
   <p>Módulo web para gestionar y enviar notificaciones masivas de WhatsApp a pacientes de forma rápida, organizada y centralizada, directamente desde la plataforma de la empresa.</p>
+
+  <nav class="nav-paginas">
+    <a href="index.html">Inicio</a>
+    <a href="pacientes.html">Pacientes</a>
+    <a href="mensajeria.html">Mensajería</a>
+    <a href="historial.html">Historial</a>
+  </nav>
 </header>
 
 <main>
@@ -137,14 +162,14 @@
     </div>
 
     <div class="card">
-      <h2>📝 Plantillas</h2>
+      <h2>✉️ Mensajería</h2>
       <p>Editor visual de mensajes reutilizables, pensado para usuarios sin conocimientos técnicos.</p>
       <ul>
         <li>Comodines automáticos: {nombre}, {apellido}, {info_extra}</li>
         <li>Vista previa estilo WhatsApp en vivo</li>
         <li>Crear, editar y eliminar plantillas</li>
       </ul>
-      <a class="btn" href="plantillas.html">Abrir módulo</a>
+      <a class="btn" href="mensajeria.html">Abrir módulo</a>
     </div>
 
     <div class="card">
