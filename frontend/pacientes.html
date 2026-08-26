@@ -27,7 +27,7 @@
       </button>
       <nav class="nav" id="menuNav">
         <a href="index.html">Inicio</a>
-        <a href="pacientes.html" class="activo" data-solo-admin>Pacientes</a>
+        <a href="pacientes.html" class="activo" data-solo-admin>Base de datos</a>
         <a href="mensajeria.html">Mensajería</a>
         <a href="historial.html">Historial</a>
       </nav>
@@ -61,6 +61,7 @@
               <th>Nombre</th>
               <th>Teléfono</th>
               <th>Estado</th>
+              <th>Respuesta</th>
               <th>Info extra</th>
               <th>Actualizado</th>
             </tr>
@@ -123,7 +124,7 @@
       if (!token) { location.replace("login.html"); return; }
       window.snwSalir = function () {
         ["snw_token", "snw_rol", "snw_nombre"].forEach(k => localStorage.removeItem(k));
-        location.replace("login.html");
+        location.replace("index.html");
       };
       if (rol !== "administrador") { location.replace("mensajeria.html"); return; }
       document.querySelectorAll("[data-solo-admin]").forEach(a => a.remove());

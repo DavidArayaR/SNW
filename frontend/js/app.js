@@ -544,8 +544,8 @@ $("#btnLanzarConf").addEventListener("click", async () => {
       const espera = document.getElementById("modalEspera");
       espera.hidden = false;
       const linkEl = document.getElementById("linkConfirmacionEsperaMsg");
-      if (linkEl && data.confirm_url) {
-        linkEl.innerHTML = `Para pruebas sin correo: <a href="${data.confirm_url}" target="_blank">Confirmar manualmente</a>`;
+      if (linkEl && data.confirm_url && localStorage.getItem("snw_rol") === "administrador") {
+        linkEl.innerHTML = `Para pruebas sin correo: <a href="${data.confirm_url}" target="_blank">Confirmar manualmente</a> · <a href="${data.confirm_url.replace('confirmar', 'rechazar')}" target="_blank" style="color:#b23b37;">Rechazar</a>`;
       }
       const beforeUnload = (e) => { e.preventDefault(); e.returnValue = ""; return ""; };
       window.addEventListener("beforeunload", beforeUnload);
@@ -563,6 +563,14 @@ $("#btnLanzarConf").addEventListener("click", async () => {
             modalConf.hidden = false;
             $("#confProgreso").hidden = false;
             seguirProgresoConf(s.job_id, s.total);
+          } else if (s.estado === "rechazado") {
+            clearInterval(poll);
+            window.removeEventListener("beforeunload", beforeUnload);
+            espera.hidden = true;
+            toast("Envío rechazado por supervisor.", "error");
+            setBloqueoEnvioConf(false);
+            $("#btnLanzarConf").hidden = false;
+            $("#btnCancelarConf").hidden = false;
           }
         } catch {}
       }, 2000);

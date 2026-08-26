@@ -215,17 +215,23 @@ def slug(texto: str) -> str:
 def listar_pacientes(q: str | None = Query(None), ambiente: str = Query("produccion"),
                      sesion: dict = Depends(solo_admin)):
     sql = (
-        "SELECT id, nombre, apellido, telefono,"
-        " COALESCE(NULLIF(estado, ''), 'pendiente') AS estado,"
-        " COALESCE(info_extra, '') AS info_extra,"
-        " fecha_actualizacion FROM pacientes"
+        "SELECT p.id, p.nombre, p.apellido, p.telefono,"
+        " COALESCE(NULLIF(p.estado, ''), 'pendiente') AS estado,"
+        " COALESCE(p.info_extra, '') AS info_extra,"
+        " p.fecha_actualizacion,"
+        " COALESCE(l.respuesta, 'pendiente') AS respuesta,"
+        " l.id AS ultimo_log_id FROM pacientes p"
+        " LEFT JOIN log_envios l ON l.id = ("
+        "   SELECT l2.id FROM log_envios l2"
+        "   WHERE l2.paciente_id = p.id ORDER BY l2.id DESC LIMIT 1"
+        ")"
     )
     args: list = []
     if q and q.strip():
         like = f"%{q.strip()}%"
-        sql += " WHERE nombre LIKE %s OR telefono LIKE %s OR info_extra LIKE %s"
+        sql += " WHERE p.nombre LIKE %s OR p.telefono LIKE %s OR p.info_extra LIKE %s"
         args = [like, like, like]
-    sql += " ORDER BY id"
+    sql += " ORDER BY p.id"
 
     with conectar(ambiente) as conn, conn.cursor() as cur:
         cur.execute(sql, tuple(args) or None)
@@ -238,6 +244,10 @@ def listar_pacientes(q: str | None = Query(None), ambiente: str = Query("producc
 
 class EstadoPacienteIn(BaseModel):
     estado: str
+
+
+class RespuestaIn(BaseModel):
+    respuesta: str
 
 
 @app.put("/api/pacientes/{paciente_id}")
@@ -253,15 +263,38 @@ def actualizar_paciente(paciente_id: int, body: EstadoPacienteIn,
         cur.execute("UPDATE pacientes SET estado = %s WHERE id = %s", (body.estado, paciente_id))
         conn.commit()
         cur.execute(
-            "SELECT id, nombre, apellido, telefono,"
-            " COALESCE(NULLIF(estado, ''), 'pendiente') AS estado,"
-            " COALESCE(info_extra, '') AS info_extra,"
-            " fecha_actualizacion FROM pacientes WHERE id = %s",
+            "SELECT p.id, p.nombre, p.apellido, p.telefono,"
+            " COALESCE(NULLIF(p.estado, ''), 'pendiente') AS estado,"
+            " COALESCE(p.info_extra, '') AS info_extra,"
+            " p.fecha_actualizacion,"
+            " COALESCE(l.respuesta, 'pendiente') AS respuesta,"
+            " l.id AS ultimo_log_id FROM pacientes p"
+            " LEFT JOIN log_envios l ON l.id = ("
+            "   SELECT l2.id FROM log_envios l2"
+            "   WHERE l2.paciente_id = p.id ORDER BY l2.id DESC LIMIT 1"
+            ") WHERE p.id = %s",
             (paciente_id,),
         )
         fila = cur.fetchone()
         fila["actualizado"] = fila.pop("fecha_actualizacion").strftime("%d-%m-%Y %H:%M")
         return fila
+
+
+@app.put("/api/pacientes/{paciente_id}/respuesta")
+def actualizar_respuesta_paciente(paciente_id: int, body: RespuestaIn,
+                                  ambiente: str = Query("produccion"),
+                                  sesion: dict = Depends(sesion_actual)):
+    if body.respuesta not in ("pendiente", "click", "respondio", "baja"):
+        raise HTTPException(400, detail="Respuesta inválida. Use: pendiente, click, respondio, baja")
+    with conectar(ambiente) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE log_envios SET respuesta = %s WHERE id = ("
+            "  SELECT l.id FROM log_envios l WHERE l.paciente_id = %s ORDER BY l.id DESC LIMIT 1"
+            ")",
+            (body.respuesta, paciente_id),
+        )
+        conn.commit()
+    return {"ok": True}
 
 
 @app.get("/api/plantillas")
@@ -433,16 +466,21 @@ def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, a
 
     if not host or not pwd:
         # Modo simulado: logear URL para pruebas sin SMTP real
-        print(f"[CORREO SIMULADO] Para {destino} desde {emisor}: confirmar http://localhost:8000/api/notificaciones/confirmar/{token} - {total} personas, plantilla '{plantilla_nombre}', base {ambiente}")
+        print(f"[CORREO SIMULADO] Para {destino} desde {emisor}: confirmar http://localhost:8000/api/notificaciones/confirmar/{token} | rechazar http://localhost:8000/api/notificaciones/rechazar/{token} - {total} personas, plantilla '{plantilla_nombre}', base {ambiente}")
         return True
 
     confirm_url = f"http://localhost:8000/api/notificaciones/confirmar/{token}"
+    reject_url = f"http://localhost:8000/api/notificaciones/rechazar/{token}"
     subject = f"[SNW] Confirmar envío masivo - {total} destinatarios"
     html = f"""
     <html><body style="font-family: Arial, sans-serif; color: #24303c;">
       <h2>Solicitud de envío masivo</h2>
       <p>Se ha solicitado enviar la plantilla <strong>{plantilla_nombre}</strong> a <strong>{total} personas</strong> desde la base de datos <strong>{ambiente}</strong>.</p>
-      <p><a href="{confirm_url}" style="display:inline-block; background:#128c7e; color:#fff; padding:12px 22px; border-radius:8px; text-decoration:none; font-weight:bold;">Confirmar envío</a></p>
+      <p style="margin:24px 0;">
+        <a href="{confirm_url}" style="display:inline-block; background:#128c7e; color:#fff; padding:12px 22px; border-radius:8px; text-decoration:none; font-weight:bold;">Confirmar envío</a>
+        &nbsp;&nbsp;
+        <a href="{reject_url}" style="display:inline-block; background:#b23b37; color:#fff; padding:12px 22px; border-radius:8px; text-decoration:none; font-weight:bold;">Rechazar envío</a>
+      </p>
       <p>Si no reconoces esta solicitud, ignora este correo.</p>
       <p style="font-size:12px; color:#66757f;">Token: {token}</p>
     </body></html>
@@ -491,17 +529,47 @@ def actualizar_telefono(paciente_id: int, telefono: str, ambiente: str) -> None:
 
 
 def registrar_historial(paciente_id, nombre, telefono, clave_plantilla, mensaje, estado, error=None,
-                        ambiente="produccion") -> None:
+                        ambiente="produccion", envio_id=None) -> None:
     try:
         with conectar(ambiente) as conn, conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO log_envios (paciente_id, nombre_paciente, numero_telefono, mensaje,"
-                " plantilla_clave, estado_envio, descripcion_error) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                (paciente_id, nombre, telefono, mensaje, clave_plantilla, estado, error),
+                "INSERT INTO log_envios (envio_id, paciente_id, nombre_paciente, numero_telefono, mensaje,"
+                " plantilla_clave, estado_envio, descripcion_error) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                (envio_id, paciente_id, nombre, telefono, mensaje, clave_plantilla, estado, error),
             )
             conn.commit()
     except Exception as e:
         print(f"[HISTORIAL] No se pudo registrar: {e}")
+
+
+def crear_envio_batch(base_datos, plantilla_clave, plantilla_nombre, total, ambiente) -> int | None:
+    try:
+        with conectar(ambiente) as conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO envios (base_datos, plantilla_clave, plantilla_nombre, total_pacientes)"
+                " VALUES (%s, %s, %s, %s)",
+                (base_datos, plantilla_clave, plantilla_nombre, total),
+            )
+            conn.commit()
+            return cur.lastrowid
+    except Exception as e:
+        print(f"[ENVIO] No se pudo crear batch: {e}")
+        return None
+
+
+def actualizar_envio_batch(envio_id, ambiente, enviados=0, fallidos=0, invalidos=0) -> None:
+    if envio_id is None:
+        return
+    try:
+        with conectar(ambiente) as conn, conn.cursor() as cur:
+            cur.execute(
+                "UPDATE envios SET enviados = enviados + %s, fallidos = fallidos + %s,"
+                " invalidos = invalidos + %s WHERE id = %s",
+                (enviados, fallidos, invalidos, envio_id),
+            )
+            conn.commit()
+    except Exception as e:
+        print(f"[ENVIO] No se pudo actualizar batch: {e}")
 
 
 def procesar_job(job_id: str) -> None:
@@ -510,6 +578,7 @@ def procesar_job(job_id: str) -> None:
     cfg = leer_config()
     canal = obtener_canal(cfg)
     clave = job.get("plantilla", {}).get("clave")
+    envio_id = job.get("envio_id")
 
     if canal is None or not canal.disponible():
         for d in job["destinatarios"]:
@@ -518,7 +587,8 @@ def procesar_job(job_id: str) -> None:
             registrar_historial(d["id"], d["nombre"], d["telefono"], clave,
                                 d["mensaje"], "error",
                                 f"Canal no disponible: {canal.nombre if canal else 'desconocido'}",
-                                ambiente=amb)
+                                ambiente=amb, envio_id=envio_id)
+        actualizar_envio_batch(envio_id, amb, fallidos=len(job["destinatarios"]))
         job["estado"] = "error"
         job["detalle"] = f"Canal de envío no disponible ({cfg.get('metodo_envio')})"
         return
@@ -539,13 +609,14 @@ def procesar_job(job_id: str) -> None:
 
         registrar_historial(d["id"], d["nombre"], d["telefono"], clave,
                             d["mensaje"], "enviado" if ok else "error", error,
-                            ambiente=amb)
+                            ambiente=amb, envio_id=envio_id)
 
         if i < total - 1 and intervalo > 0:
             time.sleep(intervalo)
 
     job["actual"] = ""
     job["estado"] = "completado"
+    actualizar_envio_batch(envio_id, amb, enviados=job["enviados"], fallidos=job["fallidos"])
 
 
 @app.post("/api/notificaciones/enviar", status_code=202)
@@ -622,6 +693,8 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
     # En producción se requiere confirmación por correo del supervisor
     if amb == "produccion":
         token = uuid.uuid4().hex
+        envio_id = crear_envio_batch(nombre_base(amb), plantilla["clave"], plantilla["nombre"],
+                                     len(destinatarios) + len(rechazados), amb)
         PENDIENTES[token] = {
             "ambiente": amb,
             "plantilla": {"id": plantilla["id"], "clave": plantilla["clave"], "nombre": plantilla["nombre"]},
@@ -629,12 +702,28 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
             "rechazados": rechazados,
             "estado": "pendiente",
             "job_id": None,
+            "envio_id": envio_id,
             "creado": time.time(),
         }
+        if envio_id:
+            actualizar_envio_batch(envio_id, amb, invalidos=len(rechazados))
+            for r in rechazados:
+                registrar_historial(r.get("id"), r.get("nombre"), r.get("telefono"),
+                                    plantilla["clave"], "", "numero_invalido",
+                                    r.get("motivo"), ambiente=amb, envio_id=envio_id)
         _enviar_correo_confirmacion(token, len(destinatarios), plantilla["nombre"], amb)
         return {"requiere_confirmacion": True, "solicitud_id": token, "total": len(destinatarios),
                 "ambiente": amb, "rechazados": rechazados,
                 "confirm_url": f"/api/notificaciones/confirmar/{token}"}
+
+    envio_id = crear_envio_batch(nombre_base(amb), plantilla["clave"], plantilla["nombre"],
+                                 len(destinatarios) + len(rechazados), amb)
+    if envio_id:
+        actualizar_envio_batch(envio_id, amb, invalidos=len(rechazados))
+        for r in rechazados:
+            registrar_historial(r.get("id"), r.get("nombre"), r.get("telefono"),
+                                plantilla["clave"], "", "numero_invalido",
+                                r.get("motivo"), ambiente=amb, envio_id=envio_id)
 
     job_id = uuid.uuid4().hex[:8]
     JOBS[job_id] = {
@@ -648,6 +737,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         "ambiente": amb,
         "plantilla": {"id": plantilla["id"], "clave": plantilla["clave"]},
         "destinatarios": destinatarios,
+        "envio_id": envio_id,
     }
 
     background_tasks.add_task(procesar_job, job_id)
@@ -662,6 +752,37 @@ def estado_solicitud(token: str, sesion: dict = Depends(sesion_actual)):
         raise HTTPException(404, detail="Solicitud no encontrada")
     return {"solicitud_id": token, "estado": pend["estado"], "total": len(pend["destinatarios"]),
             "job_id": pend.get("job_id"), "ambiente": pend["ambiente"]}
+
+
+@app.get("/api/notificaciones/rechazar/{token}")
+def rechazar_envio(token: str):
+    pend = PENDIENTES.get(token)
+    if not pend:
+        return HTMLResponse("<html><body style='font-family:Arial; text-align:center; padding:40px;'><h3>Solicitud no encontrada o expirada</h3></body></html>", status_code=404)
+    if pend["estado"] == "rechazado":
+        return HTMLResponse("<html><body style='font-family:Arial; text-align:center; padding:40px;'><h2>Este envío ya fue rechazado</h2></body></html>")
+    if pend["estado"] == "confirmado":
+        return HTMLResponse("<html><body style='font-family:Arial; text-align:center; padding:40px;'><h2>Este envío ya fue confirmado y está en proceso</h2></body></html>")
+    pend["estado"] = "rechazado"
+    envio_id = pend.get("envio_id")
+    if envio_id:
+        amb = pend["ambiente"]
+        try:
+            with conectar(amb) as conn, conn.cursor() as cur:
+                cur.execute("DELETE FROM envios WHERE id = %s", (envio_id,))
+                conn.commit()
+        except Exception:
+            pass
+    return HTMLResponse(f"""
+<html><head><meta charset='utf-8'><title>Envío rechazado</title></head>
+<body style='font-family: Segoe UI, Arial; text-align:center; padding:40px; background:#f0f2f5;'>
+<div style='background:#fff; max-width:520px; margin:40px auto; padding:32px; border-radius:14px; box-shadow:0 4px 20px rgba(0,0,0,0.1);'>
+<h2 style='color:#b23b37; margin-top:0;'>Envío rechazado</h2>
+<p>El envío de <strong>{len(pend['destinatarios'])} mensajes</strong> plantilla <strong>{pend['plantilla']['nombre']}</strong> fue rechazado.</p>
+<p style='color:#66757f; font-size:14px;'>Puedes cerrar esta ventana.</p>
+</div>
+</body></html>
+""")
 
 
 @app.get("/api/notificaciones/confirmar/{token}")
@@ -685,6 +806,7 @@ def confirmar_envio(token: str, background_tasks: BackgroundTasks):
         "ambiente": pend["ambiente"],
         "plantilla": pend["plantilla"],
         "destinatarios": pend["destinatarios"],
+        "envio_id": pend.get("envio_id"),
     }
     background_tasks.add_task(procesar_job, job_id)
     return HTMLResponse(f"""
@@ -737,34 +859,62 @@ def estado_job(job_id: str, sesion: dict = Depends(sesion_actual)):
 @app.get("/api/notificaciones/historial")
 def listar_historial(q: str | None = Query(None), estado: str | None = Query(None),
                      ambiente: str = Query("produccion"), sesion: dict = Depends(sesion_actual)):
-    sql = ("SELECT id, paciente_id, nombre_paciente, numero_telefono, plantilla_clave,"
-           " estado_envio, descripcion_error, fecha_hora, mensaje FROM log_envios")
+    sql = ("SELECT id, base_datos, plantilla_clave, plantilla_nombre, total_pacientes,"
+           " enviados, fallidos, invalidos, fecha_hora FROM envios")
     condiciones: list[str] = []
     args: list = []
 
     if q and q.strip():
         like = f"%{q.strip()}%"
         condiciones.append(
-            "(nombre_paciente LIKE %s OR numero_telefono LIKE %s OR plantilla_clave LIKE %s"
-            " OR descripcion_error LIKE %s)"
+            "(base_datos LIKE %s OR plantilla_clave LIKE %s OR plantilla_nombre LIKE %s)"
         )
-        args += [like, like, like, like]
-
-    if estado in ("enviado", "error", "numero_invalido"):
-        condiciones.append("estado_envio = %s")
-        args.append(estado)
+        args += [like, like, like]
 
     if condiciones:
         sql += " WHERE " + " AND ".join(condiciones)
     sql += " ORDER BY id DESC LIMIT 300"
 
-    with conectar(ambiente) as conn, conn.cursor() as cur:
-        cur.execute(sql, tuple(args) or None)
-        filas = cur.fetchall()
+    bases = ["desarrollo", "produccion"] if ambiente == "todos" else [ambiente]
+    filas = []
+    for amb in bases:
+        try:
+            with conectar(amb) as conn, conn.cursor() as cur:
+                cur.execute(sql, tuple(args) or None)
+                filas.extend(cur.fetchall())
+        except Exception:
+            pass
 
+    filas.sort(key=lambda f: f.get("id", 0), reverse=True)
+    for f in filas:
+        f["fecha"] = f.pop("fecha_hora").strftime("%d-%m-%Y %H:%M")
+    return filas[:300]
+
+
+@app.get("/api/notificaciones/historial/{envio_id}/detalle")
+def detalle_historial(envio_id: int, ambiente: str = Query("produccion"),
+                      sesion: dict = Depends(sesion_actual)):
+    sql = ("SELECT id, nombre_paciente, numero_telefono, plantilla_clave,"
+           " estado_envio, respuesta, descripcion_error, fecha_hora, mensaje FROM log_envios"
+           " WHERE envio_id = %s ORDER BY id")
+    with conectar(ambiente) as conn, conn.cursor() as cur:
+        cur.execute(sql, (envio_id,))
+        filas = cur.fetchall()
     for f in filas:
         f["fecha"] = f.pop("fecha_hora").strftime("%d-%m-%Y %H:%M")
     return filas
+
+
+@app.put("/api/notificaciones/historial/{registro_id}/respuesta")
+def actualizar_respuesta(registro_id: int, body: EstadoPacienteIn,
+                         ambiente: str = Query("produccion"),
+                         sesion: dict = Depends(sesion_actual)):
+    if body.estado not in ("pendiente", "click", "respondio", "baja"):
+        raise HTTPException(400, detail="Respuesta inválida. Use: pendiente, click, respondio, baja")
+    with conectar(ambiente) as conn, conn.cursor() as cur:
+        cur.execute("UPDATE log_envios SET respuesta = %s WHERE id = %s", (body.estado, registro_id))
+        conn.commit()
+    return {"ok": True}
 
 
 app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="static")

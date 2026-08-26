@@ -310,6 +310,56 @@ td.campo-id { color: var(--texto-suave); font-family: Consolas, monospace; }
   padding: 30px 0;
 }
 
+.badge--db {
+  background: #e7f3f1;
+  color: var(--verde-oscuro);
+  border: 1px solid #bcd9d2;
+  padding: 3px 11px;
+  border-radius: 999px;
+  font-size: .78rem;
+  font-weight: 700;
+}
+
+.campo-num {
+  text-align: center;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.campo-num--ok { color: #1e7d4d; }
+.campo-num--error { color: #b23b37; }
+.campo-num--invalido { color: #5c3fa8; }
+
+.btn--sm { padding: 4px 10px; font-size: .78rem; border-radius: 6px; }
+
+.respuesta-badge {
+  display: inline-block;
+  padding: 3px 11px;
+  border-radius: 999px;
+  font-size: .72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.respuesta-pendiente { background: #f0f2f5; color: #66757f; border: 1px solid #dde1e6; }
+.respuesta-click { background: #e8f4fd; color: #1a6fb5; border: 1px solid #b3d9f2; }
+.respuesta-respondio { background: #e5f6ec; color: #1e7d4d; border: 1px solid #bfe5cf; }
+.respuesta-baja { background: #fdecec; color: #b23b37; border: 1px solid #eec2c1; }
+
+.respuesta-select {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: .72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  border: 1px solid var(--borde);
+  background: #fff;
+  cursor: pointer;
+  outline: none;
+}
+.respuesta-select:focus { border-color: var(--verde); }
+.campo-respuesta { position: relative; white-space: nowrap; }
+
 @media (max-width: 700px) {
   thead th, tbody td { padding: 9px 10px; }
   .campo-info { max-width: 150px; }

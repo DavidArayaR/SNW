@@ -23,7 +23,7 @@
       </button>
       <nav class="nav" id="menuNav">
         <a href="index.html">Inicio</a>
-        <a href="pacientes.html" data-solo-admin>Pacientes</a>
+        <a href="pacientes.html" data-solo-admin>Base de datos</a>
         <a href="mensajeria.html">Mensajería</a>
         <a href="historial.html" class="activo">Historial</a>
       </nav>
@@ -34,14 +34,14 @@
 
     <section class="panel">
       <div class="panel__head">
-        <h2>Historial de mensajes</h2>
+        <h2>Historial de envíos</h2>
         <button id="btnActualizar" class="btn btn--ghost" type="button">Actualizar</button>
       </div>
 
       <div class="stats" id="stats"></div>
 
       <div class="toolbar-pacientes">
-        <input type="search" id="buscador" placeholder="Buscar por paciente, teléfono, plantilla o detalle..." autocomplete="off">
+        <input type="search" id="buscador" placeholder="Buscar por base de datos o plantilla..." autocomplete="off">
         <span id="contador" class="contador-sel"></span>
       </div>
 
@@ -50,17 +50,18 @@
           <thead>
             <tr>
               <th>Fecha</th>
-              <th>Paciente</th>
-              <th>Teléfono</th>
+              <th>Base de datos</th>
               <th>Plantilla</th>
-              <th>Mensaje</th>
-              <th>Estado</th>
+              <th>Total</th>
+              <th>Enviados</th>
+              <th>Fallidos</th>
+              <th>Inválidos</th>
               <th>Detalle</th>
             </tr>
           </thead>
           <tbody></tbody>
         </table>
-        <p id="tablaVacia" class="tabla-vacia" hidden>Sin registros.</p>
+        <p id="tablaVacia" class="tabla-vacia" hidden>Sin envíos registrados.</p>
       </div>
     </section>
 
@@ -70,9 +71,21 @@
     <div class="modal__card modal__card--detalle" role="dialog" aria-modal="true">
       <h3>Detalle del envío</h3>
       <div id="detalleCampos"></div>
-      <p class="detalle-subtitulo">Mensaje enviado</p>
-      <div class="bubble-msg" id="detalleMensaje"></div>
-      <div class="detalle-error" id="detalleError" hidden></div>
+      <p class="detalle-subtitulo">Pacientes en este envío</p>
+      <div class="tabla-wrap" style="max-height:40vh;">
+        <table>
+          <thead>
+            <tr>
+              <th>Paciente</th>
+              <th>Teléfono</th>
+              <th>Estado</th>
+              <th>Respuesta</th>
+              <th>Error</th>
+            </tr>
+          </thead>
+          <tbody id="detalleBody"></tbody>
+        </table>
+      </div>
       <div class="modal__actions">
         <button type="button" class="btn btn--primary" id="btnCerrarDetalle">Cerrar</button>
       </div>
@@ -87,7 +100,7 @@
       if (!token) { location.replace("login.html"); return; }
       window.snwSalir = function () {
         ["snw_token", "snw_rol", "snw_nombre"].forEach(k => localStorage.removeItem(k));
-        location.replace("login.html");
+        location.replace("index.html");
       };
       if (rol !== "administrador") {
         document.querySelectorAll("[data-solo-admin]").forEach(a => a.remove());
@@ -100,7 +113,7 @@
         e.preventDefault();
         try { await fetch("api/auth/logout", { method: "POST", headers: { Authorization: "Bearer " + token } }); } catch {}
         localStorage.clear();
-        location.href = "login.html";
+        location.href = "index.html";
       });
       n.appendChild(salir);
     })();

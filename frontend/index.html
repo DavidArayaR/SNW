@@ -75,6 +75,26 @@
       border: 2px solid rgba(255,255,255,.35);
     }
     .btn--login:hover { background: rgba(255,255,255,.92); filter: none; }
+    .nav-logueado {
+      display: none;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px;
+      margin-top: 24px;
+    }
+    .nav-logueado a {
+      color: #fff;
+      text-decoration: none;
+      padding: 9px 20px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.14);
+      font-size: .88rem;
+      font-weight: 600;
+      transition: background .15s;
+    }
+    .nav-logueado a:hover { background: rgba(255,255,255,.28); }
+    .nav-logueado a.nav-salir { background: rgba(180,40,40,.35); }
+    .nav-logueado a.nav-salir:hover { background: rgba(180,40,40,.55); }
     section.info {
       background: #fff;
       border: 1px solid var(--borde);
@@ -113,7 +133,14 @@
 <header>
   <h1>Sistema de Notificaciones WhatsApp (SNW)</h1>
   <p>Módulo web para gestionar y enviar notificaciones masivas de WhatsApp a pacientes de forma rápida, organizada y centralizada, directamente desde la plataforma de la empresa.</p>
-  <a class="btn btn--login" href="login.html">Iniciar sesión</a>
+  <a id="btnLogin" class="btn btn--login" href="login.html">Iniciar sesión</a>
+  <nav id="navLogueado" class="nav-logueado">
+    <a href="index.html">Inicio</a>
+    <a id="navPacientes" href="pacientes.html" data-admin>Base de datos</a>
+    <a href="mensajeria.html">Mensajería</a>
+    <a href="historial.html">Historial</a>
+    <a href="#" class="nav-salir" id="btnSalir">Cerrar sesión</a>
+  </nav>
 </header>
 
 <main>
@@ -136,6 +163,32 @@
 </main>
 
 <footer>SNW v2.0 · Basado en el Informe de Diseño de David Ignacio Araya Rodríguez (21-08-2026)</footer>
+
+<script>
+  (function () {
+    const token = localStorage.getItem("snw_token");
+    const rol = localStorage.getItem("snw_rol");
+    const btnLogin = document.getElementById("btnLogin");
+    const navLogueado = document.getElementById("navLogueado");
+    const navPacientes = document.getElementById("navPacientes");
+
+    if (token) {
+      btnLogin.hidden = true;
+      navLogueado.style.display = "flex";
+      if (rol !== "administrador") {
+        navPacientes.hidden = true;
+      }
+    }
+
+    document.getElementById("btnSalir").addEventListener("click", function (e) {
+      e.preventDefault();
+      ["snw_token", "snw_rol", "snw_nombre", "snw_ambiente_admin", "snw_ambiente"].forEach(function (k) {
+        localStorage.removeItem(k);
+      });
+      location.reload();
+    });
+  })();
+</script>
 
 </body>
 </html>
