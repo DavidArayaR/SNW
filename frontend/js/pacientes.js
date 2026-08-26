@@ -560,6 +560,11 @@ function normalizarTelefonoJs(crudo) {
 function pintarRechazados(rechazados) {
   const ul = $("#listaRechazados");
   ul.innerHTML = "";
+  const esDev = (config?.entorno === "desarrollo") || ambienteActual() === "desarrollo";
+  if (esDev) {
+    ul.hidden = true;
+    return;
+  }
   for (const r of rechazados) {
     const li = document.createElement("li");
     li.textContent = `${r.nombre} (${r.telefono || "sin teléfono"}): ${r.motivo}`;

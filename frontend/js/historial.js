@@ -54,7 +54,9 @@ function render() {
 
   for (const r of visibles) {
     const tr = document.createElement("tr");
-    tr.dataset.id = r.id;
+    tr.dataset.id = String(r.id);
+    tr.dataset.amb = (r.base_datos ?? "").includes("prod") ? "produccion" : "desarrollo";
+    tr.dataset.base = r.base_datos ?? "";
     const total = r.total_pacientes ?? 0;
     const enviados = r.enviados ?? 0;
     const fallidos = r.fallidos ?? 0;
@@ -83,8 +85,9 @@ tbodyEl.addEventListener("click", async (e) => {
   const tr = e.target.closest("tr[data-id]");
   if (!tr) return;
   const envioId = tr.dataset.id;
-  const envio = registros.find((r) => r.id === Number(envioId));
-  const amb = (envio?.base_datos ?? "").includes("prod") ? "produccion" : "desarrollo";
+  const amb = tr.dataset.amb || "produccion";
+  const envio = registros.find((r) => String(r.id) === envioId && ((r.base_datos ?? "").includes("prod") ? "produccion" : "desarrollo") === amb)
+    || registros.find((r) => String(r.id) === envioId);
 
   try {
     const r = await fetch(`api/notificaciones/historial/${envioId}/detalle?ambiente=${amb}`, {
@@ -93,14 +96,13 @@ tbodyEl.addEventListener("click", async (e) => {
     if (r.status === 401) { window.snwSalir(); return; }
     if (!r.ok) throw new Error();
     const detalle = await r.json();
-    abrirDetalle(envioId, detalle);
+    abrirDetalle(envio, detalle);
   } catch {
     toast("Error al cargar el detalle.", "error");
   }
 });
 
-function abrirDetalle(envioId, detalle) {
-  const envio = registros.find((r) => r.id === Number(envioId));
+function abrirDetalle(envio, detalle) {
   const campos = [
     ["Fecha", envio?.fecha ?? "—"],
     ["Base de datos", envio?.base_datos ?? "—"],

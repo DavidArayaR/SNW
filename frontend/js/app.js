@@ -598,6 +598,11 @@ $("#btnLanzarConf").addEventListener("click", async () => {
 function pintarRechazadosConf(rechazados) {
   const ul = $("#listaRechazadosConf");
   ul.innerHTML = "";
+  const esDev = ambienteConf === "desarrollo";
+  if (esDev) {
+    ul.hidden = true;
+    return;
+  }
   for (const r of rechazados) {
     const li = document.createElement("li");
     li.textContent = `${r.nombre} (${r.telefono || "sin teléfono"}): ${r.motivo}`;

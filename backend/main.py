@@ -676,10 +676,18 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
                 tuple(body.pacientes),
             )
         else:
-            cur.execute(
-                "SELECT id, nombre, apellido, telefono, info_extra FROM pacientes"
-                " WHERE estado = 'pendiente' ORDER BY id"
-            )
+            if amb == "desarrollo":
+                # En desarrollo se puede reenviar sin importar el estado del paciente;
+                # la única restricción real sigue siendo el filtro de números autorizados,
+                # que se aplica más abajo en este mismo endpoint.
+                cur.execute(
+                    "SELECT id, nombre, apellido, telefono, info_extra FROM pacientes ORDER BY id"
+                )
+            else:
+                cur.execute(
+                    "SELECT id, nombre, apellido, telefono, info_extra FROM pacientes"
+                    " WHERE estado = 'pendiente' ORDER BY id"
+                )
         filas = cur.fetchall()
 
     rechazados: list[dict] = []
@@ -703,8 +711,6 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
             actualizar_telefono(p["id"], telefono, amb)
 
         if amb == "desarrollo" and telefono not in autorizados:
-            rechazados.append({"id": p["id"], "nombre": nombre_completo, "telefono": telefono,
-                               "motivo": f"No está en los números autorizados de la base {amb}"})
             registrar_historial(p["id"], nombre_completo, telefono, plantilla["clave"],
                                 "", "error", f"Número no autorizado en base {amb}",
                                 ambiente=amb)
@@ -870,9 +876,14 @@ def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(sesion_actual)
         )
         fila = cur.fetchone()
 
+    total = int(fila["total"] or 0)
+    # En desarrollo se envía sin importar el estado, así que "elegibles" = todos los pacientes.
+    # En producción se respeta el filtro de solo pendientes.
+    elegibles = total if amb == "desarrollo" else int(fila["pendientes"] or 0)
+
     return {
-        "total": int(fila["total"] or 0),
-        "pendientes": int(fila["pendientes"] or 0),
+        "total": total,
+        "pendientes": elegibles,
         "base_datos": nombre_base(amb),
     }
 
@@ -915,7 +926,8 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
         except Exception:
             pass
 
-    filas.sort(key=lambda f: f.get("id", 0), reverse=True)
+    # Orden cronológico real; id no es único entre ambas BDs
+    filas.sort(key=lambda f: (f.get("fecha_hora"), f.get("id", 0)), reverse=True)
     for f in filas:
         f["fecha"] = f.pop("fecha_hora").strftime("%d-%m-%Y %H:%M")
     return filas[:300]
