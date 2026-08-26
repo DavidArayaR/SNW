@@ -60,6 +60,36 @@ def normalizar_telefono(crudo: str) -> str | None:
 app = FastAPI(title="SNW - API de Notificaciones WhatsApp")
 
 
+def _ejecutar_sql_init():
+    sql_dir = BASE_DIR / "sql"
+    for archivo in ["snw_pacientes.sql", "snw_pacientes_prod.sql"]:
+        ruta = sql_dir / archivo
+        if not ruta.exists():
+            continue
+        try:
+            conn = pymysql.connect(
+                host=os.getenv("DB_DEV_HOST", "127.0.0.1"),
+                port=int(os.getenv("DB_DEV_PUERTO", "3306")),
+                user=os.getenv("DB_DEV_USUARIO", "root"),
+                password=os.getenv("DB_DEV_CONTRASENA", ""),
+                charset="utf8mb4",
+            )
+            contenido = ruta.read_text(encoding="utf-8")
+            for stmt in contenido.split(";"):
+                stmt = stmt.strip()
+                if stmt:
+                    with conn.cursor() as cur:
+                        cur.execute(stmt)
+            conn.commit()
+            conn.close()
+            print(f"[INIT] {archivo} ejecutado correctamente")
+        except Exception as e:
+            print(f"[INIT] Error ejecutando {archivo}: {e}")
+
+
+_ejecutar_sql_init()
+
+
 @app.middleware("http")
 async def sin_cache(request, call_next):
     respuesta = await call_next(request)
