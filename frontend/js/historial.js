@@ -46,24 +46,8 @@ async function cargar() {
       `${config.entorno === "produccion" ? "BD Producción" : "BD Desarrollo"} · ${config.base_datos ?? ""}`;
     render();
   } catch {
-    activarDemo();
+    toast("Error al conectar con el servidor.", "error");
   }
-}
-
-function activarDemo() {
-  if (document.getElementById("cintaDemo")) return;
-  const cinta = document.createElement("div");
-  cinta.id = "cintaDemo";
-  cinta.className = "cinta-demo";
-  cinta.textContent = "Modo demostración — sin servidor conectado; los datos son de ejemplo.";
-  document.body.prepend(cinta);
-  $("#badgeEntorno").textContent = "Modo demo";
-  registros = [
-    { id: 3, paciente_id: 7, nombre_paciente: "David Araya", numero_telefono: "+56993921740", plantilla_clave: "recordatorio_cita", estado_envio: "enviado", descripcion_error: "", fecha: "24-08-2026 15:51", mensaje: "Hola David, le recordamos su cita médica. Control Médico 15:30 hrs. Por favor confirme su asistencia respondiendo este mensaje." },
-    { id: 2, paciente_id: 9, nombre_paciente: "Pedro Soto", numero_telefono: "+56988887777", plantilla_clave: "recordatorio_cita", estado_envio: "error", descripcion_error: "Número no autorizado en entorno desarrollo", fecha: "24-08-2026 15:51", mensaje: "" },
-    { id: 1, paciente_id: 8, nombre_paciente: "María López", numero_telefono: "912345678", plantilla_clave: "resultado_disponible", estado_envio: "numero_invalido", descripcion_error: "Formato de teléfono inválido: '912345678'", fecha: "23-08-2026 11:02", mensaje: "" },
-  ];
-  render();
 }
 
 function render() {

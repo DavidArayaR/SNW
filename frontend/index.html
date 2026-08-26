@@ -65,6 +65,16 @@
       transition: filter .15s;
     }
     .btn:hover { filter: brightness(1.07); }
+    .btn--login {
+      background: #fff;
+      color: var(--verde-oscuro);
+      font-weight: 700;
+      padding: 13px 32px;
+      font-size: 1rem;
+      margin-top: 26px;
+      border: 2px solid rgba(255,255,255,.35);
+    }
+    .btn--login:hover { background: rgba(255,255,255,.92); filter: none; }
     section.info {
       background: #fff;
       border: 1px solid var(--borde);
@@ -81,14 +91,6 @@
       font-family: Consolas, monospace;
       font-size: .85em;
     }
-    pre {
-      background: #22343c;
-      color: #d9e6ee;
-      border-radius: 10px;
-      padding: 14px 18px;
-      overflow-x: auto;
-      font-size: .85rem;
-    }
     .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
     .chip {
       background: #e7f3f1;
@@ -100,94 +102,25 @@
       font-weight: 600;
     }
     footer { text-align: center; color: var(--suave); font-size: .82rem; padding: 8px 20px 34px; }
-    .aviso {
-      margin-top: 14px;
-      padding: 12px 16px;
-      border-radius: 10px;
-      background: #fdf6e7;
-      border: 1px solid #ecd9ac;
-      color: #8a6410;
-      font-size: .88rem;
-    }
     @media (max-width: 640px) {
       header { padding: 40px 18px 52px; }
       header h1 { font-size: 1.5rem; }
     }
-    .nav-paginas {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: center;
-      gap: 10px;
-      margin-top: 30px;
-    }
-    .nav-paginas a {
-      color: #fff;
-      text-decoration: none;
-      padding: 9px 20px;
-      border-radius: 999px;
-      background: rgba(255,255,255,.14);
-      font-size: .88rem;
-      font-weight: 600;
-      transition: background .15s;
-    }
-    .nav-paginas a:hover { background: rgba(255,255,255,.28); }
   </style>
 </head>
 <body>
 
 <header>
-  <span class="badge">PROTOTIPO · VERSIÓN DEMO</span>
   <h1>Sistema de Notificaciones WhatsApp (SNW)</h1>
   <p>Módulo web para gestionar y enviar notificaciones masivas de WhatsApp a pacientes de forma rápida, organizada y centralizada, directamente desde la plataforma de la empresa.</p>
-
-  <nav class="nav-paginas">
-    <a href="index.html">Inicio</a>
-    <a href="pacientes.html">Pacientes</a>
-    <a href="mensajeria.html">Mensajería</a>
-    <a href="historial.html">Historial</a>
-  </nav>
+  <a class="btn btn--login" href="login.html">Iniciar sesión</a>
 </header>
 
 <main>
-  <div class="cards">
-    <div class="card">
-      <h2>🧑‍⚕️ Pacientes</h2>
-      <p>Lista completa de pacientes con búsqueda y filtros por estado.</p>
-      <ul>
-        <li>Selección múltiple con un click en la fila</li>
-        <li>Envío integrado en 1 paso</li>
-        <li>Contadores clicables: enviados, pendientes y errores</li>
-      </ul>
-      <a class="btn" href="pacientes.html">Abrir módulo</a>
-    </div>
-
-    <div class="card">
-      <h2>✉️ Mensajería</h2>
-      <p>Editor visual de mensajes reutilizables, pensado para usuarios sin conocimientos técnicos.</p>
-      <ul>
-        <li>Comodines automáticos: {nombre}, {apellido}, {info_extra}</li>
-        <li>Vista previa estilo WhatsApp en vivo</li>
-        <li>Crear, editar y eliminar plantillas</li>
-      </ul>
-      <a class="btn" href="mensajeria.html">Abrir módulo</a>
-    </div>
-
-    <div class="card">
-      <h2>📜 Historial</h2>
-      <p>Registro completo de cada mensaje gestionado por el sistema.</p>
-      <ul>
-        <li>Estado de cada envío: enviado, error o número inválido</li>
-        <li>Detalle del fallo y mensaje completo</li>
-        <li>Búsqueda y filtros por estado</li>
-      </ul>
-      <a class="btn" href="historial.html">Abrir módulo</a>
-    </div>
-  </div>
-
   <section class="info">
     <h2>¿Cómo funciona el envío?</h2>
     <p><strong>Tres pasos:</strong> selecciona los pacientes en la tabla, elige la plantilla del mensaje y presiona «Iniciar Envío». El sistema valida automáticamente cada número (formato internacional chileno <code>+569XXXXXXXXX</code>, corrigiendo errores comunes), descarta los inválidos sin interrumpir la cola, procesa el envío en segundo plano con un intervalo entre mensajes y registra el resultado de cada intento en el historial.</p>
-    <p>En <strong>entorno de desarrollo</strong> los envíos masivos se bloquean y solo salen mensajes hacia los números de prueba autorizados.</p>
+    <p>En <strong>entorno de desarrollo</strong> los envíos masivos se bloquean y solo salen mensajes hacia los números de prueba autorizados. En <strong>producción</strong>, cada envío requiere confirmación por correo electrónico de un supervisor antes de procesarse.</p>
   </section>
 
   <section class="info">
@@ -200,19 +133,9 @@
       <span class="chip">WhatsApp Web</span>
     </div>
   </section>
-
-  <section class="info">
-    <h2>Ejecutar la versión completa en tu equipo</h2>
-    <p>Esta página es una <strong>demostración estática</strong>: los datos son de ejemplo y los cambios no persisten en un servidor. Para usar el sistema real necesitas Python, MySQL (XAMPP) y ejecutar:</p>
-<pre>pip install -r requirements.txt
-cp .env.example .env   # y completar credenciales
-python backend/main.py</pre>
-    <p>Luego abre <code>http://localhost:8000</code>. Las instrucciones completas están en el README del repositorio.</p>
-    <div class="aviso">⚠️ En esta demo los botones de guardado y envío simulan el comportamiento; ningún mensaje real sale por WhatsApp.</div>
-  </section>
 </main>
 
-<footer>SNW v2.0 prototipo · Basado en el Informe de Diseño de David Ignacio Araya Rodríguez (21-08-2026)</footer>
+<footer>SNW v2.0 · Basado en el Informe de Diseño de David Ignacio Araya Rodríguez (21-08-2026)</footer>
 
 </body>
 </html>

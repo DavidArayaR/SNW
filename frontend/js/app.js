@@ -33,31 +33,6 @@ function authHeaders(extra = {}) {
   return { Authorization: "Bearer " + (localStorage.getItem("snw_token") || ""), ...extra };
 }
 
-const LS_DEMO_KEY = "snw_plantillas_demo";
-let demoMode = false;
-
-function activarDemo() {
-  if (demoMode) return;
-  demoMode = true;
-  mostrarCintaDemo();
-  plantillas = JSON.parse(localStorage.getItem(LS_DEMO_KEY)) ?? [
-    { id: 1, clave: "recordatorio_cita", nombre: "Recordatorio de cita médica",
-      texto: "Hola {nombre}, le recordamos que su cita es el lunes 31-08-2026 a las 10:30 en Consulta Nº 4.\nPor favor confirme respondiendo este mensaje.",
-      actualizada: Date.now() - 86400000 * 2 },
-    { id: 2, clave: "resultado_disponible", nombre: "Resultado disponible",
-      texto: "Hola {nombre}, sus resultados ya están disponibles para retiro en sucursal.",
-      actualizada: Date.now() - 86400000 },
-    { id: 3, clave: "feliz_cumpleanos", nombre: "Feliz cumpleaños",
-      texto: "¡Hola {nombre}! 🎂\nTodo el equipo de Prosalud le desea un muy feliz cumpleaños. ¡Gracias por confiar en nosotros!",
-      actualizada: Date.now() - 3600000 },
-  ];
-  renderLista(buscadorEl.value);
-}
-
-function guardarDemo() {
-  localStorage.setItem(LS_DEMO_KEY, JSON.stringify(plantillas));
-}
-
 function seleccionarDefault() {
   const def = plantillas.find((p) => p.clave === "default" || String(p.nombre || "").toLowerCase() === "default");
   if (def) abrir(def.id);
@@ -76,10 +51,7 @@ async function cargar() {
       return;
     } catch (err) {
       if (intento === 2) {
-        activarDemo();
-        renderLista(buscadorEl.value);
-        if (activaId === null) seleccionarDefault();
-        toast("Modo demostración: los cambios se guardan solo en este navegador.", "ok");
+        toast("Error al conectar con el servidor.", "error");
       } else {
         await new Promise((r) => setTimeout(r, 900));
       }
@@ -321,29 +293,6 @@ formEl.addEventListener("submit", async (e) => {
     );
   }
 
-  if (demoMode) {
-    let fila;
-    if (activaId) {
-      fila = plantillas.find((p) => p.id === activaId);
-      fila.nombre = nombre;
-      fila.texto = texto;
-      fila.actualizada = Date.now();
-      toast("Plantilla actualizada (demo).", "ok");
-    } else {
-      const base = slug(nombre) || "plantilla";
-      let id = base;
-      let n = 2;
-      while (plantillas.some((p) => p.id === id)) id = `${base}_${n++}`;
-      fila = { id, clave: id, nombre, texto, actualizada: Date.now() };
-      plantillas.push(fila);
-      toast("Plantilla creada (demo).", "ok");
-      activaId = fila.id;
-    }
-    guardarDemo();
-    abrir(fila.id);
-    return;
-  }
-
   try {
     let fila;
     if (activaId) {
@@ -375,9 +324,8 @@ $("#btnModalCancelar").addEventListener("click", () => (modalEl.hidden = true));
 
 $("#btnModalConfirmar").addEventListener("click", async () => {
   try {
-    if (!demoMode) await eliminarPlantilla(activaId);
+    await eliminarPlantilla(activaId);
     plantillas = plantillas.filter((x) => x.id !== activaId);
-    if (demoMode) guardarDemo();
     modalEl.hidden = true;
     toast("Plantilla eliminada.", "ok");
     modoVacia();
@@ -506,9 +454,6 @@ $("#btnEnviarActual").addEventListener("click", () => {
   if (hayCambios()) {
     return toast("Hay cambios sin guardar. Presiona Guardar primero (Ctrl+S).", "error");
   }
-  if (demoMode) {
-    return toast("El envío requiere el servidor local (no disponible en demo).", "error");
-  }
   abrirModalConf();
 });
 
@@ -593,6 +538,38 @@ $("#btnLanzarConf").addEventListener("click", async () => {
     if (!res.ok) throw new Error(data.detail ?? `Error ${res.status}`);
 
     pintarRechazadosConf(data.rechazados ?? []);
+
+    if (data.requiere_confirmacion) {
+      modalConf.hidden = true;
+      const espera = document.getElementById("modalEspera");
+      espera.hidden = false;
+      const linkEl = document.getElementById("linkConfirmacionEsperaMsg");
+      if (linkEl && data.confirm_url) {
+        linkEl.innerHTML = `Para pruebas sin correo: <a href="${data.confirm_url}" target="_blank">Confirmar manualmente</a>`;
+      }
+      const beforeUnload = (e) => { e.preventDefault(); e.returnValue = ""; return ""; };
+      window.addEventListener("beforeunload", beforeUnload);
+      const poll = setInterval(async () => {
+        try {
+          const r2 = await fetch(`api/notificaciones/solicitud/${data.solicitud_id}`, { headers: authHeaders(), cache: "no-store" });
+          if (!r2.ok) return;
+          const s = await r2.json();
+          if (s.estado === "confirmado" && s.job_id) {
+            clearInterval(poll);
+            window.removeEventListener("beforeunload", beforeUnload);
+            espera.hidden = true;
+            alert("Envío confirmado por supervisor");
+            await new Promise((res) => setTimeout(res, 3000));
+            modalConf.hidden = false;
+            $("#confProgreso").hidden = false;
+            seguirProgresoConf(s.job_id, s.total);
+          }
+        } catch {}
+      }, 2000);
+      window._pollEsperaMsg = poll;
+      window._beforeUnloadEsperaMsg = beforeUnload;
+      return;
+    }
 
     if (!data.iniciado) {
       setBloqueoEnvioConf(false);

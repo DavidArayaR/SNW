@@ -2,8 +2,6 @@ const API_PACIENTES = "api/pacientes";
 const API_PLANTILLAS = "api/plantillas";
 const API_ENVIAR = "api/notificaciones/enviar";
 
-let demoMode = false;
-
 function authHeaders(extra = {}) {
   return { Authorization: "Bearer " + (localStorage.getItem("snw_token") || ""), ...extra };
 }
@@ -13,35 +11,6 @@ else if (localStorage.getItem("snw_rol") !== "administrador") location.replace("
 
 let ambienteAdmin = localStorage.getItem("snw_ambiente_admin");
 let _ambienteInicializado = false;
-
-function mostrarCintaDemo() {
-  if (document.getElementById("cintaDemo")) return;
-  const cinta = document.createElement("div");
-  cinta.id = "cintaDemo";
-  cinta.className = "cinta-demo";
-  cinta.textContent = "Modo demostración — sin servidor conectado; los datos son de ejemplo.";
-  document.body.prepend(cinta);
-}
-
-function activarDemo() {
-  demoMode = true;
-  mostrarCintaDemo();
-  $("#nombreBd").textContent = "(demo)";
-  config = { entorno: "desarrollo", metodo_envio: "simulado", numeros_autorizados: ["+56993921740"], intervalo_ms: 600 };
-  pacientes = [
-    { id: 7, nombre: "David", apellido: "Araya", telefono: "+56993921740", info_extra: "Control Médico 15:30 hrs", estado: "enviado", actualizado: "24-08-2026 10:12" },
-    { id: 8, nombre: "María", apellido: "López", telefono: "+56941508435", info_extra: "Reunión de Control 16:00 hrs", estado: "pendiente", actualizado: "24-08-2026 09:40" },
-    { id: 9, nombre: "Pedro", apellido: "Soto", telefono: "+56988887777", info_extra: "Examen de sangre en ayunas", estado: "error", actualizado: "23-08-2026 18:05" },
-    { id: 10, nombre: "Sergio", apellido: "Ramírez", telefono: "+56941508435", info_extra: "", estado: "pendiente", actualizado: "22-08-2026 12:20" },
-    { id: 11, nombre: "Carla", apellido: "Díaz", telefono: "+56961234567", info_extra: "Consulta dental 09:00 hrs", estado: "enviado", actualizado: "21-08-2026 16:45" },
-  ];
-  plantillas = [
-    { id: 1, clave: "recordatorio_cita", nombre: "Recordatorio de cita médica",
-      texto: "Hola {nombre}, le recordamos que su cita es el lunes 31-08-2026 a las 10:30 en Consulta Nº 4.\nPor favor confirme respondiendo este mensaje.", actualizada: Date.now() - 172800000 },
-    { id: 2, clave: "resultado_disponible", nombre: "Resultado disponible",
-      texto: "Hola {nombre}, sus resultados ya están disponibles para retiro en sucursal.", actualizada: Date.now() - 86400000 },
-  ];
-}
 
 let pacientes = [];
 let plantillas = [];
@@ -137,8 +106,7 @@ async function cargar() {
 
     render();
   } catch {
-    activarDemo();
-    render();
+    toast("Error al conectar con el servidor.", "error");
   }
 }
 
@@ -275,26 +243,21 @@ tbodyEl.addEventListener("change", async (e) => {
   }
   sel.disabled = true;
   try {
-    if (demoMode) {
-      if (paciente) paciente.estado = nuevoEstado;
-      await new Promise((r) => setTimeout(r, 150));
-    } else {
-      const amb = ambienteActual();
-      const res = await fetch(`api/pacientes/${id}?ambiente=${encodeURIComponent(amb)}`, {
-        method: "PUT",
-        headers: authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ estado: nuevoEstado }),
-      });
-      if (res.status === 401) { window.snwSalir(); return; }
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || "No se pudo actualizar el estado");
-      }
-      const actualizado = await res.json();
-      if (paciente) {
-        paciente.estado = actualizado.estado;
-        paciente.actualizado = actualizado.actualizado;
-      }
+    const amb = ambienteActual();
+    const res = await fetch(`api/pacientes/${id}?ambiente=${encodeURIComponent(amb)}`, {
+      method: "PUT",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ estado: nuevoEstado }),
+    });
+    if (res.status === 401) { window.snwSalir(); return; }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || "No se pudo actualizar el estado");
+    }
+    const actualizado = await res.json();
+    if (paciente) {
+      paciente.estado = actualizado.estado;
+      paciente.actualizado = actualizado.actualizado;
     }
     toast(`Estado actualizado a "${nuevoEstado}"`, "ok");
     render();
@@ -359,7 +322,7 @@ function abrirModal() {
   renderPlantillasModal();
 
   $("#resumenLinea").textContent =
-    `${seleccionados.size} paciente${seleccionados.size === 1 ? "" : "s"} · método: ${config?.metodo_envio ?? "-"}`;
+    `Se enviará un mensaje a ${seleccionados.size} ${seleccionados.size === 1 ? "persona" : "personas"}`;
 
   const esDev = config?.entorno === "desarrollo";
   if (!esDev) {
@@ -426,7 +389,6 @@ $("#btnCerrarModal").addEventListener("click", () => {
 });
 
 $("#btnLanzarEnvio").addEventListener("click", async () => {
-  if (demoMode) return lanzarEnvioDemo();
   if (envioEnCurso) return;
 
   $("#btnLanzarEnvio").hidden = true;
@@ -443,6 +405,39 @@ $("#btnLanzarEnvio").addEventListener("click", async () => {
     if (!res.ok) throw new Error(data.detail ?? `Error ${res.status}`);
 
     pintarRechazados(data.rechazados ?? []);
+
+    if (data.requiere_confirmacion) {
+      modalEl.hidden = true;
+      const espera = document.getElementById("modalEspera");
+      espera.hidden = false;
+      const linkEl = document.getElementById("linkConfirmacionEspera");
+      if (linkEl && data.confirm_url) {
+        linkEl.innerHTML = `Para pruebas sin correo: <a href="${data.confirm_url}" target="_blank">Confirmar manualmente</a>`;
+      }
+      const beforeUnload = (e) => { e.preventDefault(); e.returnValue = ""; return ""; };
+      window.addEventListener("beforeunload", beforeUnload);
+      const poll = setInterval(async () => {
+        try {
+          const r2 = await fetch(`api/notificaciones/solicitud/${data.solicitud_id}`, { headers: authHeaders(), cache: "no-store" });
+          if (!r2.ok) return;
+          const s = await r2.json();
+          if (s.estado === "confirmado" && s.job_id) {
+            clearInterval(poll);
+            window.removeEventListener("beforeunload", beforeUnload);
+            espera.hidden = true;
+            alert("Envío confirmado por supervisor");
+            await new Promise((res) => setTimeout(res, 3000));
+            modalEl.hidden = false;
+            $("#faseConfig").hidden = true;
+            $("#faseProgreso").hidden = false;
+            seguirProgreso(s.job_id, s.total);
+          }
+        } catch {}
+      }, 2000);
+      window._pollEspera = poll;
+      window._beforeUnloadEspera = beforeUnload;
+      return;
+    }
 
     if (!data.iniciado) {
       toast("Ningún destinatario válido. Envío no iniciado.", "error");
@@ -475,76 +470,6 @@ function normalizarTelefonoJs(crudo) {
   if (d.length === 9 && d.startsWith("9")) return "+56" + d;
   if (d.length === 8 && d.startsWith("9")) return "+569" + d;
   return null;
-}
-
-async function lanzarEnvioDemo() {
-  if (envioEnCurso) return;
-  $("#btnLanzarEnvio").hidden = true;
-  setBloqueoEnvio(true);
-
-  const tpl = plantillas.find((t) => t.id === plantillaId);
-  const autorizados = new Set(config?.numeros_prueba ?? []);
-  const enDev = config?.entorno === "desarrollo";
-
-  const rechazados = [];
-  const cola = [];
-
-  for (const id of seleccionados) {
-    const p = pacientes.find((x) => x.id === id);
-    if (!p) continue;
-    const tel = normalizarTelefonoJs(p.telefono);
-    const nombre = [p.nombre, p.apellido].filter(Boolean).join(" ");
-    if (!tel) {
-      rechazados.push({ nombre, telefono: p.telefono, motivo: "Formato de teléfono inválido" });
-      p.estado = "error";
-      continue;
-    }
-    if (enDev && !autorizados.has(tel)) {
-      rechazados.push({ nombre, telefono: tel, motivo: "No está en la lista de números de prueba (entorno desarrollo)" });
-      continue;
-    }
-    let msg = tpl.texto
-      .replaceAll("{nombre}", p.nombre || "")
-      .replaceAll("{apellido}", p.apellido || "")
-      .replaceAll("{info_extra}", p.info_extra || "");
-    cola.push({ p, nombre, telefono: tel, mensaje: msg });
-  }
-
-  pintarRechazados(rechazados);
-
-  if (!cola.length) {
-    toast("Ningún destinatario válido. Envío no iniciado.", "error");
-    setBloqueoEnvio(false);
-    $("#btnLanzarEnvio").hidden = false;
-    render();
-    return;
-  }
-
-  $("#faseConfig").hidden = true;
-  $("#faseProgreso").hidden = false;
-
-  const intervalo = Math.min(config?.intervalo_ms ?? 600, 900);
-  let enviados = 0, fallidos = 0, i = 0;
-
-  await new Promise((resolve) => {
-    const paso = () => {
-      const d = cola[i];
-      $("#progresoTexto").textContent = `Enviando mensajes... (${i + 1}/${cola.length})`;
-      d.p.estado = "enviado";
-      enviados++;
-      i++;
-      const hechos = enviados + fallidos;
-      $("#barraFill").style.width = `${Math.round((hechos / cola.length) * 100)}%`;
-      $("#progresoNumeros").textContent = `${hechos} / ${cola.length}`;
-      if (i < cola.length) setTimeout(paso, intervalo);
-      else resolve();
-    };
-    setTimeout(paso, intervalo);
-  });
-
-  finalizar(`Envío completado (demo): ${enviados} enviado(s), ${fallidos} fallido(s).`, false);
-  setBloqueoEnvio(false);
-  render();
 }
 
 function pintarRechazados(rechazados) {

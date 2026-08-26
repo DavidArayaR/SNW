@@ -8,9 +8,15 @@ import unicodedata
 import uuid
 from pathlib import Path
 
+import smtplib
+import ssl
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
 import pymysql
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -410,6 +416,55 @@ def probar_api_wa(body: PruebaWAIn, sesion: dict = Depends(solo_admin)):
 
 JOBS: dict = {}
 JOB_LOCK = threading.Lock()
+PENDIENTES: dict = {}
+
+
+def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, ambiente: str) -> bool:
+    emisor = os.getenv("DIRECCION_CORREO_EMISOR", "").strip()
+    destino = os.getenv("DIRECCION_CORREO_DESTINO", "").strip()
+    if not emisor or not destino:
+        print(f"[CORREO] Emisor o destino no configurado. Token {token} -> http://localhost:8000/api/notificaciones/confirmar/{token}")
+        return False
+    host = os.getenv("SMTP_HOST", "").strip()
+    port = int(os.getenv("SMTP_PORT", "587") or 587)
+    user = os.getenv("SMTP_USER", "").strip() or emisor
+    pwd = os.getenv("SMTP_PASS", "").strip().replace(" ", "")
+    tls = os.getenv("SMTP_TLS", "true").lower() in ("1", "true", "yes", "si")
+
+    if not host or not pwd:
+        # Modo simulado: logear URL para pruebas sin SMTP real
+        print(f"[CORREO SIMULADO] Para {destino} desde {emisor}: confirmar http://localhost:8000/api/notificaciones/confirmar/{token} - {total} personas, plantilla '{plantilla_nombre}', base {ambiente}")
+        return True
+
+    confirm_url = f"http://localhost:8000/api/notificaciones/confirmar/{token}"
+    subject = f"[SNW] Confirmar envío masivo - {total} destinatarios"
+    html = f"""
+    <html><body style="font-family: Arial, sans-serif; color: #24303c;">
+      <h2>Solicitud de envío masivo</h2>
+      <p>Se ha solicitado enviar la plantilla <strong>{plantilla_nombre}</strong> a <strong>{total} personas</strong> desde la base de datos <strong>{ambiente}</strong>.</p>
+      <p><a href="{confirm_url}" style="display:inline-block; background:#128c7e; color:#fff; padding:12px 22px; border-radius:8px; text-decoration:none; font-weight:bold;">Confirmar envío</a></p>
+      <p>Si no reconoces esta solicitud, ignora este correo.</p>
+      <p style="font-size:12px; color:#66757f;">Token: {token}</p>
+    </body></html>
+    """
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["From"] = emisor
+        msg["To"] = destino
+        msg["Subject"] = subject
+        msg.attach(MIMEText(html, "html", "utf-8"))
+        context = ssl.create_default_context()
+        with smtplib.SMTP(host, port) as server:
+            if tls:
+                server.starttls(context=context)
+            if user and pwd:
+                server.login(user, pwd)
+            server.sendmail(emisor, destino, msg.as_string())
+        print(f"[CORREO] Confirmación enviada a {destino} token {token}")
+        return True
+    except Exception as e:
+        print(f"[CORREO ERROR] {e}")
+        return False
 
 
 def renderizar_mensaje(texto: str, paciente: dict) -> str:
@@ -562,7 +617,24 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         })
 
     if not destinatarios:
-        return {"iniciado": False, "total": 0, "rechazados": rechazados}
+        return {"iniciado": False, "total": 0, "rechazados": rechazados, "requiere_confirmacion": False}
+
+    # En producción se requiere confirmación por correo del supervisor
+    if amb == "produccion":
+        token = uuid.uuid4().hex
+        PENDIENTES[token] = {
+            "ambiente": amb,
+            "plantilla": {"id": plantilla["id"], "clave": plantilla["clave"], "nombre": plantilla["nombre"]},
+            "destinatarios": destinatarios,
+            "rechazados": rechazados,
+            "estado": "pendiente",
+            "job_id": None,
+            "creado": time.time(),
+        }
+        _enviar_correo_confirmacion(token, len(destinatarios), plantilla["nombre"], amb)
+        return {"requiere_confirmacion": True, "solicitud_id": token, "total": len(destinatarios),
+                "ambiente": amb, "rechazados": rechazados,
+                "confirm_url": f"/api/notificaciones/confirmar/{token}"}
 
     job_id = uuid.uuid4().hex[:8]
     JOBS[job_id] = {
@@ -579,8 +651,52 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
     }
 
     background_tasks.add_task(procesar_job, job_id)
-    return {"iniciado": True, "job_id": job_id, "total": len(destinatarios),
+    return {"requiere_confirmacion": False, "iniciado": True, "job_id": job_id, "total": len(destinatarios),
             "ambiente": amb, "rechazados": rechazados}
+
+
+@app.get("/api/notificaciones/solicitud/{token}")
+def estado_solicitud(token: str, sesion: dict = Depends(sesion_actual)):
+    pend = PENDIENTES.get(token)
+    if not pend:
+        raise HTTPException(404, detail="Solicitud no encontrada")
+    return {"solicitud_id": token, "estado": pend["estado"], "total": len(pend["destinatarios"]),
+            "job_id": pend.get("job_id"), "ambiente": pend["ambiente"]}
+
+
+@app.get("/api/notificaciones/confirmar/{token}")
+def confirmar_envio(token: str, background_tasks: BackgroundTasks):
+    pend = PENDIENTES.get(token)
+    if not pend:
+        return HTMLResponse("<html><body style='font-family:Arial; text-align:center; padding:40px;'><h3>Solicitud no encontrada o expirada</h3></body></html>", status_code=404)
+    if pend["estado"] == "confirmado":
+        return HTMLResponse(f"<html><body style='font-family:Arial; text-align:center; padding:40px;'><h2>Este envío ya fue confirmado</h2><p>Job: {pend.get('job_id')}</p></body></html>")
+    pend["estado"] = "confirmado"
+    job_id = uuid.uuid4().hex[:8]
+    pend["job_id"] = job_id
+    JOBS[job_id] = {
+        "estado": "en_proceso",
+        "total": len(pend["destinatarios"]),
+        "enviados": 0,
+        "fallidos": 0,
+        "actual": "",
+        "errores": [],
+        "detalle": "",
+        "ambiente": pend["ambiente"],
+        "plantilla": pend["plantilla"],
+        "destinatarios": pend["destinatarios"],
+    }
+    background_tasks.add_task(procesar_job, job_id)
+    return HTMLResponse(f"""
+<html><head><meta charset='utf-8'><title>Envío confirmado</title></head>
+<body style='font-family: Segoe UI, Arial; text-align:center; padding:40px; background:#f0f2f5;'>
+<div style='background:#fff; max-width:520px; margin:40px auto; padding:32px; border-radius:14px; box-shadow:0 4px 20px rgba(0,0,0,0.1);'>
+<h2 style='color:#128c7e; margin-top:0;'>&#10003; Envío confirmado</h2>
+<p>Se iniciará el envío de <strong>{len(pend['destinatarios'])} mensajes</strong><br>plantilla <strong>{pend['plantilla']['nombre']}</strong>.</p>
+<p style='color:#66757f; font-size:14px;'>Puedes cerrar esta ventana. El sistema continuará automáticamente.</p>
+</div>
+</body></html>
+""")
 
 
 class DestinosIn(BaseModel):
