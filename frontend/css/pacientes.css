@@ -331,6 +331,8 @@ td.campo-id { color: var(--texto-suave); font-family: Consolas, monospace; }
 
 .btn--sm { padding: 4px 10px; font-size: .78rem; border-radius: 6px; }
 
+#tablaHistorial tbody tr { cursor: pointer; }
+
 .respuesta-badge {
   display: inline-block;
   padding: 3px 11px;

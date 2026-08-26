@@ -80,9 +80,9 @@ function render() {
 }
 
 tbodyEl.addEventListener("click", async (e) => {
-  const btn = e.target.closest("[data-detalle]");
-  if (!btn) return;
-  const envioId = btn.dataset.detalle;
+  const tr = e.target.closest("tr[data-id]");
+  if (!tr) return;
+  const envioId = tr.dataset.id;
   const envio = registros.find((r) => r.id === Number(envioId));
   const amb = (envio?.base_datos ?? "").includes("prod") ? "produccion" : "desarrollo";
 
