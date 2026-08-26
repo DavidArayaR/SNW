@@ -1,6 +1,6 @@
 # SNW — Sistema de Notificaciones WhatsApp
 
-Prototipo web del módulo de notificaciones WhatsApp para pacientes. Backend en **Python (FastAPI)**: pacientes desde **MySQL** y plantillas en **archivo JSON**.
+Módulo web integrado para gestión y envío de notificaciones WhatsApp a pacientes. Backend en **Python (FastAPI)**, pacientes en **MySQL** (dual DB: desarrollo y producción), plantillas en **archivo JSON**.
 
 ## Stack
 
@@ -8,27 +8,35 @@ Prototipo web del módulo de notificaciones WhatsApp para pacientes. Backend en 
 |---|---|
 | Frontend | HTML5, CSS, JavaScript vanilla |
 | Backend / API | Python + FastAPI + Uvicorn |
-| Base de datos | MySQL / MariaDB (`snw_pacientes`, vía PyMySQL) |
+| Base de datos | MySQL / MariaDB (XAMPP, PyMySQL) |
 | Plantillas | Archivo JSON (`data/plantillas.json`) |
+| Usuarios | Archivo JSON (`data/usuarios.json`, SHA-256) |
+| Correo | SMTP (Gmail u otro, configurable en `.env`) |
 
 ## Estructura
 
 ```
 snw/
-├── backend/                 Código Python
-│   ├── main.py              Servidor FastAPI (API + archivos estáticos)
+├── backend/
+│   ├── main.py              API FastAPI (endpoints + init SQL + archivos estáticos)
 │   ├── db.py                Conexión MySQL (PyMySQL)
-│   └── motor_envio.py       Motor de envío intercambiable (simulado/whatsapp_web/api_oficial)
-├── frontend/                Interfaz web
-│   ├── pacientes.html       Pacientes + módulo de envío integrado
-│   ├── plantillas.html      Editor de plantillas (CRUD)
-│   ├── historial.html       Historial de mensajes enviados
-│   ├── css/                 Estilos (styles.css compartido, pacientes.css)
+│   └── motor_envio.py       Motor de envío intercambiable
+├── frontend/
+│   ├── index.html           Landing con navegación por roles
+│   ├── login.html           Inicio de sesión
+│   ├── pacientes.html       Gestión de pacientes + envío integrado (solo admin)
+│   ├── mensajeria.html      Editor de plantillas + confirmación de envío
+│   ├── historial.html       Historial de envíos (batch-level)
+│   ├── css/                 Estilos
 │   └── js/                  Lógica de cada página
 ├── data/
-│   └── plantillas.json      Almacenamiento de plantillas
-├── sql/                     Scripts de base de datos
-├── .env                     Configuración local (no se sube al repositorio)
+│   ├── plantillas.json      Plantillas de mensajes
+│   ├── usuarios.json        Credenciales (admin / usuario)
+│   └── sesiones.json        Tokens de sesión
+├── sql/
+│   ├── snw_pacientes.sql        Init DB desarrollo (tablas + 100 pacientes)
+│   └── snw_pacientes_prod.sql   Init DB producción (tablas + 100 pacientes)
+├── .env                     Configuración local
 ├── .env.example             Plantilla de configuración
 ├── requirements.txt         Dependencias Python
 └── README.md
@@ -40,99 +48,153 @@ snw/
    ```
    pip install -r requirements.txt
    ```
-2. MySQL activo (XAMPP) con la base `snw_pacientes`.
-3. Copiar `.env.example` como `.env` y completar credenciales de MySQL y parámetros del sistema:
-   - `SNW_ENTORNO`: `desarrollo` o `produccion` — define a qué base de datos se conecta
+2. Asegurar MySQL activo (XAMPP).
+3. Copiar `.env.example` como `.env` y completar:
+   - `SNW_ENTORNO`: `desarrollo` o `produccion`
    - `SNW_METODO_ENVIO`: `simulado`, `whatsapp_web` o `api_oficial`
-   - `SNW_NUMEROS_PRUEBA`: números autorizados separados por coma (solo aplican en desarrollo)
+   - `SNW_NUMEROS_PRUEBA_DEV`: números autorizados en desarrollo (separados por coma)
    - `SNW_INTERVALO_MS`: pausa entre mensajes
-   - `SNW_WA_TOKEN` y `SNW_WA_PHONE_ID`: credenciales de la API oficial de Meta (solo si `SNW_METODO_ENVIO=api_oficial`)
-   - Base de **desarrollo**: `DB_DEV_HOST`, `DB_DEV_PUERTO`, `DB_DEV_USUARIO`, `DB_DEV_CONTRASENA`, `DB_DEV_NOMBRE`
-   - Base de **producción**: `DB_PROD_HOST`, `DB_PROD_PUERTO`, `DB_PROD_USUARIO`, `DB_PROD_CONTRASENA`, `DB_PROD_NOMBRE`
-
-Ambas bases quedan configuradas de forma simultánea; el sistema conecta a la que corresponde según `SNW_ENTORNO`, y puede cambiarse en caliente con `PUT /api/configuracion`. El script `sql/produccion.sql` crea la base de producción con su esquema.
-4. Iniciar el servidor (puerto 8000):
+   - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_TLS`: correo de confirmación
+   - `DIRECCION_CORREO_EMISOR`, `DIRECCION_CORREO_DESTINO`: destinatarios del correo
+   - `DB_DEV_*` / `DB_PROD_*`: credenciales de ambas bases
+4. Iniciar:
    ```
-   python backend/main.py
+   python -m uvicorn main:app --app-dir backend --host 127.0.0.1 --port 8000
    ```
-   o bien:
-   ```
-   python -m uvicorn main:app --app-dir backend --host localhost --port 8000
-   ```
-5. Abrir:
-   - Pacientes: http://localhost:8000/pacientes.html
-   - Plantillas: http://localhost:8000/plantillas.html
-   - Documentación interactiva de la API: http://localhost:8000/docs
+   El sistema ejecuta automáticamente los scripts SQL al iniciar, creando las bases, tablas y 100 pacientes de prueba en cada una.
+5. Abrir http://localhost:8000
 
 ## Base de datos
 
-Base: `snw_pacientes`
+Dos bases idénticas (solo el nombre cambia):
 
-**pacientes** (MySQL): id, nombre, apellido, telefono, info_extra, estado (pendiente/enviado/error), plantilla, fechas de auditoría.
+- `snw_pacientes` — desarrollo
+- `snw_pacientes_prod` — producción
 
-Los teléfonos se almacenan en formato internacional (`+569XXXXXXXXX`).
+Se crean automáticamente al iniciar el backend. Los scripts SQL en `sql/` usan `IF NOT EXISTS` e `INSERT IGNORE`, por lo que son seguros en cada reinicio.
 
-## Almacenamiento de plantillas
+### Tablas
 
-Las plantillas **no** se guardan en MySQL: viven en `data/plantillas.json` con esta estructura:
+**`pacientes`** — Pacientes de la clínica
 
-```json
-{
-  "id": 1,
-  "clave": "recordatorio_cita",
-  "nombre": "Recordatorio cita",
-  "texto": "Hola {nombre}, ...",
-  "actualizada": 1787565579000
-}
-```
+| Columna | Tipo | Uso |
+|---|---|---|
+| `id` | INT PK | Identificador |
+| `nombre` | VARCHAR(150) | Nombre |
+| `apellido` | VARCHAR(150) | Apellido |
+| `telefono` | VARCHAR(20) | Teléfono formato `+569XXXXXXXXX` |
+| `info_extra` | VARCHAR(255) | Dato extra para plantillas |
+| `estado` | ENUM | `pendiente` / `enviado` / `error` |
+| `fecha_actualizacion` | DATETIME | Última actualización |
 
-Cada creación, edición o eliminación desde la interfaz reescribe el archivo.
+**`envios`** — Registro de cada "Iniciar envío" (batch-level)
+
+| Columna | Tipo | Uso |
+|---|---|---|
+| `id` | INT PK | ID del envío |
+| `base_datos` | VARCHAR(50) | `snw_pacientes` o `snw_pacientes_prod` |
+| `plantilla_clave` | VARCHAR(50) | Clave de plantilla usada |
+| `plantilla_nombre` | VARCHAR(100) | Nombre de la plantilla |
+| `total_pacientes` | INT | Total destinatarios |
+| `enviados` | INT | Mensajes enviados OK |
+| `fallidos` | INT | Mensajes con error |
+| `invalidos` | INT | Teléfonos inválidos |
+| `fecha_hora` | DATETIME | Fecha del envío |
+
+**`log_envios`** — Mensaje individual por paciente
+
+| Columna | Tipo | Uso |
+|---|---|---|
+| `id` | INT PK | ID del registro |
+| `envio_id` | INT FK | Enlaza al batch (`envios.id`) |
+| `paciente_id` | INT | ID del paciente |
+| `nombre_paciente` | VARCHAR(150) | Nombre al momento del envío |
+| `numero_telefono` | VARCHAR(20) | Teléfono usado |
+| `mensaje` | TEXT | Mensaje enviado |
+| `plantilla_clave` | VARCHAR(50) | Plantilla usada |
+| `estado_envio` | ENUM | `enviado` / `error` / `numero_invalido` |
+| `respuesta` | ENUM | `pendiente` / `click` / `respondio` / `baja` |
+| `descripcion_error` | VARCHAR(255) | Detalle del error |
+| `fecha_hora` | DATETIME | Fecha del registro |
 
 ## API
 
+### Autenticación
+
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/pacientes?q=` | Lista de pacientes desde MySQL (búsqueda opcional) |
-| GET | `/api/plantillas` | Lista de plantillas desde JSON |
-| POST | `/api/plantillas` | Crear plantilla `{nombre, texto}` |
-| PUT | `/api/plantillas/{id}` | Actualizar plantilla `{nombre, texto}` |
-| DELETE | `/api/plantillas/{id}` | Eliminar plantilla |
-| POST | `/api/notificaciones/enviar` | Iniciar envío `{pacientes: [ids], plantilla_id}` |
-| GET | `/api/notificaciones/jobs/{job_id}` | Progreso del envío en curso |
-| GET | `/api/notificaciones/historial?q=&estado=` | Historial de mensajes |
-| GET | `/api/configuracion` | Configuración actual |
-| PUT | `/api/configuracion` | Actualizar configuración |
+| POST | `/api/auth/login` | Iniciar sesión `{usuario, clave}` → token |
+| POST | `/api/auth/logout` | Cerrar sesión |
+
+### Pacientes (solo admin)
+
+| Método | Endpoint | Descripción |
+|---|---|---|
+| GET | `/api/pacientes?q=&ambiente=` | Lista con respuesta del último log |
+| PUT | `/api/pacientes/{id}?ambiente=` | Cambiar estado del paciente |
+| PUT | `/api/pacientes/{id}/respuesta?ambiente=` | Cambiar respuesta (click/respondio/baja) |
+
+### Plantillas
+
+| Método | Endpoint | Descripción |
+|---|---|---|
+| GET | `/api/plantillas` | Lista de plantillas |
+| POST | `/api/plantillas` | Crear `{nombre, texto}` |
+| PUT | `/api/plantillas/{id}` | Actualizar `{nombre, texto}` |
+| DELETE | `/api/plantillas/{id}` | Eliminar |
+
+### Envíos
+
+| Método | Endpoint | Descripción |
+|---|---|---|
+| POST | `/api/notificaciones/enviar` | Iniciar envío `{pacientes: [ids], plantilla_id, ambiente}` |
+| GET | `/api/notificaciones/jobs/{job_id}` | Progreso en vivo |
+| GET | `/api/notificaciones/solicitud/{token}` | Estado de solicitud pendiente |
+
+### Confirmación / Rechazo (correo)
+
+| Método | Endpoint | Descripción |
+|---|---|---|
+| GET | `/api/notificaciones/confirmar/{token}` | Confirmar envío (desde email) |
+| GET | `/api/notificaciones/rechazar/{token}` | Rechazar envío (desde email) |
+
+### Historial
+
+| Método | Endpoint | Descripción |
+|---|---|---|
+| GET | `/api/notificaciones/historial?ambiente=todos` | Envíos batch de ambas DBs |
+| GET | `/api/notificaciones/historial/{id}/detalle?ambiente=` | Pacientes individuales de un envío |
+| PUT | `/api/notificaciones/historial/{id}/respuesta?ambiente=` | Actualizar respuesta |
+
+### Configuración
+
+| Método | Endpoint | Descripción |
+|---|---|---|
+| GET | `/api/configuracion?ambiente=` | Config actual |
+| PUT | `/api/configuracion` | Actualizar `.env` en caliente |
+| GET | `/api/configuracion/stats?ambiente=` | Estadísticas (total, pendientes) |
 
 ## Módulo de envío
 
-Integrado en la página de Pacientes: se marcan pacientes con checkboxes (o "seleccionar todos" sobre los filtrados) y se presiona "Iniciar envío".
+- **Pacientes** (`pacientes.html`): seleccionar pacientes con checkboxes → elegir plantilla → "Iniciar envío"
+- **Mensajería** (`mensajeria.html`): editar plantilla → "Enviar a todos los pendientes"
+- **Producción**: antes de enviar, se envía correo de confirmación al supervisor con botones **Confirmar** y **Rechazar**
+- **Desarrollo**: envío directo, restringido a números en `SNW_NUMEROS_PRUEBA_DEV`
+- **Motor intercambiable**: `simulado`, `whatsapp_web` (abre wa.me), `api_oficial` (Graph API Meta)
+- **Cola asíncrona**: envío en segundo plano con progreso en vivo
+- **Historial batch**: cada envío se registra en `envios` (una fila por "Iniciar envío"); sin nombres de pacientes
 
-- **Cola asíncrona:** el envío se procesa en segundo plano; un modal muestra progreso en vivo mediante polling.
-- **Validaciones previas:** existencia del paciente y de la plantilla, formato internacional `+569XXXXXXXXX`, disponibilidad del canal.
-- **Descartes sin interrumpir la cola:** teléfonos inválidos o no autorizados se reportan como rechazados con su motivo.
-- **Filtro de entorno desarrollo:** solo salen mensajes hacia los números autorizados en `SNW_NUMEROS_PRUEBA` (archivo `.env`).
-- **Motor intercambiable** (`motor_envio.py`): `whatsapp_web` (abre `wa.me`/WhatsApp Web por destinatario), `simulado` y `api_oficial` (**implementado**: envía vía Graph API de Meta con `SNW_WA_TOKEN` y `SNW_WA_PHONE_ID`); el método se elige en `.env`, con intervalo entre mensajes configurable.
-- **Estados por paciente:** cada envío actualiza `pacientes.estado` (pendiente / enviado / error).
-- **Historial:** cada intento (enviado, error, nº inválido) se registra en la tabla `log_envios` con fecha, paciente, teléfono, plantilla y detalle del fallo; consultable en `historial.html` con búsqueda y filtros.
-
-## Funcionalidades actuales
-
-- Editor de plantillas: crear, editar, eliminar, con vista previa en vivo y comodines `{nombre}`, `{apellido}`, `{info_extra}`.
-- Persistencia de plantillas en archivo JSON.
-- Listado de pacientes desde MySQL con búsqueda, filtro por estado y contadores clicables.
-- Módulo de envío en 3 pasos con cola asíncrona, validaciones y progreso en vivo.
-- Navegación unificada entre módulos.
-
-## Usuarios del prototipo
+## Usuarios
 
 | Usuario | Contraseña | Rol | Acceso |
 |---|---|---|---|
-| `admin` | `admin123` | administrador | Todo: pacientes, plantillas, envío integrado, historial, configuración |
-| `usuario` | `usuario123` | usuario | Plantillas, historial y envío con selector de base de datos (no ve pacientes) |
+| `admin` | `admin123` | administrador | Todo: pacientes, mensajería, historial, links de prueba en confirmación |
+| `usuario` | `usuario123` | usuario | Mensajería, historial (sin acceso a pacientes, sin links de prueba) |
 
-Las credenciales viven en `data/usuarios.json` (contraseñas hasheadas en SHA-256). El envío del usuario final va dirigido a todos los pacientes con estado `pendiente` de la base seleccionada (desarrollo o producción); en desarrollo solo saldrán los números autorizados.
+## Pantallas
 
-## Pendientes (siguiente etapa)
-
-- Motor de envío real vía API Oficial Business (envío sin intervención del usuario).
-- Logs del sistema y autenticación SSO por roles.
+- **Landing** (`index.html`): navegación según rol
+- **Login** (`login.html`): formulario de acceso
+- **Pacientes** (`pacientes.html`): solo admin — tabla con respuesta inline, envío integrado
+- **Mensajería** (`mensajeria.html`): editor de plantillas + envío a todos los pendientes
+- **Historial** (`historial.html`): envíos de ambas bases, detalle individual, respuesta por paciente
