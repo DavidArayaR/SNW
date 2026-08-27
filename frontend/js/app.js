@@ -571,6 +571,11 @@ $("#btnCerrarConf").addEventListener("click", () => {
   clearInterval(timerPollingConf);
   modalConf.hidden = true;
 });
+$("#btnCerrarRechazoConf").addEventListener("click", () => ($("#modalRechazadoConf").hidden = true));
+const modalRechazadoConfEl = $("#modalRechazadoConf");
+modalRechazadoConfEl.addEventListener("click", (e) => {
+  if (e.target === modalRechazadoConfEl) modalRechazadoConfEl.hidden = true;
+});
 
 $("#btnLanzarConf").addEventListener("click", async () => {
   if (envioEnCursoConf) return;
@@ -619,10 +624,12 @@ $("#btnLanzarConf").addEventListener("click", async () => {
             clearInterval(poll);
             window.removeEventListener("beforeunload", beforeUnload);
             espera.hidden = true;
-            toast("Envío rechazado por supervisor.", "error");
+            const comentario = s.comentario?.trim()
+              ? s.comentario
+              : "(El supervisor no dejó comentario.)";
+            $("#comentarioRechazoConf").textContent = comentario;
+            $("#modalRechazadoConf").hidden = false;
             setBloqueoEnvioConf(false);
-            $("#btnLanzarConf").hidden = false;
-            $("#btnCancelarConf").hidden = false;
           }
         } catch {}
       }, 2000);

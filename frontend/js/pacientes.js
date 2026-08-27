@@ -503,14 +503,6 @@ $("#btnLanzarEnvio").addEventListener("click", async () => {
             jobIdActual = s.job_id;
             totalActual = s.total;
             seguirProgreso(s.job_id, s.total);
-          } else if (s.estado === "rechazado") {
-            clearInterval(poll);
-            window.removeEventListener("beforeunload", beforeUnload);
-            espera.hidden = true;
-            toast("Envío rechazado por supervisor.", "error");
-            setBloqueoEnvio(false);
-            $("#btnLanzarEnvio").hidden = false;
-            render();
           }
         } catch {}
       }, 2000);

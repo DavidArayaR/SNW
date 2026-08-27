@@ -15,7 +15,7 @@ from email.mime.text import MIMEText
 
 import pymysql
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -482,7 +482,7 @@ JOB_LOCK = threading.Lock()
 PENDIENTES: dict = {}
 
 
-def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, ambiente: str) -> bool:
+def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, plantilla_texto: str, ambiente: str) -> bool:
     emisor = os.getenv("DIRECCION_CORREO_EMISOR", "").strip()
     destino = os.getenv("DIRECCION_CORREO_DESTINO", "").strip()
     if not emisor or not destino:
@@ -506,6 +506,10 @@ def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, a
     <html><body style="font-family: Arial, sans-serif; color: #24303c;">
       <h2>Solicitud de envío masivo</h2>
       <p>Se ha solicitado enviar la plantilla <strong>{plantilla_nombre}</strong> a <strong>{total} personas</strong> desde la base de datos <strong>{ambiente}</strong>.</p>
+      <div style="background:#f5f7f8; border-left:4px solid #128c7e; padding:14px 16px; margin:18px 0; border-radius:6px;">
+        <p style="margin:0 0 6px; font-size:12px; color:#66757f; font-weight:bold;">Mensaje a enviar:</p>
+        <p style="margin:0; white-space:pre-wrap; font-family:Consolas,monospace; font-size:13px; color:#24303c;">{plantilla_texto}</p>
+      </div>
       <p style="margin:24px 0;">
         <a href="{confirm_url}" style="display:inline-block; background:#128c7e; color:#fff; padding:12px 22px; border-radius:8px; text-decoration:none; font-weight:bold;">Confirmar envío</a>
         &nbsp;&nbsp;
@@ -529,6 +533,54 @@ def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, a
                 server.login(user, pwd)
             server.sendmail(emisor, destino, msg.as_string())
         print(f"[CORREO] Confirmación enviada a {destino} token {token}")
+        return True
+    except Exception as e:
+        print(f"[CORREO ERROR] {e}")
+        return False
+
+
+def _enviar_correo_rechazo(nombre_enviador: str, plantilla_nombre: str, total: int, comentario: str) -> bool:
+    emisor = os.getenv("DIRECCION_CORREO_EMISOR", "").strip()
+    destino = os.getenv("DIRECCION_CORREO_DESTINO", "").strip()
+    if not emisor or not destino:
+        print(f"[CORREO] Emisor o destino no configurado. Rechazo -> {destino}")
+        return False
+    host = os.getenv("SMTP_HOST", "").strip()
+    port = int(os.getenv("SMTP_PORT", "587") or 587)
+    user = os.getenv("SMTP_USER", "").strip() or emisor
+    pwd = os.getenv("SMTP_PASS", "").strip().replace(" ", "")
+    tls = os.getenv("SMTP_TLS", "true").lower() in ("1", "true", "yes", "si")
+
+    if not host or not pwd:
+        print(f"[CORREO SIMULADO] Rechazo de envío de '{nombre_enviador}' plantilla '{plantilla_nombre}' ({total} dest.): {comentario}")
+        return True
+
+    subject = f"[SNW] Envío rechazado por supervisor - {plantilla_nombre}"
+    html = f"""
+    <html><body style="font-family: Arial, sans-serif; color: #24303c;">
+      <h2 style="color:#b23b37;">Envío rechazado</h2>
+      <p>El envío de la plantilla <strong>{plantilla_nombre}</strong> a <strong>{total} personas</strong>, solicitado por <strong>{nombre_enviador}</strong>, fue <strong>rechazado</strong> por el supervisor.</p>
+      <div style="background:#fdf0f0; border-left:4px solid #b23b37; padding:14px 16px; margin:18px 0; border-radius:6px;">
+        <p style="margin:0 0 6px; font-size:12px; color:#66757f; font-weight:bold;">Comentario del supervisor:</p>
+        <p style="margin:0; white-space:pre-wrap; font-size:14px; color:#24303c;">{comentario or "(sin comentario)"}</p>
+      </div>
+      <p>Revisa el comentario y vuelve a intentarlo si corresponde.</p>
+    </body></html>
+    """
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["From"] = emisor
+        msg["To"] = destino
+        msg["Subject"] = subject
+        msg.attach(MIMEText(html, "html", "utf-8"))
+        context = ssl.create_default_context()
+        with smtplib.SMTP(host, port) as server:
+            if tls:
+                server.starttls(context=context)
+            if user and pwd:
+                server.login(user, pwd)
+            server.sendmail(emisor, destino, msg.as_string())
+        print(f"[CORREO] Rechazo enviado a {destino}")
         return True
     except Exception as e:
         print(f"[CORREO ERROR] {e}")
@@ -763,13 +815,15 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
                                      len(destinatarios) + len(rechazados), amb)
         PENDIENTES[token] = {
             "ambiente": amb,
-            "plantilla": {"id": plantilla["id"], "clave": plantilla["clave"], "nombre": plantilla["nombre"]},
+            "plantilla": {"id": plantilla["id"], "clave": plantilla["clave"],
+                          "nombre": plantilla["nombre"], "texto": plantilla["texto"]},
             "destinatarios": destinatarios,
             "rechazados": rechazados,
             "estado": "pendiente",
             "job_id": None,
             "envio_id": envio_id,
             "creado": time.time(),
+            "nombre_enviador": sesion.get("nombre", "Usuario"),
         }
         if envio_id:
             actualizar_envio_batch(envio_id, amb, invalidos=len(rechazados))
@@ -777,7 +831,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
                 registrar_historial(r.get("id"), r.get("nombre"), r.get("telefono"),
                                     plantilla["clave"], "", "numero_invalido",
                                     r.get("motivo"), ambiente=amb, envio_id=envio_id)
-        _enviar_correo_confirmacion(token, len(destinatarios), plantilla["nombre"], amb)
+        _enviar_correo_confirmacion(token, len(destinatarios), plantilla["nombre"], plantilla["texto"], amb)
         return {"requiere_confirmacion": True, "solicitud_id": token, "total": len(destinatarios),
                 "ambiente": amb, "rechazados": rechazados,
                 "confirm_url": f"/api/notificaciones/confirmar/{token}"}
@@ -818,11 +872,42 @@ def estado_solicitud(token: str, sesion: dict = Depends(sesion_actual)):
     if not pend:
         raise HTTPException(404, detail="Solicitud no encontrada")
     return {"solicitud_id": token, "estado": pend["estado"], "total": len(pend["destinatarios"]),
-            "job_id": pend.get("job_id"), "ambiente": pend["ambiente"]}
+            "job_id": pend.get("job_id"), "ambiente": pend["ambiente"],
+            "comentario": pend.get("comentario", "")}
 
 
 @app.get("/api/notificaciones/rechazar/{token}")
-def rechazar_envio(token: str):
+def formulario_rechazo(token: str):
+    pend = PENDIENTES.get(token)
+    if not pend:
+        return HTMLResponse("<html><body style='font-family:Arial; text-align:center; padding:40px;'><h3>Solicitud no encontrada o expirada</h3></body></html>", status_code=404)
+    if pend["estado"] == "rechazado":
+        return HTMLResponse("<html><body style='font-family:Arial; text-align:center; padding:40px;'><h2>Este envío ya fue rechazado</h2></body></html>")
+    if pend["estado"] == "confirmado":
+        return HTMLResponse("<html><body style='font-family:Arial; text-align:center; padding:40px;'><h2>Este envío ya fue confirmado y está en proceso</h2></body></html>")
+    total = len(pend["destinatarios"])
+    plantilla = pend["plantilla"]["nombre"]
+    return HTMLResponse(f"""
+<html><head><meta charset='utf-8'><title>Rechazar envío</title></head>
+<body style='font-family: Segoe UI, Arial; text-align:center; padding:40px; background:#f0f2f5;'>
+<div style='background:#fff; max-width:520px; margin:40px auto; padding:32px; border-radius:14px; box-shadow:0 4px 20px rgba(0,0,0,0.1); text-align:left;'>
+<h2 style='color:#b23b37; margin-top:0;'>Rechazar envío</h2>
+<p>Vas a rechazar el envío de <strong>{total} mensajes</strong> de la plantilla <strong>{plantilla}</strong>.</p>
+<form method="POST" action="/api/notificaciones/rechazar/{token}">
+  <label style="display:block; font-size:14px; color:#66757f; margin:14px 0 6px;">Comentario para el enviador (opcional):</label>
+  <textarea name="comentario" rows="4" style="width:100%; padding:10px; font:inherit; font-size:14px; border:1px solid #dde1e6; border-radius:8px;" placeholder="Ej: falta adjuntar el consentimiento firmado."></textarea>
+  <div style="margin-top:20px; text-align:right;">
+    <button type="button" onclick="window.location.href='http://localhost:8000/api/notificaciones/confirmar/{token}'" style="background:#fafbfc; color:#24303c; border:1px solid #dde1e6; padding:11px 20px; border-radius:10px; font-weight:600; cursor:pointer; font-family:inherit;">Volver</button>
+    <button type="submit" style="background:#b23b37; color:#fff; border:none; padding:11px 22px; border-radius:10px; font-weight:700; cursor:pointer; font-family:inherit;">Rechazar envío</button>
+  </div>
+</form>
+</div>
+</body></html>
+""")
+
+
+@app.post("/api/notificaciones/rechazar/{token}")
+def rechazar_envio(token: str, comentario: str = Form("")):
     pend = PENDIENTES.get(token)
     if not pend:
         return HTMLResponse("<html><body style='font-family:Arial; text-align:center; padding:40px;'><h3>Solicitud no encontrada o expirada</h3></body></html>", status_code=404)
@@ -831,6 +916,7 @@ def rechazar_envio(token: str):
     if pend["estado"] == "confirmado":
         return HTMLResponse("<html><body style='font-family:Arial; text-align:center; padding:40px;'><h2>Este envío ya fue confirmado y está en proceso</h2></body></html>")
     pend["estado"] = "rechazado"
+    pend["comentario"] = comentario
     envio_id = pend.get("envio_id")
     if envio_id:
         amb = pend["ambiente"]
@@ -845,7 +931,7 @@ def rechazar_envio(token: str):
 <body style='font-family: Segoe UI, Arial; text-align:center; padding:40px; background:#f0f2f5;'>
 <div style='background:#fff; max-width:520px; margin:40px auto; padding:32px; border-radius:14px; box-shadow:0 4px 20px rgba(0,0,0,0.1);'>
 <h2 style='color:#b23b37; margin-top:0;'>Envío rechazado</h2>
-<p>El envío de <strong>{len(pend['destinatarios'])} mensajes</strong> plantilla <strong>{pend['plantilla']['nombre']}</strong> fue rechazado.</p>
+<p>El envío fue rechazado y se notificó al usuario que lo solicitó.</p>
 <p style='color:#66757f; font-size:14px;'>Puedes cerrar esta ventana.</p>
 </div>
 </body></html>
@@ -859,6 +945,8 @@ def confirmar_envio(token: str, background_tasks: BackgroundTasks):
         return HTMLResponse("<html><body style='font-family:Arial; text-align:center; padding:40px;'><h3>Solicitud no encontrada o expirada</h3></body></html>", status_code=404)
     if pend["estado"] == "confirmado":
         return HTMLResponse(f"<html><body style='font-family:Arial; text-align:center; padding:40px;'><h2>Este envío ya fue confirmado</h2><p>Job: {pend.get('job_id')}</p></body></html>")
+    if pend["estado"] == "rechazado":
+        return HTMLResponse("<html><body style='font-family:Arial; text-align:center; padding:40px;'><h2>Este envío ya fue rechazado</h2></body></html>")
     pend["estado"] = "confirmado"
     job_id = uuid.uuid4().hex[:8]
     pend["job_id"] = job_id
