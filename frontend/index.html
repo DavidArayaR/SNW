@@ -173,7 +173,7 @@
     const navPacientes = document.getElementById("navPacientes");
 
     if (token) {
-      btnLogin.hidden = true;
+      btnLogin.style.display = "none";
       navLogueado.style.display = "flex";
       if (rol !== "administrador") {
         navPacientes.hidden = true;

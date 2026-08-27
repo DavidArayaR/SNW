@@ -380,10 +380,15 @@ const modalConf = $("#modalConfirmar");
 let ambienteConf = localStorage.getItem("snw_ambiente_admin") || localStorage.getItem("snw_ambiente") || "desarrollo";
 let timerPollingConf = null;
 let envioEnCursoConf = false;
+let jobIdActualConf = null;
+let totalActualConf = 0;
+let hechosActualConf = 0;
 
 function setBloqueoEnvioConf(bloquear) {
   envioEnCursoConf = bloquear;
   document.querySelectorAll("button, input, select, textarea").forEach((el) => {
+    // El botón Cancelar siempre queda habilitado durante el envío
+    if (el.id === "btnCancelarConf") return;
     el.disabled = bloquear;
   });
 }
@@ -504,9 +509,55 @@ async function actualizarResumenConf() {
 }
 
 $("#btnCancelarConf").addEventListener("click", () => {
-  if (envioEnCursoConf) return;
-  clearInterval(timerPollingConf);
-  modalConf.hidden = true;
+  const enProgreso = envioEnCursoConf && jobIdActualConf;
+  if (envioEnCursoConf && !enProgreso) {
+    clearInterval(timerPollingConf);
+    modalConf.hidden = true;
+    return;
+  }
+  if (enProgreso) {
+    clearInterval(timerPollingConf);
+    const restantes = Math.max(0, totalActualConf - hechosActualConf);
+    $("#mensajeCancelarConf").textContent =
+      `¿Seguro que quieres cancelar el envío de ${restantes} mensaje(s) restante(s)?`;
+    $("#btnNoCancelarConf").disabled = false;
+    $("#btnConfirmarCancelarConf").disabled = false;
+    $("#modalCancelarConf").hidden = false;
+    pausarJobConf(jobIdActualConf);
+  }
+});
+$("#btnNoCancelarConf").addEventListener("click", () => {
+  $("#modalCancelarConf").hidden = true;
+  if (jobIdActualConf) {
+    reanudarJobConf(jobIdActualConf);
+    seguirProgresoConf(jobIdActualConf, totalActualConf);
+  }
+});
+$("#btnConfirmarCancelarConf").addEventListener("click", async () => {
+  const accion = await (async () => {
+    try {
+      const res = await fetch(`api/notificaciones/jobs/${jobIdActualConf}/cancelar`, {
+        method: "POST",
+        headers: authHeaders(),
+      });
+      if (res.status === 401) { window.snwSalir(); return false; }
+      return res.ok;
+    } catch {
+      return false;
+    }
+  })();
+  $("#modalCancelarConf").hidden = true;
+  if (accion) {
+    finalizarConf("Envío cancelado por el usuario.", true);
+    setBloqueoEnvioConf(false);
+    jobIdActualConf = null;
+    totalActualConf = 0;
+    hechosActualConf = 0;
+    modalConf.hidden = true;
+  } else {
+    toast("No se pudo cancelar el envío.", "error");
+    if (jobIdActualConf) seguirProgresoConf(jobIdActualConf, totalActualConf);
+  }
 });
 modalConf.addEventListener("click", (e) => {
   if (envioEnCursoConf) return;
@@ -524,7 +575,6 @@ $("#btnCerrarConf").addEventListener("click", () => {
 $("#btnLanzarConf").addEventListener("click", async () => {
   if (envioEnCursoConf) return;
   $("#btnLanzarConf").hidden = true;
-  $("#btnCancelarConf").hidden = true;
   setBloqueoEnvioConf(true);
 
   try {
@@ -559,9 +609,11 @@ $("#btnLanzarConf").addEventListener("click", async () => {
             window.removeEventListener("beforeunload", beforeUnload);
             espera.hidden = true;
             alert("Envío confirmado por supervisor");
-            await new Promise((res) => setTimeout(res, 3000));
+            await new Promise((res) => setTimeout(res, 1500));
             modalConf.hidden = false;
             $("#confProgreso").hidden = false;
+            jobIdActualConf = s.job_id;
+            totalActualConf = s.total;
             seguirProgresoConf(s.job_id, s.total);
           } else if (s.estado === "rechazado") {
             clearInterval(poll);
@@ -586,6 +638,8 @@ $("#btnLanzarConf").addEventListener("click", async () => {
     }
 
     $("#confProgreso").hidden = false;
+    jobIdActualConf = data.job_id;
+    totalActualConf = data.total;
     seguirProgresoConf(data.job_id, data.total);
   } catch (err) {
     toast(`Error al iniciar el envío: ${err.message}`, "error");
@@ -611,6 +665,17 @@ function pintarRechazadosConf(rechazados) {
   ul.hidden = rechazados.length === 0;
 }
 
+async function pausarJobConf(jobId) {
+  try {
+    await fetch(`api/notificaciones/jobs/${jobId}/pausa`, { method: "POST", headers: authHeaders() });
+  } catch {}
+}
+async function reanudarJobConf(jobId) {
+  try {
+    await fetch(`api/notificaciones/jobs/${jobId}/reanudar`, { method: "POST", headers: authHeaders() });
+  } catch {}
+}
+
 function seguirProgresoConf(jobId, total) {
   clearInterval(timerPollingConf);
   timerPollingConf = setInterval(async () => {
@@ -624,6 +689,7 @@ function seguirProgresoConf(jobId, total) {
       const job = await res.json();
 
       const hechos = job.enviados + job.fallidos;
+      hechosActualConf = hechos;
       $("#barraFillConf").style.width = `${total ? Math.round((hechos / total) * 100) : 100}%`;
       $("#progresoNumerosConf").textContent = `${hechos} / ${total}`;
       $("#progresoTextoConf").textContent =
@@ -631,13 +697,18 @@ function seguirProgresoConf(jobId, total) {
           ? "Envío finalizado."
           : `Enviando mensajes... (${hechos}/${total})`;
 
-      if (job.estado === "completado" || job.estado === "error") {
+      if (job.estado === "completado" || job.estado === "error" || job.estado === "cancelado") {
         clearInterval(timerPollingConf);
         const msg = job.estado === "error"
           ? `Error del canal: ${job.detalle}`
-          : `Envío completado: ${job.enviados} enviado(s), ${job.fallidos} fallido(s).`;
-        finalizarConf(msg, job.estado === "error");
+          : job.estado === "cancelado"
+            ? "Envío cancelado por el usuario."
+            : `Envío completado: ${job.enviados} enviado(s), ${job.fallidos} fallido(s).`;
+        finalizarConf(msg, job.estado !== "completado");
         setBloqueoEnvioConf(false);
+        jobIdActualConf = null;
+        totalActualConf = 0;
+        hechosActualConf = 0;
         cargar();
       }
     } catch {

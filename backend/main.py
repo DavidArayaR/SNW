@@ -627,6 +627,21 @@ def procesar_job(job_id: str) -> None:
     total = len(job["destinatarios"])
 
     for i, d in enumerate(job["destinatarios"]):
+        if job.get("cancelado"):
+            job["actual"] = ""
+            job["estado"] = "cancelado"
+            job["detalle"] = "Cancelado por el usuario"
+            break
+        # Si está pausado, esperar (sin enviar) hasta reanudar o cancelar
+        while job.get("pausado") and not job.get("cancelado"):
+            job["estado"] = "pausado"
+            time.sleep(0.5)
+        job["estado"] = "en_proceso"
+        if job.get("cancelado"):
+            job["actual"] = ""
+            job["estado"] = "cancelado"
+            job["detalle"] = "Cancelado por el usuario"
+            break
         job["actual"] = d["nombre"]
         ok, error = canal.enviar(d["telefono"], d["mensaje"])
         actualizar_estado_paciente(d["id"], "enviado" if ok else "error", amb)
@@ -645,8 +660,9 @@ def procesar_job(job_id: str) -> None:
             time.sleep(intervalo)
 
     job["actual"] = ""
-    job["estado"] = "completado"
-    actualizar_envio_batch(envio_id, amb, enviados=job["enviados"], fallidos=job["fallidos"])
+    if job.get("estado") != "cancelado":
+        job["estado"] = "completado"
+        actualizar_envio_batch(envio_id, amb, enviados=job["enviados"], fallidos=job["fallidos"])
 
 
 @app.post("/api/notificaciones/enviar", status_code=202)
@@ -726,8 +742,9 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
     if not destinatarios:
         return {"iniciado": False, "total": 0, "rechazados": rechazados, "requiere_confirmacion": False}
 
-    # En producción se requiere confirmación por correo del supervisor
-    if amb == "produccion":
+    # En producción se requiere confirmación por correo del supervisor,
+    # salvo que el usuario sea administrador (envía directo sin correo).
+    if amb == "produccion" and sesion.get("rol") != "administrador":
         token = uuid.uuid4().hex
         envio_id = crear_envio_batch(nombre_base(amb), plantilla["clave"], plantilla["nombre"],
                                      len(destinatarios) + len(rechazados), amb)
@@ -774,6 +791,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         "plantilla": {"id": plantilla["id"], "clave": plantilla["clave"]},
         "destinatarios": destinatarios,
         "envio_id": envio_id,
+        "pausado": False,
     }
 
     background_tasks.add_task(procesar_job, job_id)
@@ -843,6 +861,7 @@ def confirmar_envio(token: str, background_tasks: BackgroundTasks):
         "plantilla": pend["plantilla"],
         "destinatarios": pend["destinatarios"],
         "envio_id": pend.get("envio_id"),
+        "pausado": False,
     }
     background_tasks.add_task(procesar_job, job_id)
     return HTMLResponse(f"""
@@ -895,6 +914,39 @@ def estado_job(job_id: str, sesion: dict = Depends(sesion_actual)):
         raise HTTPException(404, detail="Envío no encontrado")
 
     return {k: v for k, v in job.items() if k != "destinatarios"}
+
+
+@app.post("/api/notificaciones/jobs/{job_id}/cancelar")
+def cancelar_job(job_id: str, sesion: dict = Depends(sesion_actual)):
+    job = JOBS.get(job_id)
+    if job is None:
+        raise HTTPException(404, detail="Envío no encontrado")
+    if job.get("estado") in ("completado", "cancelado", "error"):
+        return {"ok": False, "estado": job.get("estado"), "detail": "El envío ya finalizó"}
+    job["cancelado"] = True
+    return {"ok": True, "estado": "cancelado"}
+
+
+@app.post("/api/notificaciones/jobs/{job_id}/pausa")
+def pausar_job(job_id: str, sesion: dict = Depends(sesion_actual)):
+    job = JOBS.get(job_id)
+    if job is None:
+        raise HTTPException(404, detail="Envío no encontrado")
+    if job.get("estado") in ("completado", "cancelado", "error"):
+        return {"ok": False, "estado": job.get("estado"), "detail": "El envío ya finalizó"}
+    job["pausado"] = True
+    return {"ok": True, "estado": "pausado"}
+
+
+@app.post("/api/notificaciones/jobs/{job_id}/reanudar")
+def reanudar_job(job_id: str, sesion: dict = Depends(sesion_actual)):
+    job = JOBS.get(job_id)
+    if job is None:
+        raise HTTPException(404, detail="Envío no encontrado")
+    if job.get("estado") in ("completado", "cancelado", "error"):
+        return {"ok": False, "estado": job.get("estado"), "detail": "El envío ya finalizó"}
+    job["pausado"] = False
+    return {"ok": True, "estado": "en_proceso"}
 
 
 @app.get("/api/notificaciones/historial")

@@ -172,6 +172,18 @@
     </div>
   </div>
 
+  <div id="modalCancelarConf" class="modal" hidden>
+    <div class="modal__card" style="text-align:center; max-width:420px;" role="dialog" aria-modal="true">
+      <h3>Cancelar envío</h3>
+      <p id="mensajeCancelarConf">¿Seguro que quieres cancelar el envío?</p>
+      <p style="font-size:13px; color:#66757f;">Los mensajes ya enviados no se pueden recuperar.</p>
+      <div class="modal__actions" style="justify-content:center; margin-top:20px;">
+        <button type="button" class="btn btn--ghost" id="btnNoCancelarConf">No, continuar</button>
+        <button type="button" class="btn btn--primary" id="btnConfirmarCancelarConf" style="background:#b23b37;">Sí, cancelar</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toast" class="toast" hidden></div>
   <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
 

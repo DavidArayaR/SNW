@@ -21,11 +21,16 @@ let seleccionados = new Set();
 let plantillaId = null;
 let timerPolling = null;
 let envioEnCurso = false;
+let jobIdActual = null;
+let totalActual = 0;
+let hechosActual = 0;
 
 function setBloqueoEnvio(bloquear) {
   envioEnCurso = bloquear;
   document.querySelectorAll("button, input, select, textarea").forEach((el) => {
     // No bloquear el toast ni la barra de progreso (no son inputs)
+    // El botón Cancelar siempre queda habilitado durante el envío
+    if (el.id === "btnCancelarEnvio") return;
     el.disabled = bloquear;
   });
   // Si se desbloquea, restaurar estados correctos vía render
@@ -373,9 +378,57 @@ function renderPlantillasModal() {
 const avisoDevEl = $("#avisoDev");
 
 $("#btnCancelarEnvio").addEventListener("click", () => {
-  if (envioEnCurso) return;
-  clearInterval(timerPolling);
-  modalEl.hidden = true;
+  const enProgreso = envioEnCurso && jobIdActual;
+  if (envioEnCurso && !enProgreso) {
+    clearInterval(timerPolling);
+    modalEl.hidden = true;
+    return;
+  }
+  if (enProgreso) {
+    clearInterval(timerPolling);
+    const restantes = Math.max(0, totalActual - hechosActual);
+    $("#mensajeCancelar").textContent =
+      `¿Seguro que quieres cancelar el envío de ${restantes} mensaje(s) restante(s)?`;
+    $("#btnNoCancelar").disabled = false;
+    $("#btnConfirmarCancelar").disabled = false;
+    $("#modalCancelar").hidden = false;
+    pausarJob(jobIdActual);
+  }
+});
+
+$("#btnNoCancelar").addEventListener("click", () => {
+  $("#modalCancelar").hidden = true;
+  if (jobIdActual) {
+    reanudarJob(jobIdActual);
+    seguirProgreso(jobIdActual, totalActual);
+  }
+});
+$("#btnConfirmarCancelar").addEventListener("click", async () => {
+  const accion = await (async () => {
+    try {
+      const res = await fetch(`api/notificaciones/jobs/${jobIdActual}/cancelar`, {
+        method: "POST",
+        headers: authHeaders(),
+      });
+      if (res.status === 401) { window.snwSalir(); return false; }
+      return res.ok;
+    } catch {
+      return false;
+    }
+  })();
+  $("#modalCancelar").hidden = true;
+  if (accion) {
+    finalizar("Envío cancelado por el usuario.", true);
+    setBloqueoEnvio(false);
+    jobIdActual = null;
+    totalActual = 0;
+    hechosActual = 0;
+    modalEl.hidden = true;
+    render();
+  } else {
+    toast("No se pudo cancelar el envío.", "error");
+    if (jobIdActual) seguirProgreso(jobIdActual, totalActual);
+  }
 });
 modalEl.addEventListener("click", (e) => {
   if (envioEnCurso) return;
@@ -435,6 +488,8 @@ $("#btnLanzarEnvio").addEventListener("click", async () => {
             modalEl.hidden = false;
             $("#faseConfig").hidden = true;
             $("#faseProgreso").hidden = false;
+            jobIdActual = s.job_id;
+            totalActual = s.total;
             seguirProgreso(s.job_id, s.total);
           } else if (s.estado === "rechazado") {
             clearInterval(poll);
@@ -461,6 +516,8 @@ $("#btnLanzarEnvio").addEventListener("click", async () => {
 
     $("#faseConfig").hidden = true;
     $("#faseProgreso").hidden = false;
+    jobIdActual = data.job_id;
+    totalActual = data.total;
     seguirProgreso(data.job_id, data.total);
   } catch (err) {
     toast(`Error al iniciar el envío: ${err.message}`, "error");
@@ -501,6 +558,17 @@ function pintarRechazados(rechazados) {
   ul.hidden = rechazados.length === 0;
 }
 
+async function pausarJob(jobId) {
+  try {
+    await fetch(`api/notificaciones/jobs/${jobId}/pausa`, { method: "POST", headers: authHeaders() });
+  } catch {}
+}
+async function reanudarJob(jobId) {
+  try {
+    await fetch(`api/notificaciones/jobs/${jobId}/reanudar`, { method: "POST", headers: authHeaders() });
+  } catch {}
+}
+
 function seguirProgreso(jobId, total) {
   clearInterval(timerPolling);
   timerPolling = setInterval(async () => {
@@ -514,6 +582,7 @@ function seguirProgreso(jobId, total) {
       const job = await res.json();
 
       const hechos = job.enviados + job.fallidos;
+      hechosActual = hechos;
       const porcentaje = total ? Math.round((hechos / total) * 100) : 100;
       $("#barraFill").style.width = `${porcentaje}%`;
       $("#progresoNumeros").textContent = `${hechos} / ${total}`;
@@ -522,13 +591,18 @@ function seguirProgreso(jobId, total) {
           ? "Envío finalizado."
           : `Enviando mensajes... (${hechos}/${total})`;
 
-      if (job.estado === "completado" || job.estado === "error") {
+      if (job.estado === "completado" || job.estado === "error" || job.estado === "cancelado") {
         clearInterval(timerPolling);
         const msg = job.estado === "error"
           ? `Error del canal: ${job.detalle}`
-          : `Envío completado: ${job.enviados} enviado(s), ${job.fallidos} fallido(s).`;
-        finalizar(msg, job.estado === "error");
+          : job.estado === "cancelado"
+            ? "Envío cancelado por el usuario."
+            : `Envío completado: ${job.enviados} enviado(s), ${job.fallidos} fallido(s).`;
+        finalizar(msg, job.estado !== "completado");
         setBloqueoEnvio(false);
+        jobIdActual = null;
+        totalActual = 0;
+        hechosActual = 0;
         cargar();
       }
     } catch {
