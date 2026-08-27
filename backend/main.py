@@ -685,10 +685,20 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         raise HTTPException(404, detail="Plantilla no encontrada")
 
     with conectar(amb) as conn, conn.cursor() as cur:
+        base_select = (
+            "SELECT p.id, p.nombre, p.apellido, p.telefono,"
+            " COALESCE(p.info_extra, '') AS info_extra,"
+            " COALESCE(l.respuesta, 'pendiente') AS respuesta"
+            " FROM pacientes p"
+            " LEFT JOIN log_envios l ON l.id = ("
+            "   SELECT l2.id FROM log_envios l2"
+            "   WHERE l2.paciente_id = p.id ORDER BY l2.id DESC LIMIT 1"
+            ")"
+        )
         if body.pacientes:
             placeholders = ", ".join("%s" for _ in body.pacientes)
             cur.execute(
-                f"SELECT id, nombre, apellido, telefono, info_extra FROM pacientes WHERE id IN ({placeholders})",
+                base_select + f" WHERE p.id IN ({placeholders})",
                 tuple(body.pacientes),
             )
         else:
@@ -696,13 +706,10 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
                 # En desarrollo se puede reenviar sin importar el estado del paciente;
                 # la única restricción real sigue siendo el filtro de números autorizados,
                 # que se aplica más abajo en este mismo endpoint.
-                cur.execute(
-                    "SELECT id, nombre, apellido, telefono, info_extra FROM pacientes ORDER BY id"
-                )
+                cur.execute(base_select + " ORDER BY p.id")
             else:
                 cur.execute(
-                    "SELECT id, nombre, apellido, telefono, info_extra FROM pacientes"
-                    " WHERE estado = 'pendiente' ORDER BY id"
+                    base_select + " WHERE estado = 'pendiente' ORDER BY p.id"
                 )
         filas = cur.fetchall()
 
@@ -712,6 +719,12 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
     for p in filas:
         telefono_crudo = (p.get("telefono") or "").strip()
         nombre_completo = " ".join(x for x in [p.get("nombre"), p.get("apellido")] if x)
+
+        # Pacientes dados de baja: nunca se les envían mensajes
+        if (p.get("respuesta") or "pendiente") == "baja":
+            rechazados.append({"id": p["id"], "nombre": nombre_completo, "telefono": telefono_crudo,
+                               "motivo": "Paciente se dio de baja"})
+            continue
 
         telefono = normalizar_telefono(telefono_crudo)
         if telefono is None:

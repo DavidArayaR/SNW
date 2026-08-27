@@ -24,13 +24,13 @@ echo  [OK] MySQL activo.
 
 REM Ejecutar scripts SQL de inicializacion
 echo  [2/4] Ejecutando scripts SQL de base de datos...
-"%MYSQL%" -u root -h 127.0.0.1 -P 3306 < "%~dp0sql\snw_pacientes.sql" >nul 2>nul
+"%MYSQL%" --default-character-set=utf8mb4 -u root -h 127.0.0.1 -P 3306 < "%~dp0sql\snw_pacientes.sql" >nul 2>nul
 if errorlevel 1 goto ERROR_SQL
 echo  [OK] snw_pacientes.sql cargado.
-"%MYSQL%" -u root -h 127.0.0.1 -P 3306 < "%~dp0sql\snw_pacientes_prod.sql" >nul 2>nul
+"%MYSQL%" --default-character-set=utf8mb4 -u root -h 127.0.0.1 -P 3306 < "%~dp0sql\snw_pacientes_prod.sql" >nul 2>nul
 if errorlevel 1 goto ERROR_SQL
 echo  [OK] snw_pacientes_prod.sql cargado.
-"%MYSQL%" -u root -h 127.0.0.1 -P 3306 < "%~dp0sql\limpiar_estados.sql" >nul 2>nul
+"%MYSQL%" --default-character-set=utf8mb4 -u root -h 127.0.0.1 -P 3306 < "%~dp0sql\limpiar_estados.sql" >nul 2>nul
 if errorlevel 1 goto ERROR_SQL
 echo  [OK] Estados reiniciados: de enviado a pendiente en ambas bases.
 goto CHECKEAR_DEPS

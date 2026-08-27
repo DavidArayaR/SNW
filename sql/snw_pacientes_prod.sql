@@ -38,16 +38,16 @@ CREATE TABLE IF NOT EXISTS log_envios (
 );
 
 INSERT IGNORE INTO pacientes (id, nombre, apellido, telefono, info_extra, estado) VALUES
-(1, 'David', 'Araya', '+56993921740', 'Control mensual', 'pendiente'),
-(2, 'Sergio', 'Madariaga', '+56941508435', 'Atención anual programada', 'pendiente'),
-(3, 'Pedro', 'González', '+56987654321', 'Seguimiento postoperatorio', 'pendiente'),
-(4, 'María', 'López', '+56912345678', 'Control de presión arterial', 'pendiente'),
-(5, 'Juan', 'Pérez', '+56976543210', 'Resultado de exámenes pendiente', 'pendiente'),
-(6, 'Carlos', 'Muñoz', '+56956781234', 'Control post operatorio', 'pendiente'),
-(7, 'Ana', 'Rodríguez', '+56982345671', 'Control prenatal', 'pendiente'),
-(8, 'Luis', 'Fernández', '+56934567892', 'Seguimiento diabetes', 'pendiente'),
-(9, 'Claudia', 'Soto', '+56967890123', 'Control lipidídico', 'pendiente'),
-(10, 'Francisco', 'Díaz', '+56990123456', 'Resultado resonancia', 'pendiente'),
+(1, 'David', 'Araya', '+56993921740', 'Control mensual', 'enviado'),
+(2, 'Sergio', 'Madariaga', '+56941508435', 'Atención anual programada', 'enviado'),
+(3, 'Pedro', 'González', '+56987654321', 'Seguimiento postoperatorio', 'enviado'),
+(4, 'María', 'López', '+56912345678', 'Control de presión arterial', 'enviado'),
+(5, 'Juan', 'Pérez', '+56976543210', 'Resultado de exámenes pendiente', 'enviado'),
+(6, 'Carlos', 'Muñoz', '+56956781234', 'Control post operatorio', 'enviado'),
+(7, 'Ana', 'Rodríguez', '+56982345671', 'Control prenatal', 'enviado'),
+(8, 'Luis', 'Fernández', '+56934567892', 'Seguimiento diabetes', 'enviado'),
+(9, 'Claudia', 'Soto', '+56967890123', 'Control lipidídico', 'enviado'),
+(10, 'Francisco', 'Díaz', '+56990123456', 'Resultado resonancia', 'enviado'),
 (11, 'Patricia', 'Vargas', '+56923456789', 'Control cardiológico', 'pendiente'),
 (12, 'Miguel', 'Torres', '+56951234567', 'Seguimiento hipertensión', 'pendiente'),
 (13, 'Cristina', 'Reyes', '+56984567890', 'Control ginecológico', 'pendiente'),
@@ -138,3 +138,15 @@ INSERT IGNORE INTO pacientes (id, nombre, apellido, telefono, info_extra, estado
 (98, 'Diego', 'Reyes', '+56931234567', 'Resultado electromiografía', 'pendiente'),
 (99, 'Josefa', 'Lara', '+56964567890', 'Control angiología', 'pendiente'),
 (100, 'Mateo', 'Solís', '+56997890123', 'Seguimiento neuropatía', 'pendiente');
+
+INSERT IGNORE INTO log_envios (paciente_id, nombre_paciente, numero_telefono, mensaje, plantilla_clave, estado_envio, respuesta) VALUES
+(1, 'David Araya', '+56993921740', '', 'default', 'enviado', 'respondio'),
+(2, 'Sergio Madariaga', '+56941508435', '', 'default', 'enviado', 'click'),
+(3, 'Pedro González', '+56987654321', '', 'default', 'enviado', 'baja'),
+(4, 'María López', '+56912345678', '', 'default', 'enviado', 'respondio'),
+(5, 'Juan Pérez', '+56976543210', '', 'default', 'enviado', 'click'),
+(6, 'Carlos Muñoz', '+56956781234', '', 'default', 'enviado', 'baja'),
+(7, 'Ana Rodríguez', '+56982345671', '', 'default', 'enviado', 'respondio'),
+(8, 'Luis Fernández', '+56934567892', '', 'default', 'enviado', 'click'),
+(9, 'Claudia Soto', '+56967890123', '', 'default', 'enviado', 'baja'),
+(10, 'Francisco Díaz', '+56990123456', '', 'default', 'enviado', 'respondio');
