@@ -122,7 +122,11 @@ function abrirDetalle(envio, detalle) {
   if (!detalle.length) {
     body.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#66757f;">Sin detalle individual registrado.</td></tr>';
   } else {
-    for (const d of detalle) {
+    const pesoRespuesta = { respondio: 0, click: 1, baja: 2, pendiente: 3 };
+    const orden = [...detalle].sort(
+      (x, y) => (pesoRespuesta[x.respuesta] ?? 3) - (pesoRespuesta[y.respuesta] ?? 3) || (x.id - y.id)
+    );
+    for (const d of orden) {
       const tr = document.createElement("tr");
       tr.innerHTML =
         `<td class="campo-nombre">${escaparHtml(d.nombre_paciente ?? "—")}</td>` +

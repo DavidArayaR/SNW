@@ -138,17 +138,10 @@ function render() {
         `<select class="estado-select" data-id="${p.id}" hidden>` +
           `<option value="pendiente"${p.estado === "pendiente" ? " selected" : ""}>pendiente</option>` +
           `<option value="enviado"${p.estado === "enviado" ? " selected" : ""}>enviado</option>` +
-          `<option value="error"${p.estado === "error" ? " selected" : ""}>error</option>` +
         `</select>` +
       `</td>` +
       `<td class="campo-respuesta">` +
-        `<span class="respuesta-badge respuesta-${escaparHtml(respuesta)}" data-editable-resp data-id="${p.id}" title="Click para cambiar respuesta">${escaparHtml(respuestaLabels[respuesta] ?? respuesta)}</span>` +
-        `<select class="respuesta-select" data-id="${p.id}" hidden>` +
-          `<option value="pendiente"${respuesta === "pendiente" ? " selected" : ""}>Sin respuesta</option>` +
-          `<option value="click"${respuesta === "click" ? " selected" : ""}>Hizo click</option>` +
-          `<option value="respondio"${respuesta === "respondio" ? " selected" : ""}>Respondió</option>` +
-          `<option value="baja"${respuesta === "baja" ? " selected" : ""}>Se dio de baja</option>` +
-        `</select>` +
+        `<span class="respuesta-badge respuesta-${escaparHtml(respuesta)}" title="${escaparHtml(respuestaLabels[respuesta] ?? respuesta)}">${escaparHtml(respuestaLabels[respuesta] ?? respuesta)}</span>` +
       `</td>` +
       `<td class="campo-info">${escaparHtml(p.info_extra ?? "—")}</td>` +
       `<td class="campo-fecha">${escaparHtml(p.actualizado)}</td>`;
@@ -291,77 +284,12 @@ tbodyEl.addEventListener("keydown", (e) => {
     sel.hidden = true;
     sel.blur();
   }
-  if (e.key === "Escape" && e.target.classList.contains("respuesta-select")) {
-    const sel = e.target;
-    const badge = tbodyEl.querySelector(`.respuesta-badge[data-id="${sel.dataset.id}"]`);
-    if (badge) badge.hidden = false;
-    sel.hidden = true;
-    sel.blur();
-  }
-});
-
-// Edición inline de respuesta
-tbodyEl.addEventListener("click", (e) => {
-  const badge = e.target.closest(".respuesta-badge[data-editable-resp]");
-  if (!badge) return;
-  e.stopPropagation();
-  const id = badge.dataset.id;
-  const sel = tbodyEl.querySelector(`.respuesta-select[data-id="${id}"]`);
-  if (!sel) return;
-  badge.hidden = true;
-  sel.hidden = false;
-  sel.focus();
-});
-
-tbodyEl.addEventListener("change", async (e) => {
-  const sel = e.target;
-  if (!sel.classList.contains("respuesta-select")) return;
-  e.stopPropagation();
-  const id = Number(sel.dataset.id);
-  const nuevaRespuesta = sel.value;
-  const paciente = pacientes.find((p) => p.id === id);
-  if (paciente && paciente.respuesta === nuevaRespuesta) {
-    const badge = tbodyEl.querySelector(`.respuesta-badge[data-id="${id}"]`);
-    if (badge) badge.hidden = false;
-    sel.hidden = true;
-    return;
-  }
-  sel.disabled = true;
-  try {
-    const amb = ambienteActual();
-    const res = await fetch(`api/pacientes/${id}/respuesta?ambiente=${encodeURIComponent(amb)}`, {
-      method: "PUT",
-      headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ respuesta: nuevaRespuesta }),
-    });
-    if (res.status === 401) { window.snwSalir(); return; }
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || "No se pudo actualizar la respuesta");
-    }
-    if (paciente) paciente.respuesta = nuevaRespuesta;
-    toast(`Respuesta actualizada`, "ok");
-    render();
-  } catch (err) {
-    toast(err.message || "No se pudo actualizar la respuesta", "error");
-    if (paciente) sel.value = paciente.respuesta || "pendiente";
-    const badge = tbodyEl.querySelector(`.respuesta-badge[data-id="${id}"]`);
-    if (badge) badge.hidden = false;
-    sel.hidden = true;
-    sel.disabled = false;
-  }
 });
 
 document.addEventListener("click", (e) => {
   if (e.target.closest(".estado-badge, .estado-select")) return;
   tbodyEl.querySelectorAll(".estado-select:not([hidden])").forEach((sel) => {
     const badge = tbodyEl.querySelector(`.estado-badge[data-id="${sel.dataset.id}"]`);
-    if (badge) badge.hidden = false;
-    sel.hidden = true;
-  });
-  if (e.target.closest(".respuesta-badge, .respuesta-select")) return;
-  tbodyEl.querySelectorAll(".respuesta-select:not([hidden])").forEach((sel) => {
-    const badge = tbodyEl.querySelector(`.respuesta-badge[data-id="${sel.dataset.id}"]`);
     if (badge) badge.hidden = false;
     sel.hidden = true;
   });

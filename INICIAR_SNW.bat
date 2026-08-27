@@ -12,19 +12,39 @@ REM Verificar que Python este instalado
 where python >nul 2>nul
 if errorlevel 1 goto SIN_PYTHON
 
+REM Detectar cliente MySQL de XAMPP
+set "MYSQL=D:\xampp\mysql\bin\mysql.exe"
+if not exist "%MYSQL%" set "MYSQL=mysql"
+
 REM Verificar MySQL (XAMPP) en el puerto 3306
-echo  [1/3] Verificando MySQL en 127.0.0.1:3306 ...
+echo  [1/4] Verificando MySQL en 127.0.0.1:3306 ...
 python -c "import socket;s=socket.socket();s.settimeout(2);s.connect(('127.0.0.1',3306));s.close()" >nul 2>nul
 if errorlevel 1 goto SIN_MYSQL
 echo  [OK] MySQL activo.
+
+REM Ejecutar scripts SQL de inicializacion
+echo  [2/4] Ejecutando scripts SQL de base de datos...
+"%MYSQL%" -u root -h 127.0.0.1 -P 3306 < "%~dp0sql\snw_pacientes.sql" >nul 2>nul
+if errorlevel 1 goto ERROR_SQL
+echo  [OK] snw_pacientes.sql cargado.
+"%MYSQL%" -u root -h 127.0.0.1 -P 3306 < "%~dp0sql\snw_pacientes_prod.sql" >nul 2>nul
+if errorlevel 1 goto ERROR_SQL
+echo  [OK] snw_pacientes_prod.sql cargado.
+"%MYSQL%" -u root -h 127.0.0.1 -P 3306 < "%~dp0sql\limpiar_estados.sql" >nul 2>nul
+if errorlevel 1 goto ERROR_SQL
+echo  [OK] Estados reiniciados (enviado -> pendiente) en ambas bases.
 goto CHECKEAR_DEPS
 
 :SIN_MYSQL
 echo  [!!] MySQL no responde. Te sugiero iniciar MySQL en XAMPP.
-echo       Puedes continuar igual, pero la app fallara al consultar pacientes.
+echo       No se ejecutaran los scripts SQL. La app fallara al consultar pacientes.
+goto CHECKEAR_DEPS
+
+:ERROR_SQL
+echo  [!!] Error al ejecutar los scripts SQL. Intenta iniciar MySQL en XAMPP y vuelve a ejecutar.
 
 :CHECKEAR_DEPS
-echo  [2/3] Verificando dependencias de Python ...
+echo  [3/4] Verificando dependencias de Python ...
 python -c "import fastapi, uvicorn, pymysql, dotenv" >nul 2>nul
 if errorlevel 1 goto INSTALAR_DEPS
 echo  [OK] Dependencias listas.
@@ -35,7 +55,7 @@ echo  Instalando dependencias...
 python -m pip install -r "%~dp0requirements.txt"
 
 :INICIAR
-echo  [3/3] Iniciando servidor en http://127.0.0.1:8000 ...
+echo  [4/4] Iniciando servidor en http://127.0.0.1:8000 ...
 timeout /t 2 /nobreak >nul
 start "" "http://127.0.0.1:8000"
 
