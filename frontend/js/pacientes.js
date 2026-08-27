@@ -19,6 +19,7 @@ let filtro = "";
 let filtroEstado = "todos";
 let filtroRespuesta = "todas";
 let seleccionados = new Set();
+let todoMarcado = false;
 let plantillaId = null;
 let timerPolling = null;
 let envioEnCurso = false;
@@ -159,6 +160,7 @@ function render() {
     chk.addEventListener("change", (e) => {
       if (esBaja) return;
       e.target.checked ? seleccionados.add(p.id) : seleccionados.delete(p.id);
+      if (!e.target.checked) todoMarcado = false;
       refrescarSeleccion();
     });
     tbodyEl.appendChild(tr);
@@ -213,20 +215,52 @@ function refrescarSeleccion(visibles = null) {
     idsVisibles.length > 0 && idsVisibles.every((id) => seleccionados.has(id));
 }
 
-chkTodos.addEventListener("change", () => {
+// Devuelve el Set de ids de los pacientes seleccionables (cumplen el filtro actual
+// y no están dados de baja).
+function idsSeleccionables() {
   const q = filtro.trim().toLowerCase();
-  const visibles = pacientes.filter(
-    (p) =>
-      (filtroEstado === "todos" || p.estado === filtroEstado) &&
-      (filtroRespuesta === "todas" || (p.respuesta || "pendiente") === filtroRespuesta) &&
-      (!q ||
-        [p.nombre, p.apellido, p.telefono, p.info_extra]
-          .filter(Boolean)
-          .some((v) => v.toLowerCase().includes(q)))
+  return new Set(
+    pacientes
+      .filter(
+        (p) =>
+          (filtroEstado === "todos" || p.estado === filtroEstado) &&
+          (filtroRespuesta === "todas" || (p.respuesta || "pendiente") === filtroRespuesta) &&
+          (p.respuesta || "pendiente") !== "baja" &&
+          !p.whatsapp_opt_out &&
+          (!q ||
+            [p.nombre, p.apellido, p.telefono, p.info_extra]
+              .filter(Boolean)
+              .some((v) => v.toLowerCase().includes(q)))
+      )
+      .map((p) => p.id)
   );
-  for (const p of visibles) {
-    if ((p.respuesta || "pendiente") === "baja" || p.whatsapp_opt_out) continue;
-    chkTodos.checked ? seleccionados.add(p.id) : seleccionados.delete(p.id);
+}
+
+// Mantiene la selección coherente con el filtro actual:
+// - Si el check "seleccionar todos" está marcado (todoMarcado), la selección
+//   se re-sincroniza para contener exactamente los pacientes del filtro actual.
+function sincronizarSeleccionConFiltro() {
+  const seleccionables = idsSeleccionables();
+
+  if (todoMarcado) {
+    // Re-seleccionar exactamente los del filtro actual.
+    seleccionados = new Set([...seleccionables]);
+  } else {
+    // Conservar solo los seleccionados que aún cumplen el filtro.
+    for (const id of [...seleccionados]) {
+      if (!seleccionables.has(id)) seleccionados.delete(id);
+    }
+  }
+}
+
+chkTodos.addEventListener("change", (e) => {
+  todoMarcado = e.target.checked;
+  if (todoMarcado) {
+    // Marcar todos los del filtro actual.
+    sincronizarSeleccionConFiltro();
+  } else {
+    // Desmarcar todos los del filtro actual.
+    for (const id of idsSeleccionables()) seleccionados.delete(id);
   }
   render();
 });
@@ -241,6 +275,7 @@ tbodyEl.addEventListener("click", (e) => {
   if (!chk || chk.disabled) return;
   chk.checked = !chk.checked;
   chk.checked ? seleccionados.add(Number(chk.dataset.id)) : seleccionados.delete(Number(chk.dataset.id));
+  if (!chk.checked) todoMarcado = false;
   refrescarSeleccion();
 });
 
@@ -322,6 +357,7 @@ document.addEventListener("click", (e) => {
 
 buscadorEl.addEventListener("input", () => {
   filtro = buscadorEl.value;
+  sincronizarSeleccionConFiltro();
   render();
 });
 
@@ -331,12 +367,12 @@ statsEl.addEventListener("click", (e) => {
   if (btn.dataset.estado) {
     filtroEstado = btn.dataset.estado;
     filtroRespuesta = "todas";
-    render();
   } else if (btn.dataset.respuesta) {
     filtroRespuesta = btn.dataset.respuesta;
     filtroEstado = "todos";
-    render();
   }
+  sincronizarSeleccionConFiltro();
+  render();
 });
 
 $("#btnActualizar").addEventListener("click", cargar);
