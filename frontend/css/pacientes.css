@@ -43,6 +43,13 @@
 .stat--enviado::before { background: #2fa96e; }
 .stat--error::before { background: var(--rojo); }
 .stat--invalido::before { background: #8e6bd8; }
+.stat--resp::before {
+  background: #66757f;
+}
+.stat--resp[data-respuesta="pendiente"]::before { background: #98a2ad; }
+.stat--resp[data-respuesta="click"]::before { background: #1a6fb5; }
+.stat--resp[data-respuesta="respondio"]::before { background: #1e7d4d; }
+.stat--resp[data-respuesta="baja"]::before { background: #b23b37; }
 
 .toolbar-pacientes {
   display: flex;

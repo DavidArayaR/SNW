@@ -17,6 +17,7 @@ let plantillas = [];
 let config = null;
 let filtro = "";
 let filtroEstado = "todos";
+let filtroRespuesta = "todas";
 let seleccionados = new Set();
 let plantillaId = null;
 let timerPolling = null;
@@ -117,9 +118,11 @@ async function cargar() {
 
 function render() {
   const q = filtro.trim().toLowerCase();
+  const resp = (p) => p.respuesta || "pendiente";
   const visibles = pacientes.filter(
     (p) =>
       (filtroEstado === "todos" || p.estado === filtroEstado) &&
+      (filtroRespuesta === "todas" || resp(p) === filtroRespuesta) &&
       (!q ||
         [p.nombre, p.apellido, p.telefono, p.info_extra]
           .filter(Boolean)
@@ -164,23 +167,32 @@ function render() {
     if (conteo[p.estado] !== undefined) conteo[p.estado]++;
   }
 
-  const activo = (estado) => (filtroEstado === estado ? " activo" : "");
-  statsEl.innerHTML =
-    `<button type="button" class="stat stat--total${activo("todos")}" data-estado="todos">Total <strong>${conteo.total}</strong></button>` +
-    `<button type="button" class="stat stat--pendiente${activo("pendiente")}" data-estado="pendiente">Pendientes <strong>${conteo.pendiente}</strong></button>` +
-    `<button type="button" class="stat stat--enviado${activo("enviado")}" data-estado="enviado">Enviados <strong>${conteo.enviado}</strong></button>` +
-    `<button type="button" class="stat stat--error${activo("error")}" data-estado="error">Errores <strong>${conteo.error}</strong></button>`;
+  const conteoResp = { todas: pacientes.length, pendiente: 0, click: 0, respondio: 0, baja: 0 };
+  for (const p of pacientes) {
+    const r = p.respuesta || "pendiente";
+    if (conteoResp[r] !== undefined) conteoResp[r]++;
+  }
 
-  document.querySelectorAll(".filtro-btn").forEach((b) => {
-    b.classList.toggle("activo", b.dataset.estado === filtroEstado);
-  });
+  const esActivoEstado = (estado) => filtroRespuesta === "todas" && filtroEstado === estado;
+  const esActivoResp = (resp) => filtroEstado === "todos" && filtroRespuesta === resp;
+  statsEl.innerHTML =
+    `<button type="button" class="stat stat--total${esActivoEstado("todos") || (filtroEstado === "todos" && filtroRespuesta === "todas") ? " activo" : ""}" data-estado="todos">Total <strong>${conteo.total}</strong></button>` +
+    `<button type="button" class="stat stat--pendiente${esActivoEstado("pendiente") ? " activo" : ""}" data-estado="pendiente">Pendientes <strong>${conteo.pendiente}</strong></button>` +
+    `<button type="button" class="stat stat--enviado${esActivoEstado("enviado") ? " activo" : ""}" data-estado="enviado">Enviados <strong>${conteo.enviado}</strong></button>` +
+    `<button type="button" class="stat stat--error${esActivoEstado("error") ? " activo" : ""}" data-estado="error">Errores <strong>${conteo.error}</strong></button>` +
+    `<button type="button" class="stat stat--resp${esActivoResp("pendiente") ? " activo" : ""}" data-respuesta="pendiente">Sin resp. <strong>${conteoResp.pendiente}</strong></button>` +
+    `<button type="button" class="stat stat--resp${esActivoResp("click") ? " activo" : ""}" data-respuesta="click">Click <strong>${conteoResp.click}</strong></button>` +
+    `<button type="button" class="stat stat--resp${esActivoResp("respondio") ? " activo" : ""}" data-respuesta="respondio">Respondió <strong>${conteoResp.respondio}</strong></button>` +
+    `<button type="button" class="stat stat--resp${esActivoResp("baja") ? " activo" : ""}" data-respuesta="baja">Baja <strong>${conteoResp.baja}</strong></button>`;
 
   refrescarSeleccion(visibles);
 }
 
 function refrescarSeleccion(visibles = null) {
   visibles = visibles ?? pacientes.filter(
-    (p) => filtroEstado === "todos" || p.estado === filtroEstado
+    (p) =>
+      (filtroEstado === "todos" || p.estado === filtroEstado) &&
+      (filtroRespuesta === "todas" || (p.respuesta || "pendiente") === filtroRespuesta)
   );
 
   contadorSel.textContent =
@@ -200,6 +212,7 @@ chkTodos.addEventListener("change", () => {
   const visibles = pacientes.filter(
     (p) =>
       (filtroEstado === "todos" || p.estado === filtroEstado) &&
+      (filtroRespuesta === "todas" || (p.respuesta || "pendiente") === filtroRespuesta) &&
       (!q ||
         [p.nombre, p.apellido, p.telefono, p.info_extra]
           .filter(Boolean)
@@ -305,22 +318,21 @@ buscadorEl.addEventListener("input", () => {
   render();
 });
 
-document.querySelectorAll(".filtro-btn").forEach((btn) => {
-  btn.addEventListener("click", () => setFiltro(btn.dataset.estado));
-});
-
 statsEl.addEventListener("click", (e) => {
   const btn = e.target.closest(".stat");
   if (!btn) return;
-  setFiltro(btn.dataset.estado);
+  if (btn.dataset.estado) {
+    filtroEstado = btn.dataset.estado;
+    filtroRespuesta = "todas";
+    render();
+  } else if (btn.dataset.respuesta) {
+    filtroRespuesta = btn.dataset.respuesta;
+    filtroEstado = "todos";
+    render();
+  }
 });
 
 $("#btnActualizar").addEventListener("click", cargar);
-
-function setFiltro(estado) {
-  filtroEstado = estado;
-  render();
-}
 
 btnIniciar.addEventListener("click", () => {
   if (!seleccionados.size) return;
