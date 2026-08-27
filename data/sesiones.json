@@ -143,10 +143,6 @@
     "rol": "usuario",
     "nombre": "Usuario Final"
   },
-  "ebb7ec0cbda449548e0c4cb7bcfeac53": {
-    "rol": "administrador",
-    "nombre": "Administrador"
-  },
   "ffb18d1d4a4444eeb225ef2b8833b58a": {
     "rol": "administrador",
     "nombre": "Administrador"
@@ -154,5 +150,9 @@
   "09f8df2c339742359ed686abb55237a1": {
     "rol": "administrador",
     "nombre": "Administrador"
+  },
+  "0dc64778247e4cb7b88f7d89d9c989fb": {
+    "rol": "usuario",
+    "nombre": "Usuario Final"
   }
 }

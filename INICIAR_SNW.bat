@@ -32,7 +32,7 @@ if errorlevel 1 goto ERROR_SQL
 echo  [OK] snw_pacientes_prod.sql cargado.
 "%MYSQL%" -u root -h 127.0.0.1 -P 3306 < "%~dp0sql\limpiar_estados.sql" >nul 2>nul
 if errorlevel 1 goto ERROR_SQL
-echo  [OK] Estados reiniciados (enviado -> pendiente) en ambas bases.
+echo  [OK] Estados reiniciados: de enviado a pendiente en ambas bases.
 goto CHECKEAR_DEPS
 
 :SIN_MYSQL
