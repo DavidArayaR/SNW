@@ -254,5 +254,9 @@
   "04fdbf132cee47eab6444f53fa762352": {
     "rol": "administrador",
     "nombre": "Administrador"
+  },
+  "11afffef749c4102a2cd2f4ec3e52713": {
+    "rol": "administrador",
+    "nombre": "Administrador"
   }
 }

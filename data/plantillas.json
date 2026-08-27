@@ -3,8 +3,8 @@
     "id": 1,
     "clave": "default",
     "nombre": "Default",
-    "texto": "Hola, {nombre} {apellido} 👋\n\nTe recordamos que tienes pendiente agendar tu hora para tu próxima atención.\n\n📅 Agenda tu cita con anticipación para asegurar tu horario.\n\n📞 Si necesitas ayuda para agendar, comunícate con nosotros.\n\n¡Te esperamos! 🏥✨",
-    "actualizada": 1787772263291
+    "texto": "Hola, {nombre} {apellido} 👋\n\nTe recordamos que tienes pendiente agendar tu hora para tu próxima atención.\n\n📅 Agenda tu cita con anticipación para asegurar tu horario.\n\n📞 Si necesitas ayuda para agendar, comunícate con nosotros.\nholaoaoaoa\n¡Te esperamos! 🏥✨",
+    "actualizada": 1787849017136
   },
   {
     "id": 4,
