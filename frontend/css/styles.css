@@ -88,7 +88,13 @@ button { font: inherit; cursor: pointer; }
   transition: background .15s, opacity .15s;
 }
 .nav a:hover { opacity: 1; background: rgba(255, 255, 255, .12); }
-.nav a.activo { background: rgba(255, 255, 255, .2); opacity: 1; }
+.nav a.activo {
+  background: #fff;
+  color: var(--verde-oscuro);
+  opacity: 1;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .15);
+}
 
 .hamburger {
   display: none;
