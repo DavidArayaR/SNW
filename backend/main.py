@@ -628,8 +628,8 @@ def crear_envio_batch(base_datos, plantilla_clave, plantilla_nombre, total, ambi
     try:
         with conectar(ambiente) as conn, conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO envios (base_datos, plantilla_clave, plantilla_nombre, total_pacientes)"
-                " VALUES (%s, %s, %s, %s)",
+                "INSERT INTO envios (base_datos, plantilla_clave, plantilla_nombre, total_pacientes, estado)"
+                " VALUES (%s, %s, %s, %s, 'completado')",
                 (base_datos, plantilla_clave, plantilla_nombre, total),
             )
             conn.commit()
@@ -639,16 +639,23 @@ def crear_envio_batch(base_datos, plantilla_clave, plantilla_nombre, total, ambi
         return None
 
 
-def actualizar_envio_batch(envio_id, ambiente, enviados=0, fallidos=0, invalidos=0) -> None:
+def actualizar_envio_batch(envio_id, ambiente, enviados=0, fallidos=0, invalidos=0, estado=None) -> None:
     if envio_id is None:
         return
     try:
         with conectar(ambiente) as conn, conn.cursor() as cur:
-            cur.execute(
-                "UPDATE envios SET enviados = enviados + %s, fallidos = fallidos + %s,"
-                " invalidos = invalidos + %s WHERE id = %s",
-                (enviados, fallidos, invalidos, envio_id),
-            )
+            if estado:
+                cur.execute(
+                    "UPDATE envios SET enviados = enviados + %s, fallidos = fallidos + %s,"
+                    " invalidos = invalidos + %s, estado = %s WHERE id = %s",
+                    (enviados, fallidos, invalidos, estado, envio_id),
+                )
+            else:
+                cur.execute(
+                    "UPDATE envios SET enviados = enviados + %s, fallidos = fallidos + %s,"
+                    " invalidos = invalidos + %s WHERE id = %s",
+                    (enviados, fallidos, invalidos, envio_id),
+                )
             conn.commit()
     except Exception as e:
         print(f"[ENVIO] No se pudo actualizar batch: {e}")
@@ -683,6 +690,7 @@ def procesar_job(job_id: str) -> None:
             job["actual"] = ""
             job["estado"] = "cancelado"
             job["detalle"] = "Cancelado por el usuario"
+            actualizar_envio_batch(envio_id, amb, enviados=job["enviados"], fallidos=job["fallidos"], estado="cancelado")
             break
         # Si está pausado, esperar (sin enviar) hasta reanudar o cancelar
         while job.get("pausado") and not job.get("cancelado"):
@@ -693,6 +701,7 @@ def procesar_job(job_id: str) -> None:
             job["actual"] = ""
             job["estado"] = "cancelado"
             job["detalle"] = "Cancelado por el usuario"
+            actualizar_envio_batch(envio_id, amb, enviados=job["enviados"], fallidos=job["fallidos"], estado="cancelado")
             break
         job["actual"] = d["nombre"]
         ok, error = canal.enviar(d["telefono"], d["mensaje"])
@@ -1054,7 +1063,7 @@ def reanudar_job(job_id: str, sesion: dict = Depends(sesion_actual)):
 def listar_historial(q: str | None = Query(None), estado: str | None = Query(None),
                      ambiente: str = Query("produccion"), sesion: dict = Depends(sesion_actual)):
     sql = ("SELECT id, base_datos, plantilla_clave, plantilla_nombre, total_pacientes,"
-           " enviados, fallidos, invalidos, fecha_hora FROM envios")
+           " enviados, fallidos, invalidos, estado, fecha_hora FROM envios")
     condiciones: list[str] = []
     args: list = []
 

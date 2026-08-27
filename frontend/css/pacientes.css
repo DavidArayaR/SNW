@@ -178,7 +178,24 @@
   margin-bottom: 6px;
 }
 
-.modal__card--detalle { max-width: 560px; }
+.modal__card--detalle {
+  max-width: 560px;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.modal__card--detalle .tabla-wrap {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+.modal__card--detalle .modal__actions {
+  flex-shrink: 0;
+  padding-top: 14px;
+  margin-top: 4px;
+  border-top: 1px solid #edf0f3;
+}
 
 .detalle-fila {
   display: flex;
@@ -335,6 +352,17 @@ td.campo-id { color: var(--texto-suave); font-family: Consolas, monospace; }
 .campo-num--ok { color: #1e7d4d; }
 .campo-num--error { color: #b23b37; }
 .campo-num--invalido { color: #5c3fa8; }
+
+.estado-envio {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: .75rem;
+  font-weight: 700;
+  letter-spacing: .02em;
+}
+.estado-envio--completado { background: #e5f6ec; color: #1e7d4d; border: 1px solid #bfe5cf; }
+.estado-envio--cancelado { background: #fdecec; color: #b23b37; border: 1px solid #eec2c1; }
 
 .btn--sm { padding: 4px 10px; font-size: .78rem; border-radius: 6px; }
 

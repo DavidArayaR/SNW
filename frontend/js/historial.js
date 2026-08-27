@@ -61,10 +61,13 @@ function render() {
     const enviados = r.enviados ?? 0;
     const fallidos = r.fallidos ?? 0;
     const invalidos = r.invalidos ?? 0;
+    const estado = r.estado || "completado";
+    const estadoLabel = estado === "cancelado" ? "Cancelado" : "Completado";
     tr.innerHTML =
       `<td class="campo-fecha">${escaparHtml(r.fecha)}</td>` +
       `<td><span class="badge badge--db">${escaparHtml(r.base_datos ?? "—")}</span></td>` +
       `<td>${escaparHtml(r.plantilla_nombre ?? r.plantilla_clave ?? "—")}</td>` +
+      `<td><span class="estado-envio estado-envio--${escaparHtml(estado)}">${escaparHtml(estadoLabel)}</span></td>` +
       `<td class="campo-num">${total}</td>` +
       `<td class="campo-num campo-num--ok">${enviados}</td>` +
       `<td class="campo-num campo-num--error">${fallidos}</td>` +
@@ -111,6 +114,7 @@ function abrirDetalle(envio, detalle) {
     ["Enviados", envio?.enviados ?? 0],
     ["Fallidos", envio?.fallidos ?? 0],
     ["Inválidos", envio?.invalidos ?? 0],
+    ["Estado", envio?.estado === "cancelado" ? "Cancelado" : "Completado"],
   ];
 
   $("#detalleCampos").innerHTML = campos
