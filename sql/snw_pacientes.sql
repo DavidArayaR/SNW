@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS pacientes (
   telefono VARCHAR(20) NOT NULL,
   info_extra VARCHAR(255) DEFAULT NULL,
   estado ENUM('pendiente','enviado','error') NOT NULL DEFAULT 'pendiente',
+  whatsapp_opt_out TINYINT(1) NOT NULL DEFAULT 0,
   fecha_actualizacion DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
@@ -34,8 +35,18 @@ CREATE TABLE IF NOT EXISTS log_envios (
   plantilla_clave VARCHAR(50) DEFAULT NULL,
   estado_envio ENUM('enviado','error','numero_invalido') NOT NULL,
   respuesta ENUM('pendiente','click','respondio','baja') DEFAULT 'pendiente',
+  whatsapp_message_id VARCHAR(255) DEFAULT NULL,
+  estado_whatsapp ENUM('sent','delivered','read','failed') DEFAULT NULL,
   descripcion_error VARCHAR(255) DEFAULT NULL,
   fecha_hora DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS whatsapp_eventos (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  clave VARCHAR(64) NOT NULL,
+  payload TEXT,
+  recibido DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_clave (clave)
 );
 
 INSERT IGNORE INTO pacientes (id, nombre, apellido, telefono, info_extra, estado) VALUES

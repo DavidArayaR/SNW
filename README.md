@@ -174,6 +174,99 @@ Se crean automáticamente al iniciar el backend. Los scripts SQL en `sql/` usan 
 | PUT | `/api/configuracion` | Actualizar `.env` en caliente |
 | GET | `/api/configuracion/stats?ambiente=` | Estadísticas (total, pendientes) |
 
+### Webhook de WhatsApp (Meta)
+
+| Método | Endpoint | Descripción |
+|---|---|---|
+| GET | `/api/whatsapp/webhook` | Verificación inicial del webhook (`hub.verify_token`) |
+| POST | `/api/whatsapp/webhook` | Recepción de eventos (estados y mensajes) |
+
+## Integración con WhatsApp Business API
+
+La capa de integración vive en `backend/whatsapp_service.py` (servicio + cliente API +
+procesador de eventos) y `backend/whatsapp_webhook.py` (router). Está separada de la
+lógica de negocio del módulo de mensajería.
+
+### Envío de mensajes
+
+- Si la plantilla del sistema tiene `whatsapp_template` (template aprobado de Meta), se
+  envía como `type: "template"` con idioma y variables.
+- Si no, se envía como texto libre (`type: "text"`), que **solo es válido dentro de la
+  ventana de 24 h** en la que el cliente escribió al negocio.
+
+### Estados de WhatsApp
+
+Al enviar se guarda el `whatsapp_message_id` en `log_envios`. Los cambios de estado
+(`sent` → `delivered` → `read` → `failed`) llegan por webhook y actualizan la columna
+`estado_whatsapp` del mismo registro. No hay sistema de seguimiento paralelo.
+
+### Respuestas entrantes
+
+Cuando un cliente responde, el webhook busca al paciente por teléfono, guarda la respuesta
+en `log_envios` con `respuesta = 'respondio'` y actualiza la última interacción.
+
+### Detección de "no respondió"
+
+WhatsApp **no entrega** un evento `NO_RESPONDIÓ`. El sistema lo calcula así:
+
+1. Al enviar se guarda la **fecha de envío** (`log_envios.fecha_hora`).
+2. Se define una **fecha límite** (p. ej. 24/48 h) como plazo de respuesta.
+3. Si existe una **respuesta** del paciente dentro del plazo → `respondió`.
+4. Si no existe respuesta y el plazo ya venció → `no respondió`.
+5. Se usa el historial de interacciones para no contar mensajes salientes como respuestas.
+
+### Sistema de baja (opt-out)
+
+Cuando un cliente responde "BAJA" (o palabras como `no`, `stop`, `baja`, `cancelar`),
+el webhook:
+- Marca `pacientes.whatsapp_opt_out = 1`.
+- Registra `respuesta = 'baja'` en `log_envios`.
+- A partir de ese momento el sistema **excluye al paciente** de cualquier envío.
+
+La detección es por contenido del mensaje; Meta no entrega un evento explícito de baja.
+
+### Diferencia técnica
+
+| Situación | Cómo se detecta |
+|---|---|
+| Cliente responde BAJA | Mensaje entrante con keyword de opt-out → `whatsapp_opt_out=1` |
+| Cliente no responde | Ausencia de respuesta tras la fecha límite |
+| Mensaje fallido | Evento de estado `failed` de Meta |
+| Número inválido | Validación de formato al enviar (`numero_invalido`) |
+| Cliente bloquea la cuenta | Evento de error/no entregado de Meta (no hay evento explícito de bloqueo) |
+| Mensaje no entregado | Evento de estado `failed`/`undelivered` de Meta |
+
+### Idempotencia del webhook
+
+Meta puede reenviar eventos. Cada payload se guarda en `whatsapp_eventos` con una clave
+única (hash de `entry + timestamp`). Si la clave ya existe, el evento se omite.
+
+### Configuración de Meta (paso a paso)
+
+1. **Meta for Developers** → crea una App tipo **Business**.
+2. Agrega el producto **WhatsApp** → se crea la **WhatsApp Business Account (WABA)**.
+3. Añade y verifica el **número de teléfono** del negocio.
+4. En **API Setup** copia:
+   - `Phone number ID` → `SNW_WA_PHONE_ID`
+   - `WhatsApp Business Account ID` → `SNW_WA_BUSINESS_ACCOUNT_ID`
+   - `Access Token` → `SNW_WA_TOKEN`
+5. Crea un **template de mensaje** en **Message Templates** y deja tu propia palabra
+   como verify token → `SNW_WA_VERIFY_TOKEN`.
+6. Configura el **Webhook** en la App con la URL pública:
+   `https://TU-DOMINIO/api/whatsapp/webhook` y el **Verify Token**.
+7. Suscribe el webhook al evento **`messages`** (mensajes) y **`message_template_status_update`**
+   si necesitas saber el estado de tus templates.
+8. Pon `SNW_METODO_ENVIO=api_oficial` en `.env`.
+
+> **Nota:** Meta exige que el webhook esté en una URL **HTTPS pública** y accesible desde
+> internet. En local, usa un túnel (ngrok) para probarlo.
+
+### Opciones de "no respondió" (config adicional)
+
+Puedes ampliar la detección con un job programado que recorra los envíos sin respuesta
+y marque `no_respondio` pasadas N horas (ej. 24 h). Eso depende de la lógica de negocio,
+no de Meta.
+
 ## Módulo de envío
 
 - **Pacientes** (`pacientes.html`): seleccionar pacientes con checkboxes → elegir plantilla → "Iniciar envío"
@@ -181,6 +274,7 @@ Se crean automáticamente al iniciar el backend. Los scripts SQL en `sql/` usan 
 - **Producción**: antes de enviar, se envía correo de confirmación al supervisor con botones **Confirmar** y **Rechazar**
 - **Desarrollo**: envío directo, restringido a números en `SNW_NUMEROS_PRUEBA_DEV`
 - **Motor intercambiable**: `simulado`, `whatsapp_web` (abre wa.me), `api_oficial` (Graph API Meta)
+- **Capa de integración**: `whatsapp_service.py` + `whatsapp_webhook.py` (envío, estados, respuestas, opt-out, idempotencia)
 - **Cola asíncrona**: envío en segundo plano con progreso en vivo
 - **Historial batch**: cada envío se registra en `envios` (una fila por "Iniciar envío"); sin nombres de pacientes
 

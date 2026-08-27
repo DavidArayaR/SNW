@@ -22,6 +22,7 @@ from pydantic import BaseModel
 
 from db import conectar, entorno_valido, nombre_base
 from motor_envio import obtener_canal
+from whatsapp_webhook import router as whatsapp_router
 """
 from backend.db import conectar
 from backend.motor_envio import obtener_canal"""
@@ -58,6 +59,7 @@ def normalizar_telefono(crudo: str) -> str | None:
     return None
 
 app = FastAPI(title="SNW - API de Notificaciones WhatsApp")
+app.include_router(whatsapp_router)
 
 
 def _ejecutar_sql_init():
@@ -250,6 +252,7 @@ def listar_pacientes(q: str | None = Query(None), ambiente: str = Query("producc
         " COALESCE(p.info_extra, '') AS info_extra,"
         " p.fecha_actualizacion,"
         " COALESCE(l.respuesta, 'pendiente') AS respuesta,"
+        " p.whatsapp_opt_out,"
         " l.id AS ultimo_log_id FROM pacientes p"
         " LEFT JOIN log_envios l ON l.id = ("
         "   SELECT l2.id FROM log_envios l2"
@@ -473,8 +476,13 @@ def probar_api_wa(body: PruebaWAIn, sesion: dict = Depends(solo_admin)):
     if telefono is None:
         raise HTTPException(400, detail=f"Formato de teléfono inválido: '{body.telefono}'")
 
-    ok, error = canal.enviar(telefono, body.mensaje)
-    return {"ok": ok, "telefono": telefono, "error": error}
+    resultado = canal.enviar(telefono, body.mensaje)
+    if len(resultado) == 3:
+        ok, message_id, error = resultado
+    else:
+        ok, error = resultado
+        message_id = None
+    return {"ok": ok, "telefono": telefono, "error": error, "message_id": message_id}
 
 
 JOBS: dict = {}
@@ -611,13 +619,15 @@ def actualizar_telefono(paciente_id: int, telefono: str, ambiente: str) -> None:
 
 
 def registrar_historial(paciente_id, nombre, telefono, clave_plantilla, mensaje, estado, error=None,
-                        ambiente="produccion", envio_id=None) -> None:
+                        ambiente="produccion", envio_id=None, whatsapp_message_id=None) -> None:
     try:
         with conectar(ambiente) as conn, conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO log_envios (envio_id, paciente_id, nombre_paciente, numero_telefono, mensaje,"
-                " plantilla_clave, estado_envio, descripcion_error) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-                (envio_id, paciente_id, nombre, telefono, mensaje, clave_plantilla, estado, error),
+                " plantilla_clave, estado_envio, descripcion_error, whatsapp_message_id, estado_whatsapp)"
+                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (envio_id, paciente_id, nombre, telefono, mensaje, clave_plantilla, estado, error,
+                 whatsapp_message_id, "sent" if estado == "enviado" and whatsapp_message_id else None),
             )
             conn.commit()
     except Exception as e:
@@ -667,6 +677,7 @@ def procesar_job(job_id: str) -> None:
     cfg = leer_config()
     canal = obtener_canal(cfg)
     clave = job.get("plantilla", {}).get("clave")
+    plantilla_datos = job.get("plantilla")
     envio_id = job.get("envio_id")
 
     if canal is None or not canal.disponible():
@@ -704,7 +715,13 @@ def procesar_job(job_id: str) -> None:
             actualizar_envio_batch(envio_id, amb, enviados=job["enviados"], fallidos=job["fallidos"], estado="cancelado")
             break
         job["actual"] = d["nombre"]
-        ok, error = canal.enviar(d["telefono"], d["mensaje"])
+        resultado = canal.enviar(d["telefono"], d["mensaje"], plantilla=plantilla_datos)
+        # Unificar: (ok, message_id, error) o (ok, error) según el motor
+        if len(resultado) == 3:
+            ok, message_id, error = resultado
+        else:
+            ok, error = resultado
+            message_id = None
         actualizar_estado_paciente(d["id"], "enviado" if ok else "error", amb)
 
         if ok:
@@ -712,10 +729,12 @@ def procesar_job(job_id: str) -> None:
         else:
             job["fallidos"] += 1
             job["errores"].append({"id": d["id"], "telefono": d["telefono"], "detalle": error})
+            message_id = None
 
         registrar_historial(d["id"], d["nombre"], d["telefono"], clave,
                             d["mensaje"], "enviado" if ok else "error", error,
-                            ambiente=amb, envio_id=envio_id)
+                            ambiente=amb, envio_id=envio_id,
+                            whatsapp_message_id=message_id)
 
         if i < total - 1 and intervalo > 0:
             time.sleep(intervalo)
@@ -749,7 +768,8 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         base_select = (
             "SELECT p.id, p.nombre, p.apellido, p.telefono,"
             " COALESCE(p.info_extra, '') AS info_extra,"
-            " COALESCE(l.respuesta, 'pendiente') AS respuesta"
+            " COALESCE(l.respuesta, 'pendiente') AS respuesta,"
+            " p.whatsapp_opt_out"
             " FROM pacientes p"
             " LEFT JOIN log_envios l ON l.id = ("
             "   SELECT l2.id FROM log_envios l2"
@@ -759,7 +779,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         if body.pacientes:
             placeholders = ", ".join("%s" for _ in body.pacientes)
             cur.execute(
-                base_select + f" WHERE p.id IN ({placeholders})",
+                base_select + f" WHERE p.id IN ({placeholders}) AND p.whatsapp_opt_out = 0",
                 tuple(body.pacientes),
             )
         else:
@@ -767,10 +787,10 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
                 # En desarrollo se puede reenviar sin importar el estado del paciente;
                 # la única restricción real sigue siendo el filtro de números autorizados,
                 # que se aplica más abajo en este mismo endpoint.
-                cur.execute(base_select + " ORDER BY p.id")
+                cur.execute(base_select + " WHERE p.whatsapp_opt_out = 0 ORDER BY p.id")
             else:
                 cur.execute(
-                    base_select + " WHERE estado = 'pendiente' ORDER BY p.id"
+                    base_select + " WHERE estado = 'pendiente' AND p.whatsapp_opt_out = 0 ORDER BY p.id"
                 )
         filas = cur.fetchall()
 
@@ -781,8 +801,8 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         telefono_crudo = (p.get("telefono") or "").strip()
         nombre_completo = " ".join(x for x in [p.get("nombre"), p.get("apellido")] if x)
 
-        # Pacientes dados de baja: nunca se les envían mensajes
-        if (p.get("respuesta") or "pendiente") == "baja":
+        # Pacientes dados de baja o con opt-out: nunca se les envían mensajes
+        if p.get("whatsapp_opt_out") or (p.get("respuesta") or "pendiente") == "baja":
             rechazados.append({"id": p["id"], "nombre": nombre_completo, "telefono": telefono_crudo,
                                "motivo": "Paciente se dio de baja"})
             continue
@@ -864,7 +884,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         "errores": [],
         "detalle": "",
         "ambiente": amb,
-        "plantilla": {"id": plantilla["id"], "clave": plantilla["clave"]},
+        "plantilla": plantilla,
         "destinatarios": destinatarios,
         "envio_id": envio_id,
         "pausado": False,

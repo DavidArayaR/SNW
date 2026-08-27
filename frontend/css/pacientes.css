@@ -382,6 +382,9 @@ td.campo-id { color: var(--texto-suave); font-family: Consolas, monospace; }
 .respuesta-respondio { background: #e5f6ec; color: #1e7d4d; border: 1px solid #bfe5cf; }
 .respuesta-baja { background: #fdecec; color: #b23b37; border: 1px solid #eec2c1; }
 
+tr.es-baja { opacity: .55; }
+tr.es-baja .col-check input[type=checkbox] { cursor: not-allowed; }
+
 .respuesta-select {
   padding: 3px 10px;
   border-radius: 999px;

@@ -5,6 +5,8 @@ import urllib.parse
 import urllib.request
 import webbrowser
 
+from whatsapp_service import WhatsAppService
+
 GRAPH_URL = "https://graph.facebook.com/v21.0/{phone_id}/messages"
 
 
@@ -14,10 +16,10 @@ class MotorSimulado:
     def disponible(self) -> bool:
         return True
 
-    def enviar(self, telefono: str, mensaje: str):
+    def enviar(self, telefono: str, mensaje: str, plantilla: dict | None = None):
         vista = mensaje.replace("\n", " ")[:60]
         print(f"[MOTOR {self.nombre}] -> {telefono}: {vista}...")
-        return True, None
+        return True, None, None
 
 
 class MotorWhatsAppWeb:
@@ -26,58 +28,38 @@ class MotorWhatsAppWeb:
     def disponible(self) -> bool:
         return True
 
-    def enviar(self, telefono: str, mensaje: str):
+    def enviar(self, telefono: str, mensaje: str, plantilla: dict | None = None):
         numero = telefono.lstrip("+")
         url = f"https://web.whatsapp.com/send?phone={numero}&text={urllib.parse.quote(mensaje)}"
         if webbrowser.open(url):
-            return True, None
-        return False, "No se pudo abrir WhatsApp Web en el navegador"
+            return True, None, None
+        return False, "No se pudo abrir WhatsApp Web en el navegador", None
 
 
 class MotorApiOficial:
     nombre = "api_oficial"
 
     def __init__(self):
-        self.token = os.getenv("SNW_WA_TOKEN", "").strip()
-        self.phone_id = os.getenv("SNW_WA_PHONE_ID", "").strip()
+        self.servicio = WhatsAppService()
 
     def disponible(self) -> bool:
-        return bool(self.token) and bool(self.phone_id)
+        return self.servicio.configurada()
 
-    def enviar(self, telefono: str, mensaje: str):
-        url = GRAPH_URL.format(phone_id=self.phone_id)
-        payload = json.dumps({
-            "messaging_product": "whatsapp",
-            "recipient_type": "individual",
-            "to": telefono.lstrip("+"),
-            "type": "text",
-            "text": {"preview_url": False, "body": mensaje},
-        }).encode("utf-8")
+    def enviar(self, telefono: str, mensaje: str, plantilla: dict | None = None):
+        """Envía vía API oficial. Devuelve (ok, message_id, error).
 
-        peticion = urllib.request.Request(
-            url,
-            data=payload,
-            headers={
-                "Authorization": f"Bearer {self.token}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
+        Si la plantilla lleva 'whatsapp_template' configurado se envía como
+        template aprobado; si no, texto libre dentro de la ventana de 24h.
+        """
+        import asyncio
 
         try:
-            with urllib.request.urlopen(peticion, timeout=30) as resp:
-                datos = json.loads(resp.read().decode("utf-8"))
-            if datos.get("messages"):
-                return True, None
-            return False, f"Respuesta inesperada de la API: {json.dumps(datos)[:200]}"
-        except urllib.error.HTTPError as e:
-            try:
-                detalle = json.loads(e.read().decode("utf-8")).get("error", {}).get("message", "")
-            except Exception:
-                detalle = ""
-            return False, f"Error HTTP {e.code}: {detalle or 'sin detalle'}"
+            ok, message_id, error, _ = asyncio.run(
+                self.servicio.enviar(telefono, mensaje, plantilla=plantilla)
+            )
         except Exception as e:
-            return False, f"Fallo de conexión con la API de Meta: {e}"
+            return False, None, f"Fallo de conexión con la API de Meta: {e}"
+        return ok, message_id, error
 
 
 _MOTORES = {

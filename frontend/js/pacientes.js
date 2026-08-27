@@ -135,9 +135,11 @@ function render() {
     const nombreCompleto = [p.nombre, p.apellido].filter(Boolean).join(" ");
     const tr = document.createElement("tr");
     const respuesta = p.respuesta || "pendiente";
+    const esBaja = respuesta === "baja" || !!p.whatsapp_opt_out;
     const respuestaLabels = { pendiente: "Sin respuesta", click: "Hizo click", respondio: "Respondió", baja: "Se dio de baja" };
+    tr.classList.toggle("es-baja", esBaja);
     tr.innerHTML =
-      `<td class="col-check"><input type="checkbox" data-id="${p.id}" ${seleccionados.has(p.id) ? "checked" : ""}></td>` +
+      `<td class="col-check"><input type="checkbox" data-id="${p.id}" ${seleccionados.has(p.id) ? "checked" : ""} ${esBaja ? "disabled" : ""} title="${esBaja ? "No se puede enviar mensaje (se dio de baja)" : ""}"></td>` +
       `<td class="campo-id">${p.id}</td>` +
       `<td class="campo-nombre">${escaparHtml(nombreCompleto)}</td>` +
       `<td class="campo-tel">${escaparHtml(p.telefono)}</td>` +
@@ -153,7 +155,9 @@ function render() {
       `</td>` +
       `<td class="campo-info">${escaparHtml(p.info_extra ?? "—")}</td>` +
       `<td class="campo-fecha">${escaparHtml(p.actualizado)}</td>`;
-    tr.querySelector('input[type="checkbox"]').addEventListener("change", (e) => {
+    const chk = tr.querySelector('input[type="checkbox"]');
+    chk.addEventListener("change", (e) => {
+      if (esBaja) return;
       e.target.checked ? seleccionados.add(p.id) : seleccionados.delete(p.id);
       refrescarSeleccion();
     });
@@ -202,7 +206,9 @@ function refrescarSeleccion(visibles = null) {
   btnIniciar.textContent =
     seleccionados.size > 0 ? `Iniciar envío (${seleccionados.size})` : "Iniciar envío";
 
-  const idsVisibles = visibles.map((p) => p.id);
+  const idsVisibles = visibles
+    .filter((p) => (p.respuesta || "pendiente") !== "baja" && !p.whatsapp_opt_out)
+    .map((p) => p.id);
   chkTodos.checked =
     idsVisibles.length > 0 && idsVisibles.every((id) => seleccionados.has(id));
 }
@@ -219,6 +225,7 @@ chkTodos.addEventListener("change", () => {
           .some((v) => v.toLowerCase().includes(q)))
   );
   for (const p of visibles) {
+    if ((p.respuesta || "pendiente") === "baja" || p.whatsapp_opt_out) continue;
     chkTodos.checked ? seleccionados.add(p.id) : seleccionados.delete(p.id);
   }
   render();
@@ -231,7 +238,7 @@ tbodyEl.addEventListener("click", (e) => {
   const tr = e.target.closest("tr");
   if (!tr || !tbodyEl.contains(tr)) return;
   const chk = tr.querySelector("input[type=checkbox]");
-  if (!chk) return;
+  if (!chk || chk.disabled) return;
   chk.checked = !chk.checked;
   chk.checked ? seleccionados.add(Number(chk.dataset.id)) : seleccionados.delete(Number(chk.dataset.id));
   refrescarSeleccion();
