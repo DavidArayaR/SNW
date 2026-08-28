@@ -490,11 +490,17 @@ JOB_LOCK = threading.Lock()
 PENDIENTES: dict = {}
 
 
+def url_base() -> str:
+    base = os.getenv("SNW_URL_BASE", "").strip().rstrip("/")
+    return base or "http://localhost:8000"
+
+
 def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, plantilla_texto: str, ambiente: str) -> bool:
     emisor = os.getenv("DIRECCION_CORREO_EMISOR", "").strip()
     destino = os.getenv("DIRECCION_CORREO_DESTINO", "").strip()
+    base = url_base()
     if not emisor or not destino:
-        print(f"[CORREO] Emisor o destino no configurado. Token {token} -> http://localhost:8000/api/notificaciones/confirmar/{token}")
+        print(f"[CORREO] Emisor o destino no configurado. Token {token} -> {base}/api/notificaciones/confirmar/{token}")
         return False
     host = os.getenv("SMTP_HOST", "").strip()
     port = int(os.getenv("SMTP_PORT", "587") or 587)
@@ -504,11 +510,11 @@ def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, p
 
     if not host or not pwd:
         # Modo simulado: logear URL para pruebas sin SMTP real
-        print(f"[CORREO SIMULADO] Para {destino} desde {emisor}: confirmar http://localhost:8000/api/notificaciones/confirmar/{token} | rechazar http://localhost:8000/api/notificaciones/rechazar/{token} - {total} personas, plantilla '{plantilla_nombre}', base {ambiente}")
+        print(f"[CORREO SIMULADO] Para {destino} desde {emisor}: confirmar {base}/api/notificaciones/confirmar/{token} | rechazar {base}/api/notificaciones/rechazar/{token} - {total} personas, plantilla '{plantilla_nombre}', base {ambiente}")
         return True
 
-    confirm_url = f"http://localhost:8000/api/notificaciones/confirmar/{token}"
-    reject_url = f"http://localhost:8000/api/notificaciones/rechazar/{token}"
+    confirm_url = f"{base}/api/notificaciones/confirmar/{token}"
+    reject_url = f"{base}/api/notificaciones/rechazar/{token}"
     subject = f"[SNW] Confirmar envío masivo - {total} destinatarios"
     html = f"""
     <html><body style="font-family: Arial, sans-serif; color: #24303c;">
@@ -863,7 +869,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         _enviar_correo_confirmacion(token, len(destinatarios), plantilla["nombre"], plantilla["texto"], amb)
         return {"requiere_confirmacion": True, "solicitud_id": token, "total": len(destinatarios),
                 "ambiente": amb, "rechazados": rechazados,
-                "confirm_url": f"/api/notificaciones/confirmar/{token}"}
+                "confirm_url": f"{url_base()}/api/notificaciones/confirmar/{token}"}
 
     envio_id = crear_envio_batch(nombre_base(amb), plantilla["clave"], plantilla["nombre"],
                                  len(destinatarios) + len(rechazados), amb)
@@ -926,7 +932,7 @@ def formulario_rechazo(token: str):
   <label style="display:block; font-size:14px; color:#66757f; margin:14px 0 6px;">Comentario para el enviador (opcional):</label>
   <textarea name="comentario" rows="4" style="width:100%; padding:10px; font:inherit; font-size:14px; border:1px solid #dde1e6; border-radius:8px;" placeholder="Ej: falta adjuntar el consentimiento firmado."></textarea>
   <div style="margin-top:20px; text-align:right;">
-    <button type="button" onclick="window.location.href='http://localhost:8000/api/notificaciones/confirmar/{token}'" style="background:#fafbfc; color:#24303c; border:1px solid #dde1e6; padding:11px 20px; border-radius:10px; font-weight:600; cursor:pointer; font-family:inherit;">Volver</button>
+    <button type="button" onclick="window.location.href='{url_base()}/api/notificaciones/confirmar/{token}'" style="background:#fafbfc; color:#24303c; border:1px solid #dde1e6; padding:11px 20px; border-radius:10px; font-weight:600; cursor:pointer; font-family:inherit;">Volver</button>
     <button type="submit" style="background:#b23b37; color:#fff; border:none; padding:11px 22px; border-radius:10px; font-weight:700; cursor:pointer; font-family:inherit;">Rechazar envío</button>
   </div>
 </form>

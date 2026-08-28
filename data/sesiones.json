@@ -282,5 +282,33 @@
   "25891863fc7844808bdedda00df83e60": {
     "rol": "administrador",
     "nombre": "Administrador"
+  },
+  "34978c1f66cb44f2bb7df24799aa3760": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "992c32db9ad74d748aef645044d24e31": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "d20aa170292c429eb6b1b98d506149f2": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "536b63ad0f134d7d894a37ffbd46fb8d": {
+    "rol": "usuario",
+    "nombre": "Usuario Final"
+  },
+  "ab8f3c75d0754e4aabb5c9003984f4c6": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "dc26b331c56f4124a2e59bfe948e1327": {
+    "rol": "usuario",
+    "nombre": "Usuario Final"
+  },
+  "a73baa4e200a416cad92ca04397de578": {
+    "rol": "usuario",
+    "nombre": "Usuario Final"
   }
 }

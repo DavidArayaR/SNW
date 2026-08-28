@@ -7,8 +7,6 @@ las tablas existentes del sistema (log_envios / pacientes). No toca la lógica
 de negocio del módulo de mensajería; se invoca desde motor_envio.py y main.py
 o desde el router de webhook.
 
-Solo se usa la API oficial de Meta (Graph API v21.0). No se usa WhatsApp Web,
-Selenium ni scraping.
 """
 
 import hashlib
