@@ -278,7 +278,8 @@ select.badge--select {
 .field { margin-bottom: 18px; }
 .field label { display: block; margin-bottom: 6px; font-weight: 600; font-size: .9rem; }
 .field input[type="text"],
-.field textarea {
+.field textarea,
+.field select {
   width: 100%;
   border: 1.5px solid var(--borde);
   border-radius: 10px;
@@ -290,7 +291,8 @@ select.badge--select {
   resize: vertical;
 }
 .field input:focus,
-.field textarea:focus { border-color: var(--verde); outline: none; }
+.field textarea:focus,
+.field select:focus { border-color: var(--verde); outline: none; }
 .field input.invalido, .field textarea.invalido { border-color: var(--rojo); }
 
 .field__foot {

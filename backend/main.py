@@ -103,6 +103,8 @@ class PlantillaIn(BaseModel):
     nombre: str
     texto: str
     clave: str | None = None
+    whatsapp_template: str | None = None
+    whatsapp_template_lang: str | None = None
 
 
 class EnvioIn(BaseModel):
@@ -351,6 +353,8 @@ def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(sesion_actual)):
         "clave": clave,
         "nombre": body.nombre.strip(),
         "texto": body.texto,
+        "whatsapp_template": (body.whatsapp_template or "").strip() or None,
+        "whatsapp_template_lang": (body.whatsapp_template_lang or "").strip() or None,
         "actualizada": int(time.time() * 1000),
     }
     plantillas.append(nueva)
@@ -368,6 +372,8 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
         if p["id"] == plantilla_id:
             p["nombre"] = body.nombre.strip()
             p["texto"] = body.texto
+            p["whatsapp_template"] = (body.whatsapp_template or "").strip() or None
+            p["whatsapp_template_lang"] = (body.whatsapp_template_lang or "").strip() or None
             p["actualizada"] = int(time.time() * 1000)
             escribir_plantillas(plantillas)
             return p

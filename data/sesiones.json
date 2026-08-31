@@ -307,8 +307,24 @@
     "rol": "usuario",
     "nombre": "Usuario Final"
   },
-  "a73baa4e200a416cad92ca04397de578": {
-    "rol": "usuario",
-    "nombre": "Usuario Final"
+  "46e60de330cd41a2ad094f18c0636f09": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "99ff033c38fa42ff9d1cb96b5d59e138": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "1fc7c4af23e649eeb933c8e44617e1f7": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "6c53f1e174eb4dd998b6fb97f5b547b8": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "29b9ff173325498fb8b5f0fa387e52c6": {
+    "rol": "administrador",
+    "nombre": "Administrador"
   }
 }

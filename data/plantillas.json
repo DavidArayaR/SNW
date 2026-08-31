@@ -7,10 +7,48 @@
     "actualizada": 1787932785539
   },
   {
+    "id": 2,
+    "clave": "recordatorio_cita",
+    "nombre": "Recordatorio de cita",
+    "texto": "Hola {nombre}, te recordamos que tienes una cita el {info_extra}. Por favor confirma tu asistencia respondiendo SI o NO. ¡Te esperamos!",
+    "whatsapp_template": null,
+    "whatsapp_template_lang": "es",
+    "actualizada": 1788192802410
+  },
+  {
+    "id": 3,
+    "clave": "confirmacion_hora",
+    "nombre": "Confirmación de hora",
+    "texto": "Hola {nombre}, tu hora fue confirmada para el {info_extra}. Si necesitas reagendar, responde este mensaje y te ayudamos.",
+    "whatsapp_template": null,
+    "whatsapp_template_lang": "es",
+    "actualizada": 1788192802410
+  },
+  {
     "id": 4,
-    "clave": "lorem_ipsum",
-    "nombre": "Lorem Ipsum",
-    "texto": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspendisse hendrerit, augue sed maximus scelerisque, neque massa ultrices libero, a commodo neque dui ac dui. Nunc ac nisi eu eros porttitor sagittis id id justo. Integer tempor pharetra eros eget sodales. Nunc eu lobortis tellus. Quisque dolor lacus, tempor ac fringilla eu, pellentesque sed nibh. Vivamus convallis consectetur egestas. Vivamus auctor felis non bibendum bibendum. Donec ullamcorper suscipit arcu, id vulputate lacus consequat sed.\n\nNullam ullamcorper erat nec tortor porta, a tempor tortor lacinia. Etiam at tellus vitae turpis venenatis semper quis sit amet velit. Fusce fermentum, nibh a sollicitudin varius, orci turpis congue arcu, vitae dapibus ipsum nunc egestas dolor. Quisque sapien lectus, ornare tempus quam non, sagittis consequat metus. Aenean molestie sem ac augue facilisis, et sollicitudin dui tincidunt. Donec odio quam, ullamcorper et quam eu, pellentesque porttitor lorem. Vestibulum viverra tellus vitae pretium fringilla.\n\nNulla porta sollicitudin fringilla. Sed auctor auctor nulla ut ultricies. In eget iaculis sapien. Integer mollis maximus ipsum at volutpat. Sed porta, mi vel luctus consectetur, odio lorem tempus velit, eget efficitur odio diam nec massa. Etiam tincidunt ultrices eros. Class aptent taciti sociosqu ad litora torquent per conubia nostra, per inceptos himenaeos. Aliquam vulputate massa erat, quis placerat eros interdum a. In molestie nisl sit amet nulla maximus ornare.",
-    "actualizada": 1787772250334
+    "clave": "resultados_listos",
+    "nombre": "Resultados listos",
+    "texto": "Hola {nombre}, tus resultados de exámenes ya están disponibles. Retíralos en nuestra sucursal o solicita el envío digital respondiendo este mensaje.",
+    "whatsapp_template": null,
+    "whatsapp_template_lang": "es",
+    "actualizada": 1788192802410
+  },
+  {
+    "id": 5,
+    "clave": "recordatorio_control",
+    "nombre": "Recordatorio de control",
+    "texto": "Hola {nombre}, hace tiempo no visitas nuestro centro. Te recordamos agendar tu control de salud. Responde este mensaje para coordinar tu hora.",
+    "whatsapp_template": null,
+    "whatsapp_template_lang": "es",
+    "actualizada": 1788192802410
+  },
+  {
+    "id": 6,
+    "clave": "aviso_pago",
+    "nombre": "Aviso de pago pendiente",
+    "texto": "Hola {nombre}, tienes un saldo pendiente de {info_extra}. Puedes regularizarlo en línea o en sucursal. Ante dudas, responde este mensaje.",
+    "whatsapp_template": null,
+    "whatsapp_template_lang": "es",
+    "actualizada": 1788192802410
   }
 ]

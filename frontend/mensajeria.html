@@ -75,6 +75,21 @@
         </div>
         <p id="avisoComodines" class="warn" hidden></p>
 
+        <div class="field" data-solo-admin>
+          <label for="inpTemplate">Template de Meta (opcional)</label>
+          <input type="text" id="inpTemplate" maxlength="100" placeholder="Ej: recordatorio_cita" autocomplete="off">
+          <p class="field__hint">Nombre exacto del template aprobado en Meta. Si lo dejas vacío, el mensaje se enviará como texto libre (solo válido dentro de la ventana de 24 h).</p>
+        </div>
+
+        <div class="field" data-solo-admin>
+          <label for="inpTemplateLang">Idioma del template</label>
+          <select id="inpTemplateLang">
+            <option value="es">Español</option>
+            <option value="en">English</option>
+            <option value="pt_BR">Português (Brasil)</option>
+          </select>
+        </div>
+
         <div class="preview-wrap">
           <div class="preview-head">
             <h3>Vista previa</h3>

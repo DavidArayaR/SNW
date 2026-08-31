@@ -11,6 +11,12 @@ const buscadorEl = $("#buscador");
 const formEl = $("#formPlantilla");
 const inpNombre = $("#inpNombre");
 const inpMensaje = $("#inpMensaje");
+const inpTemplate = $("#inpTemplate");
+const inpTemplateLang = $("#inpTemplateLang");
+const hayTemplateMeta = !!inpTemplate && !!inpTemplateLang;
+
+const valTemplate = () => (hayTemplateMeta ? inpTemplate.value : "");
+const valTemplateLang = () => (hayTemplateMeta ? inpTemplateLang.value : "es");
 const contadorEl = $("#contador");
 const avisoComodines = $("#avisoComodines");
 const previewTexto = $("#previewTexto");
@@ -59,11 +65,11 @@ async function cargar() {
   }
 }
 
-async function crearPlantilla(nombre, texto) {
+async function crearPlantilla(nombre, texto, whatsapp_template, whatsapp_template_lang) {
   const res = await fetch(API_URL, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ clave: slug(nombre), nombre, texto }),
+    body: JSON.stringify({ clave: slug(nombre), nombre, texto, whatsapp_template, whatsapp_template_lang }),
   });
   if (res.status === 401) { window.snwSalir(); return Promise.reject(new Error("Sesión expirada")); }
   const data = await res.json().catch(() => ({}));
@@ -71,11 +77,11 @@ async function crearPlantilla(nombre, texto) {
   return data;
 }
 
-async function actualizarPlantilla(id, nombre, texto) {
+async function actualizarPlantilla(id, nombre, texto, whatsapp_template, whatsapp_template_lang) {
   const res = await fetch(`${API_URL}/${id}`, {
     method: "PUT",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ nombre, texto }),
+    body: JSON.stringify({ nombre, texto, whatsapp_template, whatsapp_template_lang }),
   });
   if (res.status === 401) { window.snwSalir(); return Promise.reject(new Error("Sesión expirada")); }
   const data = await res.json().catch(() => ({}));
@@ -189,11 +195,11 @@ function refrescarEditor() {
 }
 
 function marcarSnapshot() {
-  snapshot = JSON.stringify([inpNombre.value, inpMensaje.value]);
+  snapshot = JSON.stringify([inpNombre.value, inpMensaje.value, valTemplate(), valTemplateLang()]);
 }
 
 function hayCambios() {
-  return snapshot !== null && snapshot !== JSON.stringify([inpNombre.value, inpMensaje.value]);
+  return snapshot !== null && snapshot !== JSON.stringify([inpNombre.value, inpMensaje.value, valTemplate(), valTemplateLang()]);
 }
 
 function abrir(id) {
@@ -205,6 +211,10 @@ function abrir(id) {
   tituloForm.textContent = `Editando: ${p.nombre}`;
   inpNombre.value = p.nombre;
   inpMensaje.value = p.texto;
+  if (hayTemplateMeta) {
+    inpTemplate.value = p.whatsapp_template || "";
+    inpTemplateLang.value = p.whatsapp_template_lang || "es";
+  }
   btnEliminar.hidden = false;
   inpNombre.classList.remove("invalido");
   inpMensaje.classList.remove("invalido");
@@ -220,6 +230,10 @@ function modoNueva() {
   tituloForm.textContent = "Nueva plantilla";
   inpNombre.value = "";
   inpMensaje.value = "";
+  if (hayTemplateMeta) {
+    inpTemplate.value = "";
+    inpTemplateLang.value = "es";
+  }
   btnEliminar.hidden = true;
   inpNombre.classList.remove("invalido");
   inpMensaje.classList.remove("invalido");
@@ -264,6 +278,8 @@ formEl.addEventListener("submit", async (e) => {
 
   const nombre = inpNombre.value.trim();
   const texto = inpMensaje.value.trim();
+  const whatsapp_template = valTemplate().trim() || null;
+  const whatsapp_template_lang = valTemplateLang() || "es";
 
   inpNombre.classList.toggle("invalido", !nombre);
   inpMensaje.classList.toggle("invalido", !texto);
@@ -296,12 +312,12 @@ formEl.addEventListener("submit", async (e) => {
   try {
     let fila;
     if (activaId) {
-      fila = await actualizarPlantilla(activaId, nombre, texto);
+      fila = await actualizarPlantilla(activaId, nombre, texto, whatsapp_template, whatsapp_template_lang);
       const i = plantillas.findIndex((x) => x.id === activaId);
       if (i >= 0) plantillas[i] = fila;
       toast("Plantilla actualizada.", "ok");
     } else {
-      fila = await crearPlantilla(nombre, texto);
+      fila = await crearPlantilla(nombre, texto, whatsapp_template, whatsapp_template_lang);
       plantillas.push(fila);
       toast("Plantilla creada.", "ok");
     }
