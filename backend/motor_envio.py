@@ -50,7 +50,6 @@ class MotorApiOficial:
 
 _MOTORES = {
     "simulado": MotorSimulado,
-    "whatsapp_web": MotorWhatsAppWeb,
     "api_oficial": MotorApiOficial,
 }
 
