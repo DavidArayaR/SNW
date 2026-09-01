@@ -56,14 +56,6 @@ if (ambienteAdmin) selAmbiente.value = ambienteAdmin;
 selAmbiente.addEventListener("change", async () => {
   ambienteAdmin = selAmbiente.value;
   localStorage.setItem("snw_ambiente_admin", ambienteAdmin);
-  // Sincroniza también el .env global (solo admin)
-  try {
-    await fetch("api/configuracion", {
-      method: "PUT",
-      headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ entorno: ambienteAdmin }),
-    });
-  } catch {}
   cargar();
 });
 

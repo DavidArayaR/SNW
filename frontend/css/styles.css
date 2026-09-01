@@ -87,6 +87,7 @@ button { font: inherit; cursor: pointer; }
   opacity: .8;
   transition: background .15s, opacity .15s;
 }
+.nav a i { margin-right: 7px; font-size: .82rem; }
 .nav a:hover { opacity: 1; background: rgba(255, 255, 255, .12); }
 .nav a.activo {
   background: #fff;

@@ -110,4 +110,7 @@ INSERT IGNORE INTO log_envios (paciente_id, nombre_paciente, numero_telefono, me
 (7, 'Ana Rodríguez', '+56982345671', '', 'default', 'enviado', 'respondio'),
 (8, 'Luis Fernández', '+56934567892', '', 'default', 'enviado', 'click'),
 (9, 'Claudia Soto', '+56967890123', '', 'default', 'enviado', 'baja'),
-(10, 'Francisco Díaz', '+56990123456', '', 'default', 'enviado', 'respondio');
+(10, 'Francisco Díaz', '+56990123456', '', 'default', 'enviado', 'respondio'),
+(11, 'Patricia', 'Vargas', '+56923456789', 'default', 'enviado', 'pendiente'),
+(12, 'Miguel', 'Torres', '+56951234567', 'default', 'enviado', 'pendiente'),
+(13, 'Cristina', 'Reyes', '+56984567890', 'default', 'enviado', 'pendiente');

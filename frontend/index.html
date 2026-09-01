@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SNW — Sistema de Notificaciones WhatsApp</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <style>
     :root {
       --verde: #128c7e;
@@ -135,18 +136,18 @@
   <p>Módulo web para gestionar y enviar notificaciones masivas de WhatsApp a pacientes de forma rápida, organizada y centralizada, directamente desde la plataforma de la empresa.</p>
   <a id="btnLogin" class="btn btn--login" href="login.html">Iniciar sesión</a>
   <nav id="navLogueado" class="nav-logueado">
-    <a href="index.html">Inicio</a>
-    <a id="navPacientes" href="pacientes.html" data-admin>Base de datos</a>
-    <a href="mensajeria.html">Mensajería</a>
-    <a href="historial.html">Historial</a>
-    <a href="#" class="nav-salir" id="btnSalir">Cerrar sesión</a>
+    <a href="index.html"><i class="fa-solid fa-house"></i>Inicio</a>
+    <a id="navPacientes" href="pacientes.html" data-admin><i class="fa-solid fa-database"></i> Base de datos</a>
+    <a href="mensajeria.html"><i class="fa-solid fa-envelope"></i> Mensajería</a>
+    <a href="historial.html"><i class="fa-solid fa-clock-rotate-left"></i> Historial</a>
+    <a href="#" class="nav-salir" id="btnSalir"><i class="fa-solid fa-right-from-bracket"></i> Cerrar sesión</a>
   </nav>
 </header>
 
 <main>
   <section class="info">
     <h2>¿Cómo funciona el envío?</h2>
-    <p><strong>Tres pasos:</strong> selecciona los pacientes en la tabla, elige la plantilla del mensaje y presiona «Iniciar Envío». El sistema valida automáticamente cada número (formato internacional chileno <code>+569XXXXXXXXX</code>, corrigiendo errores comunes), descarta los inválidos sin interrumpir la cola, procesa el envío en segundo plano con un intervalo entre mensajes y registra el resultado de cada intento en el historial.</p>
+    <p><strong>Tres pasos:</strong> elige la plantilla del mensaje, selecciona la base de datos a la que enviar los mensajes y presiona «Iniciar Envío». El sistema valida automáticamente cada número (formato internacional chileno <code>+569XXXXXXXXX</code>, corrigiendo errores comunes), descarta los inválidos sin interrumpir la cola, procesa el envío en segundo plano con un intervalo entre mensajes y registra el resultado de cada intento en el historial.</p>
     <p>En <strong>entorno de desarrollo</strong> los envíos masivos se bloquean y solo salen mensajes hacia los números de prueba autorizados. En <strong>producción</strong>, cada envío requiere confirmación por correo electrónico de un supervisor antes de procesarse.</p>
   </section>
 

@@ -326,5 +326,17 @@
   "29b9ff173325498fb8b5f0fa387e52c6": {
     "rol": "administrador",
     "nombre": "Administrador"
+  },
+  "e5867941f30d45d8935456c24bab8723": {
+    "rol": "usuario",
+    "nombre": "Usuario Final"
+  },
+  "62203575f85947febe9b831f7645aa89": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "bf892c93de534d62b35022a5e16f7c82": {
+    "rol": "usuario",
+    "nombre": "Usuario Final"
   }
 }

@@ -765,6 +765,12 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
     except ValueError:
         raise HTTPException(400, detail=f"Entorno inválido: '{body.ambiente}'")
 
+    # En ambiente de desarrollo, el usuario normal solo puede enviar a la base
+    # de desarrollo (números autorizados); nunca a producción.
+    entorno_global = os.getenv("SNW_ENTORNO", "desarrollo").strip().lower()
+    if entorno_global == "desarrollo" and sesion.get("rol") != "administrador":
+        amb = "desarrollo"
+
     if not body.pacientes and body.pacientes is not None:
         raise HTTPException(400, detail="No se seleccionaron pacientes")
 

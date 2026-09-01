@@ -60,9 +60,9 @@ INSERT IGNORE INTO pacientes (id, nombre, apellido, telefono, info_extra, estado
 (8, 'Luis', 'Fernández', '+56934567892', 'Seguimiento diabetes', 'enviado'),
 (9, 'Claudia', 'Soto', '+56967890123', 'Control lipidídico', 'enviado'),
 (10, 'Francisco', 'Díaz', '+56990123456', 'Resultado resonancia', 'enviado'),
-(11, 'Patricia', 'Vargas', '+56923456789', 'Control cardiológico', 'pendiente'),
-(12, 'Miguel', 'Torres', '+56951234567', 'Seguimiento hipertensión', 'pendiente'),
-(13, 'Cristina', 'Reyes', '+56984567890', 'Control ginecológico', 'pendiente'),
+(11, 'Patricia', 'Vargas', '+56923456789', 'Control cardiológico', 'enviado'),
+(12, 'Miguel', 'Torres', '+56951234567', 'Seguimiento hipertensión', 'enviado'),
+(13, 'Cristina', 'Reyes', '+56984567890', 'Control ginecológico', 'enviado'),
 (14, 'Roberto', 'Flores', '+56917890123', 'Resultado ecografía', 'pendiente'),
 (15, 'Daniela', 'Castro', '+56940123456', 'Control pediátrico', 'pendiente'),
 (16, 'Andrés', 'Morales', '+56973456789', 'Seguimiento asma', 'pendiente'),
@@ -161,4 +161,8 @@ INSERT IGNORE INTO log_envios (paciente_id, nombre_paciente, numero_telefono, me
 (7, 'Ana Rodríguez', '+56982345671', '', 'default', 'enviado', 'respondio'),
 (8, 'Luis Fernández', '+56934567892', '', 'default', 'enviado', 'click'),
 (9, 'Claudia Soto', '+56967890123', '', 'default', 'enviado', 'baja'),
-(10, 'Francisco Díaz', '+56990123456', '', 'default', 'enviado', 'respondio');
+(10, 'Francisco Díaz', '+56990123456', '', 'default', 'enviado', 'respondio'),
+(11, 'Patricia Vargas', '+56923456789', '', 'default', 'enviado', 'pendiente'),
+(12, 'Miguel Torres', '+56951234567', '', 'default', 'enviado', 'pendiente'),
+(13, 'Cristina Reyes', '+56984567890', '', 'default', 'enviado', 'pendiente');
+

@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SNW · Pacientes</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <link rel="stylesheet" href="css/styles.css">
   <link rel="stylesheet" href="css/pacientes.css">
 </head>
@@ -11,6 +12,7 @@
 
   <header class="topbar">
     <a class="topbar__brand" href="index.html" title="Volver al inicio">
+      <i class="fa-brands fa-whatsapp"></i>
       <div>
         <h1>Notificaciones WhatsApp</h1>
         <p>Sistema de Notificaciones SNW</p>
@@ -26,10 +28,10 @@
         <span></span><span></span><span></span>
       </button>
       <nav class="nav" id="menuNav">
-        <a href="index.html">Inicio</a>
-        <a href="pacientes.html" class="activo" data-solo-admin>Base de datos</a>
-        <a href="mensajeria.html">Mensajería</a>
-        <a href="historial.html">Historial</a>
+        <a href="index.html"><i class="fa-solid fa-house"></i>Inicio</a>
+        <a href="pacientes.html" class="activo" data-solo-admin><i class="fa-solid fa-database"></i> Base de datos</a>
+        <a href="mensajeria.html"><i class="fa-solid fa-envelope"></i> Mensajería</a>
+        <a href="historial.html"><i class="fa-solid fa-clock-rotate-left"></i> Historial</a>
       </nav>
     </div>
   </header>
@@ -143,7 +145,7 @@
       const n = document.getElementById("menuNav");
       const salir = document.createElement("a");
       salir.href = "#";
-      salir.textContent = "Cerrar sesión · " + (localStorage.getItem("snw_nombre") || "");
+      salir.innerHTML = '<i class="fa-solid fa-right-from-bracket"></i> Cerrar sesión · ' + (localStorage.getItem("snw_nombre") || "");
       salir.addEventListener("click", async (e) => {
         e.preventDefault();
         try { await fetch("api/auth/logout", { method: "POST", headers: { Authorization: "Bearer " + token } }); } catch {}

@@ -394,6 +394,7 @@ function toast(msg, tipo = "ok") {
 const badgeEntornoMensajeria = document.getElementById("badgeEntorno");
 const modalConf = $("#modalConfirmar");
 let ambienteConf = localStorage.getItem("snw_ambiente_admin") || localStorage.getItem("snw_ambiente") || "desarrollo";
+let entornoGlobal = null;
 let timerPollingConf = null;
 let envioEnCursoConf = false;
 let jobIdActualConf = null;
@@ -413,6 +414,9 @@ function setBloqueoEnvioConf(bloquear) {
 fetch("api/configuracion", { headers: authHeaders(), cache: "no-store" })
   .then((r) => (r.ok ? r.json() : null))
   .then((cfg) => {
+    if (cfg && cfg.entorno) {
+      entornoGlobal = cfg.entorno;
+    }
     if (cfg && cfg.entorno && cfg.entorno !== ambienteConf) {
       ambienteConf = cfg.entorno;
       localStorage.setItem("snw_ambiente_admin", ambienteConf);
@@ -438,6 +442,9 @@ if (!localStorage.getItem("snw_ambiente_admin") && !localStorage.getItem("snw_am
   fetch("api/configuracion", { headers: authHeaders(), cache: "no-store" })
     .then((r) => (r.ok ? r.json() : null))
     .then((cfg) => {
+      if (cfg && cfg.entorno) {
+        entornoGlobal = cfg.entorno;
+      }
       if (cfg && cfg.entorno && cfg.entorno !== ambienteConf) {
         ambienteConf = cfg.entorno;
         localStorage.setItem("snw_ambiente_admin", ambienteConf);
@@ -449,10 +456,37 @@ if (!localStorage.getItem("snw_ambiente_admin") && !localStorage.getItem("snw_am
 }
 actualizarBadgeMensajeria();
 
+// Devuelve true si el usuario normal debe quedar restringido a la base de
+// desarrollo (cuando el entorno global del sistema es desarrollo).
+function usuarioRestringidoADesarrollo() {
+  const rol = localStorage.getItem("snw_rol");
+  return rol !== "administrador" && entornoGlobal === "desarrollo";
+}
+
+// Aplica la restricción de base de datos en el modal de envío.
+function aplicarRestriccionAmbiente() {
+  const radios = document.querySelectorAll('input[name="ambienteConf"]');
+  const restringido = usuarioRestringidoADesarrollo();
+
+  radios.forEach((r) => {
+    if (r.value === "produccion") {
+      r.disabled = restringido;
+    }
+  });
+
+  if (restringido && ambienteConf === "produccion") {
+    ambienteConf = "desarrollo";
+    localStorage.setItem("snw_ambiente", ambienteConf);
+    localStorage.setItem("snw_ambiente_admin", ambienteConf);
+    actualizarBadgeMensajeria();
+  }
+}
+
 function abrirModalConf() {
   const p = plantillas.find((x) => x.id === activaId);
   $("#confNombre").textContent = p?.nombre ?? "";
 
+  aplicarRestriccionAmbiente();
   document.querySelectorAll('input[name="ambienteConf"]').forEach((r) => {
     r.checked = r.value === ambienteConf;
   });

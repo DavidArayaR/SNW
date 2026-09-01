@@ -4,51 +4,53 @@
     "clave": "default",
     "nombre": "Default",
     "texto": "Hola, {nombre} {apellido} 👋\n\nTe recordamos que tienes pendiente agendar tu hora para tu próxima atención.\n\n📅 Agenda tu cita con anticipación para asegurar tu horario.\n\n📞 Si necesitas ayuda para agendar, comunícate con nosotros.\n\n¡Te esperamos! 🏥✨",
-    "actualizada": 1787932785539
+    "whatsapp_template": "default",
+    "whatsapp_template_lang": "es",
+    "actualizada": 1788194137873
   },
   {
     "id": 2,
     "clave": "recordatorio_cita",
     "nombre": "Recordatorio de cita",
     "texto": "Hola {nombre}, te recordamos que tienes una cita el {info_extra}. Por favor confirma tu asistencia respondiendo SI o NO. ¡Te esperamos!",
-    "whatsapp_template": null,
+    "whatsapp_template": "recordatorio_cita",
     "whatsapp_template_lang": "es",
-    "actualizada": 1788192802410
+    "actualizada": 1788194150102
   },
   {
     "id": 3,
     "clave": "confirmacion_hora",
     "nombre": "Confirmación de hora",
     "texto": "Hola {nombre}, tu hora fue confirmada para el {info_extra}. Si necesitas reagendar, responde este mensaje y te ayudamos.",
-    "whatsapp_template": null,
+    "whatsapp_template": "confirmacion_hora",
     "whatsapp_template_lang": "es",
-    "actualizada": 1788192802410
+    "actualizada": 1788194156997
   },
   {
     "id": 4,
     "clave": "resultados_listos",
     "nombre": "Resultados listos",
     "texto": "Hola {nombre}, tus resultados de exámenes ya están disponibles. Retíralos en nuestra sucursal o solicita el envío digital respondiendo este mensaje.",
-    "whatsapp_template": null,
+    "whatsapp_template": "resultados_listos",
     "whatsapp_template_lang": "es",
-    "actualizada": 1788192802410
+    "actualizada": 1788194166968
   },
   {
     "id": 5,
     "clave": "recordatorio_control",
     "nombre": "Recordatorio de control",
     "texto": "Hola {nombre}, hace tiempo no visitas nuestro centro. Te recordamos agendar tu control de salud. Responde este mensaje para coordinar tu hora.",
-    "whatsapp_template": null,
+    "whatsapp_template": "recordatorio_control",
     "whatsapp_template_lang": "es",
-    "actualizada": 1788192802410
+    "actualizada": 1788194175000
   },
   {
     "id": 6,
     "clave": "aviso_pago",
     "nombre": "Aviso de pago pendiente",
     "texto": "Hola {nombre}, tienes un saldo pendiente de {info_extra}. Puedes regularizarlo en línea o en sucursal. Ante dudas, responde este mensaje.",
-    "whatsapp_template": null,
+    "whatsapp_template": "aviso_pago_pendiente",
     "whatsapp_template_lang": "es",
-    "actualizada": 1788192802410
+    "actualizada": 1788194184603
   }
 ]
