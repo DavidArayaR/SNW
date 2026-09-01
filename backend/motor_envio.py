@@ -22,20 +22,6 @@ class MotorSimulado:
         return True, None, None
 
 
-class MotorWhatsAppWeb:
-    nombre = "whatsapp_web"
-
-    def disponible(self) -> bool:
-        return True
-
-    def enviar(self, telefono: str, mensaje: str, plantilla: dict | None = None):
-        numero = telefono.lstrip("+")
-        url = f"https://web.whatsapp.com/send?phone={numero}&text={urllib.parse.quote(mensaje)}"
-        if webbrowser.open(url):
-            return True, None, None
-        return False, "No se pudo abrir WhatsApp Web en el navegador", None
-
-
 class MotorApiOficial:
     nombre = "api_oficial"
 
