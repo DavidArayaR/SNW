@@ -339,7 +339,15 @@
     "rol": "usuario",
     "nombre": "Usuario Final"
   },
-  "6d8eca3c95e04bbcb4a9f384898eebb5": {
+  "b975dedbfd6e4e70976fda85a33ffeaa": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "aa616ef00a084a13a846a610646b2db3": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "a3bed42bd35b4e92993887c679ba22b2": {
     "rol": "administrador",
     "nombre": "Administrador"
   }

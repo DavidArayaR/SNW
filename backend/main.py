@@ -20,7 +20,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from db import conectar, entorno_valido, nombre_base
+from db import conectar, entorno_valido, nombre_base, columnas_tabla, columna_existe
 from motor_envio import obtener_canal
 from whatsapp_webhook import router as whatsapp_router
 """
@@ -245,27 +245,54 @@ def slug(texto: str) -> str:
     return t[:40] or "plantilla"
 
 
+FROM_PACIENTES = (
+    " FROM pacientes p"
+    " LEFT JOIN log_envios l ON l.id = ("
+    "   SELECT l2.id FROM log_envios l2"
+    "   WHERE l2.paciente_id = p.id ORDER BY l2.id DESC LIMIT 1"
+    ")"
+)
+
+
+def expr_select_pacientes(ambiente: str) -> str:
+    """Genera las expresiones SELECT de la tabla pacientes adaptándose a las
+    columnas reales existentes (soporta bases con esquema mínimo)."""
+    cols = columnas_tabla("pacientes", ambiente)
+    exprs = ["p.id", "p.nombre", "p.apellido", "p.telefono"]
+    if "estado" in cols:
+        exprs.append("COALESCE(NULLIF(p.estado, ''), 'pendiente') AS estado")
+    else:
+        exprs.append("'pendiente' AS estado")
+    if "info_extra" in cols:
+        exprs.append("COALESCE(p.info_extra, '') AS info_extra")
+    else:
+        exprs.append("'' AS info_extra")
+    if "fecha_actualizacion" in cols:
+        exprs.append("p.fecha_actualizacion")
+    else:
+        exprs.append("NULL AS fecha_actualizacion")
+    exprs.append("COALESCE(l.respuesta, 'pendiente') AS respuesta")
+    if "whatsapp_opt_out" in cols:
+        exprs.append("p.whatsapp_opt_out")
+    else:
+        exprs.append("0 AS whatsapp_opt_out")
+    exprs.append("l.id AS ultimo_log_id")
+    return ", ".join(exprs)
+
+
 @app.get("/api/pacientes")
 def listar_pacientes(q: str | None = Query(None), ambiente: str = Query("produccion"),
                      sesion: dict = Depends(solo_admin)):
-    sql = (
-        "SELECT p.id, p.nombre, p.apellido, p.telefono,"
-        " COALESCE(NULLIF(p.estado, ''), 'pendiente') AS estado,"
-        " COALESCE(p.info_extra, '') AS info_extra,"
-        " p.fecha_actualizacion,"
-        " COALESCE(l.respuesta, 'pendiente') AS respuesta,"
-        " p.whatsapp_opt_out,"
-        " l.id AS ultimo_log_id FROM pacientes p"
-        " LEFT JOIN log_envios l ON l.id = ("
-        "   SELECT l2.id FROM log_envios l2"
-        "   WHERE l2.paciente_id = p.id ORDER BY l2.id DESC LIMIT 1"
-        ")"
-    )
+    sql = "SELECT " + expr_select_pacientes(ambiente) + FROM_PACIENTES
     args: list = []
     if q and q.strip():
         like = f"%{q.strip()}%"
-        sql += " WHERE p.nombre LIKE %s OR p.telefono LIKE %s OR p.info_extra LIKE %s"
-        args = [like, like, like]
+        if columna_existe("pacientes", "info_extra", ambiente):
+            sql += " WHERE p.nombre LIKE %s OR p.telefono LIKE %s OR p.info_extra LIKE %s"
+            args = [like, like, like]
+        else:
+            sql += " WHERE p.nombre LIKE %s OR p.telefono LIKE %s"
+            args = [like, like]
     sql += " ORDER BY p.id"
 
     with conectar(ambiente) as conn, conn.cursor() as cur:
@@ -273,7 +300,8 @@ def listar_pacientes(q: str | None = Query(None), ambiente: str = Query("producc
         filas = cur.fetchall()
 
     for f in filas:
-        f["actualizado"] = f.pop("fecha_actualizacion").strftime("%d-%m-%Y %H:%M")
+        fecha = f.pop("fecha_actualizacion", None)
+        f["actualizado"] = fecha.strftime("%d-%m-%Y %H:%M") if fecha else "—"
     return filas
 
 
@@ -295,23 +323,16 @@ def actualizar_paciente(paciente_id: int, body: EstadoPacienteIn,
         cur.execute("SELECT id FROM pacientes WHERE id = %s", (paciente_id,))
         if not cur.fetchone():
             raise HTTPException(404, detail="Paciente no encontrado")
-        cur.execute("UPDATE pacientes SET estado = %s WHERE id = %s", (body.estado, paciente_id))
-        conn.commit()
+        if columna_existe("pacientes", "estado", ambiente):
+            cur.execute("UPDATE pacientes SET estado = %s WHERE id = %s", (body.estado, paciente_id))
+            conn.commit()
         cur.execute(
-            "SELECT p.id, p.nombre, p.apellido, p.telefono,"
-            " COALESCE(NULLIF(p.estado, ''), 'pendiente') AS estado,"
-            " COALESCE(p.info_extra, '') AS info_extra,"
-            " p.fecha_actualizacion,"
-            " COALESCE(l.respuesta, 'pendiente') AS respuesta,"
-            " l.id AS ultimo_log_id FROM pacientes p"
-            " LEFT JOIN log_envios l ON l.id = ("
-            "   SELECT l2.id FROM log_envios l2"
-            "   WHERE l2.paciente_id = p.id ORDER BY l2.id DESC LIMIT 1"
-            ") WHERE p.id = %s",
+            "SELECT " + expr_select_pacientes(ambiente) + FROM_PACIENTES + " WHERE p.id = %s",
             (paciente_id,),
         )
         fila = cur.fetchone()
-        fila["actualizado"] = fila.pop("fecha_actualizacion").strftime("%d-%m-%Y %H:%M")
+        fecha = fila.pop("fecha_actualizacion", None)
+        fila["actualizado"] = fecha.strftime("%d-%m-%Y %H:%M") if fecha else "—"
         return fila
 
 
@@ -619,12 +640,16 @@ def renderizar_mensaje(texto: str, paciente: dict) -> str:
 
 
 def actualizar_estado_paciente(paciente_id: int, estado: str, ambiente: str) -> None:
+    if not columna_existe("pacientes", "estado", ambiente):
+        return
     with conectar(ambiente) as conn, conn.cursor() as cur:
         cur.execute("UPDATE pacientes SET estado = %s WHERE id = %s", (estado, paciente_id))
         conn.commit()
 
 
 def actualizar_telefono(paciente_id: int, telefono: str, ambiente: str) -> None:
+    if not columna_existe("pacientes", "telefono", ambiente):
+        return
     with conectar(ambiente) as conn, conn.cursor() as cur:
         cur.execute("UPDATE pacientes SET telefono = %s WHERE id = %s", (telefono, paciente_id))
         conn.commit()
@@ -783,33 +808,36 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         raise HTTPException(404, detail="Plantilla no encontrada")
 
     with conectar(amb) as conn, conn.cursor() as cur:
-        base_select = (
-            "SELECT p.id, p.nombre, p.apellido, p.telefono,"
-            " COALESCE(p.info_extra, '') AS info_extra,"
-            " COALESCE(l.respuesta, 'pendiente') AS respuesta,"
-            " p.whatsapp_opt_out"
-            " FROM pacientes p"
-            " LEFT JOIN log_envios l ON l.id = ("
-            "   SELECT l2.id FROM log_envios l2"
-            "   WHERE l2.paciente_id = p.id ORDER BY l2.id DESC LIMIT 1"
-            ")"
-        )
+        tiene_opt_out = columna_existe("pacientes", "whatsapp_opt_out", amb)
+        tiene_estado = columna_existe("pacientes", "estado", amb)
+
+        base_select = "SELECT " + expr_select_pacientes(amb) + FROM_PACIENTES
+
         if body.pacientes:
             placeholders = ", ".join("%s" for _ in body.pacientes)
-            cur.execute(
-                base_select + f" WHERE p.id IN ({placeholders}) AND p.whatsapp_opt_out = 0",
-                tuple(body.pacientes),
-            )
+            where = f" WHERE p.id IN ({placeholders})"
+            if tiene_opt_out:
+                where += " AND p.whatsapp_opt_out = 0"
+            cur.execute(base_select + where, tuple(body.pacientes))
         else:
             if amb == "desarrollo":
                 # En desarrollo se puede reenviar sin importar el estado del paciente;
                 # la única restricción real sigue siendo el filtro de números autorizados,
                 # que se aplica más abajo en este mismo endpoint.
-                cur.execute(base_select + " WHERE p.whatsapp_opt_out = 0 ORDER BY p.id")
+                if tiene_opt_out:
+                    cur.execute(base_select + " WHERE p.whatsapp_opt_out = 0 ORDER BY p.id")
+                else:
+                    cur.execute(base_select + " ORDER BY p.id")
             else:
-                cur.execute(
-                    base_select + " WHERE estado = 'pendiente' AND p.whatsapp_opt_out = 0 ORDER BY p.id"
-                )
+                cond = []
+                if tiene_estado:
+                    cond.append("p.estado = 'pendiente'")
+                if tiene_opt_out:
+                    cond.append("p.whatsapp_opt_out = 0")
+                if cond:
+                    cur.execute(base_select + " WHERE " + " AND ".join(cond) + " ORDER BY p.id")
+                else:
+                    cur.execute(base_select + " ORDER BY p.id")
         filas = cur.fetchall()
 
     rechazados: list[dict] = []
@@ -1036,11 +1064,16 @@ def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(sesion_actual)
         raise HTTPException(400, detail=f"Entorno inválido: '{body.ambiente}'")
 
     with conectar(amb) as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT COUNT(*) AS total,"
-            " SUM(estado = 'pendiente') AS pendientes"
-            " FROM pacientes"
-        )
+        if columna_existe("pacientes", "estado", amb):
+            cur.execute(
+                "SELECT COUNT(*) AS total,"
+                " SUM(estado = 'pendiente') AS pendientes"
+                " FROM pacientes"
+            )
+        else:
+            cur.execute(
+                "SELECT COUNT(*) AS total, COUNT(*) AS pendientes FROM pacientes"
+            )
         fila = cur.fetchone()
 
     total = int(fila["total"] or 0)

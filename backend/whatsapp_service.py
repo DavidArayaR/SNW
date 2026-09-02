@@ -17,7 +17,7 @@ from pathlib import Path
 
 import httpx
 
-from db import conectar
+from db import conectar, columna_existe
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 GRAPHVERSION = "v21.0"
@@ -327,9 +327,10 @@ class WhatsAppService:
             return "sin_cliente"
         try:
             with conectar(amb) as conn, conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE pacientes SET estado = 'enviado' WHERE telefono = %s", (telefono,)
-                )
+                if columna_existe("pacientes", "estado", amb):
+                    cur.execute(
+                        "UPDATE pacientes SET estado = 'enviado' WHERE telefono = %s", (telefono,)
+                    )
                 cur.execute(
                     "INSERT INTO log_envios (envio_id, paciente_id, nombre_paciente, numero_telefono,"
                     " mensaje, plantilla_clave, estado_envio, respuesta, descripcion_error)"
@@ -349,9 +350,10 @@ class WhatsAppService:
             return
         try:
             with conectar(amb) as conn, conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE pacientes SET whatsapp_opt_out = 1 WHERE telefono = %s", (telefono,)
-                )
+                if columna_existe("pacientes", "whatsapp_opt_out", amb):
+                    cur.execute(
+                        "UPDATE pacientes SET whatsapp_opt_out = 1 WHERE telefono = %s", (telefono,)
+                    )
                 cur.execute(
                     "UPDATE log_envios SET respuesta = 'baja' WHERE paciente_id ="
                     " (SELECT id FROM pacientes WHERE telefono = %s LIMIT 1)"

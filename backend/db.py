@@ -33,3 +33,33 @@ def conectar(entorno: str | None = None):
 def nombre_base(entorno: str | None = None) -> str:
     prefijo = PREFIJOS[entorno_valido(entorno)]
     return os.getenv(prefijo + "NOMBRE", "")
+
+
+_columnas_cache: dict = {}
+
+
+def columnas_tabla(tabla: str, entorno: str | None = None) -> set:
+    """Devuelve el conjunto de columnas reales de una tabla (con caché).
+
+    Permite que el backend se adapte a bases con esquema mínimo (p. ej. una
+    tabla 'pacientes' con solo nombre, apellido y telefono), evitando fallos
+    al referenciar columnas que no existen.
+    """
+    clave = f"{entorno_valido(entorno)}:{tabla}"
+    if clave not in _columnas_cache:
+        try:
+            with conectar(entorno) as conn, conn.cursor() as cur:
+                cur.execute(
+                    "SELECT COLUMN_NAME FROM information_schema.COLUMNS"
+                    " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s",
+                    (tabla,),
+                )
+                _columnas_cache[clave] = {f["COLUMN_NAME"] for f in cur.fetchall()}
+        except Exception:
+            _columnas_cache[clave] = set()
+    return _columnas_cache[clave]
+
+
+def columna_existe(tabla: str, columna: str, entorno: str | None = None) -> bool:
+    """Devuelve True si la columna existe en la tabla (cacheado)."""
+    return columna in columnas_tabla(tabla, entorno)
