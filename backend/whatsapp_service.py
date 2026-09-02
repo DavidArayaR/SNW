@@ -9,6 +9,7 @@ o desde el router de webhook.
 
 """
 
+import asyncio
 import hashlib
 import os
 import re
@@ -105,13 +106,30 @@ class WhatsAppApiClient:
             resp = await cliente.post(url, json=payload, headers=self._headers())
         return self._procesar_respuesta(resp)
 
+    async def crear_template(self, waba_id: str, payload: dict) -> dict:
+        """Crea un template de mensaje en Meta (POST /{waba_id}/message_templates)."""
+        url = f"{GRAPH_URL}/{waba_id}/message_templates"
+        async with httpx.AsyncClient(timeout=30) as cliente:
+            resp = await cliente.post(url, json=payload, headers=self._headers())
+        return self._procesar_respuesta(resp)
+
+    async def listar_templates(self, waba_id: str) -> dict:
+        """Lista los templates de mensaje de la WABA."""
+        url = f"{GRAPH_URL}/{waba_id}/message_templates"
+        async with httpx.AsyncClient(timeout=30) as cliente:
+            resp = await cliente.get(url, headers=self._headers())
+        return self._procesar_respuesta(resp)
+
     def _procesar_respuesta(self, resp) -> dict:
         if resp.status_code in (200, 201):
             return resp.json()
         detalle = ""
         try:
             err = resp.json().get("error", {})
-            detalle = err.get("message", "") or json_short(resp.text)
+            detalle = (err.get("error_user_msg")
+                       or err.get("error_user_title")
+                       or err.get("message")
+                       or json_short(resp.text))
             codigo_msg = err.get("code", resp.status_code)
             tipo = err.get("type", "permanent")
         except Exception:
@@ -139,6 +157,7 @@ class WhatsAppService:
     def __init__(self):
         self.token = os.getenv("SNW_WA_TOKEN", "").strip()
         self.phone_number_id = os.getenv("SNW_WA_PHONE_ID", "").strip()
+        self.waba_id = os.getenv("SNW_WA_BUSINESS_ACCOUNT_ID", "").strip()
 
     def configurada(self) -> bool:
         return bool(self.token) and bool(self.phone_number_id)
@@ -146,6 +165,60 @@ class WhatsAppService:
     @property
     def cliente(self) -> WhatsAppApiClient:
         return WhatsAppApiClient(self.token, self.phone_number_id)
+
+    # ---------- Plantillas (templates) ----------
+    COMODINES = {
+        "nombre": "David",
+        "apellido": "Araya",
+        "info_extra": "su cita programada",
+    }
+
+    def convertir_texto_meta(self, texto: str) -> tuple[str, list[str]]:
+        """Convierte los comodines {nombre}/{apellido}/{info_extra} del sistema
+        a placeholders secuenciales de Meta ({{1}}, {{2}}, ...) y devuelve el
+        texto convertido junto con los valores de ejemplo en ese orden."""
+        orden: list[str] = []
+
+        def reemplazo(m) -> str:
+            clave = m.group(1)
+            if clave in self.COMODINES and clave not in orden:
+                orden.append(clave)
+            idx = orden.index(clave) + 1 if clave in orden else 1
+            return f"{{{{{idx}}}}}"
+
+        texto_meta = re.sub(r"\{([a-z_]+)\}", reemplazo, texto)
+        ejemplo = [self.COMODINES[c] for c in orden if c in self.COMODINES]
+        return texto_meta, ejemplo
+
+    def crear_template_meta(self, nombre: str, texto: str, lang: str = "es",
+                            category: str = "UTILITY") -> dict:
+        """Crea el template en Meta. Devuelve {ok, template_id, status, error}.
+
+        Los templates en Meta quedan en estado PENDING hasta ser aprobados."""
+        if not self.waba_id or not self.token:
+            return {"ok": False, "template_id": None, "status": None,
+                    "error": "Faltan SNW_WA_BUSINESS_ACCOUNT_ID o SNW_WA_TOKEN"}
+
+        texto_meta, ejemplo = self.convertir_texto_meta(texto)
+        componente_body: dict = {"type": "BODY", "text": texto_meta}
+        if ejemplo:
+            componente_body["example"] = {"body_text": [ejemplo]}
+
+        payload = {
+            "name": nombre,
+            "category": category,
+            "language": lang,
+            "components": [componente_body],
+        }
+
+        try:
+            data = asyncio.run(self.cliente.crear_template(self.waba_id, payload))
+        except ErrorWhatsApp as e:
+            return {"ok": False, "template_id": None, "status": None, "error": e.message}
+
+        tid = data.get("id") or ""
+        status = data.get("status") or "PENDING"
+        return {"ok": True, "template_id": tid, "status": status, "error": None}
 
     # ---------- Envío ----------
     def construir_payload_texto(self, telefono: str, mensaje: str, preview_url: bool = False) -> tuple:
@@ -181,23 +254,34 @@ class WhatsAppService:
         }
         return payload, "template"
 
-    async def enviar(self, telefono: str, mensaje: str, plantilla: dict | None = None) -> tuple:
+    def extraer_orden_comodines(self, texto: str) -> list[str]:
+        """Devuelve el orden de aparición de los comodines {nombre}/{apellido}/{info_extra}
+        en el texto, para construir los parámetros del template en el orden correcto."""
+        orden: list[str] = []
+        for m in re.finditer(r"\{([a-z_]+)\}", texto or ""):
+            clave = m.group(1)
+            if clave in ("nombre", "apellido", "info_extra") and clave not in orden:
+                orden.append(clave)
+        return orden
+
+    async def enviar(self, telefono: str, mensaje: str, plantilla: dict | None = None,
+                     variables: dict | None = None) -> tuple:
         """Envía un mensaje. Devuelve (ok, message_id, error, estado).
 
         Si la plantilla en el sistema tiene un template Meta configurado
-        (campo 'whatsapp_template'), se envía como template aprobado;
-        en caso contrario, texto libre.
+        (campo 'whatsapp_template'), se envía como template aprobado usando los
+        valores reales del paciente; en caso contrario, texto libre.
         """
         msg = plantilla or {}
         nombre_template = msg.get("whatsapp_template")
-        idioma = msg.get("whatsapp_template_lang", os.getenv("SNW_WA_TEMPLATE_LANG", "es"))
+        idioma = msg.get("whatsapp_template_lang") or os.getenv("SNW_WA_TEMPLATE_LANG", "es")
 
         if nombre_template:
-            # Reemplaza comodines {nombre} {info_extra} -> variables del template
-            vars_ = list(re.findall(r"\{([a-z_]+)\}", msg.get("texto", "")))
+            orden = self.extraer_orden_comodines(msg.get("texto", "") or "")
+            vdict = variables or {}
+            valores = [vdict.get(clave, "") or "" for clave in orden]
             payload_, tipo = self.construir_payload_template(
-                telefono, nombre_template, idioma,
-                variables=[v for v in ([msg.get("texto", "")] + list(vars_))],
+                telefono, nombre_template, idioma, variables=valores,
             )
         else:
             payload_, tipo = self.construir_payload_texto(telefono, mensaje)

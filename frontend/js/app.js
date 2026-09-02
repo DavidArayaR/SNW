@@ -13,10 +13,12 @@ const inpNombre = $("#inpNombre");
 const inpMensaje = $("#inpMensaje");
 const inpTemplate = $("#inpTemplate");
 const inpTemplateLang = $("#inpTemplateLang");
-const hayTemplateMeta = !!inpTemplate && !!inpTemplateLang;
+const inpTemplateCategoria = $("#inpTemplateCategoria");
+const hayTemplateMeta = !!inpTemplate && !!inpTemplateLang && !!inpTemplateCategoria;
 
 const valTemplate = () => (hayTemplateMeta ? inpTemplate.value : "");
 const valTemplateLang = () => (hayTemplateMeta ? inpTemplateLang.value : "es");
+const valTemplateCategoria = () => (hayTemplateMeta ? inpTemplateCategoria.value : "UTILITY");
 const contadorEl = $("#contador");
 const avisoComodines = $("#avisoComodines");
 const previewTexto = $("#previewTexto");
@@ -24,6 +26,7 @@ const previewHora = $("#previewHora");
 const tituloForm = $("#tituloFormulario");
 const estadoVacio = $("#estadoVacio");
 const btnEliminar = $("#btnEliminar");
+const btnGuardar = $("#btnGuardar");
 const modalEl = $("#modalEliminar");
 const toastEl = $("#toast");
 
@@ -65,11 +68,11 @@ async function cargar() {
   }
 }
 
-async function crearPlantilla(nombre, texto, whatsapp_template, whatsapp_template_lang) {
+async function crearPlantilla(nombre, texto, whatsapp_template, whatsapp_template_lang, whatsapp_template_categoria) {
   const res = await fetch(API_URL, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ clave: slug(nombre), nombre, texto, whatsapp_template, whatsapp_template_lang }),
+    body: JSON.stringify({ clave: slug(nombre), nombre, texto, whatsapp_template, whatsapp_template_lang, whatsapp_template_categoria }),
   });
   if (res.status === 401) { window.snwSalir(); return Promise.reject(new Error("Sesión expirada")); }
   const data = await res.json().catch(() => ({}));
@@ -77,11 +80,11 @@ async function crearPlantilla(nombre, texto, whatsapp_template, whatsapp_templat
   return data;
 }
 
-async function actualizarPlantilla(id, nombre, texto, whatsapp_template, whatsapp_template_lang) {
+async function actualizarPlantilla(id, nombre, texto, whatsapp_template, whatsapp_template_lang, whatsapp_template_categoria) {
   const res = await fetch(`${API_URL}/${id}`, {
     method: "PUT",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ nombre, texto, whatsapp_template, whatsapp_template_lang }),
+    body: JSON.stringify({ nombre, texto, whatsapp_template, whatsapp_template_lang, whatsapp_template_categoria }),
   });
   if (res.status === 401) { window.snwSalir(); return Promise.reject(new Error("Sesión expirada")); }
   const data = await res.json().catch(() => ({}));
@@ -195,11 +198,11 @@ function refrescarEditor() {
 }
 
 function marcarSnapshot() {
-  snapshot = JSON.stringify([inpNombre.value, inpMensaje.value, valTemplate(), valTemplateLang()]);
+  snapshot = JSON.stringify([inpNombre.value, inpMensaje.value, valTemplate(), valTemplateLang(), valTemplateCategoria()]);
 }
 
 function hayCambios() {
-  return snapshot !== null && snapshot !== JSON.stringify([inpNombre.value, inpMensaje.value, valTemplate(), valTemplateLang()]);
+  return snapshot !== null && snapshot !== JSON.stringify([inpNombre.value, inpMensaje.value, valTemplate(), valTemplateLang(), valTemplateCategoria()]);
 }
 
 function abrir(id) {
@@ -214,6 +217,7 @@ function abrir(id) {
   if (hayTemplateMeta) {
     inpTemplate.value = p.whatsapp_template || "";
     inpTemplateLang.value = p.whatsapp_template_lang || "es";
+    inpTemplateCategoria.value = p.whatsapp_template_categoria || "UTILITY";
   }
   btnEliminar.hidden = false;
   inpNombre.classList.remove("invalido");
@@ -233,6 +237,7 @@ function modoNueva() {
   if (hayTemplateMeta) {
     inpTemplate.value = "";
     inpTemplateLang.value = "es";
+    inpTemplateCategoria.value = "UTILITY";
   }
   btnEliminar.hidden = true;
   inpNombre.classList.remove("invalido");
@@ -280,6 +285,7 @@ formEl.addEventListener("submit", async (e) => {
   const texto = inpMensaje.value.trim();
   const whatsapp_template = valTemplate().trim() || null;
   const whatsapp_template_lang = valTemplateLang() || "es";
+  const whatsapp_template_categoria = valTemplateCategoria() || "UTILITY";
 
   inpNombre.classList.toggle("invalido", !nombre);
   inpMensaje.classList.toggle("invalido", !texto);
@@ -309,20 +315,35 @@ formEl.addEventListener("submit", async (e) => {
     );
   }
 
+  setGuardando(true);
+
   try {
     let fila;
     if (activaId) {
-      fila = await actualizarPlantilla(activaId, nombre, texto, whatsapp_template, whatsapp_template_lang);
+      fila = await actualizarPlantilla(activaId, nombre, texto, whatsapp_template, whatsapp_template_lang, whatsapp_template_categoria);
       const i = plantillas.findIndex((x) => x.id === activaId);
       if (i >= 0) plantillas[i] = fila;
-      toast("Plantilla actualizada.", "ok");
     } else {
-      fila = await crearPlantilla(nombre, texto, whatsapp_template, whatsapp_template_lang);
+      fila = await crearPlantilla(nombre, texto, whatsapp_template, whatsapp_template_lang, whatsapp_template_categoria);
       plantillas.push(fila);
-      toast("Plantilla creada.", "ok");
     }
+    setGuardando(false);
+
+    // Mensaje según el estado del template en Meta
+    const accion = activaId ? "actualizada" : "creada";
+    const tplStatus = fila.whatsapp_template_status;
+    const tplError = fila.whatsapp_template_error;
+    if (tplError) {
+      toast(`Plantilla ${accion}, pero el template en Meta falló: ${tplError}`, "error");
+    } else if (tplStatus) {
+      toast(`Plantilla ${accion}. Template en Meta: ${tplStatus}.`, "ok");
+    } else {
+      toast(`Plantilla ${accion}.`, "ok");
+    }
+
     abrir(fila.id);
   } catch (err) {
+    setGuardando(false);
     toast(err.message === "Ya existe una plantilla con esa clave"
       ? "Ya existe una plantilla similar."
       : `Error al guardar: ${err.message}`, "error");
@@ -388,7 +409,20 @@ function toast(msg, tipo = "ok") {
   clearTimeout(toastTimer);
   toastEl.textContent = msg;
   toastEl.className = `toast visible toast--${tipo}`;
-  toastTimer = setTimeout(() => toastEl.classList.remove("visible"), 2800);
+  toastTimer = setTimeout(() => toastEl.classList.remove("visible"), 3200);
+}
+
+// Bloquea/desbloquea toda la interfaz durante el guardado y muestra el estado
+// en el botón Guardar (con spinner).
+function setGuardando(guardando) {
+  document.querySelectorAll("button, input, select, textarea").forEach((el) => {
+    el.disabled = guardando;
+  });
+  if (btnGuardar) {
+    btnGuardar.innerHTML = guardando
+      ? '<span class="spinner"></span> Guardando...'
+      : "Guardar";
+  }
 }
 
 const badgeEntornoMensajeria = document.getElementById("badgeEntorno");

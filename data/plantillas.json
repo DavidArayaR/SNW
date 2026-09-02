@@ -6,7 +6,11 @@
     "texto": "Hola, {nombre} {apellido} 👋\n\nTe recordamos que tienes pendiente agendar tu hora para tu próxima atención.\n\n📅 Agenda tu cita con anticipación para asegurar tu horario.\n\n📞 Si necesitas ayuda para agendar, comunícate con nosotros.\n\n¡Te esperamos! 🏥✨",
     "whatsapp_template": "default",
     "whatsapp_template_lang": "es",
-    "actualizada": 1788194137873
+    "actualizada": 1788381200951,
+    "whatsapp_template_categoria": "UTILITY",
+    "whatsapp_template_id": null,
+    "whatsapp_template_status": null,
+    "whatsapp_template_error": "La categoría UTILITY no coincide con la que ya está asociada a esta plantilla: MARKETING."
   },
   {
     "id": 2,
@@ -57,9 +61,26 @@
     "id": 7,
     "clave": "descuento_salud_mental",
     "nombre": "Descuento Salud Mental",
-    "texto": "Hola {nombre} 👋 Esta semana tienes 25% de descuento en Salud Mental Para Todos. \nEscríbenos para agendar tu sesión antes de que termine la promoción.",
+    "texto": "¡Hola {nombre} 👋! \nEsta semana tienes 25% de descuento en Salud Mental Para Todos. \n\nEscríbenos para agendar tu sesión antes de que termine la promoción.",
     "whatsapp_template": "descuento_salud_mental",
     "whatsapp_template_lang": "es",
-    "actualizada": 1788377907588
+    "actualizada": 1788380662450,
+    "whatsapp_template_categoria": "MARKETING",
+    "whatsapp_template_id": null,
+    "whatsapp_template_status": null,
+    "whatsapp_template_error": "Ya existe contenido en Spanish para esta plantilla. Puedes crear una plantilla nueva y volver a intentarlo."
+  },
+  {
+    "id": 8,
+    "clave": "test",
+    "nombre": "test",
+    "texto": "Hola como estas {nombre}",
+    "whatsapp_template": "test",
+    "whatsapp_template_lang": "es",
+    "whatsapp_template_categoria": "UTILITY",
+    "actualizada": 1788381255326,
+    "whatsapp_template_id": null,
+    "whatsapp_template_status": null,
+    "whatsapp_template_error": "Las variables no pueden estar al principio ni al final de la plantilla."
   }
 ]

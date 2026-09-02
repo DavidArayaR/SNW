@@ -22,6 +22,7 @@ from pydantic import BaseModel
 
 from db import conectar, entorno_valido, nombre_base, columnas_tabla, columna_existe, tabla_pacientes
 from motor_envio import obtener_canal
+from whatsapp_service import WhatsAppService
 from whatsapp_webhook import router as whatsapp_router
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -102,6 +103,7 @@ class PlantillaIn(BaseModel):
     clave: str | None = None
     whatsapp_template: str | None = None
     whatsapp_template_lang: str | None = None
+    whatsapp_template_categoria: str | None = None
 
 
 class EnvioIn(BaseModel):
@@ -354,6 +356,31 @@ def actualizar_respuesta_paciente(paciente_id: int, body: RespuestaIn,
     return {"ok": True}
 
 
+def _registrar_template_meta(p: dict) -> dict:
+    """Registra la plantilla en Meta (crea el template) y devuelve la plantilla
+    actualizada con los datos de Meta (template_id, status, error).
+
+    No rompe el flujo si Meta falla: el error queda guardado en la plantilla."""
+    nombre_template = (p.get("whatsapp_template") or "").strip() or slug(p.get("nombre", ""))
+    lang = (p.get("whatsapp_template_lang") or "").strip() or "es"
+    categoria = (p.get("whatsapp_template_categoria") or "").strip() or "UTILITY"
+
+    p["whatsapp_template"] = nombre_template
+    p["whatsapp_template_lang"] = lang
+    p["whatsapp_template_categoria"] = categoria
+
+    try:
+        servicio = WhatsAppService()
+        resultado = servicio.crear_template_meta(nombre_template, p.get("texto", ""), lang, categoria)
+    except Exception as e:
+        resultado = {"ok": False, "template_id": None, "status": None, "error": str(e)}
+
+    p["whatsapp_template_id"] = resultado.get("template_id")
+    p["whatsapp_template_status"] = resultado.get("status")
+    p["whatsapp_template_error"] = resultado.get("error")
+    return p
+
+
 @app.get("/api/plantillas")
 def listar_plantillas(sesion: dict = Depends(sesion_actual)):
     return sorted(leer_plantillas(), key=lambda p: p.get("actualizada", 0), reverse=True)
@@ -377,8 +404,10 @@ def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(sesion_actual)):
         "texto": body.texto,
         "whatsapp_template": (body.whatsapp_template or "").strip() or None,
         "whatsapp_template_lang": (body.whatsapp_template_lang or "").strip() or None,
+        "whatsapp_template_categoria": (body.whatsapp_template_categoria or "").strip() or None,
         "actualizada": int(time.time() * 1000),
     }
+    nueva = _registrar_template_meta(nueva)
     plantillas.append(nueva)
     escribir_plantillas(plantillas)
     return nueva
@@ -396,7 +425,9 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
             p["texto"] = body.texto
             p["whatsapp_template"] = (body.whatsapp_template or "").strip() or None
             p["whatsapp_template_lang"] = (body.whatsapp_template_lang or "").strip() or None
+            p["whatsapp_template_categoria"] = (body.whatsapp_template_categoria or "").strip() or None
             p["actualizada"] = int(time.time() * 1000)
+            p = _registrar_template_meta(p)
             escribir_plantillas(plantillas)
             return p
 
@@ -755,7 +786,7 @@ def procesar_job(job_id: str) -> None:
             actualizar_envio_batch(envio_id, amb, enviados=job["enviados"], fallidos=job["fallidos"], estado="cancelado")
             break
         job["actual"] = d["nombre"]
-        resultado = canal.enviar(d["telefono"], d["mensaje"], plantilla=plantilla_datos)
+        resultado = canal.enviar(d["telefono"], d["mensaje"], plantilla=plantilla_datos, variables=d.get("variables"))
         # Unificar: (ok, message_id, error) o (ok, error) según el motor
         if len(resultado) == 3:
             ok, message_id, error = resultado
@@ -881,6 +912,11 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
             "nombre": nombre_completo,
             "telefono": telefono,
             "mensaje": renderizar_mensaje(plantilla["texto"], p),
+            "variables": {
+                "nombre": p.get("nombre") or "",
+                "apellido": p.get("apellido") or "",
+                "info_extra": p.get("info_extra") or "",
+            },
         })
 
     if not destinatarios:

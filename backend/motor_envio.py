@@ -16,7 +16,7 @@ class MotorSimulado:
     def disponible(self) -> bool:
         return True
 
-    def enviar(self, telefono: str, mensaje: str, plantilla: dict | None = None):
+    def enviar(self, telefono: str, mensaje: str, plantilla: dict | None = None, variables: dict | None = None):
         vista = mensaje.replace("\n", " ")[:60]
         print(f"[MOTOR {self.nombre}] -> {telefono}: {vista}...")
         return True, None, None
@@ -31,7 +31,7 @@ class MotorApiOficial:
     def disponible(self) -> bool:
         return self.servicio.configurada()
 
-    def enviar(self, telefono: str, mensaje: str, plantilla: dict | None = None):
+    def enviar(self, telefono: str, mensaje: str, plantilla: dict | None = None, variables: dict | None = None):
         """Envía vía API oficial. Devuelve (ok, message_id, error).
 
         Si la plantilla lleva 'whatsapp_template' configurado se envía como
@@ -41,7 +41,7 @@ class MotorApiOficial:
 
         try:
             ok, message_id, error, _ = asyncio.run(
-                self.servicio.enviar(telefono, mensaje, plantilla=plantilla)
+                self.servicio.enviar(telefono, mensaje, plantilla=plantilla, variables=variables)
             )
         except Exception as e:
             return False, None, f"Fallo de conexión con la API de Meta: {e}"

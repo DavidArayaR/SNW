@@ -443,6 +443,19 @@ select.badge--select {
 .toast--error { background: var(--rojo); }
 .toast--ok { background: var(--verde-oscuro); }
 
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, .4);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
 @media (max-width: 900px) {
   .layout { grid-template-columns: 1fr; }
   .panel--list { position: static; max-height: none; }
