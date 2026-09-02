@@ -120,6 +120,13 @@ class WhatsAppApiClient:
             resp = await cliente.get(url, headers=self._headers())
         return self._procesar_respuesta(resp)
 
+    async def buscar_template(self, waba_id: str, nombre: str) -> dict:
+        """Busca un template por nombre (puede devolver varias variantes de idioma)."""
+        url = f"{GRAPH_URL}/{waba_id}/message_templates"
+        async with httpx.AsyncClient(timeout=30) as cliente:
+            resp = await cliente.get(url, params={"name": nombre}, headers=self._headers())
+        return self._procesar_respuesta(resp)
+
     def _procesar_respuesta(self, resp) -> dict:
         if resp.status_code in (200, 201):
             return resp.json()
@@ -219,6 +226,35 @@ class WhatsAppService:
         tid = data.get("id") or ""
         status = data.get("status") or "PENDING"
         return {"ok": True, "template_id": tid, "status": status, "error": None}
+
+    def estado_template_meta(self, nombre_template: str, lang: str) -> dict:
+        """Consulta en Meta el estado actual de un template por nombre + idioma.
+
+        Devuelve {ok, status, category, rejected_reason, error}. No rompe el
+        flujo si Meta falla o si no encuentra el template: el error queda en
+        el campo 'error' para que el llamador decida qué mostrar."""
+        if not self.waba_id or not self.token:
+            return {"ok": False, "status": None, "category": None, "rejected_reason": None,
+                    "error": "Faltan SNW_WA_BUSINESS_ACCOUNT_ID o SNW_WA_TOKEN"}
+
+        try:
+            data = asyncio.run(self.cliente.buscar_template(self.waba_id, nombre_template))
+        except ErrorWhatsApp as e:
+            return {"ok": False, "status": None, "category": None, "rejected_reason": None,
+                    "error": e.message}
+
+        for t in data.get("data", []):
+            if t.get("language") == lang:
+                return {
+                    "ok": True,
+                    "status": t.get("status"),
+                    "category": t.get("category"),
+                    "rejected_reason": t.get("rejected_reason") or t.get("reject_reason"),
+                    "error": None,
+                }
+
+        return {"ok": False, "status": None, "category": None, "rejected_reason": None,
+                "error": f"No se encontró el template '{nombre_template}' en idioma '{lang}' en Meta"}
 
     # ---------- Envío ----------
     def construir_payload_texto(self, telefono: str, mensaje: str, preview_url: bool = False) -> tuple:

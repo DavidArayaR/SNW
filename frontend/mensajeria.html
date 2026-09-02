@@ -37,7 +37,10 @@
     <aside class="panel panel--list">
       <div class="panel__head">
         <h2>Plantillas</h2>
-        <button id="btnNueva" class="btn btn--primary" type="button">+ Nueva</button>
+        <div class="panel__actions">
+          <button id="btnRevisarTodos" class="btn btn--ghost" type="button" data-solo-admin>Actualizar estados</button>
+          <button id="btnNueva" class="btn btn--primary" type="button">+ Nueva</button>
+        </div>
       </div>
       <div class="searchbox">
         <input type="search" id="buscador" placeholder="Buscar..." autocomplete="off">
@@ -99,6 +102,15 @@
             <option value="MARKETING">Marketing</option>
             <option value="AUTHENTICATION">Authentication (códigos OTP)</option>
           </select>
+        </div>
+
+        <div class="field" data-solo-admin id="bloqueEstadoMeta" hidden>
+          <label>Estado en Meta</label>
+          <div class="estado-meta-fila">
+            <span id="badgeEstadoMeta" class="estado-badge">—</span>
+            <button type="button" id="btnRevisarEstadoMeta" class="btn btn--ghost">Consultar estado</button>
+          </div>
+          <p id="motivoRechazoMeta" class="field__hint" hidden></p>
         </div>
 
         <div class="preview-wrap">
@@ -223,7 +235,14 @@
   </div>
 
   <div id="toast" class="toast" hidden></div>
-  <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
+  <style>
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .estado-meta-fila { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    #badgeEstadoMeta.estado-APPROVED { background: #e5f6ec; color: #1e7d4d; border: 1px solid #bfe5cf; }
+    #badgeEstadoMeta.estado-PENDING { background: #fdf3e0; color: #a06b08; border: 1px solid #ecd9ac; }
+    #badgeEstadoMeta.estado-REJECTED { background: #fdecec; color: #b23b37; border: 1px solid #eec2c1; }
+    #badgeEstadoMeta.estado-DESCONOCIDO { background: #eef1f4; color: #66757f; border: 1px solid #dde1e6; }
+  </style>
 
   <script>
     (function () {

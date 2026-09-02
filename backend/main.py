@@ -386,6 +386,47 @@ def listar_plantillas(sesion: dict = Depends(sesion_actual)):
     return sorted(leer_plantillas(), key=lambda p: p.get("actualizada", 0), reverse=True)
 
 
+def _actualizar_estado_meta(p: dict) -> dict:
+    """Consulta el estado real en Meta de una plantilla y actualiza sus campos."""
+    nombre_template = (p.get("whatsapp_template") or "").strip()
+    if not nombre_template:
+        p["whatsapp_template_status"] = None
+        p["whatsapp_template_error"] = "Esta plantilla no tiene un template de Meta configurado"
+        p["whatsapp_template_rejected_reason"] = None
+        return p
+
+    lang = (p.get("whatsapp_template_lang") or "").strip() or "es"
+    servicio = WhatsAppService()
+    resultado = servicio.estado_template_meta(nombre_template, lang)
+
+    p["whatsapp_template_status"] = resultado.get("status")
+    p["whatsapp_template_error"] = resultado.get("error")
+    p["whatsapp_template_rejected_reason"] = resultado.get("rejected_reason")
+    return p
+
+
+@app.get("/api/plantillas/{plantilla_id}/estado-meta")
+def estado_plantilla_meta(plantilla_id: int, sesion: dict = Depends(sesion_actual)):
+    plantillas = leer_plantillas()
+    p = next((x for x in plantillas if x["id"] == plantilla_id), None)
+    if p is None:
+        raise HTTPException(404, detail="Plantilla no encontrada")
+
+    p = _actualizar_estado_meta(p)
+    escribir_plantillas(plantillas)
+    return p
+
+
+@app.post("/api/plantillas/estado-meta/actualizar")
+def actualizar_todos_estados_meta(sesion: dict = Depends(sesion_actual)):
+    plantillas = leer_plantillas()
+    for p in plantillas:
+        if (p.get("whatsapp_template") or "").strip():
+            _actualizar_estado_meta(p)
+    escribir_plantillas(plantillas)
+    return sorted(plantillas, key=lambda p: p.get("actualizada", 0), reverse=True)
+
+
 @app.post("/api/plantillas", status_code=201)
 def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(sesion_actual)):
     if not body.nombre.strip() or not body.texto.strip():

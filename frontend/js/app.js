@@ -15,6 +15,11 @@ const inpTemplate = $("#inpTemplate");
 const inpTemplateLang = $("#inpTemplateLang");
 const inpTemplateCategoria = $("#inpTemplateCategoria");
 const hayTemplateMeta = !!inpTemplate && !!inpTemplateLang && !!inpTemplateCategoria;
+const bloqueEstadoMeta = $("#bloqueEstadoMeta");
+const badgeEstadoMeta = $("#badgeEstadoMeta");
+const btnRevisarEstadoMeta = $("#btnRevisarEstadoMeta");
+const motivoRechazoMeta = $("#motivoRechazoMeta");
+const btnRevisarTodos = $("#btnRevisarTodos");
 
 const valTemplate = () => (hayTemplateMeta ? inpTemplate.value : "");
 const valTemplateLang = () => (hayTemplateMeta ? inpTemplateLang.value : "es");
@@ -205,6 +210,32 @@ function hayCambios() {
   return snapshot !== null && snapshot !== JSON.stringify([inpNombre.value, inpMensaje.value, valTemplate(), valTemplateLang(), valTemplateCategoria()]);
 }
 
+function renderEstadoMeta(p) {
+  if (!bloqueEstadoMeta) return;
+
+  const tieneTemplate = !!(p && p.whatsapp_template);
+  bloqueEstadoMeta.hidden = !tieneTemplate;
+  if (!tieneTemplate) return;
+
+  const status = p.whatsapp_template_status || "DESCONOCIDO";
+  const etiquetas = {
+    APPROVED: "Aprobada",
+    PENDING: "Pendiente",
+    REJECTED: "Rechazada",
+    DESCONOCIDO: "Sin consultar",
+  };
+  badgeEstadoMeta.textContent = etiquetas[status] || status;
+  badgeEstadoMeta.className = "estado-badge estado-" + (etiquetas[status] ? status : "DESCONOCIDO");
+
+  const motivo = p.whatsapp_template_rejected_reason || p.whatsapp_template_error;
+  if (motivo && status !== "APPROVED") {
+    motivoRechazoMeta.textContent = motivo;
+    motivoRechazoMeta.hidden = false;
+  } else {
+    motivoRechazoMeta.hidden = true;
+  }
+}
+
 function abrir(id) {
   const p = plantillas.find((x) => x.id === id);
   if (!p) return;
@@ -219,6 +250,7 @@ function abrir(id) {
     inpTemplateLang.value = p.whatsapp_template_lang || "es";
     inpTemplateCategoria.value = p.whatsapp_template_categoria || "UTILITY";
   }
+  renderEstadoMeta(p);
   btnEliminar.hidden = false;
   inpNombre.classList.remove("invalido");
   inpMensaje.classList.remove("invalido");
@@ -239,6 +271,7 @@ function modoNueva() {
     inpTemplateLang.value = "es";
     inpTemplateCategoria.value = "UTILITY";
   }
+  if (bloqueEstadoMeta) bloqueEstadoMeta.hidden = true;
   btnEliminar.hidden = true;
   inpNombre.classList.remove("invalido");
   inpMensaje.classList.remove("invalido");
@@ -831,6 +864,53 @@ function finalizarConf(mensaje, esError) {
   $("#btnCancelarConf").hidden = true;
   setBloqueoEnvioConf(false);
   toast(mensaje, esError ? "error" : "ok");
+}
+
+if (btnRevisarEstadoMeta) {
+  btnRevisarEstadoMeta.addEventListener("click", async () => {
+    if (!activaId) return;
+    btnRevisarEstadoMeta.disabled = true;
+    try {
+      const res = await fetch(`${API_URL}/${activaId}/estado-meta`, { headers: authHeaders() });
+      if (res.status === 401) { window.snwSalir(); return; }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail ?? `Error ${res.status}`);
+      const i = plantillas.findIndex((x) => x.id === activaId);
+      if (i >= 0) plantillas[i] = data;
+      renderEstadoMeta(data);
+      toast(`Estado en Meta: ${data.whatsapp_template_status || "sin información"}.`, "ok");
+    } catch (err) {
+      toast(`No se pudo consultar el estado: ${err.message}`, "error");
+    } finally {
+      btnRevisarEstadoMeta.disabled = false;
+    }
+  });
+}
+
+if (btnRevisarTodos) {
+  btnRevisarTodos.addEventListener("click", async () => {
+    btnRevisarTodos.disabled = true;
+    try {
+      const res = await fetch(`${API_URL}/estado-meta/actualizar`, {
+        method: "POST",
+        headers: authHeaders(),
+      });
+      if (res.status === 401) { window.snwSalir(); return; }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail ?? `Error ${res.status}`);
+      plantillas = data;
+      renderLista(buscadorEl.value);
+      if (activaId) {
+        const actual = plantillas.find((x) => x.id === activaId);
+        if (actual) renderEstadoMeta(actual);
+      }
+      toast("Estados actualizados.", "ok");
+    } catch (err) {
+      toast(`No se pudieron actualizar los estados: ${err.message}`, "error");
+    } finally {
+      btnRevisarTodos.disabled = false;
+    }
+  });
 }
 
 modoVacia();
