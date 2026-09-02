@@ -17,7 +17,7 @@ from pathlib import Path
 
 import httpx
 
-from db import conectar, columna_existe
+from db import conectar, columna_existe, tabla_pacientes
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 GRAPHVERSION = "v21.0"
@@ -54,11 +54,12 @@ def _normalizar_telefono(crudo: str) -> str | None:
 
 
 def _detectar_ambiente_por_telefono(telefono: str) -> str | None:
-    """Busca el teléfono en cualquiera de las dos bases y devuelve 'desarrollo' o 'produccion'."""
+    """Busca el teléfono en pacientes_dev y pacientes_prod y devuelve 'desarrollo' o 'produccion'."""
     for ambiente in ("desarrollo", "produccion"):
+        t = tabla_pacientes(ambiente)
         try:
             with conectar(ambiente) as conn, conn.cursor() as cur:
-                cur.execute("SELECT id FROM pacientes WHERE telefono = %s LIMIT 1", (telefono,))
+                cur.execute(f"SELECT id FROM {t} WHERE telefono = %s LIMIT 1", (telefono,))
                 if cur.fetchone():
                     return ambiente
         except Exception:
@@ -218,12 +219,13 @@ class WhatsAppService:
                            ambiente: str, descripcion_error: str | None = None) -> bool:
         """Relaciona el message id de Meta con el último log del paciente."""
         numero = telefono if telefono.startswith("+") else f"+{telefono}"
+        t = tabla_pacientes(ambiente)
         try:
             with conectar(ambiente) as conn, conn.cursor() as cur:
                 cur.execute(
                     "UPDATE log_envios SET whatsapp_message_id = %s, estado_whatsapp = 'sent',"
                     " estado_envio = %s, descripcion_error = %s"
-                    " WHERE paciente_id = (SELECT id FROM pacientes WHERE telefono = %s LIMIT 1)"
+                    f" WHERE paciente_id = (SELECT id FROM {t} WHERE telefono = %s LIMIT 1)"
                     " ORDER BY id DESC LIMIT 1",
                     (message_id, estado_envio, descripcion_error, numero),
                 )
@@ -325,17 +327,18 @@ class WhatsAppService:
         amb = _detectar_ambiente_por_telefono(telefono)
         if not amb:
             return "sin_cliente"
+        t = tabla_pacientes(amb)
         try:
             with conectar(amb) as conn, conn.cursor() as cur:
-                if columna_existe("pacientes", "estado", amb):
+                if columna_existe(t, "estado", amb):
                     cur.execute(
-                        "UPDATE pacientes SET estado = 'enviado' WHERE telefono = %s", (telefono,)
+                        f"UPDATE {t} SET estado = 'enviado' WHERE telefono = %s", (telefono,)
                     )
                 cur.execute(
                     "INSERT INTO log_envios (envio_id, paciente_id, nombre_paciente, numero_telefono,"
                     " mensaje, plantilla_clave, estado_envio, respuesta, descripcion_error)"
-                    " SELECT NULL, id, nombre, telefono, %s, 'respuesta', 'enviado', 'respondio', NULL"
-                    " FROM pacientes WHERE telefono = %s LIMIT 1",
+                    f" SELECT NULL, id, nombre, telefono, %s, 'respuesta', 'enviado', 'respondio', NULL"
+                    f" FROM {t} WHERE telefono = %s LIMIT 1",
                     (texto, telefono),
                 )
                 conn.commit()
@@ -348,15 +351,16 @@ class WhatsAppService:
         amb = _detectar_ambiente_por_telefono(telefono)
         if not amb:
             return
+        t = tabla_pacientes(amb)
         try:
             with conectar(amb) as conn, conn.cursor() as cur:
-                if columna_existe("pacientes", "whatsapp_opt_out", amb):
+                if columna_existe(t, "whatsapp_opt_out", amb):
                     cur.execute(
-                        "UPDATE pacientes SET whatsapp_opt_out = 1 WHERE telefono = %s", (telefono,)
+                        f"UPDATE {t} SET whatsapp_opt_out = 1 WHERE telefono = %s", (telefono,)
                     )
                 cur.execute(
                     "UPDATE log_envios SET respuesta = 'baja' WHERE paciente_id ="
-                    " (SELECT id FROM pacientes WHERE telefono = %s LIMIT 1)"
+                    f" (SELECT id FROM {t} WHERE telefono = %s LIMIT 1)"
                     " ORDER BY id DESC LIMIT 1",
                     (telefono,),
                 )

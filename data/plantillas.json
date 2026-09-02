@@ -52,5 +52,14 @@
     "whatsapp_template": "aviso_pago_pendiente",
     "whatsapp_template_lang": "es",
     "actualizada": 1788194184603
+  },
+  {
+    "id": 7,
+    "clave": "descuento_salud_mental",
+    "nombre": "Descuento Salud Mental",
+    "texto": "Hola {nombre} 👋 Esta semana tienes 25% de descuento en Salud Mental Para Todos. \nEscríbenos para agendar tu sesión antes de que termine la promoción.",
+    "whatsapp_template": "descuento_salud_mental",
+    "whatsapp_template_lang": "es",
+    "actualizada": 1788377907588
   }
 ]

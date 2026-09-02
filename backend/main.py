@@ -20,12 +20,9 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from db import conectar, entorno_valido, nombre_base, columnas_tabla, columna_existe
+from db import conectar, entorno_valido, nombre_base, columnas_tabla, columna_existe, tabla_pacientes
 from motor_envio import obtener_canal
 from whatsapp_webhook import router as whatsapp_router
-"""
-from backend.db import conectar
-from backend.motor_envio import obtener_canal"""
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
@@ -245,19 +242,22 @@ def slug(texto: str) -> str:
     return t[:40] or "plantilla"
 
 
-FROM_PACIENTES = (
-    " FROM pacientes p"
-    " LEFT JOIN log_envios l ON l.id = ("
-    "   SELECT l2.id FROM log_envios l2"
-    "   WHERE l2.paciente_id = p.id ORDER BY l2.id DESC LIMIT 1"
-    ")"
-)
+def from_pacientes(ambiente: str) -> str:
+    """Cláusula FROM + LEFT JOIN sobre la tabla de pacientes del entorno."""
+    t = tabla_pacientes(ambiente)
+    return (
+        f" FROM {t} p"
+        " LEFT JOIN log_envios l ON l.id = ("
+        "   SELECT l2.id FROM log_envios l2"
+        "   WHERE l2.paciente_id = p.id ORDER BY l2.id DESC LIMIT 1"
+        ")"
+    )
 
 
 def expr_select_pacientes(ambiente: str) -> str:
     """Genera las expresiones SELECT de la tabla pacientes adaptándose a las
     columnas reales existentes (soporta bases con esquema mínimo)."""
-    cols = columnas_tabla("pacientes", ambiente)
+    cols = columnas_tabla(tabla_pacientes(ambiente), ambiente)
     exprs = ["p.id", "p.nombre", "p.apellido", "p.telefono"]
     if "estado" in cols:
         exprs.append("COALESCE(NULLIF(p.estado, ''), 'pendiente') AS estado")
@@ -283,11 +283,11 @@ def expr_select_pacientes(ambiente: str) -> str:
 @app.get("/api/pacientes")
 def listar_pacientes(q: str | None = Query(None), ambiente: str = Query("produccion"),
                      sesion: dict = Depends(solo_admin)):
-    sql = "SELECT " + expr_select_pacientes(ambiente) + FROM_PACIENTES
+    sql = "SELECT " + expr_select_pacientes(ambiente) + from_pacientes(ambiente)
     args: list = []
     if q and q.strip():
         like = f"%{q.strip()}%"
-        if columna_existe("pacientes", "info_extra", ambiente):
+        if columna_existe(tabla_pacientes(ambiente), "info_extra", ambiente):
             sql += " WHERE p.nombre LIKE %s OR p.telefono LIKE %s OR p.info_extra LIKE %s"
             args = [like, like, like]
         else:
@@ -319,15 +319,16 @@ def actualizar_paciente(paciente_id: int, body: EstadoPacienteIn,
                         sesion: dict = Depends(solo_admin)):
     if body.estado not in ("pendiente", "enviado", "error"):
         raise HTTPException(400, detail="Estado inválido. Use: pendiente, enviado o error")
+    t = tabla_pacientes(ambiente)
     with conectar(ambiente) as conn, conn.cursor() as cur:
-        cur.execute("SELECT id FROM pacientes WHERE id = %s", (paciente_id,))
+        cur.execute(f"SELECT id FROM {t} WHERE id = %s", (paciente_id,))
         if not cur.fetchone():
             raise HTTPException(404, detail="Paciente no encontrado")
-        if columna_existe("pacientes", "estado", ambiente):
-            cur.execute("UPDATE pacientes SET estado = %s WHERE id = %s", (body.estado, paciente_id))
+        if columna_existe(t, "estado", ambiente):
+            cur.execute(f"UPDATE {t} SET estado = %s WHERE id = %s", (body.estado, paciente_id))
             conn.commit()
         cur.execute(
-            "SELECT " + expr_select_pacientes(ambiente) + FROM_PACIENTES + " WHERE p.id = %s",
+            "SELECT " + expr_select_pacientes(ambiente) + from_pacientes(ambiente) + " WHERE p.id = %s",
             (paciente_id,),
         )
         fila = cur.fetchone()
@@ -640,18 +641,20 @@ def renderizar_mensaje(texto: str, paciente: dict) -> str:
 
 
 def actualizar_estado_paciente(paciente_id: int, estado: str, ambiente: str) -> None:
-    if not columna_existe("pacientes", "estado", ambiente):
+    t = tabla_pacientes(ambiente)
+    if not columna_existe(t, "estado", ambiente):
         return
     with conectar(ambiente) as conn, conn.cursor() as cur:
-        cur.execute("UPDATE pacientes SET estado = %s WHERE id = %s", (estado, paciente_id))
+        cur.execute(f"UPDATE {t} SET estado = %s WHERE id = %s", (estado, paciente_id))
         conn.commit()
 
 
 def actualizar_telefono(paciente_id: int, telefono: str, ambiente: str) -> None:
-    if not columna_existe("pacientes", "telefono", ambiente):
+    t = tabla_pacientes(ambiente)
+    if not columna_existe(t, "telefono", ambiente):
         return
     with conectar(ambiente) as conn, conn.cursor() as cur:
-        cur.execute("UPDATE pacientes SET telefono = %s WHERE id = %s", (telefono, paciente_id))
+        cur.execute(f"UPDATE {t} SET telefono = %s WHERE id = %s", (telefono, paciente_id))
         conn.commit()
 
 
@@ -808,10 +811,11 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         raise HTTPException(404, detail="Plantilla no encontrada")
 
     with conectar(amb) as conn, conn.cursor() as cur:
-        tiene_opt_out = columna_existe("pacientes", "whatsapp_opt_out", amb)
-        tiene_estado = columna_existe("pacientes", "estado", amb)
+        t = tabla_pacientes(amb)
+        tiene_opt_out = columna_existe(t, "whatsapp_opt_out", amb)
+        tiene_estado = columna_existe(t, "estado", amb)
 
-        base_select = "SELECT " + expr_select_pacientes(amb) + FROM_PACIENTES
+        base_select = "SELECT " + expr_select_pacientes(amb) + from_pacientes(amb)
 
         if body.pacientes:
             placeholders = ", ".join("%s" for _ in body.pacientes)
@@ -891,7 +895,9 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         PENDIENTES[token] = {
             "ambiente": amb,
             "plantilla": {"id": plantilla["id"], "clave": plantilla["clave"],
-                          "nombre": plantilla["nombre"], "texto": plantilla["texto"]},
+                          "nombre": plantilla["nombre"], "texto": plantilla["texto"],
+                          "whatsapp_template": plantilla.get("whatsapp_template"),
+                          "whatsapp_template_lang": plantilla.get("whatsapp_template_lang")},
             "destinatarios": destinatarios,
             "rechazados": rechazados,
             "estado": "pendiente",
@@ -1063,16 +1069,17 @@ def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(sesion_actual)
     except ValueError:
         raise HTTPException(400, detail=f"Entorno inválido: '{body.ambiente}'")
 
+    t = tabla_pacientes(amb)
     with conectar(amb) as conn, conn.cursor() as cur:
-        if columna_existe("pacientes", "estado", amb):
+        if columna_existe(t, "estado", amb):
             cur.execute(
-                "SELECT COUNT(*) AS total,"
-                " SUM(estado = 'pendiente') AS pendientes"
-                " FROM pacientes"
+                f"SELECT COUNT(*) AS total,"
+                f" SUM(estado = 'pendiente') AS pendientes"
+                f" FROM {t}"
             )
         else:
             cur.execute(
-                "SELECT COUNT(*) AS total, COUNT(*) AS pendientes FROM pacientes"
+                f"SELECT COUNT(*) AS total, COUNT(*) AS pendientes FROM {t}"
             )
         fila = cur.fetchone()
 
@@ -1138,6 +1145,11 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
     condiciones: list[str] = []
     args: list = []
 
+    # envios es una única tabla; 'base_datos' guarda 'pacientes_dev' o 'pacientes_prod'.
+    if ambiente != "todos":
+        condiciones.append("base_datos = %s")
+        args.append(nombre_base(ambiente))
+
     if q and q.strip():
         like = f"%{q.strip()}%"
         condiciones.append(
@@ -1149,26 +1161,19 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
         sql += " WHERE " + " AND ".join(condiciones)
     sql += " ORDER BY id DESC LIMIT 300"
 
-    bases = ["desarrollo", "produccion"] if ambiente == "todos" else [ambiente]
-    filas = []
-    for amb in bases:
-        try:
-            with conectar(amb) as conn, conn.cursor() as cur:
-                cur.execute(sql, tuple(args) or None)
-                filas.extend(cur.fetchall())
-        except Exception:
-            pass
+    with conectar(ambiente) as conn, conn.cursor() as cur:
+        cur.execute(sql, tuple(args) or None)
+        filas = cur.fetchall()
 
-    # Orden cronológico real; id no es único entre ambas BDs
-    filas.sort(key=lambda f: (f.get("fecha_hora"), f.get("id", 0)), reverse=True)
     for f in filas:
         f["fecha"] = f.pop("fecha_hora").strftime("%d-%m-%Y %H:%M")
-    return filas[:300]
+    return filas
 
 
 @app.get("/api/notificaciones/historial/{envio_id}/detalle")
 def detalle_historial(envio_id: int, ambiente: str = Query("produccion"),
                       sesion: dict = Depends(sesion_actual)):
+    # log_envios es única para todo el sistema; el detalle se busca por envio_id.
     sql = ("SELECT id, nombre_paciente, numero_telefono, plantilla_clave,"
            " estado_envio, respuesta, descripcion_error, fecha_hora, mensaje FROM log_envios"
            " WHERE envio_id = %s ORDER BY id")
