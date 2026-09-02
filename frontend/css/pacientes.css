@@ -143,6 +143,17 @@
   font-size: .85rem;
 }
 
+.aviso-admin {
+  padding: 11px 15px;
+  border-radius: 10px;
+  background: #fdecec;
+  border: 1px solid #eec2c1;
+  color: #b23b37;
+  font-size: .85rem;
+  font-weight: 600;
+  margin-top: 10px;
+}
+
 .progreso-info {
   display: flex;
   justify-content: space-between;

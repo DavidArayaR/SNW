@@ -338,5 +338,9 @@
   "bf892c93de534d62b35022a5e16f7c82": {
     "rol": "usuario",
     "nombre": "Usuario Final"
+  },
+  "6d8eca3c95e04bbcb4a9f384898eebb5": {
+    "rol": "administrador",
+    "nombre": "Administrador"
   }
 }

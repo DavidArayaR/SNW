@@ -491,6 +491,7 @@ function abrirModalConf() {
     r.checked = r.value === ambienteConf;
   });
   refrescarAvisoDevConf();
+  refrescarAvisoAdminConf();
   actualizarResumenConf();
 
   $("#confProgreso").hidden = true;
@@ -519,6 +520,7 @@ document.querySelectorAll('input[name="ambienteConf"]').forEach((r) => {
     localStorage.setItem("snw_ambiente_admin", ambienteConf);
     actualizarBadgeMensajeria();
     refrescarAvisoDevConf();
+    refrescarAvisoAdminConf();
     actualizarResumenConf();
   });
 });
@@ -536,6 +538,18 @@ function refrescarAvisoDevConf() {
         `Base de datos desarrollo: solo se enviará a los números autorizados (${nums}). El resto será descartado.`;
     })
     .catch(() => {});
+}
+
+// Aviso rojo para el administrador: en producción envía directo sin confirmación.
+function refrescarAvisoAdminConf() {
+  const box = $("#confAvisoAdmin");
+  const rol = localStorage.getItem("snw_rol");
+  const esAdminProduccion = rol === "administrador" && ambienteConf === "produccion";
+  box.hidden = !esAdminProduccion;
+  if (esAdminProduccion) {
+    box.textContent =
+      "Logeado como admin: se envía directamente sin confirmación de supervisor.";
+  }
 }
 
 async function actualizarResumenConf() {

@@ -111,7 +111,7 @@
       const n = document.getElementById("menuNav");
       const salir = document.createElement("a");
       salir.href = "#";
-      salir.innerHTML = '<i class="fa-solid fa-right-from-bracket"></i> Cerrar sesión · ' + (localStorage.getItem("snw_nombre") || "");
+      salir.innerHTML = '<i class="fa-solid fa-right-from-bracket"></i> Cerrar sesión' || "";
       salir.addEventListener("click", async (e) => {
         e.preventDefault();
         try { await fetch("api/auth/logout", { method: "POST", headers: { Authorization: "Bearer " + token } }); } catch {}
