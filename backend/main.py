@@ -356,9 +356,17 @@ def actualizar_respuesta_paciente(paciente_id: int, body: RespuestaIn,
     return {"ok": True}
 
 
-def _registrar_template_meta(p: dict) -> dict:
-    """Registra la plantilla en Meta (crea el template) y devuelve la plantilla
-    actualizada con los datos de Meta (template_id, status, error).
+def _registrar_template_meta(p: dict, nombre_anterior: str | None = None,
+                             lang_anterior: str | None = None,
+                             template_id_anterior: str | None = None) -> dict:
+    """Registra la plantilla en Meta: la CREA si es nueva, o la EDITA si ya
+    existía con el mismo nombre+idioma. Devuelve la plantilla actualizada con
+    los datos de Meta (template_id, status, error).
+
+    'nombre_anterior'/'lang_anterior'/'template_id_anterior' deben ser los
+    valores que tenía la plantilla ANTES de aplicar los cambios del usuario;
+    así se detecta si el template de Meta sigue siendo el mismo (edición) o
+    si cambió a otro nombre/idioma distinto (lo que requiere crear uno nuevo).
 
     No rompe el flujo si Meta falla: el error queda guardado en la plantilla."""
     nombre_template = (p.get("whatsapp_template") or "").strip() or slug(p.get("nombre", ""))
@@ -369,13 +377,24 @@ def _registrar_template_meta(p: dict) -> dict:
     p["whatsapp_template_lang"] = lang
     p["whatsapp_template_categoria"] = categoria
 
+    # Solo reutilizamos el template_id conocido si el nombre y el idioma no
+    # cambiaron; si cambiaron, es un template distinto y hay que crearlo.
+    id_conocido = (
+        template_id_anterior
+        if nombre_anterior == nombre_template and lang_anterior == lang
+        else None
+    )
+
     try:
         servicio = WhatsAppService()
-        resultado = servicio.crear_template_meta(nombre_template, p.get("texto", ""), lang, categoria)
+        resultado = servicio.guardar_template_meta(
+            nombre_template, p.get("texto", ""), lang, categoria,
+            template_id_conocido=id_conocido,
+        )
     except Exception as e:
-        resultado = {"ok": False, "template_id": None, "status": None, "error": str(e)}
+        resultado = {"ok": False, "template_id": id_conocido, "status": None, "error": str(e)}
 
-    p["whatsapp_template_id"] = resultado.get("template_id")
+    p["whatsapp_template_id"] = resultado.get("template_id") or id_conocido
     p["whatsapp_template_status"] = resultado.get("status")
     p["whatsapp_template_error"] = resultado.get("error")
     return p
@@ -462,13 +481,17 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
     plantillas = leer_plantillas()
     for p in plantillas:
         if p["id"] == plantilla_id:
+            nombre_template_anterior = p.get("whatsapp_template")
+            lang_anterior = p.get("whatsapp_template_lang")
+            template_id_anterior = p.get("whatsapp_template_id")
+
             p["nombre"] = body.nombre.strip()
             p["texto"] = body.texto
             p["whatsapp_template"] = (body.whatsapp_template or "").strip() or None
             p["whatsapp_template_lang"] = (body.whatsapp_template_lang or "").strip() or None
             p["whatsapp_template_categoria"] = (body.whatsapp_template_categoria or "").strip() or None
             p["actualizada"] = int(time.time() * 1000)
-            p = _registrar_template_meta(p)
+            p = _registrar_template_meta(p, nombre_template_anterior, lang_anterior, template_id_anterior)
             escribir_plantillas(plantillas)
             return p
 

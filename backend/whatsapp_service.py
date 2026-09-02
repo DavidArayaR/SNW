@@ -113,6 +113,27 @@ class WhatsAppApiClient:
             resp = await cliente.post(url, json=payload, headers=self._headers())
         return self._procesar_respuesta(resp)
 
+    async def editar_template(self, template_id: str, payload: dict) -> dict:
+        """Edita un template EXISTENTE en Meta (POST /{template_id}).
+
+        A diferencia de crear_template, este endpoint se identifica por el ID
+        propio del template (no por el waba_id) y no acepta 'name' ni
+        'language': esos dos campos son inmutables una vez creado el template.
+        """
+        url = f"{GRAPH_URL}/{template_id}"
+        async with httpx.AsyncClient(timeout=30) as cliente:
+            resp = await cliente.post(url, json=payload, headers=self._headers())
+        return self._procesar_respuesta(resp)
+
+    async def obtener_template(self, template_id: str) -> dict:
+        """Obtiene los datos actuales de un template por su propio ID."""
+        url = f"{GRAPH_URL}/{template_id}"
+        async with httpx.AsyncClient(timeout=30) as cliente:
+            resp = await cliente.get(
+                url, params={"fields": "category,status,name,language"}, headers=self._headers()
+            )
+        return self._procesar_respuesta(resp)
+
     async def listar_templates(self, waba_id: str) -> dict:
         """Lista los templates de mensaje de la WABA."""
         url = f"{GRAPH_URL}/{waba_id}/message_templates"
@@ -226,6 +247,104 @@ class WhatsAppService:
         tid = data.get("id") or ""
         status = data.get("status") or "PENDING"
         return {"ok": True, "template_id": tid, "status": status, "error": None}
+
+    def editar_template_meta(self, template_id: str, texto: str, category: str = "UTILITY") -> dict:
+        """Edita un template ya existente en Meta usando su ID.
+
+        Importante: Meta NO permite cambiar la categoría de un template ya
+        APPROVED bajo ninguna circunstancia. Para evitar el error, primero
+        consultamos la categoría real que tiene el template en Meta y la
+        usamos tal cual en el payload de edición, sin importar qué categoría
+        tengamos guardada localmente. Además, Meta solo permite editar un
+        template como máximo una vez cada 24h, y al editar uno ya APPROVED,
+        vuelve a quedar en PENDING hasta que Meta lo re-revise."""
+        if not self.token:
+            return {"ok": False, "template_id": template_id, "status": None,
+                    "error": "Falta SNW_WA_TOKEN"}
+        if not template_id:
+            return {"ok": False, "template_id": None, "status": None,
+                    "error": "No hay un template_id conocido para editar"}
+
+        categoria_real = category
+        try:
+            info = asyncio.run(self.cliente.obtener_template(template_id))
+            categoria_real = info.get("category") or category
+        except ErrorWhatsApp:
+            # Si falla la consulta (p. ej. permisos), seguimos con la
+            # categoría local como mejor esfuerzo; el reintento de abajo
+            # cubre el caso de que igual sea rechazada.
+            pass
+
+        texto_meta, ejemplo = self.convertir_texto_meta(texto)
+        componente_body: dict = {"type": "BODY", "text": texto_meta}
+        if ejemplo:
+            componente_body["example"] = {"body_text": [ejemplo]}
+
+        payload = {"category": categoria_real, "components": [componente_body]}
+        aviso_categoria = None
+        if categoria_real != category:
+            aviso_categoria = (
+                f"El texto se actualizó. La categoría se mantuvo en"
+                f" '{categoria_real}' porque Meta no permite cambiar la"
+                f" categoría de un template ya aprobado."
+            )
+
+        try:
+            data = asyncio.run(self.cliente.editar_template(template_id, payload))
+        except ErrorWhatsApp as e:
+            mensaje = (e.message or "").lower()
+            if "categor" in mensaje:
+                # Último recurso: reintentar sin mandar el campo de categoría.
+                payload_sin_categoria = {"components": [componente_body]}
+                try:
+                    data = asyncio.run(self.cliente.editar_template(template_id, payload_sin_categoria))
+                    aviso_categoria = (
+                        "El texto se actualizó, pero Meta no permite cambiar la"
+                        " categoría de un template ya aprobado (se mantuvo la"
+                        " categoría original en Meta)."
+                    )
+                except ErrorWhatsApp as e2:
+                    return {"ok": False, "template_id": template_id, "status": None, "error": e2.message}
+            else:
+                return {"ok": False, "template_id": template_id, "status": None, "error": e.message}
+
+        status = data.get("status") or "PENDING"
+        return {
+            "ok": True,
+            "template_id": template_id,
+            "status": status,
+            "error": aviso_categoria,
+            "category_real": categoria_real,
+        }
+
+    def id_template_meta(self, nombre_template: str, lang: str) -> str | None:
+        """Busca en Meta el ID real de un template por nombre+idioma.
+
+        Sirve como respaldo cuando no tenemos el template_id guardado
+        localmente (por ejemplo, plantillas creadas antes de este cambio)."""
+        if not self.waba_id or not self.token:
+            return None
+        try:
+            data = asyncio.run(self.cliente.buscar_template(self.waba_id, nombre_template))
+        except ErrorWhatsApp:
+            return None
+        for t in data.get("data", []):
+            if t.get("language") == lang:
+                return t.get("id")
+        return None
+
+    def guardar_template_meta(self, nombre: str, texto: str, lang: str = "es",
+                              category: str = "UTILITY",
+                              template_id_conocido: str | None = None) -> dict:
+        """Crea el template en Meta, o lo edita si ya existe.
+
+        Si no se pasa un template_id_conocido, primero intenta encontrarlo en
+        Meta por nombre+idioma (por si ya se había creado pero se perdió el id
+        localmente). Si lo encuentra, edita; si no, crea uno nuevo."""
+        tid = template_id_conocido or self.id_template_meta(nombre, lang)
+        if tid:
+            return self.editar_template_meta(tid, texto, category)
+        return self.crear_template_meta(nombre, texto, lang, category)
 
     def estado_template_meta(self, nombre_template: str, lang: str) -> dict:
         """Consulta en Meta el estado actual de un template por nombre + idioma.

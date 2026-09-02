@@ -15,74 +15,30 @@
   },
   {
     "id": 2,
-    "clave": "recordatorio_cita",
-    "nombre": "Recordatorio de cita",
-    "texto": "Hola {nombre}, te recordamos que tienes una cita el {info_extra}. Por favor confirma tu asistencia respondiendo SI o NO. ¡Te esperamos!",
-    "whatsapp_template": "recordatorio_cita",
-    "whatsapp_template_lang": "es",
-    "actualizada": 1788194150102
-  },
-  {
-    "id": 3,
-    "clave": "confirmacion_hora",
-    "nombre": "Confirmación de hora",
-    "texto": "Hola {nombre}, tu hora fue confirmada para el {info_extra}. Si necesitas reagendar, responde este mensaje y te ayudamos.",
-    "whatsapp_template": "confirmacion_hora",
-    "whatsapp_template_lang": "es",
-    "actualizada": 1788194156997
-  },
-  {
-    "id": 4,
-    "clave": "resultados_listos",
-    "nombre": "Resultados listos",
-    "texto": "Hola {nombre}, tus resultados de exámenes ya están disponibles. Retíralos en nuestra sucursal o solicita el envío digital respondiendo este mensaje.",
-    "whatsapp_template": "resultados_listos",
-    "whatsapp_template_lang": "es",
-    "actualizada": 1788194166968
-  },
-  {
-    "id": 5,
-    "clave": "recordatorio_control",
-    "nombre": "Recordatorio de control",
-    "texto": "Hola {nombre}, hace tiempo no visitas nuestro centro. Te recordamos agendar tu control de salud. Responde este mensaje para coordinar tu hora.",
-    "whatsapp_template": "recordatorio_control",
-    "whatsapp_template_lang": "es",
-    "actualizada": 1788194175000
-  },
-  {
-    "id": 6,
-    "clave": "aviso_pago",
-    "nombre": "Aviso de pago pendiente",
-    "texto": "Hola {nombre}, tienes un saldo pendiente de {info_extra}. Puedes regularizarlo en línea o en sucursal. Ante dudas, responde este mensaje.",
-    "whatsapp_template": "aviso_pago_pendiente",
-    "whatsapp_template_lang": "es",
-    "actualizada": 1788194184603
-  },
-  {
-    "id": 7,
     "clave": "descuento_salud_mental",
     "nombre": "Descuento Salud Mental",
-    "texto": "¡Hola {nombre} 👋! \nEsta semana tienes 25% de descuento en Salud Mental Para Todos. \n\nEscríbenos para agendar tu sesión antes de que termine la promoción.",
+    "texto": "¡Hola {nombre} 👋! \n¡Esta semana un 25% de descuento en Salud Mental Para Todos! 🤑\n\nEscríbenos para agendar tu sesión antes de que termine la promoción ✍",
     "whatsapp_template": "descuento_salud_mental",
     "whatsapp_template_lang": "es",
-    "actualizada": 1788380662450,
+    "actualizada": 1788387070717,
     "whatsapp_template_categoria": "MARKETING",
-    "whatsapp_template_id": null,
+    "whatsapp_template_id": "1319259093453424",
     "whatsapp_template_status": "APPROVED",
     "whatsapp_template_error": null,
     "whatsapp_template_rejected_reason": null
   },
   {
-    "id": 8,
-    "clave": "test",
-    "nombre": "test",
-    "texto": "Hola como estas {nombre}",
-    "whatsapp_template": "test",
+    "id": 3,
+    "clave": "aprovecha",
+    "nombre": "Aprovecha",
+    "texto": "¡Hola {nombre} 👋! \nEsta semana aprovecha para agendar tu hora a *$25.000* en Salud Mental. \n\nEscríbenos para agendar tu sesión antes de que termine la promoción.",
+    "whatsapp_template": "aprovecha",
     "whatsapp_template_lang": "es",
-    "whatsapp_template_categoria": "UTILITY",
-    "actualizada": 1788381255326,
-    "whatsapp_template_id": null,
-    "whatsapp_template_status": null,
-    "whatsapp_template_error": "Las variables no pueden estar al principio ni al final de la plantilla."
+    "whatsapp_template_categoria": "MARKETING",
+    "actualizada": 1788388112321,
+    "whatsapp_template_id": "955941433581561",
+    "whatsapp_template_status": "APPROVED",
+    "whatsapp_template_error": null,
+    "whatsapp_template_rejected_reason": null
   }
 ]

@@ -351,10 +351,6 @@
     "rol": "administrador",
     "nombre": "Administrador"
   },
-  "ce0c392c64a348049e447e18363388d9": {
-    "rol": "administrador",
-    "nombre": "Administrador"
-  },
   "13fac4ef4707498086dc5d0b189afd66": {
     "rol": "administrador",
     "nombre": "Administrador"
@@ -376,6 +372,14 @@
     "nombre": "Administrador"
   },
   "bbda4cd8338043088529d0e94d072646": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "33bdba2ae5384eeb948e8619d430928b": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "2ac26b12f5854627b126165ea81b4ff4": {
     "rol": "administrador",
     "nombre": "Administrador"
   }

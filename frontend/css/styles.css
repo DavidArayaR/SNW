@@ -350,6 +350,13 @@ select.badge--select {
   box-shadow: 0 1px 1px rgba(0, 0, 0, .1);
 }
 .bubble--vacia { color: #97a3ad; font-style: italic; }
+.bubble code {
+  background: rgba(0, 0, 0, .06);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: Consolas, "SFMono-Regular", monospace;
+  font-size: .88em;
+}
 
 .bubble__time {
   position: absolute;

@@ -120,6 +120,18 @@ function escaparHtml(texto) {
   return div.innerHTML;
 }
 
+// Convierte el formato de WhatsApp (*negrita*, _cursiva_, ~tachado~,
+// ```monoespaciado```) a HTML para la vista previa. Se escapa primero el
+// texto para evitar inyección de HTML.
+function formatearWhatsApp(texto) {
+  let html = escaparHtml(texto);
+  html = html.replace(/```([\s\S]+?)```/g, "<code>$1</code>");
+  html = html.replace(/(^|[\s(>])\*(\S(?:[^*\n]*\S)?)\*(?=$|[\s).,!?<])/g, "$1<strong>$2</strong>");
+  html = html.replace(/(^|[\s(>])_(\S(?:[^_\n]*\S)?)_(?=$|[\s).,!?<])/g, "$1<em>$2</em>");
+  html = html.replace(/(^|[\s(>])~(\S(?:[^~\n]*\S)?)~(?=$|[\s).,!?<])/g, "$1<del>$2</del>");
+  return html; // el contenedor .bubble ya usa white-space: pre-wrap para los saltos de línea
+}
+
 function renderLista(filtro = "") {
   const q = filtro.trim().toLowerCase();
   const visibles = [...plantillas]
@@ -165,7 +177,7 @@ function actualizarPreview() {
     for (const [clave, valor] of Object.entries(DATOS_EJEMPLO)) {
       reemplazado = reemplazado.replaceAll(`{${clave}}`, valor);
     }
-    previewTexto.textContent = reemplazado;
+    previewTexto.innerHTML = formatearWhatsApp(reemplazado);
     previewTexto.parentElement.classList.remove("bubble--vacia");
   }
 
@@ -236,6 +248,27 @@ function renderEstadoMeta(p) {
   }
 }
 
+// El nombre del template de Meta, su idioma y su categoría son inmutables
+// una vez creados (Meta no permite cambiarlos, y cambiarlos de verdad
+// implicaría registrar un template distinto). Por eso solo se pueden elegir
+// al crear una plantilla nueva; en una ya guardada quedan bloqueados.
+function actualizarBloqueoCamposMeta() {
+  if (!hayTemplateMeta) return;
+  const esExistente = !!activaId;
+  inpTemplate.disabled = esExistente;
+  inpTemplateLang.disabled = esExistente;
+  inpTemplateCategoria.disabled = esExistente;
+  inpTemplate.title = esExistente
+    ? "El nombre del template de Meta es definitivo y no se puede cambiar una vez creado."
+    : "";
+  inpTemplateLang.title = esExistente
+    ? "El idioma del template es definitivo y no se puede cambiar una vez creado."
+    : "";
+  inpTemplateCategoria.title = esExistente
+    ? "La categoría no se puede cambiar una vez que el template fue aprobado por Meta."
+    : "";
+}
+
 function abrir(id) {
   const p = plantillas.find((x) => x.id === id);
   if (!p) return;
@@ -254,6 +287,7 @@ function abrir(id) {
   btnEliminar.hidden = false;
   inpNombre.classList.remove("invalido");
   inpMensaje.classList.remove("invalido");
+  actualizarBloqueoCamposMeta();
   refrescarEditor();
   marcarSnapshot();
   renderLista(buscadorEl.value);
@@ -275,6 +309,7 @@ function modoNueva() {
   btnEliminar.hidden = true;
   inpNombre.classList.remove("invalido");
   inpMensaje.classList.remove("invalido");
+  actualizarBloqueoCamposMeta();
   refrescarEditor();
   marcarSnapshot();
   renderLista(buscadorEl.value);
@@ -445,16 +480,37 @@ function toast(msg, tipo = "ok") {
   toastTimer = setTimeout(() => toastEl.classList.remove("visible"), 3200);
 }
 
-// Bloquea/desbloquea toda la interfaz durante el guardado y muestra el estado
+// Bloquea/desbloquea toda la interfaz (botones, inputs, selects, textareas).
+function bloquearInterfaz(bloquear) {
+  document.querySelectorAll("button, input, select, textarea").forEach((el) => {
+    el.disabled = bloquear;
+  });
+  // Al desbloquear, los campos de Meta de una plantilla ya guardada deben
+  // seguir bloqueados (no los reactivamos junto con el resto).
+  if (!bloquear) actualizarBloqueoCamposMeta();
+}
+
+// Bloquea toda la interfaz durante el guardado y muestra el estado
 // en el botón Guardar (con spinner).
 function setGuardando(guardando) {
-  document.querySelectorAll("button, input, select, textarea").forEach((el) => {
-    el.disabled = guardando;
-  });
+  bloquearInterfaz(guardando);
   if (btnGuardar) {
     btnGuardar.innerHTML = guardando
       ? '<span class="spinner"></span> Guardando...'
       : "Guardar";
+  }
+}
+
+// Bloquea toda la interfaz mientras se consulta el estado de un template en
+// Meta (individual o "Actualizar estados"), igual que al guardar.
+function setConsultandoEstado(consultando, boton, textoConsultando) {
+  bloquearInterfaz(consultando);
+  if (!boton) return;
+  if (consultando) {
+    boton.dataset.textoOriginal = boton.dataset.textoOriginal ?? boton.textContent;
+    boton.innerHTML = `<span class="spinner"></span> ${textoConsultando}`;
+  } else {
+    boton.textContent = boton.dataset.textoOriginal ?? boton.textContent;
   }
 }
 
@@ -470,11 +526,10 @@ let hechosActualConf = 0;
 
 function setBloqueoEnvioConf(bloquear) {
   envioEnCursoConf = bloquear;
-  document.querySelectorAll("button, input, select, textarea").forEach((el) => {
-    // El botón Cancelar siempre queda habilitado durante el envío
-    if (el.id === "btnCancelarConf") return;
-    el.disabled = bloquear;
-  });
+  bloquearInterfaz(bloquear);
+  // El botón Cancelar siempre queda habilitado durante el envío.
+  const btnCancelar = document.getElementById("btnCancelarConf");
+  if (btnCancelar) btnCancelar.disabled = false;
 }
 
 // Sincronizar con el .env global: si el archivo cambió a produccion/desarrollo, actualizar la selección
@@ -869,7 +924,7 @@ function finalizarConf(mensaje, esError) {
 if (btnRevisarEstadoMeta) {
   btnRevisarEstadoMeta.addEventListener("click", async () => {
     if (!activaId) return;
-    btnRevisarEstadoMeta.disabled = true;
+    setConsultandoEstado(true, btnRevisarEstadoMeta, "Consultando...");
     try {
       const res = await fetch(`${API_URL}/${activaId}/estado-meta`, { headers: authHeaders() });
       if (res.status === 401) { window.snwSalir(); return; }
@@ -882,14 +937,14 @@ if (btnRevisarEstadoMeta) {
     } catch (err) {
       toast(`No se pudo consultar el estado: ${err.message}`, "error");
     } finally {
-      btnRevisarEstadoMeta.disabled = false;
+      setConsultandoEstado(false, btnRevisarEstadoMeta);
     }
   });
 }
 
 if (btnRevisarTodos) {
   btnRevisarTodos.addEventListener("click", async () => {
-    btnRevisarTodos.disabled = true;
+    setConsultandoEstado(true, btnRevisarTodos, "Actualizando...");
     try {
       const res = await fetch(`${API_URL}/estado-meta/actualizar`, {
         method: "POST",
@@ -908,7 +963,7 @@ if (btnRevisarTodos) {
     } catch (err) {
       toast(`No se pudieron actualizar los estados: ${err.message}`, "error");
     } finally {
-      btnRevisarTodos.disabled = false;
+      setConsultandoEstado(false, btnRevisarTodos);
     }
   });
 }
