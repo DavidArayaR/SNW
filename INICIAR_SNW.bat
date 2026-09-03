@@ -22,11 +22,17 @@ python -c "import socket;s=socket.socket();s.settimeout(2);s.connect(('127.0.0.1
 if errorlevel 1 goto SIN_MYSQL
 echo  [OK] MySQL activo.
 
-REM Ejecutar scripts SQL de inicializacion
-echo  [2/4] Ejecutando scripts SQL de base de datos...
+REM Inicializar la base SOLO la primera vez (si aun no existe la tabla)
+echo  [2/4] Verificando base de datos...
+"%MYSQL%" -u root -h 127.0.0.1 -P 3306 -e "SELECT 1 FROM snw_base.pacientes_prod LIMIT 1;" >nul 2>nul
+if not errorlevel 1 (
+  echo  [OK] Base ya inicializada, se omite snw_base.sql.
+  goto CHECKEAR_DEPS
+)
+echo       Primera ejecucion: cargando snw_base.sql...
 "%MYSQL%" --default-character-set=utf8mb4 -u root -h 127.0.0.1 -P 3306 < "%~dp0sql\snw_base.sql" >nul 2>nul
 if errorlevel 1 goto ERROR_SQL
-echo  [OK] snw_base.sql cargado (5 tablas + datos de prueba).
+echo  [OK] snw_base.sql cargado (5 tablas + 2 numeros autorizados).
 goto CHECKEAR_DEPS
 
 :SIN_MYSQL

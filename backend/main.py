@@ -20,7 +20,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from db import conectar, entorno_valido, nombre_base, columnas_tabla, columna_existe, tabla_pacientes
+from db import conectar, entorno_valido, log_error, nombre_base, columnas_tabla, columna_existe, tabla_pacientes
 from motor_envio import obtener_canal
 from whatsapp_service import WhatsAppService
 from whatsapp_webhook import router as whatsapp_router
@@ -84,7 +84,7 @@ def _ejecutar_sql_init():
             conn.close()
             print(f"[INIT] {archivo} ejecutado correctamente")
         except Exception as e:
-            print(f"[INIT] Error ejecutando {archivo}: {e}")
+            log_error(f"_ejecutar_sql_init({archivo})", e)
 
 
 _ejecutar_sql_init()
@@ -92,7 +92,12 @@ _ejecutar_sql_init()
 
 @app.middleware("http")
 async def sin_cache(request, call_next):
-    respuesta = await call_next(request)
+    try:
+        respuesta = await call_next(request)
+    except Exception as e:
+        # Cualquier error no controlado de una ruta queda en consola.
+        log_error(f"{request.method} {request.url.path}", e)
+        raise
     respuesta.headers["Cache-Control"] = "no-store"
     return respuesta
 
@@ -135,6 +140,9 @@ def _cargar_sesiones() -> dict[str, dict]:
         return datos if isinstance(datos, dict) else {}
     except FileNotFoundError:
         return {}
+    except Exception as e:
+        log_error(f"_cargar_sesiones: {SESIONES_FILE.name} ilegible", e)
+        return {}
 
 
 def guardar_sesiones() -> None:
@@ -170,6 +178,9 @@ def cargar_usuarios() -> list:
         datos = json.loads(USUARIOS_FILE.read_text(encoding="utf-8"))
         return datos if isinstance(datos, list) else []
     except FileNotFoundError:
+        return []
+    except Exception as e:
+        log_error(f"cargar_usuarios: {USUARIOS_FILE.name} ilegible", e)
         return []
 
 
@@ -227,6 +238,9 @@ def leer_plantillas() -> list:
         datos = json.loads(DATA_FILE.read_text(encoding="utf-8"))
         return datos if isinstance(datos, list) else []
     except FileNotFoundError:
+        return []
+    except Exception as e:
+        log_error(f"leer_plantillas: {DATA_FILE.name} ilegible", e)
         return []
 
 
@@ -394,6 +408,7 @@ def _registrar_template_meta(p: dict, nombre_anterior: str | None = None,
             template_id_conocido=id_conocido,
         )
     except Exception as e:
+        log_error(f"_registrar_template_meta({nombre_template!r})", e)
         resultado = {"ok": False, "template_id": id_conocido, "status": None, "error": str(e)}
 
     p["whatsapp_template_id"] = resultado.get("template_id") or id_conocido
@@ -674,7 +689,7 @@ def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, p
         print(f"[CORREO] Confirmación enviada a {destino} token {token}")
         return True
     except Exception as e:
-        print(f"[CORREO ERROR] {e}")
+        log_error(f"_enviar_correo_confirmacion a {destino}", e)
         return False
 
 
@@ -722,7 +737,7 @@ def _enviar_correo_rechazo(nombre_enviador: str, plantilla_nombre: str, total: i
         print(f"[CORREO] Rechazo enviado a {destino}")
         return True
     except Exception as e:
-        print(f"[CORREO ERROR] {e}")
+        log_error(f"_enviar_correo_rechazo a {destino}", e)
         return False
 
 
@@ -809,6 +824,19 @@ def actualizar_envio_batch(envio_id, ambiente, enviados=0, fallidos=0, invalidos
 
 
 def procesar_job(job_id: str) -> None:
+    """Wrapper: garantiza que cualquier error del envío quede en consola y
+    marque el job como fallido en vez de morir en silencio."""
+    try:
+        _procesar_job(job_id)
+    except Exception as e:
+        log_error(f"procesar_job({job_id})", e)
+        job = JOBS.get(job_id)
+        if job is not None:
+            job["estado"] = "error"
+            job["detalle"] = f"Error interno del envío: {e}"
+
+
+def _procesar_job(job_id: str) -> None:
     job = JOBS[job_id]
     amb = job["ambiente"]
     cfg = leer_config()
@@ -852,13 +880,18 @@ def procesar_job(job_id: str) -> None:
             actualizar_envio_batch(envio_id, amb, enviados=job["enviados"], fallidos=job["fallidos"], estado="cancelado")
             break
         job["actual"] = d["nombre"]
-        resultado = canal.enviar(d["telefono"], d["mensaje"], plantilla=plantilla_datos, variables=d.get("variables"))
-        # Unificar: (ok, message_id, error) o (ok, error) según el motor
-        if len(resultado) == 3:
-            ok, message_id, error = resultado
-        else:
-            ok, error = resultado
-            message_id = None
+        try:
+            resultado = canal.enviar(d["telefono"], d["mensaje"], plantilla=plantilla_datos, variables=d.get("variables"))
+            # Unificar: (ok, message_id, error) o (ok, error) según el motor
+            if len(resultado) == 3:
+                ok, message_id, error = resultado
+            else:
+                ok, error = resultado
+                message_id = None
+        except Exception as e:
+            log_error(f"procesar_job {job_id}: fallo enviando a {d.get('telefono')}", e)
+            ok, message_id, error = False, None, f"Error inesperado: {e}"
+
         actualizar_estado_paciente(d["id"], "enviado" if ok else "error", amb)
 
         if ok:
@@ -867,6 +900,7 @@ def procesar_job(job_id: str) -> None:
             job["fallidos"] += 1
             job["errores"].append({"id": d["id"], "telefono": d["telefono"], "detalle": error})
             message_id = None
+            log_error(f"procesar_job {job_id}: {d.get('telefono')} -> {error}")
 
         registrar_historial(d["id"], d["nombre"], d["telefono"], clave,
                             d["mensaje"], "enviado" if ok else "error", error,
@@ -1107,8 +1141,8 @@ def rechazar_envio(token: str, comentario: str = Form("")):
             with conectar(amb) as conn, conn.cursor() as cur:
                 cur.execute("DELETE FROM envios WHERE id = %s", (envio_id,))
                 conn.commit()
-        except Exception:
-            pass
+        except Exception as e:
+            log_error(f"rechazar_envio: no se pudo borrar el batch {envio_id}", e)
     return HTMLResponse(f"""
 <html><head><meta charset='utf-8'><title>Envío rechazado</title></head>
 <body style='font-family: Segoe UI, Arial; text-align:center; padding:40px; background:#f0f2f5;'>

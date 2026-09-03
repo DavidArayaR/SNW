@@ -5,6 +5,7 @@ import urllib.parse
 import urllib.request
 import webbrowser
 
+from db import log_error
 from whatsapp_service import WhatsAppService
 
 GRAPH_URL = "https://graph.facebook.com/v21.0/{phone_id}/messages"
@@ -44,7 +45,10 @@ class MotorApiOficial:
                 self.servicio.enviar(telefono, mensaje, plantilla=plantilla, variables=variables)
             )
         except Exception as e:
+            log_error(f"MotorApiOficial.enviar a {telefono}", e)
             return False, None, f"Fallo de conexión con la API de Meta: {e}"
+        if not ok:
+            log_error(f"MotorApiOficial.enviar a {telefono}: {error}")
         return ok, message_id, error
 
 

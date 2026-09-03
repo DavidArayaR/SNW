@@ -1,4 +1,6 @@
 import os
+import sys
+import traceback
 from pathlib import Path
 
 import pymysql
@@ -6,6 +8,18 @@ from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
+
+
+def log_error(contexto: str, exc: BaseException | None = None) -> None:
+    """Registra en consola (stderr) cualquier error, con su traza completa.
+
+    Se usa en todos los bloques try/except del backend para que ningún
+    fallo quede silenciado, aunque el flujo continúe."""
+    print(f"[ERROR] {contexto}: {exc!r}" if exc is not None else f"[ERROR] {contexto}",
+          file=sys.stderr, flush=True)
+    if exc is not None and exc.__traceback__ is not None:
+        traceback.print_exception(type(exc), exc, exc.__traceback__)
+        sys.stderr.flush()
 
 AMBIENTES = {"desarrollo", "produccion"}
 TABLAS_PACIENTES = {"desarrollo": "pacientes_dev", "produccion": "pacientes_prod"}
@@ -62,7 +76,8 @@ def columnas_tabla(tabla: str, entorno: str | None = None) -> set:
                     (tabla,),
                 )
                 _columnas_cache[clave] = {f["COLUMN_NAME"] for f in cur.fetchall()}
-        except Exception:
+        except Exception as e:
+            log_error(f"columnas_tabla({tabla!r}, {entorno!r})", e)
             _columnas_cache[clave] = set()
     return _columnas_cache[clave]
 

@@ -18,7 +18,7 @@ from pathlib import Path
 
 import httpx
 
-from db import conectar, columna_existe, tabla_pacientes
+from db import conectar, columna_existe, log_error, tabla_pacientes
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 GRAPHVERSION = "v21.0"
@@ -63,7 +63,8 @@ def _detectar_ambiente_por_telefono(telefono: str) -> str | None:
                 cur.execute(f"SELECT id FROM {t} WHERE telefono = %s LIMIT 1", (telefono,))
                 if cur.fetchone():
                     return ambiente
-        except Exception:
+        except Exception as e:
+            log_error(f"_detectar_ambiente_por_telefono({ambiente})", e)
             continue
     return None
 
@@ -160,7 +161,8 @@ class WhatsAppApiClient:
                        or json_short(resp.text))
             codigo_msg = err.get("code", resp.status_code)
             tipo = err.get("type", "permanent")
-        except Exception:
+        except Exception as e:
+            log_error(f"_procesar_respuesta: no se pudo parsear el error de Meta (HTTP {resp.status_code})", e)
             err = {}
             codigo_msg = resp.status_code
             tipo = "permanent"
@@ -242,6 +244,7 @@ class WhatsAppService:
         try:
             data = asyncio.run(self.cliente.crear_template(self.waba_id, payload))
         except ErrorWhatsApp as e:
+            log_error(f"crear_template_meta({nombre!r})", e)
             return {"ok": False, "template_id": None, "status": None, "error": e.message}
 
         tid = data.get("id") or ""
@@ -269,11 +272,11 @@ class WhatsAppService:
         try:
             info = asyncio.run(self.cliente.obtener_template(template_id))
             categoria_real = info.get("category") or category
-        except ErrorWhatsApp:
+        except ErrorWhatsApp as e:
             # Si falla la consulta (p. ej. permisos), seguimos con la
             # categoría local como mejor esfuerzo; el reintento de abajo
             # cubre el caso de que igual sea rechazada.
-            pass
+            log_error(f"editar_template_meta: no se pudo consultar la categoría real de {template_id}", e)
 
         texto_meta, ejemplo = self.convertir_texto_meta(texto)
         componente_body: dict = {"type": "BODY", "text": texto_meta}
@@ -292,6 +295,7 @@ class WhatsAppService:
         try:
             data = asyncio.run(self.cliente.editar_template(template_id, payload))
         except ErrorWhatsApp as e:
+            log_error(f"editar_template_meta({template_id})", e)
             mensaje = (e.message or "").lower()
             if "categor" in mensaje:
                 # Último recurso: reintentar sin mandar el campo de categoría.
@@ -304,6 +308,7 @@ class WhatsAppService:
                         " categoría original en Meta)."
                     )
                 except ErrorWhatsApp as e2:
+                    log_error(f"editar_template_meta({template_id}) reintento sin categoría", e2)
                     return {"ok": False, "template_id": template_id, "status": None, "error": e2.message}
             else:
                 return {"ok": False, "template_id": template_id, "status": None, "error": e.message}
@@ -326,7 +331,8 @@ class WhatsAppService:
             return None
         try:
             data = asyncio.run(self.cliente.buscar_template(self.waba_id, nombre_template))
-        except ErrorWhatsApp:
+        except ErrorWhatsApp as e:
+            log_error(f"id_template_meta({nombre_template!r}, {lang!r})", e)
             return None
         for t in data.get("data", []):
             if t.get("language") == lang:
@@ -359,6 +365,7 @@ class WhatsAppService:
         try:
             data = asyncio.run(self.cliente.buscar_template(self.waba_id, nombre_template))
         except ErrorWhatsApp as e:
+            log_error(f"estado_template_meta({nombre_template!r}, {lang!r})", e)
             return {"ok": False, "status": None, "category": None, "rejected_reason": None,
                     "error": e.message}
 
@@ -444,6 +451,7 @@ class WhatsAppService:
         try:
             data = await self.cliente.enviar(payload_)
         except ErrorWhatsApp as e:
+            log_error(f"envío a {telefono} (template={nombre_template or 'texto libre'})", e)
             return False, None, e.message, "failed" if e.tipo == "permanent" else "sent"
 
         msg_id = ""
@@ -471,7 +479,7 @@ class WhatsAppService:
                 conn.commit()
                 return cur.rowcount > 0
         except Exception as e:
-            print(f"[WHATSAPP] No se pudo guardar message id: {e}")
+            log_error(f"guardar_message_id({telefono}, {ambiente})", e)
             return False
 
     # ---------- Webhook ----------
@@ -533,7 +541,19 @@ class WhatsAppService:
         telefono = valor.get("phone_number", "") or valor.get("recipient_id", "")
         if estado not in ESTADO_WHATSAPP or not message_id:
             return acciones
-        self._actualizar_estado(message_id, estado)
+        detalle_error = None
+        if estado == "failed":
+            errores = valor.get("errors") or []
+            partes = []
+            for err in errores:
+                data_err = err.get("error_data") or {}
+                partes.append(" - ".join(str(x) for x in (
+                    err.get("code"), err.get("title"), err.get("message"),
+                    data_err.get("details"),
+                ) if x))
+            detalle_error = " | ".join(p for p in partes if p) or "Meta reportó el mensaje como fallido sin detalle"
+            log_error(f"webhook: mensaje {message_id} a {telefono} falló - {detalle_error}")
+        self._actualizar_estado(message_id, estado, detalle_error)
         acciones.append(f"estado_{estado}")
         return acciones
 
@@ -544,7 +564,8 @@ class WhatsAppService:
                 cur.execute("SELECT COUNT(*) AS n FROM whatsapp_eventos WHERE clave = %s",
                             (_hash_evento(body),))
                 return (cur.fetchone() or {}).get("n", 0) > 0
-        except Exception:
+        except Exception as e:
+            log_error("_evento_duplicado", e)
             return False
 
     def _guardar_evento(self, body: dict) -> None:
@@ -558,8 +579,8 @@ class WhatsAppService:
                         (clave, texto),
                     )
                     conn.commit()
-            except Exception:
-                pass
+            except Exception as e:
+                log_error(f"_guardar_evento({ambiente})", e)
 
     # ---------- Registro de respuestas y estados ----------
     def _registrar_respuesta(self, telefono: str, texto: str, timestamp: str) -> str:
@@ -583,7 +604,7 @@ class WhatsAppService:
                 conn.commit()
             return "registrada"
         except Exception as e:
-            print(f"[WHATSAPP] No se pudo registrar respuesta: {e}")
+            log_error(f"_registrar_respuesta({telefono})", e)
             return "error"
 
     def _registrar_baja(self, telefono: str) -> None:
@@ -605,9 +626,9 @@ class WhatsAppService:
                 )
                 conn.commit()
         except Exception as e:
-            print(f"[WHATSAPP] No se pudo registrar baja: {e}")
+            log_error(f"_registrar_baja({telefono})", e)
 
-    def _actualizar_estado(self, message_id: str, estado: str) -> None:
+    def _actualizar_estado(self, message_id: str, estado: str, detalle_error: str | None = None) -> None:
         for ambiente in ("desarrollo", "produccion"):
             try:
                 with conectar(ambiente) as conn, conn.cursor() as cur:
@@ -623,11 +644,13 @@ class WhatsAppService:
                         )
                     if estado == "failed":
                         cur.execute(
-                            "UPDATE log_envios SET estado_envio = 'error'"
-                            " WHERE whatsapp_message_id = %s", (message_id,)
+                            "UPDATE log_envios SET estado_envio = 'error',"
+                            " descripcion_error = COALESCE(%s, descripcion_error)"
+                            " WHERE whatsapp_message_id = %s", (detalle_error[:255] if detalle_error else None, message_id)
                         )
                     conn.commit()
-            except Exception:
+            except Exception as e:
+                log_error(f"_actualizar_estado({ambiente}, msg={message_id}, estado={estado})", e)
                 continue
 
     def _es_baja(self, texto: str) -> bool:

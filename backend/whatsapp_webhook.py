@@ -8,6 +8,7 @@ Router del webhook oficial de WhatsApp Business Platform.
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 
+from db import log_error
 from whatsapp_service import WebhookHandler
 
 router = APIRouter(prefix="/api/whatsapp", tags=["whatsapp"])
@@ -38,7 +39,8 @@ async def recibir_evento(request: Request):
     """Recibe eventos de Meta. Retorna 200 aunque un evento falle para no reintentar."""
     try:
         payload = await request.json()
-    except Exception:
+    except Exception as e:
+        log_error("webhook: cuerpo de la petición no es JSON válido", e)
         return JSONResponse({"status": "ok", "acciones": []})
 
     if not isinstance(payload, dict) or not payload.get("entry"):
@@ -48,7 +50,7 @@ async def recibir_evento(request: Request):
         acciones = handler.procesar(payload)
     except Exception as e:
         # No romper el sistema; Meta reintentaría y volvería a fallar.
-        print(f"[WEBHOOK] Error procesando evento: {e}")
+        log_error("webhook: fallo procesando evento", e)
         return JSONResponse({"status": "ok", "acciones": []}, status_code=200)
 
     return JSONResponse({"status": "ok", "acciones": acciones}, status_code=200)
