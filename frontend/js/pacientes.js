@@ -131,6 +131,11 @@ function render() {
     const esBaja = respuesta === "baja" || !!p.whatsapp_opt_out;
     const respuestaLabels = { pendiente: "Sin respuesta", click: "Hizo click", respondio: "Respondió", baja: "Se dio de baja" };
     tr.classList.toggle("es-baja", esBaja);
+    const hayError = p.estado === "error" || p.ultimo_estado_envio === "error";
+    const textoError = hayError && p.ultimo_error ? String(p.ultimo_error) : "";
+    const celdaError = textoError
+      ? `<td class="campo-error"><span title="${escaparHtml(textoError)}">${escaparHtml(textoError)}</span></td>`
+      : `<td class="campo-error campo-error--vacio">—</td>`;
     tr.innerHTML =
       `<td class="col-check"><input type="checkbox" data-id="${p.id}" ${seleccionados.has(p.id) ? "checked" : ""} ${esBaja ? "disabled" : ""} title="${esBaja ? "No se puede enviar mensaje (se dio de baja)" : ""}"></td>` +
       `<td class="campo-id">${p.id}</td>` +
@@ -143,6 +148,7 @@ function render() {
           `<option value="enviado"${p.estado === "enviado" ? " selected" : ""}>enviado</option>` +
         `</select>` +
       `</td>` +
+      celdaError +
       `<td class="campo-respuesta">` +
         `<span class="respuesta-badge respuesta-${escaparHtml(respuesta)}" title="${escaparHtml(respuestaLabels[respuesta] ?? respuesta)}">${escaparHtml(respuestaLabels[respuesta] ?? respuesta)}</span>` +
       `</td>` +

@@ -279,6 +279,8 @@ def expr_select_pacientes(ambiente: str) -> str:
     else:
         exprs.append("0 AS whatsapp_opt_out")
     exprs.append("l.id AS ultimo_log_id")
+    exprs.append("l.estado_envio AS ultimo_estado_envio")
+    exprs.append("l.descripcion_error AS ultimo_error")
     return ", ".join(exprs)
 
 

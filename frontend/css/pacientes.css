@@ -339,6 +339,21 @@ td.campo-id { color: var(--texto-suave); font-family: Consolas, monospace; }
 .estado-select:focus { border-color: var(--verde); }
 .campo-estado { position: relative; white-space: nowrap; }
 
+.campo-error {
+  max-width: 260px;
+  font-size: .8rem;
+  color: #b23b37;
+}
+.campo-error span {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.35;
+  cursor: help;
+}
+.campo-error--vacio { color: var(--texto-suave); }
+
 .tabla-vacia {
   text-align: center;
   color: var(--texto-suave);
