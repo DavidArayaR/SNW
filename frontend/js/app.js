@@ -251,20 +251,23 @@ function renderEstadoMeta(p) {
 // El nombre del template de Meta, su idioma y su categoría son inmutables
 // una vez creados (Meta no permite cambiarlos, y cambiarlos de verdad
 // implicaría registrar un template distinto). Por eso solo se pueden elegir
-// al crear una plantilla nueva; en una ya guardada quedan bloqueados.
+// al crear una plantilla nueva se pueden elegir; una vez que la plantilla
+// ya tiene un template registrado en Meta, quedan bloqueados. Las plantillas
+// antiguas sin template todavía pueden completarlo.
 function actualizarBloqueoCamposMeta() {
   if (!hayTemplateMeta) return;
-  const esExistente = !!activaId;
-  inpTemplate.disabled = esExistente;
-  inpTemplateLang.disabled = esExistente;
-  inpTemplateCategoria.disabled = esExistente;
-  inpTemplate.title = esExistente
+  const p = activaId ? plantillas.find((x) => x.id === activaId) : null;
+  const yaTieneTemplate = !!(p && p.whatsapp_template);
+  inpTemplate.disabled = yaTieneTemplate;
+  inpTemplateLang.disabled = yaTieneTemplate;
+  inpTemplateCategoria.disabled = yaTieneTemplate;
+  inpTemplate.title = yaTieneTemplate
     ? "El nombre del template de Meta es definitivo y no se puede cambiar una vez creado."
     : "";
-  inpTemplateLang.title = esExistente
+  inpTemplateLang.title = yaTieneTemplate
     ? "El idioma del template es definitivo y no se puede cambiar una vez creado."
     : "";
-  inpTemplateCategoria.title = esExistente
+  inpTemplateCategoria.title = yaTieneTemplate
     ? "La categoría no se puede cambiar una vez que el template fue aprobado por Meta."
     : "";
 }
@@ -287,6 +290,7 @@ function abrir(id) {
   btnEliminar.hidden = false;
   inpNombre.classList.remove("invalido");
   inpMensaje.classList.remove("invalido");
+  if (hayTemplateMeta) inpTemplate.classList.remove("invalido");
   actualizarBloqueoCamposMeta();
   refrescarEditor();
   marcarSnapshot();
@@ -309,6 +313,7 @@ function modoNueva() {
   btnEliminar.hidden = true;
   inpNombre.classList.remove("invalido");
   inpMensaje.classList.remove("invalido");
+  if (hayTemplateMeta) inpTemplate.classList.remove("invalido");
   actualizarBloqueoCamposMeta();
   refrescarEditor();
   marcarSnapshot();
@@ -351,15 +356,22 @@ formEl.addEventListener("submit", async (e) => {
 
   const nombre = inpNombre.value.trim();
   const texto = inpMensaje.value.trim();
-  const whatsapp_template = valTemplate().trim() || null;
+  const whatsapp_template = valTemplate().trim();
   const whatsapp_template_lang = valTemplateLang() || "es";
   const whatsapp_template_categoria = valTemplateCategoria() || "UTILITY";
 
   inpNombre.classList.toggle("invalido", !nombre);
   inpMensaje.classList.toggle("invalido", !texto);
+  if (hayTemplateMeta) {
+    inpTemplate.classList.toggle("invalido", !/^[a-z0-9_]+$/.test(whatsapp_template));
+  }
 
   if (!nombre) return toast("Falta el nombre.", "error");
   if (!texto) return toast("El mensaje está vacío.", "error");
+  if (hayTemplateMeta && !whatsapp_template) return toast("Falta el nombre del template de Meta.", "error");
+  if (hayTemplateMeta && !/^[a-z0-9_]+$/.test(whatsapp_template)) {
+    return toast("El template de Meta solo admite minúsculas, números y guiones bajos.", "error");
+  }
 
   const duplicada = plantillas.some(
     (p) =>

@@ -9,8 +9,8 @@
     "actualizada": 1788381200951,
     "whatsapp_template_categoria": "UTILITY",
     "whatsapp_template_id": null,
-    "whatsapp_template_status": "APPROVED",
-    "whatsapp_template_error": null,
+    "whatsapp_template_status": null,
+    "whatsapp_template_error": "Unsupported get request. Object with ID '4341996596130578' does not exist, cannot be loaded due to missing permissions, or does not support this operation. Please read the Graph API documentation at https://developers.facebook.com/docs/graph-api",
     "whatsapp_template_rejected_reason": null
   },
   {
@@ -23,8 +23,8 @@
     "actualizada": 1788387070717,
     "whatsapp_template_categoria": "MARKETING",
     "whatsapp_template_id": "1319259093453424",
-    "whatsapp_template_status": "APPROVED",
-    "whatsapp_template_error": null,
+    "whatsapp_template_status": null,
+    "whatsapp_template_error": "Unsupported get request. Object with ID '4341996596130578' does not exist, cannot be loaded due to missing permissions, or does not support this operation. Please read the Graph API documentation at https://developers.facebook.com/docs/graph-api",
     "whatsapp_template_rejected_reason": null
   },
   {
@@ -37,8 +37,8 @@
     "whatsapp_template_categoria": "MARKETING",
     "actualizada": 1788388112321,
     "whatsapp_template_id": "955941433581561",
-    "whatsapp_template_status": "APPROVED",
-    "whatsapp_template_error": null,
+    "whatsapp_template_status": null,
+    "whatsapp_template_error": "Unsupported get request. Object with ID '4341996596130578' does not exist, cannot be loaded due to missing permissions, or does not support this operation. Please read the Graph API documentation at https://developers.facebook.com/docs/graph-api",
     "whatsapp_template_rejected_reason": null
   }
 ]
