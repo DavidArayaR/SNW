@@ -133,26 +133,26 @@
 
 <header>
   <h1>Sistema de Notificaciones WhatsApp (SNW)</h1>
-  <p>Módulo web para gestionar y enviar notificaciones masivas de WhatsApp a pacientes de forma rápida, organizada y centralizada, directamente desde la plataforma de la empresa.</p>
-  <a id="btnLogin" class="btn btn--login" href="login.html">Iniciar sesión</a>
+  <p>M&oacute;dulo web para gestionar y enviar notificaciones masivas de WhatsApp a pacientes de forma r&aacute;pida, organizada y centralizada, directamente desde la plataforma de la empresa.</p>
+  <a id="btnLogin" class="btn btn--login" href="login.html">Iniciar sesi&oacute;n</a>
   <nav id="navLogueado" class="nav-logueado">
     <a href="index.html"><i class="fa-solid fa-house"></i>Inicio</a>
     <a id="navPacientes" href="pacientes.html" data-admin><i class="fa-solid fa-database"></i> Base de datos</a>
-    <a href="mensajeria.html"><i class="fa-solid fa-envelope"></i> Mensajería</a>
+    <a href="mensajeria.html"><i class="fa-solid fa-envelope"></i> Mensajer&iacute;a</a>
     <a href="historial.html"><i class="fa-solid fa-clock-rotate-left"></i> Historial</a>
-    <a href="#" class="nav-salir" id="btnSalir"><i class="fa-solid fa-right-from-bracket"></i> Cerrar sesión</a>
+    <a href="#" class="nav-salir" id="btnSalir"><i class="fa-solid fa-right-from-bracket"></i> Cerrar sesi&oacute;n</a>
   </nav>
 </header>
 
 <main>
   <section class="info">
-    <h2>¿Cómo funciona el envío?</h2>
-    <p><strong>Tres pasos:</strong> elige la plantilla del mensaje, selecciona la base de datos a la que enviar los mensajes y presiona «Iniciar Envío». El sistema valida automáticamente cada número (formato internacional chileno <code>+569XXXXXXXXX</code>, corrigiendo errores comunes), descarta los inválidos sin interrumpir la cola, procesa el envío en segundo plano con un intervalo entre mensajes y registra el resultado de cada intento en el historial.</p>
-    <p>En <strong>entorno de desarrollo</strong> los envíos masivos se bloquean y solo salen mensajes hacia los números de prueba autorizados. En <strong>producción</strong>, cada envío requiere confirmación por correo electrónico de un supervisor antes de procesarse.</p>
+    <h2>¿C&oacute;mo funciona el env&iacute;o?</h2>
+    <p><strong>Tres pasos:</strong> elige la plantilla del mensaje, selecciona la base de datos a la que enviar los mensajes y presiona «Iniciar Env&iacute;o». El sistema valida autom&aacute;ticamente cada n&uacute;mero (formato internacional chileno <code>+569XXXXXXXXX</code>, corrigiendo errores comunes), descarta los inv&aacute;lidos sin interrumpir la cola, procesa el env&iacute;o en segundo plano con un intervalo entre mensajes y registra el resultado de cada intento en el historial.</p>
+    <p>En <strong>entorno de desarrollo</strong> los env&iacute;os masivos se bloquean y solo salen mensajes hacia los n&uacute;meros de prueba autorizados. En <strong>producci&oacute;n</strong>, cada env&iacute;o requiere confirmaci&oacute;n por correo electr&oacute;nico de un supervisor antes de procesarse.</p>
   </section>
 
   <section class="info">
-    <h2>Tecnologías</h2>
+    <h2>Tecnolog&iacute;as</h2>
     <div class="chips">
       <span class="chip">Python · FastAPI</span>
       <span class="chip">MySQL / MariaDB</span>

@@ -479,7 +479,9 @@ def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(sesion_actual)):
         "clave": clave,
         "nombre": body.nombre.strip(),
         "texto": body.texto,
-        "whatsapp_template": (body.whatsapp_template or "").strip() or None,
+        # El nombre del template de Meta se deriva SIEMPRE del nombre de la
+        # plantilla (no se acepta uno arbitrario desde el cliente).
+        "whatsapp_template": slug(body.nombre) or None,
         "whatsapp_template_lang": (body.whatsapp_template_lang or "").strip() or None,
         "whatsapp_template_categoria": (body.whatsapp_template_categoria or "").strip() or None,
         "actualizada": int(time.time() * 1000),
@@ -498,13 +500,23 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
     plantillas = leer_plantillas()
     for p in plantillas:
         if p["id"] == plantilla_id:
+            # El nombre es permanente: una vez creada la plantilla no se puede
+            # cambiar (solo eliminándola). La clave interna se deriva del nombre
+            # al crear y quedaría desincronizada si se editara.
+            if body.nombre.strip() != p.get("nombre", ""):
+                raise HTTPException(
+                    400,
+                    detail="El nombre de la plantilla no se puede cambiar. Elimínala y crea una nueva.",
+                )
+
             nombre_template_anterior = p.get("whatsapp_template")
             lang_anterior = p.get("whatsapp_template_lang")
             template_id_anterior = p.get("whatsapp_template_id")
 
-            p["nombre"] = body.nombre.strip()
             p["texto"] = body.texto
-            p["whatsapp_template"] = (body.whatsapp_template or "").strip() or None
+            # El nombre del template de Meta va ligado al nombre de la plantilla
+            # (que es inmutable), así que nunca cambia al editar.
+            p["whatsapp_template"] = p.get("whatsapp_template") or (slug(p.get("nombre", "")) or None)
             p["whatsapp_template_lang"] = (body.whatsapp_template_lang or "").strip() or None
             p["whatsapp_template_categoria"] = (body.whatsapp_template_categoria or "").strip() or None
             p["actualizada"] = int(time.time() * 1000)

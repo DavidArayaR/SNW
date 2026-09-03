@@ -26,6 +26,9 @@ const valTemplateLang = () => (hayTemplateMeta ? inpTemplateLang.value : "es");
 const valTemplateCategoria = () => (hayTemplateMeta ? inpTemplateCategoria.value : "UTILITY");
 const contadorEl = $("#contador");
 const avisoComodines = $("#avisoComodines");
+const avisoNombrePermanente = $("#avisoNombrePermanente");
+const hintNombre = $("#hintNombre");
+const hintTemplate = $("#hintTemplate");
 const previewTexto = $("#previewTexto");
 const previewHora = $("#previewHora");
 const tituloForm = $("#tituloFormulario");
@@ -248,22 +251,50 @@ function renderEstadoMeta(p) {
   }
 }
 
-// El nombre del template de Meta, su idioma y su categoría son inmutables
-// una vez creados (Meta no permite cambiarlos, y cambiarlos de verdad
-// implicaría registrar un template distinto). Por eso solo se pueden elegir
-// al crear una plantilla nueva se pueden elegir; una vez que la plantilla
-// ya tiene un template registrado en Meta, quedan bloqueados. Las plantillas
-// antiguas sin template todavía pueden completarlo.
-function actualizarBloqueoCamposMeta() {
+// El nombre del template de Meta NO se elige a mano: se genera a partir del
+// nombre de la plantilla (Meta solo admite minúsculas, números y "_"). El
+// campo está siempre bloqueado. Si la plantilla ya tiene un template
+// registrado en Meta, se muestra ese valor tal cual (es inmutable).
+function sincronizarTemplateConNombre() {
+  if (!hayTemplateMeta) return;
+  const p = activaId ? plantillas.find((x) => x.id === activaId) : null;
+  inpTemplate.value = p && p.whatsapp_template ? p.whatsapp_template : slug(inpNombre.value);
+}
+
+// El nombre de la plantilla es permanente: una vez creada solo puede
+// cambiarse borrando la plantilla y creando otra (la clave interna se
+// deriva del nombre al crear y no se recalcula al editar).
+//
+// El idioma y la categoría del template son inmutables una vez creados
+// (Meta no permite cambiarlos). Por eso solo se pueden elegir al crear una
+// plantilla nueva; una vez que la plantilla ya tiene un template registrado
+// en Meta, quedan bloqueados. Las plantillas antiguas sin template todavía
+// pueden completarlos. El nombre del template está SIEMPRE bloqueado.
+function actualizarBloqueoCampos() {
+  const esExistente = !!activaId;
+  inpNombre.disabled = esExistente;
+  inpNombre.title = esExistente
+    ? "El nombre es permanente y no se puede cambiar. Para usar otro nombre, elimina la plantilla y crea una nueva."
+    : "";
+  // Los textos de ayuda del nombre solo tienen sentido al crear: en una
+  // plantilla ya guardada el campo está bloqueado.
+  if (avisoNombrePermanente) avisoNombrePermanente.hidden = esExistente;
+  if (hintNombre) hintNombre.hidden = esExistente;
+
   if (!hayTemplateMeta) return;
   const p = activaId ? plantillas.find((x) => x.id === activaId) : null;
   const yaTieneTemplate = !!(p && p.whatsapp_template);
-  inpTemplate.disabled = yaTieneTemplate;
+  // El nombre del template SIEMPRE está bloqueado (se genera desde el nombre).
+  inpTemplate.disabled = true;
   inpTemplateLang.disabled = yaTieneTemplate;
   inpTemplateCategoria.disabled = yaTieneTemplate;
-  inpTemplate.title = yaTieneTemplate
-    ? "El nombre del template de Meta es definitivo y no se puede cambiar una vez creado."
-    : "";
+  sincronizarTemplateConNombre();
+  // La ayuda del nombre del template solo se muestra al crear una plantilla
+  // nueva; en una ya guardada no aporta (el campo es automático e inmutable).
+  if (hintTemplate) hintTemplate.hidden = esExistente;
+  inpTemplate.title = esExistente
+    ? "El nombre del template de Meta es definitivo y no se puede cambiar."
+    : "Se genera automáticamente a partir del nombre de la plantilla.";
   inpTemplateLang.title = yaTieneTemplate
     ? "El idioma del template es definitivo y no se puede cambiar una vez creado."
     : "";
@@ -282,7 +313,6 @@ function abrir(id) {
   inpNombre.value = p.nombre;
   inpMensaje.value = p.texto;
   if (hayTemplateMeta) {
-    inpTemplate.value = p.whatsapp_template || "";
     inpTemplateLang.value = p.whatsapp_template_lang || "es";
     inpTemplateCategoria.value = p.whatsapp_template_categoria || "UTILITY";
   }
@@ -291,7 +321,7 @@ function abrir(id) {
   inpNombre.classList.remove("invalido");
   inpMensaje.classList.remove("invalido");
   if (hayTemplateMeta) inpTemplate.classList.remove("invalido");
-  actualizarBloqueoCamposMeta();
+  actualizarBloqueoCampos();
   refrescarEditor();
   marcarSnapshot();
   renderLista(buscadorEl.value);
@@ -305,7 +335,6 @@ function modoNueva() {
   inpNombre.value = "";
   inpMensaje.value = "";
   if (hayTemplateMeta) {
-    inpTemplate.value = "";
     inpTemplateLang.value = "es";
     inpTemplateCategoria.value = "UTILITY";
   }
@@ -314,7 +343,7 @@ function modoNueva() {
   inpNombre.classList.remove("invalido");
   inpMensaje.classList.remove("invalido");
   if (hayTemplateMeta) inpTemplate.classList.remove("invalido");
-  actualizarBloqueoCamposMeta();
+  actualizarBloqueoCampos();
   refrescarEditor();
   marcarSnapshot();
   renderLista(buscadorEl.value);
@@ -362,15 +391,16 @@ formEl.addEventListener("submit", async (e) => {
 
   inpNombre.classList.toggle("invalido", !nombre);
   inpMensaje.classList.toggle("invalido", !texto);
+  // whatsapp_template se genera desde el nombre; solo puede quedar vacío si el
+  // nombre no tiene ninguna letra ni número.
   if (hayTemplateMeta) {
-    inpTemplate.classList.toggle("invalido", !/^[a-z0-9_]+$/.test(whatsapp_template));
+    inpNombre.classList.toggle("invalido", !nombre || !/^[a-z0-9_]+$/.test(whatsapp_template));
   }
 
   if (!nombre) return toast("Falta el nombre.", "error");
   if (!texto) return toast("El mensaje está vacío.", "error");
-  if (hayTemplateMeta && !whatsapp_template) return toast("Falta el nombre del template de Meta.", "error");
   if (hayTemplateMeta && !/^[a-z0-9_]+$/.test(whatsapp_template)) {
-    return toast("El template de Meta solo admite minúsculas, números y guiones bajos.", "error");
+    return toast("El nombre de la plantilla debe tener al menos una letra o número (se usa para el template de Meta).", "error");
   }
 
   const duplicada = plantillas.some(
@@ -468,7 +498,12 @@ document.querySelectorAll(".chip").forEach((chip) => {
   });
 });
 
-inpNombre.addEventListener("input", () => inpNombre.classList.remove("invalido"));
+inpNombre.addEventListener("input", () => {
+  inpNombre.classList.remove("invalido");
+  // El nombre del template de Meta refleja el nombre de la plantilla en vivo.
+  sincronizarTemplateConNombre();
+  if (hayTemplateMeta) inpTemplate.classList.remove("invalido");
+});
 inpMensaje.addEventListener("input", refrescarEditor);
 buscadorEl.addEventListener("input", () => renderLista(buscadorEl.value));
 $("#btnNueva").addEventListener("click", intentarNueva);
@@ -497,9 +532,9 @@ function bloquearInterfaz(bloquear) {
   document.querySelectorAll("button, input, select, textarea").forEach((el) => {
     el.disabled = bloquear;
   });
-  // Al desbloquear, los campos de Meta de una plantilla ya guardada deben
-  // seguir bloqueados (no los reactivamos junto con el resto).
-  if (!bloquear) actualizarBloqueoCamposMeta();
+  // Al desbloquear, el nombre y los campos de Meta de una plantilla ya
+  // guardada deben seguir bloqueados (no los reactivamos con el resto).
+  if (!bloquear) actualizarBloqueoCampos();
 }
 
 // Bloquea toda la interfaz durante el guardado y muestra el estado

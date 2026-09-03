@@ -295,6 +295,14 @@ select.badge--select {
 .field textarea:focus,
 .field select:focus { border-color: var(--verde); outline: none; }
 .field input.invalido, .field textarea.invalido { border-color: var(--rojo); }
+.field input:disabled,
+.field textarea:disabled,
+.field select:disabled {
+  background: #eceff2;
+  color: var(--texto-suave);
+  cursor: not-allowed;
+  border-style: dashed;
+}
 
 .field__foot {
   display: flex;
@@ -316,6 +324,7 @@ select.badge--select {
   color: #8a6410;
   font-size: .84rem;
 }
+.warn--nombre { margin: 8px 0 0; }
 
 .preview-wrap { margin-bottom: 22px; }
 .preview-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }

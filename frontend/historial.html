@@ -20,13 +20,13 @@
     </a>
     <div class="topbar__right">
       <span class="badge badge--dev" id="badgeEntorno">Ambiente: —</span>
-      <button class="hamburger" id="btnMenu" aria-label="Abrir menú" aria-expanded="false">
+      <button class="hamburger" id="btnMenu" aria-label="Abrir men&uacute;" aria-expanded="false">
         <span></span><span></span><span></span>
       </button>
       <nav class="nav" id="menuNav">
         <a href="index.html"><i class="fa-solid fa-house"></i>Inicio</a>
         <a href="pacientes.html" data-solo-admin><i class="fa-solid fa-database"></i> Base de datos</a>
-        <a href="mensajeria.html"><i class="fa-solid fa-envelope"></i> Mensajería</a>
+        <a href="mensajeria.html"><i class="fa-solid fa-envelope"></i> Mensajer&iacute;a</a>
         <a href="historial.html" class="activo"><i class="fa-solid fa-clock-rotate-left"></i> Historial</a>
       </nav>
     </div>
@@ -36,7 +36,7 @@
 
     <section class="panel">
       <div class="panel__head">
-        <h2>Historial de envíos</h2>
+        <h2>Historial de env&iacute;os</h2>
         <button id="btnActualizar" class="btn btn--ghost" type="button">Actualizar</button>
       </div>
 
@@ -58,13 +58,13 @@
               <th>Total</th>
               <th>Enviados</th>
               <th>Fallidos</th>
-              <th>Inválidos</th>
+              <th>Inv&aacute;lidos</th>
               <th>Detalle</th>
             </tr>
           </thead>
           <tbody></tbody>
         </table>
-        <p id="tablaVacia" class="tabla-vacia" hidden>Sin envíos registrados.</p>
+        <p id="tablaVacia" class="tabla-vacia" hidden>Sin env&iacute;os registrados.</p>
       </div>
     </section>
 
@@ -72,15 +72,15 @@
 
   <div id="modalDetalle" class="modal" hidden>
     <div class="modal__card modal__card--detalle" role="dialog" aria-modal="true">
-      <h3>Detalle del envío</h3>
+      <h3>Detalle del env&iacute;o</h3>
       <div id="detalleCampos"></div>
-      <p class="detalle-subtitulo">Pacientes en este envío</p>
+      <p class="detalle-subtitulo">Pacientes en este env&iacute;o</p>
       <div class="tabla-wrap">
         <table>
           <thead>
             <tr>
               <th>Paciente</th>
-              <th>Teléfono</th>
+              <th>Tel&eacute;fono</th>
               <th>Estado</th>
               <th>Respuesta</th>
               <th>Error</th>
@@ -111,7 +111,7 @@
       const n = document.getElementById("menuNav");
       const salir = document.createElement("a");
       salir.href = "#";
-      salir.innerHTML = '<i class="fa-solid fa-right-from-bracket"></i> Cerrar sesión' || "";
+      salir.innerHTML = '<i class="fa-solid fa-right-from-bracket"></i> Cerrar sesi&oacute;n' || "";
       salir.addEventListener("click", async (e) => {
         e.preventDefault();
         try { await fetch("api/auth/logout", { method: "POST", headers: { Authorization: "Bearer " + token } }); } catch {}

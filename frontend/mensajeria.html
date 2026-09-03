@@ -60,7 +60,8 @@
         <div class="field">
           <label for="inpNombre">Nombre</label>
           <input type="text" id="inpNombre" maxlength="60" placeholder="Ej: Recordatorio de cita médica" autocomplete="off">
-          <p class="field__hint">Es el nombre que verás al elegir la plantilla antes de un envío.</p>
+          <p id="avisoNombrePermanente" class="warn warn--nombre">El nombre es permanente: una vez creada la plantilla no se puede cambiar. Para usar otro nombre hay que eliminar la plantilla y crear una nueva.</p>
+          <p id="hintNombre" class="field__hint">Es el nombre que verás al elegir la plantilla antes de un envío.</p>
         </div>
 
         <div class="field">
@@ -80,10 +81,25 @@
         </div>
         <p id="avisoComodines" class="warn" hidden></p>
 
+        <div class="preview-wrap">
+          <div class="preview-head">
+            <h3>Vista previa</h3>
+            <span class="preview-note">Así lo recibirá el paciente (datos de ejemplo)</span>
+          </div>
+          <div class="phone">
+            <div class="chat">
+              <div class="bubble">
+                <div id="previewTexto"></div>
+                <span class="bubble__time" id="previewHora"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div class="field">
-          <label for="inpTemplate">Template de Meta</label>
-          <input type="text" id="inpTemplate" maxlength="100" placeholder="Ej: recordatorio_cita" autocomplete="off" required pattern="[a-z0-9_]+">
-          <p class="field__hint">Nombre exacto del template en Meta (obligatorio). Solo minúsculas, números y guiones bajos. Sin un template aprobado, Meta no permite iniciar la conversación con el paciente.</p>
+          <label for="inpTemplate">Nombre del template de Meta (automático)</label>
+          <input type="text" id="inpTemplate" maxlength="100" placeholder="(se genera desde el nombre)" autocomplete="off" tabindex="-1" aria-readonly="true" disabled>
+          <p id="hintTemplate" class="field__hint">Se genera automáticamente a partir del nombre de la plantilla (solo minúsculas, números y guiones bajos). No se puede editar y, una vez creada la plantilla, queda fijo en Meta.</p>
         </div>
 
         <div class="field">
@@ -113,21 +129,6 @@
           <p id="motivoRechazoMeta" class="field__hint" hidden></p>
         </div>
 
-        <div class="preview-wrap">
-          <div class="preview-head">
-            <h3>Vista previa</h3>
-            <span class="preview-note">Así lo recibirá el paciente (datos de ejemplo)</span>
-          </div>
-          <div class="phone">
-            <div class="chat">
-              <div class="bubble">
-                <div id="previewTexto"></div>
-                <span class="bubble__time" id="previewHora"></span>
-              </div>
-            </div>
-          </div>
-        </div>
-
         <div class="form-actions">
           <button type="submit" id="btnGuardar" class="btn btn--primary btn--lg">Guardar</button>
           <button type="button" id="btnCancelar" class="btn btn--ghost btn--lg">Cancelar</button>
@@ -147,7 +148,7 @@
   <div id="modalEliminar" class="modal" hidden>
     <div class="modal__card" role="dialog" aria-modal="true" aria-labelledby="modalTitulo">
       <h3 id="modalTitulo">¿Eliminar "<span id="modalNombre"></span>"?</h3>
-      <p>Los envíos ya realizados con esta plantilla no se verán afectados.</p>
+      <p>Los env&iacute;os ya realizados con esta plantilla no se verán afectados.</p>
       <div class="modal__actions">
         <button type="button" class="btn btn--ghost" id="btnModalCancelar">Cancelar</button>
         <button type="button" class="btn btn--danger" id="btnModalConfirmar">Eliminar</button>
@@ -225,8 +226,8 @@
 
   <div id="modalRechazadoConf" class="modal" hidden>
     <div class="modal__card" style="text-align:center; max-width:480px;" role="dialog" aria-modal="true">
-      <h3 style="color:#b23b37;">Envío rechazado por supervisor</h3>
-      <p>El envío fue rechazado por el supervisor.</p>
+      <h3 style="color:#b23b37;">Env&iacute;o rechazado por supervisor</h3>
+      <p>El env&iacute;o fue rechazado por el supervisor.</p>
       <div id="comentarioRechazoConf" style="background:#fdf0f0; border-left:4px solid #b23b37; padding:14px 16px; margin:14px 0; border-radius:6px; text-align:left; font-size:14px; color:#24303c; white-space:pre-wrap;"></div>
       <div class="modal__actions" style="justify-content:center; margin-top:20px;">
         <button type="button" class="btn btn--primary" id="btnCerrarRechazoConf">Entendido</button>
