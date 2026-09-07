@@ -20,6 +20,7 @@ const badgeEstadoMeta = $("#badgeEstadoMeta");
 const btnRevisarEstadoMeta = $("#btnRevisarEstadoMeta");
 const motivoRechazoMeta = $("#motivoRechazoMeta");
 const btnRevisarTodos = $("#btnRevisarTodos");
+const btnSincronizarMeta = $("#btnSincronizarMeta");
 
 const valTemplate = () => (hayTemplateMeta ? inpTemplate.value : "");
 const valTemplateLang = () => (hayTemplateMeta ? inpTemplateLang.value : "es");
@@ -1011,6 +1012,39 @@ if (btnRevisarTodos) {
       toast(`No se pudieron actualizar los estados: ${err.message}`, "error");
     } finally {
       setConsultandoEstado(false, btnRevisarTodos);
+    }
+  });
+}
+
+// Meta es la fuente de verdad para los templates (esta cuenta no puede
+// crearlos/editarlos por API): trae el estado real de los que ya se conocen
+// e importa como plantilla nueva los que existan en Meta y falten aquí.
+if (btnSincronizarMeta) {
+  btnSincronizarMeta.addEventListener("click", async () => {
+    setConsultandoEstado(true, btnSincronizarMeta, "Sincronizando...");
+    try {
+      const res = await fetch(`${API_URL}/sincronizar-meta`, {
+        method: "POST",
+        headers: authHeaders(),
+      });
+      if (res.status === 401) { window.snwSalir(); return; }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail ?? `Error ${res.status}`);
+      plantillas = data.plantillas;
+      renderLista(buscadorEl.value);
+      if (activaId) {
+        const actual = plantillas.find((x) => x.id === activaId);
+        if (actual) renderEstadoMeta(actual);
+      }
+      toast(
+        `Sincronizado con Meta: ${data.creadas} nueva(s), ${data.actualizadas} actualizada(s)` +
+          ` de ${data.total_meta} template(s) en Meta.`,
+        "ok"
+      );
+    } catch (err) {
+      toast(`No se pudo sincronizar con Meta: ${err.message}`, "error");
+    } finally {
+      setConsultandoEstado(false, btnSincronizarMeta);
     }
   });
 }

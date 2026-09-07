@@ -38,10 +38,12 @@
       <div class="panel__head">
         <h2>Plantillas</h2>
         <div class="panel__actions">
+          <button id="btnSincronizarMeta" class="btn btn--ghost" type="button" title="Trae los templates que existen en Meta: actualiza el estado de los que ya conoces e importa como plantilla nueva los que falten">Sincronizar</button>
           <button id="btnRevisarTodos" class="btn btn--ghost" type="button" data-solo-admin>Actualizar estados</button>
           <button id="btnNueva" class="btn btn--primary" type="button">+ Nueva</button>
         </div>
       </div>
+      <p id="avisoSincronizarMeta" class="field__hint tpl-list__aviso-sync">Usa «Sincronizar» para traer las plantillas que falten y actualizar su estado.</p>
       <div class="searchbox">
         <input type="search" id="buscador" placeholder="Buscar..." autocomplete="off">
       </div>

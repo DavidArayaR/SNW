@@ -463,6 +463,126 @@ def actualizar_todos_estados_meta(sesion: dict = Depends(sesion_actual)):
     return sorted(plantillas, key=lambda p: p.get("actualizada", 0), reverse=True)
 
 
+def _texto_desde_componentes(components: list) -> str:
+    """Extrae el texto del componente BODY de un template de Meta (los
+    placeholders {{1}}, {{2}}... quedan tal cual, no sabemos a qué comodín
+    del sistema corresponden)."""
+    for c in components or []:
+        if (c.get("type") or "").upper() == "BODY":
+            return c.get("text", "") or ""
+    return ""
+
+
+def _nombre_libre(base: str, ocupados: set) -> str:
+    """Genera un nombre no usado a partir de 'base', agregando ' (2)', ' (3)'..."""
+    nombre = base
+    i = 2
+    while nombre.lower() in ocupados:
+        nombre = f"{base} ({i})"
+        i += 1
+    ocupados.add(nombre.lower())
+    return nombre
+
+
+def _clave_libre(base: str, ocupadas: set) -> str:
+    """Genera una clave no usada a partir de 'base', agregando '_2', '_3'..."""
+    clave = base
+    i = 2
+    while clave in ocupadas:
+        clave = f"{base}_{i}"
+        i += 1
+    ocupadas.add(clave)
+    return clave
+
+
+@app.post("/api/plantillas/sincronizar-meta")
+def sincronizar_plantillas_meta(sesion: dict = Depends(sesion_actual)):
+    """Meta es la fuente de verdad para los templates: esta cuenta no tiene
+    permiso para crear/editar templates vía API, así que se gestionan a mano
+    en Meta y aquí solo se leen (GET). Esta acción:
+      - Actualiza el estado/id/categoría de las plantillas locales que ya
+        tienen un 'whatsapp_template' configurado, contra lo que hay en Meta.
+      - Importa como plantillas nuevas los templates que existen en Meta y
+        todavía no tienen una plantilla local asociada.
+    No crea ni edita nada en Meta, solo lee."""
+    servicio = WhatsAppService()
+    resultado = servicio.listar_templates_meta()
+    if not resultado["ok"]:
+        raise HTTPException(502, detail=f"No se pudo consultar los templates en Meta: {resultado['error']}")
+
+    templates_meta = resultado["templates"]
+    plantillas = leer_plantillas()
+
+    usados_id = set()
+    actualizadas = 0
+    for p in plantillas:
+        nombre_tpl = (p.get("whatsapp_template") or "").strip()
+        if not nombre_tpl:
+            continue
+        lang = (p.get("whatsapp_template_lang") or "").strip() or "es"
+        match = next((t for t in templates_meta
+                      if t.get("name") == nombre_tpl and t.get("language") == lang), None)
+        if not match:
+            match = next((t for t in templates_meta if t.get("name") == nombre_tpl), None)
+
+        if match:
+            usados_id.add(match.get("id"))
+            cambio = (
+                p.get("whatsapp_template_id") != match.get("id")
+                or p.get("whatsapp_template_status") != match.get("status")
+                or p.get("whatsapp_template_categoria") != match.get("category")
+            )
+            actualizadas += 1 if cambio else 0
+            p["whatsapp_template_id"] = match.get("id")
+            p["whatsapp_template_status"] = match.get("status")
+            p["whatsapp_template_categoria"] = match.get("category") or p.get("whatsapp_template_categoria")
+            p["whatsapp_template_lang"] = match.get("language") or lang
+            p["whatsapp_template_rejected_reason"] = match.get("rejected_reason") or match.get("reject_reason")
+            p["whatsapp_template_error"] = None
+        else:
+            p["whatsapp_template_status"] = None
+            p["whatsapp_template_error"] = (
+                f"No se encontró el template '{nombre_tpl}' (idioma '{lang}') en Meta."
+            )
+
+    nombres_ocupados = {p["nombre"].lower() for p in plantillas}
+    claves_ocupadas = {p["clave"] for p in plantillas}
+    siguiente_id = max((p["id"] for p in plantillas), default=0) + 1
+    creadas = 0
+
+    for t in templates_meta:
+        if t.get("id") in usados_id:
+            continue
+        nombre_base = (t.get("name") or "").replace("_", " ").strip().capitalize() or "Template de Meta"
+        nombre = _nombre_libre(nombre_base, nombres_ocupados)
+        clave = _clave_libre(slug(nombre), claves_ocupadas)
+
+        plantillas.append({
+            "id": siguiente_id,
+            "clave": clave,
+            "nombre": nombre,
+            "texto": _texto_desde_componentes(t.get("components")),
+            "whatsapp_template": t.get("name"),
+            "whatsapp_template_lang": t.get("language"),
+            "whatsapp_template_categoria": t.get("category"),
+            "whatsapp_template_id": t.get("id"),
+            "whatsapp_template_status": t.get("status"),
+            "whatsapp_template_rejected_reason": t.get("rejected_reason") or t.get("reject_reason"),
+            "whatsapp_template_error": None,
+            "actualizada": int(time.time() * 1000),
+        })
+        siguiente_id += 1
+        creadas += 1
+
+    escribir_plantillas(plantillas)
+    return {
+        "creadas": creadas,
+        "actualizadas": actualizadas,
+        "total_meta": len(templates_meta),
+        "plantillas": sorted(plantillas, key=lambda p: p.get("actualizada", 0), reverse=True),
+    }
+
+
 @app.post("/api/plantillas", status_code=201)
 def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(sesion_actual)):
     if not body.nombre.strip() or not body.texto.strip():
@@ -582,7 +702,7 @@ def actualizar_configuracion(body: ConfigIn, sesion: dict = Depends(solo_admin))
         _actualizar_env("SNW_ENTORNO", body.entorno)
 
     if body.metodo_envio is not None:
-        if body.metodo_envio not in ("simulado", "whatsapp_web", "api_oficial"):
+        if body.metodo_envio not in ("simulado", "api_oficial"):
             raise HTTPException(400, detail="Método de envío inválido")
         os.environ["SNW_METODO_ENVIO"] = body.metodo_envio
         _actualizar_env("SNW_METODO_ENVIO", body.metodo_envio)

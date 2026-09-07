@@ -136,11 +136,21 @@ class WhatsAppApiClient:
         return self._procesar_respuesta(resp)
 
     async def listar_templates(self, waba_id: str) -> dict:
-        """Lista los templates de mensaje de la WABA."""
+        """Lista los templates de mensaje de la WABA, con paginación."""
         url = f"{GRAPH_URL}/{waba_id}/message_templates"
+        params = {
+            "fields": "id,name,language,status,category,components,rejected_reason",
+            "limit": 100,
+        }
+        templates: list = []
         async with httpx.AsyncClient(timeout=30) as cliente:
-            resp = await cliente.get(url, headers=self._headers())
-        return self._procesar_respuesta(resp)
+            while url:
+                resp = await cliente.get(url, params=params, headers=self._headers())
+                data = self._procesar_respuesta(resp)
+                templates += data.get("data", [])
+                url = (data.get("paging") or {}).get("next")
+                params = None  # la URL "next" ya trae todos los query params
+        return {"data": templates}
 
     async def buscar_template(self, waba_id: str, nombre: str) -> dict:
         """Busca un template por nombre (puede devolver varias variantes de idioma)."""
@@ -381,6 +391,20 @@ class WhatsAppService:
 
         return {"ok": False, "status": None, "category": None, "rejected_reason": None,
                 "error": f"No se encontró el template '{nombre_template}' en idioma '{lang}' en Meta"}
+
+    def listar_templates_meta(self) -> dict:
+        """Lista TODOS los templates que existen en Meta para la WABA configurada
+        (fuente de verdad cuando la cuenta no tiene permiso para crear/editar
+        templates vía API: los templates se gestionan a mano en Meta y este
+        sistema solo los lee). Devuelve {ok, templates, error}."""
+        if not self.waba_id or not self.token:
+            return {"ok": False, "templates": [], "error": "Faltan SNW_WA_BUSINESS_ACCOUNT_ID o SNW_WA_TOKEN"}
+        try:
+            data = asyncio.run(self.cliente.listar_templates(self.waba_id))
+        except ErrorWhatsApp as e:
+            log_error("listar_templates_meta", e)
+            return {"ok": False, "templates": [], "error": e.message}
+        return {"ok": True, "templates": data.get("data", []), "error": None}
 
     # ---------- Envío ----------
     def construir_payload_texto(self, telefono: str, mensaje: str, preview_url: bool = False) -> tuple:
