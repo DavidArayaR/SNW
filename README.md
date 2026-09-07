@@ -23,6 +23,7 @@ con la **WhatsApp Business Cloud API** de Meta (v21.0).
 snw/
 ├── INICIAR_SNW.bat          Arranque en un clic (Windows): valida MySQL/deps, inicializa
 │                             la BD solo la primera vez, abre el navegador y levanta uvicorn
+├── iniciar_snw.sh           Mismo arranque para Linux/macOS (chmod +x la primera vez)
 ├── backend/
 │   ├── main.py               API FastAPI: rutas, jobs de envío en background, confirmación
 │   │                          por correo, plantillas, pacientes, historial, configuración
@@ -56,14 +57,15 @@ snw/
 
 ## Puesta en marcha
 
-**Opción recomendada (Windows):** doble clic en `INICIAR_SNW.bat`. El script:
+**Opción recomendada:** `INICIAR_SNW.bat` (Windows, doble clic) o `./iniciar_snw.sh`
+(Linux/macOS — la primera vez: `chmod +x iniciar_snw.sh`). Ambos scripts hacen lo mismo:
 
-1. Verifica que Python y MySQL (XAMPP) estén disponibles.
-2. **Solo la primera vez** (si `snw_base.pacientes_prod` todavía no existe) carga
+1. Verifican que Python y MySQL (XAMPP/LAMPP) estén disponibles.
+2. **Solo la primera vez** (si `snw_base.pacientes_prod` todavía no existe) cargan
    `sql/snw_base.sql` para crear la base, las tablas y los 2 números autorizados. En
-   arranques posteriores omite este paso.
-3. Instala las dependencias de `requirements.txt` si faltan.
-4. Abre `http://127.0.0.1:8000` en el navegador y levanta `uvicorn` en la misma ventana.
+   arranques posteriores omiten este paso.
+3. Instalan las dependencias de `requirements.txt` si faltan.
+4. Abren `http://127.0.0.1:8000` en el navegador y levantan `uvicorn`.
 
 **Manual (cualquier SO):**
 

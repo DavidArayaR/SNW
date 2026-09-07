@@ -1,0 +1,2 @@
+*.sh text eol=lf
+INICIAR_SNW.bat text eol=crlf
