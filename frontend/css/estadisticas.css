@@ -1,0 +1,69 @@
+/* Página de Estadísticas */
+
+.hero-grid {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 32px;
+  padding: 22px 18px 6px;
+}
+
+.hero-num-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.hero-num {
+  font-size: 3.4rem;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--verde-oscuro);
+  font-variant-numeric: tabular-nums;
+}
+.hero-sub { font-size: .85rem; color: var(--texto-suave); }
+
+/* La grilla de stats reutiliza .stat/.stats de pacientes.css; solo añadimos
+   el respiro inferior dentro de un panel. */
+.panel .stats { padding-bottom: 16px; }
+
+/* Barras por mes */
+.meses {
+  list-style: none;
+  margin: 0;
+  padding: 14px 18px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.mes-fila {
+  display: grid;
+  grid-template-columns: 130px 1fr 60px;
+  align-items: center;
+  gap: 12px;
+  font-size: .88rem;
+}
+.mes-nombre { color: var(--texto-suave); text-transform: capitalize; }
+.mes-barra {
+  height: 12px;
+  background: #eef1f4;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.mes-barra > span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--verde), #25d366);
+  border-radius: 999px;
+  min-width: 2px;
+}
+.mes-num {
+  text-align: right;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.mes-vacio { color: var(--texto-suave); padding: 6px 0; }
+
+@media (max-width: 560px) {
+  .hero-num { font-size: 2.6rem; }
+  .mes-fila { grid-template-columns: 96px 1fr 48px; gap: 8px; }
+}

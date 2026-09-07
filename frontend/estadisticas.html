@@ -3,10 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SNW · Historial</title>
+  <title>SNW &middot; Estad&iacute;sticas</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <link rel="stylesheet" href="css/styles.css">
   <link rel="stylesheet" href="css/pacientes.css">
+  <link rel="stylesheet" href="css/estadisticas.css">
 </head>
 <body>
 
@@ -19,7 +20,6 @@
       </div>
     </a>
     <div class="topbar__right">
-      <span class="badge badge--dev" id="badgeEntorno">Ambiente: —</span>
       <button class="hamburger" id="btnMenu" aria-label="Abrir men&uacute;" aria-expanded="false">
         <span></span><span></span><span></span>
       </button>
@@ -27,8 +27,8 @@
         <a href="index.html"><i class="fa-solid fa-house"></i>Inicio</a>
         <a href="pacientes.html" data-solo-admin><i class="fa-solid fa-database"></i> Base de datos</a>
         <a href="mensajeria.html"><i class="fa-solid fa-envelope"></i> Mensajer&iacute;a</a>
-        <a href="historial.html" class="activo"><i class="fa-solid fa-clock-rotate-left"></i> Historial</a>
-        <a href="estadisticas.html"><i class="fa-solid fa-chart-column"></i> Estad&iacute;sticas</a>
+        <a href="historial.html"><i class="fa-solid fa-clock-rotate-left"></i> Historial</a>
+        <a href="estadisticas.html" class="activo"><i class="fa-solid fa-chart-column"></i> Estad&iacute;sticas</a>
       </nav>
     </div>
   </header>
@@ -37,64 +37,31 @@
 
     <section class="panel">
       <div class="panel__head">
-        <h2>Historial de env&iacute;os</h2>
+        <h2>Mensajes enviados en <span id="nombreMes">este mes</span></h2>
         <button id="btnActualizar" class="btn btn--ghost" type="button">Actualizar</button>
       </div>
 
-      <div class="stats" id="stats"></div>
-
-      <div class="toolbar-pacientes">
-        <input type="search" id="buscador" placeholder="Buscar por base de datos o plantilla..." autocomplete="off">
-        <span id="contador" class="contador-sel"></span>
+      <div class="hero-grid">
+        <div class="hero-num-wrap">
+          <span class="hero-num" id="enviadosMes">&mdash;</span>
+          <span class="hero-sub">mensajes enviados este mes</span>
+        </div>
       </div>
 
-      <div class="tabla-wrap">
-        <table id="tablaHistorial">
-          <thead>
-            <tr>
-              <th>Fecha</th>
-              <th>Base de datos</th>
-              <th>Plantilla</th>
-              <th>Estado</th>
-              <th>Total</th>
-              <th>Enviados</th>
-              <th>Fallidos</th>
-              <th>Inv&aacute;lidos</th>
-              <th>Detalle</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-        <p id="tablaVacia" class="tabla-vacia" hidden>Sin env&iacute;os registrados.</p>
-      </div>
+      <div class="stats" id="statsMes"></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel__head"><h2>Mensajes enviados por mes</h2></div>
+      <ul class="meses" id="meses"></ul>
+    </section>
+
+    <section class="panel">
+      <div class="panel__head"><h2>Total hist&oacute;rico</h2></div>
+      <div class="stats" id="statsTotal"></div>
     </section>
 
   </main>
-
-  <div id="modalDetalle" class="modal" hidden>
-    <div class="modal__card modal__card--detalle" role="dialog" aria-modal="true">
-      <h3>Detalle del env&iacute;o</h3>
-      <div id="detalleCampos"></div>
-      <p class="detalle-subtitulo">Pacientes en este env&iacute;o</p>
-      <div class="tabla-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Paciente</th>
-              <th>Tel&eacute;fono</th>
-              <th>Estado</th>
-              <th>Respuesta</th>
-              <th>Error</th>
-            </tr>
-          </thead>
-          <tbody id="detalleBody"></tbody>
-        </table>
-      </div>
-      <div class="modal__actions">
-        <button type="button" class="btn btn--primary" id="btnCerrarDetalle">Cerrar</button>
-      </div>
-    </div>
-  </div>
 
   <div id="toast" class="toast" hidden></div>
 
@@ -122,7 +89,7 @@
       n.appendChild(salir);
     })();
   </script>
-  <script src="js/historial.js"></script>
+  <script src="js/estadisticas.js"></script>
   <script>
     (function () {
       const b = document.getElementById("btnMenu"), n = document.getElementById("menuNav");

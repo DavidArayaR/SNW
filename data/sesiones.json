@@ -379,12 +379,36 @@
     "rol": "administrador",
     "nombre": "Administrador"
   },
-  "2ac26b12f5854627b126165ea81b4ff4": {
-    "rol": "administrador",
-    "nombre": "Administrador"
-  },
   "f108b7779b3f4e60bbaf500fb2176f83": {
     "rol": "administrador",
     "nombre": "Administrador"
+  },
+  "9738c1ea510f4758888c4ba8e3fd3721": {
+    "rol": "usuario",
+    "nombre": "Usuario Final"
+  },
+  "afb5012864644e34b019438ce15958e9": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "0c96dbb8897f4976826eec9f9167cf2d": {
+    "rol": "usuario",
+    "nombre": "Usuario Final"
+  },
+  "bd2bd17f9cf14739934c24c15a65df81": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "a7b2f269ad0b4bea9caff0ef3932fad6": {
+    "rol": "usuario",
+    "nombre": "Usuario Final"
+  },
+  "23686bdf52a14c8a90b76d4b6827cb29": {
+    "rol": "usuario",
+    "nombre": "Usuario Final"
+  },
+  "df094df320314441bb668496685af159": {
+    "rol": "usuario",
+    "nombre": "Usuario Final"
   }
 }

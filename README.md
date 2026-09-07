@@ -39,8 +39,9 @@ snw/
 │   ├── mensajeria.html        Editor de plantillas, vista previa estilo WhatsApp, envío
 │   ├── pacientes.html         Base de datos de pacientes + envío masivo (solo admin)
 │   ├── historial.html         Historial de envíos (batch + detalle por paciente)
-│   ├── css/                   Estilos (styles.css compartido, pacientes.css)
-│   └── js/                    app.js (mensajería), pacientes.js, historial.js
+│   ├── estadisticas.html      Contador mensual de mensajes enviados y desgloses
+│   ├── css/                   Estilos (styles.css compartido, pacientes.css, estadisticas.css)
+│   └── js/                    app.js (mensajería), pacientes.js, historial.js, estadisticas.js
 ├── data/
 │   ├── plantillas.json        Plantillas de mensajes + metadata del template en Meta
 │   ├── usuarios.json          Credenciales (admin / usuario), clave en SHA-256
@@ -213,6 +214,12 @@ Reglas del editor:
 | GET | `/api/notificaciones/historial/{id}/detalle?ambiente=` | Pacientes individuales de un envío |
 | PUT | `/api/notificaciones/historial/{id}/respuesta?ambiente=` | Corregir la respuesta de un registro |
 
+### Estadísticas
+
+| Método | Endpoint | Descripción |
+|---|---|---|
+| GET | `/api/estadisticas` | Resumen para la página de Estadísticas: mensajes `enviado` del mes, desglose (fallidos/inválidos/respuestas), últimos 6 meses y totales históricos |
+
 ### Configuración
 
 | Método | Endpoint | Descripción |
@@ -340,7 +347,7 @@ propagar como error 500.
 | Usuario | Contraseña | Rol | Acceso |
 |---|---|---|---|
 | `admin` | `admin123` | administrador | Todo: Pacientes, Mensajería, Historial, configuración, links de prueba en el correo de confirmación, envío directo en producción |
-| `usuario` | `usuario123` | usuario | Mensajería (crear/editar plantillas, ver estado y sincronizar con Meta) e Historial; sin acceso a Pacientes ni a Configuración; en producción sus envíos requieren confirmación del supervisor |
+| `usuario` | `usuario123` | usuario | Mensajería (crear/editar plantillas, ver estado y sincronizar con Meta), Historial y Estadísticas; sin acceso a Pacientes ni a Configuración; en producción sus envíos requieren confirmación del supervisor |
 
 Las credenciales viven en `data/usuarios.json` (clave en SHA-256); las sesiones activas
 en `data/sesiones.json` (token → `{rol, nombre}`, sin expiración automática).
@@ -358,3 +365,5 @@ en `data/sesiones.json` (token → `{rol, nombre}`, sin expiración automática)
   selección múltiple y envío masivo integrado.
 - **Historial** (`historial.html`): envíos de ambas bases (o filtrado por una), detalle
   individual por paciente con estado, respuesta y error de cada mensaje.
+- **Estadísticas** (`estadisticas.html`): mensajes enviados en el mes en curso, desglose
+  del mes (enviados/fallidos/inválidos/respuestas), últimos 6 meses y totales históricos.

@@ -1465,6 +1465,52 @@ def actualizar_respuesta(registro_id: int, body: EstadoPacienteIn,
     return {"ok": True}
 
 
+@app.get("/api/estadisticas")
+def estadisticas(sesion: dict = Depends(sesion_actual)):
+    """Resumen de envíos para la página de Estadísticas."""
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT"
+            "  SUM(estado_envio = 'enviado') AS enviados,"
+            "  SUM(estado_envio = 'error') AS fallidos,"
+            "  SUM(estado_envio = 'numero_invalido') AS invalidos,"
+            "  SUM(respuesta = 'respondio') AS respondio,"
+            "  SUM(respuesta = 'click') AS click,"
+            "  SUM(respuesta = 'baja') AS baja"
+            " FROM log_envios"
+            " WHERE fecha_hora >= DATE_FORMAT(CURDATE(), '%Y-%m-01')"
+        )
+        mes = cur.fetchone() or {}
+
+        cur.execute(
+            "SELECT DATE_FORMAT(fecha_hora, '%Y-%m') AS mes, COUNT(*) AS enviados"
+            " FROM log_envios"
+            " WHERE estado_envio = 'enviado'"
+            "   AND fecha_hora >= DATE_FORMAT(CURDATE() - INTERVAL 5 MONTH, '%Y-%m-01')"
+            " GROUP BY mes ORDER BY mes"
+        )
+        por_mes = [{"mes": r["mes"], "enviados": int(r["enviados"] or 0)} for r in cur.fetchall()]
+
+        cur.execute("SELECT COUNT(*) AS n FROM log_envios WHERE estado_envio = 'enviado'")
+        total_enviados = int((cur.fetchone() or {}).get("n", 0))
+        cur.execute("SELECT COUNT(*) AS n FROM envios")
+        total_batches = int((cur.fetchone() or {}).get("n", 0))
+
+    enviados_mes = int(mes.get("enviados") or 0)
+    return {
+        "mes": time.strftime("%Y-%m"),
+        "enviados_mes": enviados_mes,
+        "fallidos_mes": int(mes.get("fallidos") or 0),
+        "invalidos_mes": int(mes.get("invalidos") or 0),
+        "respondio_mes": int(mes.get("respondio") or 0),
+        "click_mes": int(mes.get("click") or 0),
+        "baja_mes": int(mes.get("baja") or 0),
+        "total_enviados_historico": total_enviados,
+        "total_batches": total_batches,
+        "por_mes": por_mes,
+    }
+
+
 app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="static")
 
 

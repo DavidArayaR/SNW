@@ -3,11 +3,11 @@
     "id": 1,
     "clave": "default",
     "nombre": "default",
-    "texto": "¡Hola {nombre} 👋! \n\n💚 Esta semana, aprovecha tu sesión de *Salud Mental* a solo *$25.000*. \n\n✍️ Escríbenos para agendar tu hora antes de que termine la promoción. \n¡Cuidarte también es quererte! 🏥✨",
+    "texto": "¡Hola {nombre} 👋!\n\n💚 Esta semana, en *Salud Mental Para Todos* aprovecha tu sesión a solo *$25.000*.\n\n✍️ Escríbenos para agendar tu hora antes de que termine la promoción. \n¡Cuidarte también es quererte! 🏥✨",
     "whatsapp_template": "default",
     "whatsapp_template_lang": "es",
     "whatsapp_template_categoria": "MARKETING",
-    "actualizada": 1788544964432,
+    "actualizada": 1788794189823,
     "whatsapp_template_id": "1382444860710230",
     "whatsapp_template_status": "APPROVED",
     "whatsapp_template_error": null,
@@ -25,7 +25,7 @@
     "whatsapp_template_id": "1737252654192451",
     "whatsapp_template_status": "APPROVED",
     "whatsapp_template_error": null,
-    "whatsapp_template_rejected_reason": "NONE"
+    "whatsapp_template_rejected_reason": null
   },
   {
     "id": 3,
@@ -37,7 +37,7 @@
     "whatsapp_template_categoria": "UTILITY",
     "whatsapp_template_id": "2300541910864809",
     "whatsapp_template_status": "APPROVED",
-    "whatsapp_template_rejected_reason": "NONE",
+    "whatsapp_template_rejected_reason": null,
     "whatsapp_template_error": null,
     "actualizada": 1788545013118
   },
@@ -51,7 +51,7 @@
     "whatsapp_template_categoria": "UTILITY",
     "whatsapp_template_id": "1285483704651425",
     "whatsapp_template_status": "APPROVED",
-    "whatsapp_template_rejected_reason": "NONE",
+    "whatsapp_template_rejected_reason": null,
     "whatsapp_template_error": null,
     "actualizada": 1788545013118
   }
