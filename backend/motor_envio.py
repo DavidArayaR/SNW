@@ -8,8 +8,6 @@ import webbrowser
 from db import log_error
 from whatsapp_service import WhatsAppService
 
-GRAPH_URL = "https://graph.facebook.com/v21.0/{phone_id}/messages"
-
 
 class MotorSimulado:
     nombre = "simulado"

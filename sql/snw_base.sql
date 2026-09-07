@@ -1,12 +1,13 @@
 -- ============================================================
 -- SNW - Base de datos única (snw_base)
 -- ============================================================
--- Infraestructura de UNA sola base de datos con 5 tablas:
+-- Infraestructura de la base de datos con 6 tablas:
 --   - pacientes_dev   : números autorizados para pruebas de desarrollo
 --   - pacientes_prod  : números autorizados (sin datos ficticios)
 --   - envios          : lotes de envío (una fila por "Iniciar envío")
 --   - log_envios      : historial individual de mensajes
 --   - whatsapp_eventos: eventos del webhook (idempotencia)
+--   - configuracion   : ajustes editables de la app (entorno, método de envío, etc.)
 --
 -- Es idempotente (IF NOT EXISTS / INSERT IGNORE): crea la estructura y
 -- siembra solo los 2 números autorizados. Está pensado para ejecutarse
@@ -82,6 +83,40 @@ CREATE TABLE IF NOT EXISTS whatsapp_eventos (
   recibido DATETIME DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_clave (clave)
 );
+
+-- TODA la configuración de la app. En .env solo quedan las credenciales 
+-- de la base de datos (DB_*), que se necesitan para llegar aquí.
+CREATE TABLE IF NOT EXISTS configuracion (
+  clave VARCHAR(60) PRIMARY KEY,
+  valor TEXT,
+  actualizada DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) CHARACTER SET utf8mb4;
+
+INSERT IGNORE INTO configuracion (clave, valor) VALUES
+  -- App / envío
+  ('entorno', 'desarrollo'),
+  ('metodo_envio', 'simulado'),
+  ('numeros_prueba_dev', ''),
+  ('numeros_prueba_prod', ''),
+  ('intervalo_ms', '1000'),
+  ('url_base', ''),
+  -- Correo (confirmación de envíos en producción)
+  ('smtp_host', ''),
+  ('smtp_port', '587'),
+  ('smtp_user', ''),
+  ('smtp_pass', ''),
+  ('smtp_tls', 'true'),
+  ('correo_emisor', ''),
+  ('correo_destino', ''),
+  -- WhatsApp Business Cloud API (Meta)
+  ('wa_token', ''),
+  ('wa_phone_id', ''),
+  ('wa_business_account_id', ''),
+  ('wa_verify_token', ''),
+  ('wa_template_nombre', ''),
+  ('wa_template_lang', 'es'),
+  ('wa_webhook_path', '/api/whatsapp/webhook'),
+  ('wa_graph_version', 'v26.0');
 
 -- ------------------------------------------------------------
 -- Datos: pacientes_dev (números autorizados)

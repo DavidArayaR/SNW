@@ -11,18 +11,29 @@ o desde el router de webhook.
 
 import asyncio
 import hashlib
-import os
 import re
 import time
 from pathlib import Path
 
 import httpx
 
-from db import conectar, columna_existe, log_error, tabla_pacientes
+from db import conectar, columna_existe, config_get, log_error, tabla_pacientes
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-GRAPHVERSION = "v21.0"
-GRAPH_URL = f"https://graph.facebook.com/{GRAPHVERSION}"
+
+# Versión de la Graph API de Meta. Configurable en la tabla `configuracion`
+# (clave `wa_graph_version`); si no está, se usa este valor por defecto.
+GRAPH_VERSION_DEFAULT = "v26.0"
+
+
+def graph_version() -> str:
+    return (config_get("wa_graph_version") or GRAPH_VERSION_DEFAULT).strip() or GRAPH_VERSION_DEFAULT
+
+
+def graph_url() -> str:
+    """Base de la Graph API: https://graph.facebook.com/<version>"""
+    return f"https://graph.facebook.com/{graph_version()}"
+
 
 # Palabras que determinan opt-out (baja) según políticas de WhatsApp.
 BAJA_KEYWORDS = ("baja", "cancelar", "no", "stop", "salir", "quit", "unsubscribe")
@@ -102,14 +113,14 @@ class WhatsAppApiClient:
         }
 
     async def enviar(self, payload: dict) -> dict:
-        url = f"{GRAPH_URL}/{self.phone_number_id}/messages"
+        url = f"{graph_url()}/{self.phone_number_id}/messages"
         async with httpx.AsyncClient(timeout=30) as cliente:
             resp = await cliente.post(url, json=payload, headers=self._headers())
         return self._procesar_respuesta(resp)
 
     async def crear_template(self, waba_id: str, payload: dict) -> dict:
         """Crea un template de mensaje en Meta (POST /{waba_id}/message_templates)."""
-        url = f"{GRAPH_URL}/{waba_id}/message_templates"
+        url = f"{graph_url()}/{waba_id}/message_templates"
         async with httpx.AsyncClient(timeout=30) as cliente:
             resp = await cliente.post(url, json=payload, headers=self._headers())
         return self._procesar_respuesta(resp)
@@ -121,14 +132,14 @@ class WhatsAppApiClient:
         propio del template (no por el waba_id) y no acepta 'name' ni
         'language': esos dos campos son inmutables una vez creado el template.
         """
-        url = f"{GRAPH_URL}/{template_id}"
+        url = f"{graph_url()}/{template_id}"
         async with httpx.AsyncClient(timeout=30) as cliente:
             resp = await cliente.post(url, json=payload, headers=self._headers())
         return self._procesar_respuesta(resp)
 
     async def obtener_template(self, template_id: str) -> dict:
         """Obtiene los datos actuales de un template por su propio ID."""
-        url = f"{GRAPH_URL}/{template_id}"
+        url = f"{graph_url()}/{template_id}"
         async with httpx.AsyncClient(timeout=30) as cliente:
             resp = await cliente.get(
                 url, params={"fields": "category,status,name,language"}, headers=self._headers()
@@ -137,7 +148,7 @@ class WhatsAppApiClient:
 
     async def listar_templates(self, waba_id: str) -> dict:
         """Lista los templates de mensaje de la WABA, con paginación."""
-        url = f"{GRAPH_URL}/{waba_id}/message_templates"
+        url = f"{graph_url()}/{waba_id}/message_templates"
         params = {
             "fields": "id,name,language,status,category,components,rejected_reason",
             "limit": 100,
@@ -154,7 +165,7 @@ class WhatsAppApiClient:
 
     async def buscar_template(self, waba_id: str, nombre: str) -> dict:
         """Busca un template por nombre (puede devolver varias variantes de idioma)."""
-        url = f"{GRAPH_URL}/{waba_id}/message_templates"
+        url = f"{graph_url()}/{waba_id}/message_templates"
         async with httpx.AsyncClient(timeout=30) as cliente:
             resp = await cliente.get(url, params={"name": nombre}, headers=self._headers())
         return self._procesar_respuesta(resp)
@@ -194,10 +205,19 @@ class WhatsAppService:
     los datos derivados en las tablas existentes.
     """
 
-    def __init__(self):
-        self.token = os.getenv("SNW_WA_TOKEN", "").strip()
-        self.phone_number_id = os.getenv("SNW_WA_PHONE_ID", "").strip()
-        self.waba_id = os.getenv("SNW_WA_BUSINESS_ACCOUNT_ID", "").strip()
+    # Se leen de la tabla `configuracion` en cada acceso, para que un cambio
+    # (p. ej. rotar el token) surta efecto sin reconstruir el servicio.
+    @property
+    def token(self) -> str:
+        return (config_get("wa_token") or "").strip()
+
+    @property
+    def phone_number_id(self) -> str:
+        return (config_get("wa_phone_id") or "").strip()
+
+    @property
+    def waba_id(self) -> str:
+        return (config_get("wa_business_account_id") or "").strip()
 
     def configurada(self) -> bool:
         return bool(self.token) and bool(self.phone_number_id)
@@ -460,7 +480,7 @@ class WhatsAppService:
         """
         msg = plantilla or {}
         nombre_template = msg.get("whatsapp_template")
-        idioma = msg.get("whatsapp_template_lang") or os.getenv("SNW_WA_TEMPLATE_LANG", "es")
+        idioma = msg.get("whatsapp_template_lang") or config_get("wa_template_lang", "es")
 
         if nombre_template:
             orden = self.extraer_orden_comodines(msg.get("texto", "") or "")
@@ -509,7 +529,7 @@ class WhatsAppService:
     # ---------- Webhook ----------
     def verificar_webhook(self, mode: str, verify_token: str, challenge: str) -> bool | str:
         """Verificación inicial del webhook solicitada por Meta."""
-        esperado = os.getenv("SNW_WA_VERIFY_TOKEN", "").strip()
+        esperado = (config_get("wa_verify_token") or "").strip()
         if mode == "subscribe" and esperado and verify_token == esperado:
             return challenge
         return False

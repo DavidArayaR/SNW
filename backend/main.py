@@ -1,6 +1,5 @@
 import json
 import hashlib
-import os
 import re
 import threading
 import time
@@ -13,14 +12,16 @@ import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-import pymysql
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from db import conectar, entorno_valido, log_error, nombre_base, columnas_tabla, columna_existe, tabla_pacientes
+from db import (
+    conectar, entorno_valido, log_error, nombre_base, columnas_tabla, columna_existe,
+    tabla_pacientes, asegurar_tabla_config, config_all, config_get, config_set,
+)
 from motor_envio import obtener_canal
 from whatsapp_service import WhatsAppService
 from whatsapp_webhook import router as whatsapp_router
@@ -60,34 +61,9 @@ app = FastAPI(title="SNW - API de Notificaciones WhatsApp")
 app.include_router(whatsapp_router)
 
 
-def _ejecutar_sql_init():
-    sql_dir = BASE_DIR / "sql"
-    for archivo in ["snw_pacientes.sql", "snw_pacientes_prod.sql"]:
-        ruta = sql_dir / archivo
-        if not ruta.exists():
-            continue
-        try:
-            conn = pymysql.connect(
-                host=os.getenv("DB_DEV_HOST", "127.0.0.1"),
-                port=int(os.getenv("DB_DEV_PUERTO", "3306")),
-                user=os.getenv("DB_DEV_USUARIO", "root"),
-                password=os.getenv("DB_DEV_CONTRASENA", ""),
-                charset="utf8mb4",
-            )
-            contenido = ruta.read_text(encoding="utf-8")
-            for stmt in contenido.split(";"):
-                stmt = stmt.strip()
-                if stmt:
-                    with conn.cursor() as cur:
-                        cur.execute(stmt)
-            conn.commit()
-            conn.close()
-            print(f"[INIT] {archivo} ejecutado correctamente")
-        except Exception as e:
-            log_error(f"_ejecutar_sql_init({archivo})", e)
-
-
-_ejecutar_sql_init()
+# Crea/siembra la tabla `configuracion` al arrancar (migración transparente
+# desde .env la primera vez).
+asegurar_tabla_config()
 
 
 @app.middleware("http")
@@ -123,6 +99,22 @@ class ConfigIn(BaseModel):
     numeros_prueba_dev: list[str] | None = None
     numeros_prueba_prod: list[str] | None = None
     intervalo_ms: int | None = None
+    url_base: str | None = None
+    smtp_host: str | None = None
+    smtp_port: int | None = None
+    smtp_user: str | None = None
+    smtp_pass: str | None = None
+    smtp_tls: bool | None = None
+    correo_emisor: str | None = None
+    correo_destino: str | None = None
+    wa_token: str | None = None
+    wa_phone_id: str | None = None
+    wa_business_account_id: str | None = None
+    wa_verify_token: str | None = None
+    wa_template_nombre: str | None = None
+    wa_template_lang: str | None = None
+    wa_webhook_path: str | None = None
+    wa_graph_version: str | None = None
 
 
 class LoginIn(BaseModel):
@@ -149,25 +141,6 @@ def guardar_sesiones() -> None:
     SESIONES_FILE.write_text(
         json.dumps(SESIONES, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-
-
-def _actualizar_env(clave: str, valor: str) -> None:
-    env_path = BASE_DIR / ".env"
-    try:
-        texto = env_path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        texto = ""
-    lineas = texto.splitlines()
-    nueva = f"{clave}={valor}"
-    encontrada = False
-    for i, lin in enumerate(lineas):
-        if lin.strip().startswith(f"{clave}="):
-            lineas[i] = nueva
-            encontrada = True
-            break
-    if not encontrada:
-        lineas.append(nueva)
-    env_path.write_text("\n".join(lineas) + "\n", encoding="utf-8")
 
 
 SESIONES: dict[str, dict] = _cargar_sesiones()
@@ -659,28 +632,37 @@ def eliminar_plantilla(plantilla_id: int, sesion: dict = Depends(sesion_actual))
 
 
 def leer_config(ambiente: str | None = None) -> dict:
-    # Recargar .env para que ediciones manuales surtan efecto sin reiniciar
-    load_dotenv(BASE_DIR / ".env", override=True)
+    # Toda la config vive en la tabla `configuracion`. Este endpoint devuelve
+    # una vista segura (sin volcar secretos como el token de Meta o la clave SMTP).
+    cfg = config_all()
     ent = entorno_valido(ambiente)
-    var_numeros = ("SNW_NUMEROS_PRUEBA_DEV" if ent == "desarrollo"
-                   else "SNW_NUMEROS_PRUEBA_PROD")
+    clave_numeros = "numeros_prueba_dev" if ent == "desarrollo" else "numeros_prueba_prod"
 
-    def lista(var: str) -> list:
-        return [n.strip() for n in os.getenv(var, "").split(",") if n.strip()]
+    def lista(valor: str) -> list:
+        return [n.strip() for n in (valor or "").split(",") if n.strip()]
+
+    try:
+        intervalo = int(cfg.get("intervalo_ms") or 1000)
+    except (TypeError, ValueError):
+        intervalo = 1000
 
     return {
         "entorno": ent,
         "base_datos": nombre_base(ent),
-        "numeros_autorizados": lista(var_numeros),
-        "metodo_envio": os.getenv("SNW_METODO_ENVIO", "simulado"),
+        "numeros_autorizados": lista(cfg.get(clave_numeros)),
+        "metodo_envio": cfg.get("metodo_envio") or "simulado",
+        "url_base": (cfg.get("url_base") or "").strip(),
+        "correo_configurado": bool((cfg.get("smtp_host") or "").strip() and (cfg.get("smtp_pass") or "").strip()),
         "wa_api": {
             "configurada": bool(
-                os.getenv("SNW_WA_TOKEN", "").strip()
-                and os.getenv("SNW_WA_PHONE_ID", "").strip()
+                (cfg.get("wa_token") or "").strip()
+                and (cfg.get("wa_phone_id") or "").strip()
             ),
-            "version_graph": "v21.0",
+            "waba_id": (cfg.get("wa_business_account_id") or "").strip(),
+            "template_lang": (cfg.get("wa_template_lang") or "es").strip(),
+            "version_graph": (cfg.get("wa_graph_version") or "v26.0").strip(),
         },
-        "intervalo_ms": int(os.getenv("SNW_INTERVALO_MS", "1000")),
+        "intervalo_ms": intervalo,
     }
 
 
@@ -695,32 +677,56 @@ def obtener_configuracion(ambiente: str | None = Query(None),
 
 @app.put("/api/configuracion")
 def actualizar_configuracion(body: ConfigIn, sesion: dict = Depends(solo_admin)):
+    cambios: dict[str, str] = {}
+
     if body.entorno is not None:
         if body.entorno not in ("desarrollo", "produccion"):
             raise HTTPException(400, detail="Entorno inválido")
-        os.environ["SNW_ENTORNO"] = body.entorno
-        _actualizar_env("SNW_ENTORNO", body.entorno)
+        cambios["entorno"] = body.entorno
 
     if body.metodo_envio is not None:
         if body.metodo_envio not in ("simulado", "api_oficial"):
             raise HTTPException(400, detail="Método de envío inválido")
-        os.environ["SNW_METODO_ENVIO"] = body.metodo_envio
-        _actualizar_env("SNW_METODO_ENVIO", body.metodo_envio)
+        cambios["metodo_envio"] = body.metodo_envio
 
     if body.numeros_prueba_dev is not None:
-        val = ",".join(n.strip() for n in body.numeros_prueba_dev if n.strip())
-        os.environ["SNW_NUMEROS_PRUEBA_DEV"] = val
-        _actualizar_env("SNW_NUMEROS_PRUEBA_DEV", val)
+        cambios["numeros_prueba_dev"] = ",".join(n.strip() for n in body.numeros_prueba_dev if n.strip())
 
     if body.numeros_prueba_prod is not None:
-        val = ",".join(n.strip() for n in body.numeros_prueba_prod if n.strip())
-        os.environ["SNW_NUMEROS_PRUEBA_PROD"] = val
-        _actualizar_env("SNW_NUMEROS_PRUEBA_PROD", val)
+        cambios["numeros_prueba_prod"] = ",".join(n.strip() for n in body.numeros_prueba_prod if n.strip())
 
     if body.intervalo_ms is not None:
-        val = str(max(0, int(body.intervalo_ms)))
-        os.environ["SNW_INTERVALO_MS"] = val
-        _actualizar_env("SNW_INTERVALO_MS", val)
+        cambios["intervalo_ms"] = str(max(0, int(body.intervalo_ms)))
+
+    if body.smtp_port is not None:
+        cambios["smtp_port"] = str(max(1, int(body.smtp_port)))
+
+    if body.smtp_tls is not None:
+        cambios["smtp_tls"] = "true" if body.smtp_tls else "false"
+
+    # Resto de claves de texto: se guardan tal cual (recortando espacios).
+    _texto = {
+        "url_base": body.url_base,
+        "smtp_host": body.smtp_host,
+        "smtp_user": body.smtp_user,
+        "smtp_pass": body.smtp_pass,
+        "correo_emisor": body.correo_emisor,
+        "correo_destino": body.correo_destino,
+        "wa_token": body.wa_token,
+        "wa_phone_id": body.wa_phone_id,
+        "wa_business_account_id": body.wa_business_account_id,
+        "wa_verify_token": body.wa_verify_token,
+        "wa_template_nombre": body.wa_template_nombre,
+        "wa_template_lang": body.wa_template_lang,
+        "wa_webhook_path": body.wa_webhook_path,
+        "wa_graph_version": body.wa_graph_version,
+    }
+    for clave, valor in _texto.items():
+        if valor is not None:
+            cambios[clave] = valor.strip()
+
+    if cambios:
+        config_set(cambios)
 
     return leer_config()
 
@@ -735,7 +741,7 @@ def probar_api_wa(body: PruebaWAIn, sesion: dict = Depends(solo_admin)):
     """Envía un mensaje real vía la API oficial para validar las credenciales de .env."""
     cfg = leer_config()
     if cfg["metodo_envio"] != "api_oficial":
-        raise HTTPException(400, detail="SNW_METODO_ENVIO no está en api_oficial")
+        raise HTTPException(400, detail="El método de envío no está en 'api_oficial' (cámbialo en Configuración)")
 
     canal = obtener_canal(cfg)
     if canal is None or not canal.disponible():
@@ -763,22 +769,36 @@ PENDIENTES: dict = {}
 
 
 def url_base() -> str:
-    base = os.getenv("SNW_URL_BASE", "").strip().rstrip("/")
+    base = (config_get("url_base") or "").strip().rstrip("/")
     return base or "http://localhost:8000"
 
 
+def _config_correo() -> dict:
+    """Parámetros de correo/SMTP desde la tabla `configuracion`."""
+    emisor = (config_get("correo_emisor") or "").strip()
+    try:
+        port = int((config_get("smtp_port") or "587").strip() or 587)
+    except ValueError:
+        port = 587
+    return {
+        "emisor": emisor,
+        "destino": (config_get("correo_destino") or "").strip(),
+        "host": (config_get("smtp_host") or "").strip(),
+        "port": port,
+        "user": (config_get("smtp_user") or "").strip() or emisor,
+        "pwd": (config_get("smtp_pass") or "").strip().replace(" ", ""),
+        "tls": (config_get("smtp_tls", "true") or "true").lower() in ("1", "true", "yes", "si"),
+    }
+
+
 def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, plantilla_texto: str, ambiente: str) -> bool:
-    emisor = os.getenv("DIRECCION_CORREO_EMISOR", "").strip()
-    destino = os.getenv("DIRECCION_CORREO_DESTINO", "").strip()
+    c = _config_correo()
+    emisor, destino = c["emisor"], c["destino"]
     base = url_base()
     if not emisor or not destino:
         print(f"[CORREO] Emisor o destino no configurado. Token {token} -> {base}/api/notificaciones/confirmar/{token}")
         return False
-    host = os.getenv("SMTP_HOST", "").strip()
-    port = int(os.getenv("SMTP_PORT", "587") or 587)
-    user = os.getenv("SMTP_USER", "").strip() or emisor
-    pwd = os.getenv("SMTP_PASS", "").strip().replace(" ", "")
-    tls = os.getenv("SMTP_TLS", "true").lower() in ("1", "true", "yes", "si")
+    host, port, user, pwd, tls = c["host"], c["port"], c["user"], c["pwd"], c["tls"]
 
     if not host or not pwd:
         # Modo simulado: logear URL para pruebas sin SMTP real
@@ -826,16 +846,12 @@ def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, p
 
 
 def _enviar_correo_rechazo(nombre_enviador: str, plantilla_nombre: str, total: int, comentario: str) -> bool:
-    emisor = os.getenv("DIRECCION_CORREO_EMISOR", "").strip()
-    destino = os.getenv("DIRECCION_CORREO_DESTINO", "").strip()
+    c = _config_correo()
+    emisor, destino = c["emisor"], c["destino"]
     if not emisor or not destino:
         print(f"[CORREO] Emisor o destino no configurado. Rechazo -> {destino}")
         return False
-    host = os.getenv("SMTP_HOST", "").strip()
-    port = int(os.getenv("SMTP_PORT", "587") or 587)
-    user = os.getenv("SMTP_USER", "").strip() or emisor
-    pwd = os.getenv("SMTP_PASS", "").strip().replace(" ", "")
-    tls = os.getenv("SMTP_TLS", "true").lower() in ("1", "true", "yes", "si")
+    host, port, user, pwd, tls = c["host"], c["port"], c["user"], c["pwd"], c["tls"]
 
     if not host or not pwd:
         print(f"[CORREO SIMULADO] Rechazo de envío de '{nombre_enviador}' plantilla '{plantilla_nombre}' ({total} dest.): {comentario}")
@@ -1058,7 +1074,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
 
     # En ambiente de desarrollo, el usuario normal solo puede enviar a la base
     # de desarrollo (números autorizados); nunca a producción.
-    entorno_global = os.getenv("SNW_ENTORNO", "desarrollo").strip().lower()
+    entorno_global = config_get("entorno", "desarrollo").strip().lower()
     if entorno_global == "desarrollo" and sesion.get("rol") != "administrador":
         amb = "desarrollo"
 

@@ -3,7 +3,7 @@
 Módulo web para gestionar y enviar notificaciones de WhatsApp a pacientes. Backend en
 **Python (FastAPI)**, una única base de datos **MySQL/MariaDB** con tablas separadas para
 desarrollo y producción, plantillas y usuarios en **archivos JSON**, e integración directa
-con la **WhatsApp Business Cloud API** de Meta (v21.0).
+con la **WhatsApp Business Cloud API** de Meta (v26.0).
 
 ## Stack
 
@@ -14,8 +14,9 @@ con la **WhatsApp Business Cloud API** de Meta (v21.0).
 | Base de datos | MySQL / MariaDB (XAMPP, PyMySQL) — una sola base, `snw_base` |
 | Plantillas | Archivo JSON (`data/plantillas.json`) |
 | Usuarios / sesiones | Archivos JSON (`data/usuarios.json` con SHA-256, `data/sesiones.json`) |
-| WhatsApp | WhatsApp Business Cloud API (Meta Graph API v21.0) o motor simulado |
-| Correo | SMTP (Gmail u otro, configurable en `.env`) — confirmación de envíos en producción |
+| WhatsApp | WhatsApp Business Cloud API (Meta Graph API v26.0) o motor simulado |
+| Correo | SMTP (configurable en la tabla `configuracion`) — confirmación de envíos en producción |
+| Configuración | Tabla `configuracion` en MySQL (todo salvo credenciales de BD, que van en `.env`) |
 
 ## Estructura
 
@@ -47,11 +48,11 @@ snw/
 │   ├── usuarios.json          Credenciales (admin / usuario), clave en SHA-256
 │   └── sesiones.json          Tokens de sesión activos
 ├── sql/
-│   └── snw_base.sql           Crea la base snw_base, sus 5 tablas y siembra los 2
+│   └── snw_base.sql           Crea la base snw_base, sus 6 tablas y siembra los 2
 │                                números autorizados (idempotente: IF NOT EXISTS / INSERT IGNORE)
 ├── backups/                   Volcados manuales (mysqldump) antes de operaciones destructivas
-├── .env                       Configuración local (no versionado)
-├── .env.example                Plantilla de configuración
+├── .env                       Solo credenciales de la BD (DB_*). No versionado.
+├── .env.example                Plantilla del .env (solo DB_*)
 ├── requirements.txt            Dependencias Python
 └── README.md
 ```
@@ -78,31 +79,35 @@ snw/
    ```
    mysql -u root -h 127.0.0.1 < sql/snw_base.sql
    ```
-3. Copiar `.env.example` como `.env` y completar (ver tabla abajo).
+3. Copiar `.env.example` como `.env` y completar solo las variables `DB_*`.
 4. Iniciar:
    ```
    python -m uvicorn main:app --app-dir backend --host 127.0.0.1 --port 8000
    ```
 5. Abrir http://localhost:8000
+6. Cargar la configuración real (token de Meta, SMTP, números autorizados, etc.) con
+   `PUT /api/configuracion` o con `UPDATE configuracion SET valor='…' WHERE clave='…'`.
 
-### Variables de entorno principales (`.env`)
+### Configuración
 
-| Variable | Uso |
+**`.env` solo tiene las credenciales de la base de datos** (`DB_HOST`, `DB_PUERTO`,
+`DB_USUARIO`, `DB_CONTRASENA`, `DB_NOMBRE`) — se necesitan para llegar a la base donde
+vive el resto.
+
+**Todo lo demás vive en la tabla `configuracion`** (clave/valor). El backend la crea y la
+siembra en el primer arranque (tomando lo que hubiera en un `.env` antiguo). Se edita con
+`PUT /api/configuracion` (solo admin) sin reiniciar, o con `UPDATE configuracion` (requiere
+reiniciar por la caché).
+
+| Grupo | Claves |
 |---|---|
-| `SNW_ENTORNO` | `desarrollo` \| `produccion` — entorno activo por defecto del sistema |
-| `SNW_URL_BASE` | URL pública para los enlaces de confirmación/rechazo del correo (vacío = `http://localhost:8000`) |
-| `SNW_METODO_ENVIO` | `simulado` (no envía nada real) \| `api_oficial` (WhatsApp Cloud API) |
-| `SNW_NUMEROS_PRUEBA_DEV` / `SNW_NUMEROS_PRUEBA_PROD` | Números autorizados por entorno, separados por coma |
-| `SNW_INTERVALO_MS` | Pausa entre mensajes de un mismo envío |
-| `SMTP_*`, `DIRECCION_CORREO_EMISOR`, `DIRECCION_CORREO_DESTINO` | Correo de confirmación de envíos en producción |
-| `SNW_WA_TOKEN`, `SNW_WA_PHONE_ID`, `SNW_WA_BUSINESS_ACCOUNT_ID` | Credenciales de la WhatsApp Business Cloud API |
-| `SNW_WA_VERIFY_TOKEN` | Token de verificación del webhook (lo defines tú) |
-| `SNW_WA_TEMPLATE_LANG` | Idioma por defecto de los templates (código real de Meta, ej. `es`) |
-| `DB_HOST`, `DB_PUERTO`, `DB_USUARIO`, `DB_CONTRASENA`, `DB_NOMBRE` | Conexión a la base única `snw_base` |
+| App / envío | `entorno` (`desarrollo`/`produccion`), `metodo_envio` (`simulado`/`api_oficial`), `numeros_prueba_dev`, `numeros_prueba_prod`, `intervalo_ms`, `url_base` |
+| Correo | `smtp_host`, `smtp_port`, `smtp_user`, `smtp_pass`, `smtp_tls`, `correo_emisor`, `correo_destino` |
+| WhatsApp / Meta | `wa_token`, `wa_phone_id`, `wa_business_account_id`, `wa_verify_token`, `wa_template_nombre`, `wa_template_lang`, `wa_webhook_path`, `wa_graph_version` (por defecto `v26.0`) |
 
 ## Base de datos
 
-**Una sola base MySQL, `snw_base`**, con 5 tablas (ver `sql/snw_base.sql`):
+**Una sola base MySQL, `snw_base`**, con 6 tablas (ver `sql/snw_base.sql`):
 
 **`pacientes_dev` / `pacientes_prod`** — mismo esquema, una tabla por entorno
 
@@ -139,6 +144,12 @@ snw/
 
 **`whatsapp_eventos`** — idempotencia del webhook: guarda un hash de cada payload recibido
 (`entry + timestamp`) para no reprocesar un evento que Meta reenvíe.
+
+**`configuracion`** — clave/valor con **toda** la configuración de la app (envío, correo
+SMTP, credenciales y datos de Meta, URL pública, webhook). Lo único que NO está aquí son
+las credenciales de la propia base de datos (`.env`). El backend crea y siembra esta tabla
+en el primer arranque; a partir de ahí es la fuente de verdad y se edita con
+`PUT /api/configuracion`. Ver la lista de claves en **Configuración** más arriba.
 
 Las tablas de pacientes comparten `log_envios`, así que el backend siempre ubica el
 "último log" de un paciente con un `LEFT JOIN` correlacionado por `paciente_id`.
@@ -224,8 +235,8 @@ Reglas del editor:
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/configuracion?ambiente=` | Config activa (números autorizados, método de envío, etc.) |
-| PUT | `/api/configuracion` | (solo admin) Actualiza `.env` en caliente, sin reiniciar |
+| GET | `/api/configuracion?ambiente=` | Vista **segura** de la config (no devuelve el token de Meta ni la clave SMTP en claro) |
+| PUT | `/api/configuracion` | (solo admin) Guarda cualquier clave de la tabla `configuracion`, sin reiniciar (`entorno`, `metodo_envio`, `numeros_prueba_dev/prod`, `intervalo_ms`, `url_base`, `smtp_*`, `correo_*`, `wa_*`) |
 
 ### Webhook de WhatsApp (Meta)
 
@@ -238,7 +249,8 @@ Reglas del editor:
 
 La capa de integración vive en `backend/whatsapp_service.py` (cliente Graph API +
 `WhatsAppService` + `WebhookHandler`) y `backend/whatsapp_webhook.py` (router). Está
-separada de la lógica de negocio de mensajería, y usa **Graph API v21.0**.
+separada de la lógica de negocio de mensajería. Usa la **Graph API v26.0** por defecto
+(configurable en la clave `wa_graph_version` de la tabla `configuracion`).
 
 ### Envío de mensajes
 
@@ -293,17 +305,17 @@ volver a procesarlo.
 1. **Meta for Developers** → crea una App tipo **Business**.
 2. Agrega el producto **WhatsApp** → se crea la **WhatsApp Business Account (WABA)**.
 3. Añade y verifica el **número de teléfono** del negocio.
-4. En **API Setup** copia:
-   - `Phone number ID` → `SNW_WA_PHONE_ID`
-   - `WhatsApp Business Account ID` → `SNW_WA_BUSINESS_ACCOUNT_ID`
-   - `Access Token` → `SNW_WA_TOKEN` (usa uno de *System User* si necesitas que no
+4. En **API Setup** copia a la tabla `configuracion` (con `PUT /api/configuracion` o `UPDATE`):
+   - `Phone number ID` → `wa_phone_id`
+   - `WhatsApp Business Account ID` → `wa_business_account_id`
+   - `Access Token` → `wa_token` (usa uno de *System User* si necesitas que no
      caduque; los tokens temporales de API Setup expiran en 24 h)
-5. Define tu propio **Verify Token** → `SNW_WA_VERIFY_TOKEN`, y configura el **Webhook**
+5. Define tu propio **Verify Token** → `wa_verify_token`, y configura el **Webhook**
    de la App con `https://TU-DOMINIO/api/whatsapp/webhook` más ese token. Suscríbelo al
    menos a `messages`.
-6. Pon `SNW_METODO_ENVIO=api_oficial` en `.env`.
-7. Verifica que el `access token` sea de la **misma** WABA que pusiste en
-   `SNW_WA_BUSINESS_ACCOUNT_ID` (un token válido de otra WABA falla con *"Object with ID
+6. Pon `metodo_envio` en `api_oficial`.
+7. Verifica que el `wa_token` sea de la **misma** WABA que pusiste en
+   `wa_business_account_id` (un token válido de otra WABA falla con *"Object with ID
    '...' does not exist, cannot be loaded due to missing permissions"*).
 
 > **Nota:** Meta exige que el webhook esté en una URL **HTTPS pública** y accesible desde
@@ -331,10 +343,10 @@ propagar como error 500.
   confirmación al supervisor con botones **Confirmar** y **Rechazar** (con comentario);
   el envío no arranca hasta que se confirma. Un administrador en producción envía
   directo, sin correo.
-- **Desarrollo**: envío directo, restringido a los números en `SNW_NUMEROS_PRUEBA_DEV`;
-  un usuario no-admin con `SNW_ENTORNO=desarrollo` global nunca puede apuntar a
-  producción, aunque lo pida en la petición.
-- **Motor intercambiable** (`SNW_METODO_ENVIO`): `simulado` (no envía nada real, solo
+- **Desarrollo**: envío directo, restringido a los números de `numeros_prueba_dev`;
+  un usuario no-admin con `entorno = desarrollo` nunca puede apuntar a producción,
+  aunque lo pida en la petición.
+- **Motor intercambiable** (`metodo_envio`): `simulado` (no envía nada real, solo
   registra en consola) o `api_oficial` (WhatsApp Business Cloud API).
 - **Cola en background**: cada envío corre como `BackgroundTask` de FastAPI con
   progreso en vivo (`GET /jobs/{id}`), y se puede pausar/reanudar/cancelar a mitad de
