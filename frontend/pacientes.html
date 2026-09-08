@@ -5,37 +5,30 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SNW · Pacientes</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
   <link rel="stylesheet" href="css/styles.css">
   <link rel="stylesheet" href="css/pacientes.css">
+  <link rel="stylesheet" href="css/layout.css">
 </head>
-<body>
+<body data-pagina="pacientes">
 
-  <header class="topbar">
-    <a class="topbar__brand" href="index.html" title="Volver al inicio">
-      <i class="fa-brands fa-whatsapp"></i>
-      <div>
-        <h1>Notificaciones WhatsApp</h1>
-        <p>Sistema de Notificaciones SNW</p>
-      </div>
-    </a>
-    <div class="topbar__right">
-      <span class="badge badge--bd" id="nombreBd"></span>
-      <select id="selAmbiente" class="badge badge--select" aria-label="Base de datos">
-        <option value="desarrollo">Base de datos desarrollo</option>
-        <option value="produccion">Base de datos producci&oacute;n</option>
-      </select>
-      <button class="hamburger" id="btnMenu" aria-label="Abrir men&uacute;" aria-expanded="false">
-        <span></span><span></span><span></span>
-      </button>
-      <nav class="nav" id="menuNav">
-        <a href="index.html"><i class="fa-solid fa-house"></i>Inicio</a>
-        <a href="pacientes.html" class="activo" data-solo-admin><i class="fa-solid fa-database"></i> Base de datos</a>
-        <a href="mensajeria.html"><i class="fa-solid fa-envelope"></i> Mensajer&iacute;a</a>
-        <a href="historial.html"><i class="fa-solid fa-clock-rotate-left"></i> Historial</a>
-        <a href="estadisticas.html"><i class="fa-solid fa-chart-column"></i> Estad&iacute;sticas</a>
-      </nav>
-    </div>
-  </header>
+  <div class="app-shell">
+    <nav class="sidebar" id="sidebar"></nav>
+    <div class="sidebar-backdrop"></div>
+
+    <div class="app-main">
+      <header class="app-topbar">
+        <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="Abrir menú">
+          <i class="fa-solid fa-bars"></i>
+        </button>
+        <span class="app-topbar__titulo">Base de datos</span>
+        <span class="app-topbar__sep"></span>
+        <span class="badge badge--bd" id="nombreBd"></span>
+        <select id="selAmbiente" class="badge badge--select" aria-label="Base de datos">
+          <option value="desarrollo">Base de datos desarrollo</option>
+          <option value="produccion">Base de datos producci&oacute;n</option>
+        </select>
+      </header>
 
   <main class="layout layout--ancho">
 
@@ -76,7 +69,9 @@
       </div>
     </section>
 
-  </main>
+      </main>
+    </div>
+  </div>
 
   <div id="modalEnvio" class="modal" hidden>
     <div class="modal__card modal__card--envio" role="dialog" aria-modal="true">
@@ -131,51 +126,11 @@
     </div>
   </div>
 
-  <div id="toast" class="toast" hidden></div>
+  <div id="toast" class="toast"></div>
   <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
 
-  <script>
-    (function () {
-      const token = localStorage.getItem("snw_token"), rol = localStorage.getItem("snw_rol");
-      if (!token) { location.replace("login.html"); return; }
-      window.snwSalir = function () {
-        ["snw_token", "snw_rol", "snw_nombre"].forEach(k => localStorage.removeItem(k));
-        location.replace("index.html");
-      };
-      if (rol !== "administrador") { location.replace("mensajeria.html"); return; }
-      document.querySelectorAll("[data-solo-admin]").forEach(a => a.remove());
-      const n = document.getElementById("menuNav");
-      const salir = document.createElement("a");
-      salir.href = "#";
-      salir.innerHTML = '<i class="fa-solid fa-right-from-bracket"></i> Cerrar sesi&oacute;n' || "";
-      salir.addEventListener("click", async (e) => {
-        e.preventDefault();
-        try { await fetch("api/auth/logout", { method: "POST", headers: { Authorization: "Bearer " + token } }); } catch {}
-        localStorage.clear();
-        location.href = "login.html";
-      });
-      n.appendChild(salir);
-    })();
-  </script>
+  <script src="js/layout.js"></script>
   <script src="js/pacientes.js"></script>
-  <script>
-    (function () {
-      const b = document.getElementById("btnMenu"), n = document.getElementById("menuNav");
-      if (!b || !n) return;
-      b.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const o = n.classList.toggle("abierto");
-        b.classList.toggle("abierto", o);
-        b.setAttribute("aria-expanded", o);
-      });
-      document.addEventListener("click", (e) => {
-        if (!b.contains(e.target) && !n.contains(e.target)) {
-          n.classList.remove("abierto");
-          b.classList.remove("abierto");
-          b.setAttribute("aria-expanded", "false");
-        }
-      });
-    })();
-  </script>
+  <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>

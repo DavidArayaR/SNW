@@ -106,38 +106,27 @@ tbodyEl.addEventListener("click", async (e) => {
 });
 
 function abrirDetalle(envio, detalle) {
-  const campos = [
-    ["Fecha", envio?.fecha ?? "—"],
-    ["Base de datos", envio?.base_datos ?? "—"],
-    ["Plantilla", envio?.plantilla_nombre ?? envio?.plantilla_clave ?? "—"],
-    ["Total pacientes", envio?.total_pacientes ?? "—"],
-    ["Enviados", envio?.enviados ?? 0],
-    ["Fallidos", envio?.fallidos ?? 0],
-    ["Inválidos", envio?.invalidos ?? 0],
-    ["Estado", envio?.estado === "cancelado" ? "Cancelado" : "Completado"],
-  ];
-
-  $("#detalleCampos").innerHTML = campos
-    .map(([k, v]) => `<div class="detalle-fila"><dt>${escaparHtml(k)}</dt><dd>${escaparHtml(String(v))}</dd></div>`)
-    .join("");
+  const plantilla = envio?.plantilla_nombre ?? envio?.plantilla_clave ?? "";
+  $("#detalleTitulo").textContent = plantilla
+    ? `Pacientes del envío · ${plantilla}`
+    : "Pacientes del envío";
 
   const body = $("#detalleBody");
   body.innerHTML = "";
   if (!detalle.length) {
-    body.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#66757f;">Sin detalle individual registrado.</td></tr>';
+    body.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#66757f;">Sin detalle individual registrado.</td></tr>';
   } else {
     const pesoRespuesta = { respondio: 0, click: 1, baja: 2, pendiente: 3 };
     const orden = [...detalle].sort(
       (x, y) => (pesoRespuesta[x.respuesta] ?? 3) - (pesoRespuesta[y.respuesta] ?? 3) || (x.id - y.id)
     );
     for (const d of orden) {
+      const r = d.respuesta ?? "pendiente";
       const tr = document.createElement("tr");
       tr.innerHTML =
         `<td class="campo-nombre">${escaparHtml(d.nombre_paciente ?? "—")}</td>` +
-        `<td class="campo-tel">${escaparHtml(d.numero_telefono ?? "—")}</td>` +
-        `<td><span class="estado-badge estado-${escaparHtml(d.estado_envio)}">${escaparHtml(d.estado_envio)}</span></td>` +
-        `<td><span class="respuesta-badge respuesta-${escaparHtml(d.respuesta ?? 'pendiente')}">${escaparHtml(respuestaLabel(d.respuesta))}</span></td>` +
-        `<td class="campo-info">${escaparHtml(d.descripcion_error ?? "")}</td>`;
+        `<td><span class="respuesta-badge respuesta-${escaparHtml(r)}">${escaparHtml(respuestaLabel(r))}</span></td>` +
+        `<td class="campo-fecha">${escaparHtml(d.fecha ?? "—")}</td>`;
       body.appendChild(tr);
     }
   }

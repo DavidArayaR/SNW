@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SNW — Sistema de Notificaciones WhatsApp</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="css/layout.css">
   <style>
     :root {
       --verde: #128c7e;
@@ -20,14 +23,14 @@
       color: var(--texto);
       background: #f0f2f5;
     }
-    header {
+    .hero {
       background: linear-gradient(135deg, var(--verde-oscuro), var(--verde));
       color: #fff;
       padding: 56px 24px 64px;
       text-align: center;
     }
-    header h1 { margin: 0 0 10px; font-size: 2rem; letter-spacing: -.02em; }
-    header p { margin: 0 auto; max-width: 640px; opacity: .92; font-size: 1.02rem; line-height: 1.55; }
+    .hero h1 { margin: 0 0 10px; font-size: 2rem; letter-spacing: -.02em; }
+    .hero p { margin: 0 auto; max-width: 640px; opacity: .92; font-size: 1.02rem; line-height: 1.55; }
     .badge {
       display: inline-block;
       margin-bottom: 18px;
@@ -76,26 +79,6 @@
       border: 2px solid rgba(255,255,255,.35);
     }
     .btn--login:hover { background: rgba(255,255,255,.92); filter: none; }
-    .nav-logueado {
-      display: none;
-      flex-wrap: wrap;
-      justify-content: center;
-      gap: 10px;
-      margin-top: 24px;
-    }
-    .nav-logueado a {
-      color: #fff;
-      text-decoration: none;
-      padding: 9px 20px;
-      border-radius: 999px;
-      background: rgba(255,255,255,.14);
-      font-size: .88rem;
-      font-weight: 600;
-      transition: background .15s;
-    }
-    .nav-logueado a:hover { background: rgba(255,255,255,.28); }
-    .nav-logueado a.nav-salir { background: rgba(180,40,40,.35); }
-    .nav-logueado a.nav-salir:hover { background: rgba(180,40,40,.55); }
     section.info {
       background: #fff;
       border: 1px solid var(--borde);
@@ -124,26 +107,30 @@
     }
     footer { text-align: center; color: var(--suave); font-size: .82rem; padding: 8px 20px 34px; }
     @media (max-width: 640px) {
-      header { padding: 40px 18px 52px; }
-      header h1 { font-size: 1.5rem; }
+      .hero { padding: 40px 18px 52px; }
+      .hero h1 { font-size: 1.5rem; }
     }
   </style>
 </head>
-<body>
+<body data-pagina="inicio">
 
-<header>
-  <h1>Sistema de Notificaciones WhatsApp (SNW)</h1>
-  <p>M&oacute;dulo web para gestionar y enviar notificaciones masivas de WhatsApp a pacientes de forma r&aacute;pida, organizada y centralizada, directamente desde la plataforma de la empresa.</p>
-  <a id="btnLogin" class="btn btn--login" href="login.html">Iniciar sesi&oacute;n</a>
-  <nav id="navLogueado" class="nav-logueado">
-    <a href="index.html"><i class="fa-solid fa-house"></i>Inicio</a>
-    <a id="navPacientes" href="pacientes.html" data-admin><i class="fa-solid fa-database"></i> Base de datos</a>
-    <a href="mensajeria.html"><i class="fa-solid fa-envelope"></i> Mensajer&iacute;a</a>
-    <a href="historial.html"><i class="fa-solid fa-clock-rotate-left"></i> Historial</a>
-    <a href="estadisticas.html"><i class="fa-solid fa-chart-column"></i> Estad&iacute;sticas</a>
-    <a href="#" class="nav-salir" id="btnSalir"><i class="fa-solid fa-right-from-bracket"></i> Cerrar sesi&oacute;n</a>
-  </nav>
-</header>
+<div class="app-shell" id="appShell">
+  <nav class="sidebar" id="sidebar"></nav>
+  <div class="sidebar-backdrop"></div>
+
+  <div class="app-main">
+    <header class="app-topbar" id="appTopbar">
+      <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="Abrir men&uacute;">
+        <i class="fa-solid fa-bars"></i>
+      </button>
+      <span class="app-topbar__titulo">Inicio</span>
+    </header>
+
+    <header class="hero">
+      <h1>Sistema de Notificaciones WhatsApp (SNW)</h1>
+      <p>M&oacute;dulo web para gestionar y enviar notificaciones masivas de WhatsApp a pacientes de forma r&aacute;pida, organizada y centralizada, directamente desde la plataforma de la empresa.</p>
+      <a id="btnLogin" class="btn btn--login" href="login.html">Iniciar sesi&oacute;n</a>
+    </header>
 
 <main>
   <section class="info">
@@ -162,35 +149,14 @@
       <span class="chip">WhatsApp Web</span>
     </div>
   </section>
-</main>
+    </main>
 
-<footer>SNW · Sistema de Notificaciones WhatsApp</footer>
+    <footer>SNW &middot; Sistema de Notificaciones WhatsApp</footer>
+    </div>
+  </div>
 
-<script>
-  (function () {
-    const token = localStorage.getItem("snw_token");
-    const rol = localStorage.getItem("snw_rol");
-    const btnLogin = document.getElementById("btnLogin");
-    const navLogueado = document.getElementById("navLogueado");
-    const navPacientes = document.getElementById("navPacientes");
-
-    if (token) {
-      btnLogin.style.display = "none";
-      navLogueado.style.display = "flex";
-      if (rol !== "administrador") {
-        navPacientes.hidden = true;
-      }
-    }
-
-    document.getElementById("btnSalir").addEventListener("click", function (e) {
-      e.preventDefault();
-      ["snw_token", "snw_rol", "snw_nombre", "snw_ambiente_admin", "snw_ambiente"].forEach(function (k) {
-        localStorage.removeItem(k);
-      });
-      location.reload();
-    });
-  })();
-</script>
+<script src="js/layout.js"></script>
+<script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 
 </body>
 </html>

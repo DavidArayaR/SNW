@@ -136,6 +136,16 @@ function render() {
     const celdaError = textoError
       ? `<td class="campo-error"><span title="${escaparHtml(textoError)}">${escaparHtml(textoError)}</span></td>`
       : `<td class="campo-error campo-error--vacio">—</td>`;
+
+    // Tooltip de la respuesta: cuándo escribió y qué dijo (lo trae el webhook).
+    let tituloResp = respuestaLabels[respuesta] ?? respuesta;
+    if (p.ultima_respuesta_fecha) {
+      tituloResp += ` · ${p.ultima_respuesta_fecha}`;
+      if (p.ultimo_mensaje_recibido) tituloResp += `\n«${p.ultimo_mensaje_recibido}»`;
+    }
+    const subResp = p.ultima_respuesta_fecha
+      ? `<span class="respuesta-fecha">${escaparHtml(p.ultima_respuesta_fecha)}</span>`
+      : "";
     tr.innerHTML =
       `<td class="col-check"><input type="checkbox" data-id="${p.id}" ${seleccionados.has(p.id) ? "checked" : ""} ${esBaja ? "disabled" : ""} title="${esBaja ? "No se puede enviar mensaje (se dio de baja)" : ""}"></td>` +
       `<td class="campo-id">${p.id}</td>` +
@@ -150,7 +160,12 @@ function render() {
       `</td>` +
       celdaError +
       `<td class="campo-respuesta">` +
-        `<span class="respuesta-badge respuesta-${escaparHtml(respuesta)}" title="${escaparHtml(respuestaLabels[respuesta] ?? respuesta)}">${escaparHtml(respuestaLabels[respuesta] ?? respuesta)}</span>` +
+        `<span class="respuesta-badge respuesta-${escaparHtml(respuesta)}" data-editable data-id="${p.id}" title="${escaparHtml(tituloResp + " · click para cambiar")}">${escaparHtml(respuestaLabels[respuesta] ?? respuesta)}</span>` +
+        `<select class="respuesta-select" data-id="${p.id}" hidden>` +
+          ["pendiente", "respondio", "click", "baja"].map((v) =>
+            `<option value="${v}"${v === respuesta ? " selected" : ""}>${respuestaLabels[v]}</option>`).join("") +
+        `</select>` +
+        subResp +
       `</td>` +
       `<td class="campo-info">${escaparHtml(p.info_extra ?? "—")}</td>` +
       `<td class="campo-fecha">${escaparHtml(p.actualizado)}</td>`;
@@ -277,17 +292,58 @@ tbodyEl.addEventListener("click", (e) => {
   refrescarSeleccion();
 });
 
-// Edición inline del estado
+// Edición inline del estado y de la respuesta (badge -> select)
 tbodyEl.addEventListener("click", (e) => {
-  const badge = e.target.closest(".estado-badge[data-editable]");
+  const badge = e.target.closest(".estado-badge[data-editable], .respuesta-badge[data-editable]");
   if (!badge) return;
   e.stopPropagation();
-  const id = badge.dataset.id;
-  const sel = tbodyEl.querySelector(`.estado-select[data-id="${id}"]`);
+  const clase = badge.classList.contains("respuesta-badge") ? "respuesta-select" : "estado-select";
+  const sel = badge.parentElement.querySelector(`.${clase}[data-id="${badge.dataset.id}"]`);
   if (!sel) return;
   badge.hidden = true;
   sel.hidden = false;
   sel.focus();
+});
+
+tbodyEl.addEventListener("change", async (e) => {
+  const sel = e.target;
+  if (!sel.classList.contains("respuesta-select")) return;
+  e.stopPropagation();
+  const id = Number(sel.dataset.id);
+  const nueva = sel.value;
+  const paciente = pacientes.find((p) => p.id === id);
+  const anterior = paciente ? paciente.respuesta : null;
+  if (paciente && paciente.respuesta === nueva) {
+    const badge = tbodyEl.querySelector(`.respuesta-badge[data-id="${id}"]`);
+    if (badge) badge.hidden = false;
+    sel.hidden = true;
+    return;
+  }
+  sel.disabled = true;
+  try {
+    const amb = ambienteActual();
+    const res = await fetch(`api/pacientes/${id}/respuesta?ambiente=${encodeURIComponent(amb)}`, {
+      method: "PUT",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ respuesta: nueva }),
+    });
+    if (res.status === 401) { window.snwSalir(); return; }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || "No se pudo actualizar la respuesta");
+    }
+    const actualizado = await res.json();
+    if (paciente) Object.assign(paciente, actualizado);
+    toast(nueva === "baja" ? "Paciente marcado como dado de baja." : `Respuesta actualizada a "${nueva}".`, "ok");
+    render();
+  } catch (err) {
+    toast(err.message || "No se pudo actualizar la respuesta", "error");
+    if (paciente) sel.value = anterior || "pendiente";
+    const badge = tbodyEl.querySelector(`.respuesta-badge[data-id="${id}"]`);
+    if (badge) badge.hidden = false;
+    sel.hidden = true;
+    sel.disabled = false;
+  }
 });
 
 tbodyEl.addEventListener("change", async (e) => {
@@ -334,23 +390,23 @@ tbodyEl.addEventListener("change", async (e) => {
   }
 });
 
+function cerrarSelectInline(sel) {
+  const claseBadge = sel.classList.contains("respuesta-select") ? "respuesta-badge" : "estado-badge";
+  const badge = sel.parentElement.querySelector(`.${claseBadge}[data-id="${sel.dataset.id}"]`);
+  if (badge) badge.hidden = false;
+  sel.hidden = true;
+}
+
 tbodyEl.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && e.target.classList.contains("estado-select")) {
-    const sel = e.target;
-    const badge = tbodyEl.querySelector(`.estado-badge[data-id="${sel.dataset.id}"]`);
-    if (badge) badge.hidden = false;
-    sel.hidden = true;
-    sel.blur();
+  if (e.key === "Escape" && (e.target.classList.contains("estado-select") || e.target.classList.contains("respuesta-select"))) {
+    cerrarSelectInline(e.target);
+    e.target.blur();
   }
 });
 
 document.addEventListener("click", (e) => {
-  if (e.target.closest(".estado-badge, .estado-select")) return;
-  tbodyEl.querySelectorAll(".estado-select:not([hidden])").forEach((sel) => {
-    const badge = tbodyEl.querySelector(`.estado-badge[data-id="${sel.dataset.id}"]`);
-    if (badge) badge.hidden = false;
-    sel.hidden = true;
-  });
+  if (e.target.closest(".estado-badge, .estado-select, .respuesta-badge, .respuesta-select")) return;
+  tbodyEl.querySelectorAll(".estado-select:not([hidden]), .respuesta-select:not([hidden])").forEach(cerrarSelectInline);
 });
 
 buscadorEl.addEventListener("input", () => {
@@ -553,7 +609,11 @@ $("#btnLanzarEnvio").addEventListener("click", async () => {
     }
 
     if (!data.iniciado) {
-      toast("Ningún destinatario válido. Envío no iniciado.", "error");
+      const rech = data.rechazados ?? [];
+      const bajas = rech.filter((r) => (r.motivo || "").toLowerCase().includes("baja")).length;
+      let msg = "No se envió a nadie: ninguno de los pacientes seleccionados puede recibir mensajes.";
+      if (bajas) msg += ` ${bajas} se ${bajas === 1 ? "dio" : "dieron"} de baja.`;
+      toast(msg, "error");
       setBloqueoEnvio(false);
       $("#btnLanzarEnvio").hidden = false;
       return;
@@ -590,14 +650,9 @@ function normalizarTelefonoJs(crudo) {
 function pintarRechazados(rechazados) {
   const ul = $("#listaRechazados");
   ul.innerHTML = "";
-  const esDev = (config?.entorno === "desarrollo") || ambienteActual() === "desarrollo";
-  if (esDev) {
-    ul.hidden = true;
-    return;
-  }
   for (const r of rechazados) {
     const li = document.createElement("li");
-    li.textContent = `${r.nombre} (${r.telefono || "sin teléfono"}): ${r.motivo}`;
+    li.textContent = `${r.nombre || "(sin nombre)"} (${r.telefono || "sin teléfono"}): ${r.motivo}`;
     ul.appendChild(li);
   }
   ul.hidden = rechazados.length === 0;

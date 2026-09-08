@@ -425,6 +425,12 @@ tr.es-baja .col-check input[type=checkbox] { cursor: not-allowed; }
 }
 .respuesta-select:focus { border-color: var(--verde); }
 .campo-respuesta { position: relative; white-space: nowrap; }
+.respuesta-fecha {
+  display: block;
+  margin-top: 3px;
+  font-size: .72rem;
+  color: var(--texto-suave);
+}
 
 @media (max-width: 700px) {
   thead th, tbody td { padding: 9px 10px; }
