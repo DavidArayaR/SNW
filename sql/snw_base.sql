@@ -57,7 +57,8 @@ CREATE TABLE IF NOT EXISTS envios (
   enviados INT DEFAULT 0,
   fallidos INT DEFAULT 0,
   invalidos INT DEFAULT 0,
-  estado ENUM('completado','cancelado') NOT NULL DEFAULT 'completado',
+  estado ENUM('completado','cancelado','rechazado') NOT NULL DEFAULT 'completado',
+  comentario VARCHAR(255) DEFAULT NULL,
   fecha_hora DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 

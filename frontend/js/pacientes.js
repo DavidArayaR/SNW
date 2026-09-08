@@ -70,7 +70,7 @@ function escaparHtml(texto) {
 
 async function cargar() {
   try {
-    // Si no hay preferencia guardada, usar el entorno global del .env como default
+    // Si no hay preferencia guardada, usar el entorno global de la configuración como default
     if (!_ambienteInicializado && !localStorage.getItem("snw_ambiente_admin")) {
       try {
         const r0 = await fetch("api/configuracion", { headers: authHeaders(), cache: "no-store" });

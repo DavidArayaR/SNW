@@ -97,7 +97,7 @@ snw/
 vive el resto.
 
 **Todo lo demás vive en la tabla `configuracion`** (clave/valor). El backend la crea y la
-siembra en el primer arranque (tomando lo que hubiera en un `.env` antiguo). Se edita desde
+siembra con los valores por defecto en el primer arranque. Se edita desde
 la página **Configuración** (`configuracion.html`, solo admin) — que muestra TODAS las claves
 por secciones (Aplicación, URL pública, Correo/SMTP, WhatsApp) — o con `UPDATE configuracion`
 (requiere reiniciar por la caché). Los cambios de la página se aplican sin reiniciar (salvo
@@ -133,7 +133,8 @@ el `entorno` activo, que las demás pantallas leen al cargar).
 | `base_datos` | `pacientes_dev` o `pacientes_prod` |
 | `plantilla_clave`, `plantilla_nombre` | Plantilla usada |
 | `total_pacientes`, `enviados`, `fallidos`, `invalidos` | Contadores del batch |
-| `estado` | `completado` / `cancelado` |
+| `estado` | `completado` / `cancelado` / `rechazado` (por el supervisor) |
+| `comentario` | Motivo del rechazo escrito por el supervisor (NULL si no aplica) |
 | `fecha_hora` | Fecha del envío |
 
 **`log_envios`** — un registro por mensaje individual (fuente de la columna **Error** en Pacientes y del detalle en Historial)
@@ -412,8 +413,9 @@ propagar como error 500.
   confirmación al supervisor con el **costo aproximado del envío en grande y rojo**
   (nº de mensajes × tarifa vigente de Meta para la categoría de la plantilla, **total
   redondeado hacia arriba**) y botones **Confirmar** y **Rechazar** (con comentario); el
-  envío no arranca hasta que se confirma. Un administrador en producción envía directo,
-  sin correo.
+  envío no arranca hasta que se confirma. Un envío rechazado queda en el **Historial**
+  con estado `rechazado` y el comentario del supervisor (ya no se borra). Un administrador
+  en producción envía directo, sin correo.
 - **Desarrollo**: envío directo, restringido a los números de `numeros_prueba_dev`;
   un usuario no-admin con `entorno = desarrollo` nunca puede apuntar a producción,
   aunque lo pida en la petición.

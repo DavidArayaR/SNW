@@ -6,7 +6,6 @@ import html as _html
 import io as _io
 import json
 import re
-import threading
 import time
 import unicodedata
 import urllib.parse
@@ -19,7 +18,6 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 import httpx
-from dotenv import load_dotenv
 from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -35,7 +33,6 @@ from whatsapp_service import WhatsAppService
 from whatsapp_webhook import router as whatsapp_router
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-load_dotenv(BASE_DIR / ".env")
 
 DATA_FILE = BASE_DIR / "data" / "plantillas.json"
 FRONTEND_DIR = BASE_DIR / "frontend"
@@ -949,7 +946,7 @@ class PruebaWAIn(BaseModel):
 
 @app.post("/api/notificaciones/prueba-wa")
 def probar_api_wa(body: PruebaWAIn, sesion: dict = Depends(solo_admin)):
-    """Envía un mensaje real vía la API oficial para validar las credenciales de .env."""
+    """Envía un mensaje real vía la API oficial para validar las credenciales de WhatsApp."""
     cfg = leer_config()
     if cfg["metodo_envio"] != "api_oficial":
         raise HTTPException(400, detail="El método de envío no está en 'api_oficial' (cámbialo en Configuración)")
@@ -958,7 +955,7 @@ def probar_api_wa(body: PruebaWAIn, sesion: dict = Depends(solo_admin)):
     if canal is None or not canal.disponible():
         raise HTTPException(
             400,
-            detail="Faltan SNW_WA_TOKEN o SNW_WA_PHONE_ID en el archivo .env",
+            detail="Faltan el token o el phone ID de WhatsApp (configúralos en Configuración)",
         )
 
     telefono = normalizar_telefono(body.telefono)
@@ -975,7 +972,6 @@ def probar_api_wa(body: PruebaWAIn, sesion: dict = Depends(solo_admin)):
 
 
 JOBS: dict = {}
-JOB_LOCK = threading.Lock()
 PENDIENTES: dict = {}
 
 
@@ -1559,17 +1555,23 @@ def rechazar_envio(token: str, comentario: str = Form("")):
     if pend["estado"] == "confirmado":
         return HTMLResponse("<html><body style='font-family:Arial; text-align:center; padding:40px;'><h2>Este envío ya fue confirmado y está en proceso</h2></body></html>")
     pend["estado"] = "rechazado"
+    comentario = (comentario or "").strip()
     pend["comentario"] = comentario
     envio_id = pend.get("envio_id")
     if envio_id:
         amb = pend["ambiente"]
+        # El batch NO se borra: queda en el historial como «rechazado» con el
+        # comentario del supervisor y sin ningún mensaje enviado.
         try:
             with conectar(amb) as conn, conn.cursor() as cur:
-                cur.execute("DELETE FROM envios WHERE id = %s", (envio_id,))
+                cur.execute(
+                    "UPDATE envios SET estado = 'rechazado', comentario = %s WHERE id = %s",
+                    (comentario[:255] or None, envio_id),
+                )
                 conn.commit()
         except Exception as e:
-            log_error(f"rechazar_envio: no se pudo borrar el batch {envio_id}", e)
-    return HTMLResponse(f"""
+            log_error(f"rechazar_envio: no se pudo marcar el batch {envio_id}", e)
+    return HTMLResponse("""
 <html><head><meta charset='utf-8'><title>Envío rechazado</title></head>
 <body style='font-family: Segoe UI, Arial; text-align:center; padding:40px; background:#f0f2f5;'>
 <div style='background:#fff; max-width:520px; margin:40px auto; padding:32px; border-radius:14px; box-shadow:0 4px 20px rgba(0,0,0,0.1);'>
@@ -1702,8 +1704,9 @@ def reanudar_job(job_id: str, sesion: dict = Depends(sesion_actual)):
 @app.get("/api/notificaciones/historial")
 def listar_historial(q: str | None = Query(None), estado: str | None = Query(None),
                      ambiente: str = Query("produccion"), sesion: dict = Depends(sesion_actual)):
+    com_col = "comentario" if "comentario" in columnas_tabla("envios", "produccion") else "NULL AS comentario"
     sql = ("SELECT id, base_datos, plantilla_clave, plantilla_nombre, total_pacientes,"
-           " enviados, fallidos, invalidos, estado, fecha_hora FROM envios")
+           f" enviados, fallidos, invalidos, estado, {com_col}, fecha_hora FROM envios")
     condiciones: list[str] = []
     args: list = []
 

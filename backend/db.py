@@ -26,10 +26,11 @@ TABLAS_PACIENTES = {"desarrollo": "pacientes_dev", "produccion": "pacientes_prod
 
 
 # ---------------------------------------------------------------------------
-# TODA la configuración vive en la tabla `configuracion` (clave/valor).
-# En .env solo quedan las credenciales de la BASE DE DATOS (DB_*), porque se
-# necesitan para conectarse a la base donde vive la tabla. La primera vez que
-# arranca el backend, la tabla se siembra con lo que hubiera en .env.
+# TODA la configuración vive en la tabla `configuracion` (clave/valor) y se
+# edita desde la página de Configuración. En .env solo quedan las credenciales
+# de la BASE DE DATOS (DB_*), porque se necesitan para conectarse a la base
+# donde vive la tabla. La primera vez que arranca el backend, la tabla se
+# siembra con estos valores por defecto.
 # ---------------------------------------------------------------------------
 CONFIG_DEFAULTS = {
     # App / envío
@@ -58,42 +59,8 @@ CONFIG_DEFAULTS = {
     "wa_graph_version": "v26.0",
     "wa_moneda": "USD",
 }
-# Clave en la tabla -> variable de .env de la que se migra la primera vez.
-_CONFIG_ENV_LEGACY = {
-    "entorno": "SNW_ENTORNO",
-    "metodo_envio": "SNW_METODO_ENVIO",
-    "numeros_prueba_dev": "SNW_NUMEROS_PRUEBA_DEV",
-    "numeros_prueba_prod": "SNW_NUMEROS_PRUEBA_PROD",
-    "intervalo_ms": "SNW_INTERVALO_MS",
-    "url_base": "SNW_URL_BASE",
-    "smtp_host": "SMTP_HOST",
-    "smtp_port": "SMTP_PORT",
-    "smtp_user": "SMTP_USER",
-    "smtp_pass": "SMTP_PASS",
-    "smtp_tls": "SMTP_TLS",
-    "correo_emisor": "DIRECCION_CORREO_EMISOR",
-    "correo_destino": "DIRECCION_CORREO_DESTINO",
-    "wa_token": "SNW_WA_TOKEN",
-    "wa_phone_id": "SNW_WA_PHONE_ID",
-    "wa_business_account_id": "SNW_WA_BUSINESS_ACCOUNT_ID",
-    "wa_verify_token": "SNW_WA_VERIFY_TOKEN",
-    "wa_template_nombre": "SNW_WA_TEMPLATE_NOMBRE",
-    "wa_template_lang": "SNW_WA_TEMPLATE_LANG",
-    "wa_webhook_path": "SNW_WHATSAPP_WEBHOOK_PATH",
-    "wa_graph_version": "SNW_WA_GRAPH_VERSION",
-}
 
 _config_cache: dict | None = None
-
-
-def _config_semilla() -> dict:
-    """Valores por defecto mezclados con lo que haya en .env (compatibilidad)."""
-    valores = dict(CONFIG_DEFAULTS)
-    for clave, env in _CONFIG_ENV_LEGACY.items():
-        v = os.getenv(env)
-        if v is not None and v.strip() != "":
-            valores[clave] = v.strip()
-    return valores
 
 
 def asegurar_tabla_config() -> None:
@@ -108,7 +75,7 @@ def asegurar_tabla_config() -> None:
                 "  actualizada DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"
                 ") CHARACTER SET utf8mb4"
             )
-            for clave, valor in _config_semilla().items():
+            for clave, valor in CONFIG_DEFAULTS.items():
                 cur.execute(
                     "INSERT IGNORE INTO configuracion (clave, valor) VALUES (%s, %s)",
                     (clave, valor),
@@ -158,10 +125,10 @@ def asegurar_tabla_config() -> None:
                         " WHERE EXISTS (SELECT 1 FROM log_envios le2"
                         "  WHERE le2.paciente_id = p.id AND le2.plantilla_clave = 'ajuste_manual')"
                     )
-                # El tipo de respuesta 'click' se eliminó: pasa a 'respondió'.
                 cur.execute(f"UPDATE {tp} SET respuesta_manual = 'respondio' WHERE respuesta_manual = 'click'")
 
-            # Quita 'click' del ENUM de log_envios.respuesta (una sola vez).
+            # El tipo de respuesta 'click' se eliminó: quita el valor del ENUM
+            # de log_envios.respuesta (una sola vez) y migra las filas antiguas.
             cur.execute(
                 "SELECT COLUMN_TYPE AS t FROM information_schema.COLUMNS"
                 " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'log_envios'"
@@ -174,6 +141,28 @@ def asegurar_tabla_config() -> None:
                     "ALTER TABLE log_envios MODIFY COLUMN respuesta"
                     " ENUM('pendiente','respondio','baja') DEFAULT 'pendiente'"
                 )
+
+            # Un envío rechazado por el supervisor queda en el historial con su
+            # comentario, en vez de borrarse.
+            cur.execute(
+                "SELECT"
+                "  (SELECT COUNT(*) FROM information_schema.TABLES"
+                "     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'envios') AS tabla,"
+                "  (SELECT COLUMN_TYPE FROM information_schema.COLUMNS"
+                "     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'envios' AND COLUMN_NAME = 'estado') AS estado_tipo,"
+                "  (SELECT COUNT(*) FROM information_schema.COLUMNS"
+                "     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'envios' AND COLUMN_NAME = 'comentario') AS tiene_com"
+            )
+            e = cur.fetchone() or {}
+            if e.get("tabla"):
+                if "'rechazado'" not in (e.get("estado_tipo") or ""):
+                    cur.execute(
+                        "ALTER TABLE envios MODIFY COLUMN estado"
+                        " ENUM('completado','cancelado','rechazado') NOT NULL DEFAULT 'completado'"
+                    )
+                if not e.get("tiene_com"):
+                    cur.execute("ALTER TABLE envios ADD COLUMN comentario VARCHAR(255) NULL")
+
             conn.commit()
     except Exception as e:
         log_error("asegurar_tabla_config", e)
@@ -184,7 +173,7 @@ def asegurar_tabla_config() -> None:
 def _cargar_config() -> tuple[dict, bool]:
     """Devuelve (valores, ok). ok=False si no se pudo leer la tabla (BD caída),
     para no cachear valores por defecto de forma permanente."""
-    valores = _config_semilla()
+    valores = dict(CONFIG_DEFAULTS)
     try:
         with conectar() as conn, conn.cursor() as cur:
             cur.execute("SELECT clave, valor FROM configuracion")
@@ -192,10 +181,10 @@ def _cargar_config() -> tuple[dict, bool]:
                 valores[row["clave"]] = "" if row["valor"] is None else row["valor"]
         return valores, True
     except Exception as e:
-        # 1146 = la tabla no existe todavía (primer arranque): se usa .env
-        # como respaldo y asegurar_tabla_config() la creará enseguida.
+        # 1146 = la tabla no existe todavía (primer arranque): se usan los
+        # valores por defecto y asegurar_tabla_config() la creará enseguida.
         if getattr(e, "args", [None])[0] != 1146:
-            log_error("_cargar_config (se usa .env como respaldo)", e)
+            log_error("_cargar_config (se usan los valores por defecto)", e)
         return valores, False
 
 

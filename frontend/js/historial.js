@@ -62,11 +62,16 @@ function render() {
     const fallidos = r.fallidos ?? 0;
     const invalidos = r.invalidos ?? 0;
     const estado = r.estado || "completado";
-    const estadoLabel = estado === "cancelado" ? "Cancelado" : "Completado";
+    const estadoLabel =
+      { cancelado: "Cancelado", rechazado: "Rechazado" }[estado] || "Completado";
+    const comentario = (r.comentario ?? "").trim();
+    const notaRechazo = estado === "rechazado"
+      ? `<div class="hist-rechazo">Rechazado por el supervisor${comentario ? `: «${escaparHtml(comentario)}»` : " (sin comentario)"}</div>`
+      : "";
     tr.innerHTML =
       `<td class="campo-fecha">${escaparHtml(r.fecha)}</td>` +
       `<td><span class="badge badge--db">${escaparHtml(r.base_datos ?? "—")}</span></td>` +
-      `<td>${escaparHtml(r.plantilla_nombre ?? r.plantilla_clave ?? "—")}</td>` +
+      `<td>${escaparHtml(r.plantilla_nombre ?? r.plantilla_clave ?? "—")}${notaRechazo}</td>` +
       `<td><span class="estado-envio estado-envio--${escaparHtml(estado)}">${escaparHtml(estadoLabel)}</span></td>` +
       `<td class="campo-num">${total}</td>` +
       `<td class="campo-num campo-num--ok">${enviados}</td>` +
@@ -113,6 +118,18 @@ function abrirDetalle(envio, detalle) {
 
   const body = $("#detalleBody");
   body.innerHTML = "";
+
+  if ((envio?.estado || "") === "rechazado") {
+    const c = (envio.comentario ?? "").trim();
+    body.innerHTML =
+      `<tr><td colspan="3" class="hist-rechazo-detalle">` +
+      `Envío rechazado por el supervisor. No se envió ningún mensaje.` +
+      (c ? `<br><span>Comentario: «${escaparHtml(c)}»</span>` : "") +
+      `</td></tr>`;
+    $("#modalDetalle").hidden = false;
+    return;
+  }
+
   if (!detalle.length) {
     body.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#66757f;">Sin detalle individual registrado.</td></tr>';
   } else {

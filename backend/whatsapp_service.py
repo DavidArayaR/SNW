@@ -12,14 +12,10 @@ o desde el router de webhook.
 import asyncio
 import hashlib
 import re
-import time
-from pathlib import Path
 
 import httpx
 
 from db import conectar, config_get, log_error, tabla_pacientes
-
-BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Versión de la Graph API de Meta. Configurable en la tabla `configuracion`
 # (clave `wa_graph_version`); si no está, se usa este valor por defecto.
@@ -54,11 +50,8 @@ BAJA_FRASES = (
     "detener promociones", "detener promo", "stop promotions", "no promociones",
     "cancelar suscripcion", "cancelar suscripción",
 )
-# Compatibilidad hacia atrás
-BAJA_KEYWORDS = BAJA_EXACTAS
 
-# Mapeo oficial de estados de Meta -> estados internos de log_envios.
-ESTADO_DIRECTO = {"sent": "enviado"}
+# Estados de entrega que Meta reporta por webhook.
 ESTADO_WHATSAPP = {"sent", "delivered", "read", "failed"}
 
 
@@ -93,9 +86,6 @@ def _hash_evento(payload: dict) -> str:
     """Clave de idempotencia a partir del payload+timestamp de Meta."""
     raw = str(payload.get("entry")) + "|" + str(payload.get("timestamp", ""))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
-
-
-_MOTORES_HASH = None
 
 
 class ErrorWhatsApp(Exception):
@@ -266,7 +256,7 @@ class WhatsAppService:
         Los templates en Meta quedan en estado PENDING hasta ser aprobados."""
         if not self.waba_id or not self.token:
             return {"ok": False, "template_id": None, "status": None,
-                    "error": "Faltan SNW_WA_BUSINESS_ACCOUNT_ID o SNW_WA_TOKEN"}
+                    "error": "Falta la cuenta de WhatsApp Business o el token (configúralos en Configuración)"}
 
         texto_meta, ejemplo = self.convertir_texto_meta(texto)
         componente_body: dict = {"type": "BODY", "text": texto_meta}
@@ -302,7 +292,7 @@ class WhatsAppService:
         vuelve a quedar en PENDING hasta que Meta lo re-revise."""
         if not self.token:
             return {"ok": False, "template_id": template_id, "status": None,
-                    "error": "Falta SNW_WA_TOKEN"}
+                    "error": "Falta el token de WhatsApp (configúralo en Configuración)"}
         if not template_id:
             return {"ok": False, "template_id": None, "status": None,
                     "error": "No hay un template_id conocido para editar"}
@@ -399,7 +389,7 @@ class WhatsAppService:
         el campo 'error' para que el llamador decida qué mostrar."""
         if not self.waba_id or not self.token:
             return {"ok": False, "status": None, "category": None, "rejected_reason": None,
-                    "error": "Faltan SNW_WA_BUSINESS_ACCOUNT_ID o SNW_WA_TOKEN"}
+                    "error": "Falta la cuenta de WhatsApp Business o el token (configúralos en Configuración)"}
 
         try:
             data = asyncio.run(self.cliente.buscar_template(self.waba_id, nombre_template))
@@ -427,7 +417,7 @@ class WhatsAppService:
         templates vía API: los templates se gestionan a mano en Meta y este
         sistema solo los lee). Devuelve {ok, templates, error}."""
         if not self.waba_id or not self.token:
-            return {"ok": False, "templates": [], "error": "Faltan SNW_WA_BUSINESS_ACCOUNT_ID o SNW_WA_TOKEN"}
+            return {"ok": False, "templates": [], "error": "Falta la cuenta de WhatsApp Business o el token (configúralos en Configuración)"}
         try:
             data = asyncio.run(self.cliente.listar_templates(self.waba_id))
         except ErrorWhatsApp as e:
@@ -495,11 +485,11 @@ class WhatsAppService:
             orden = self.extraer_orden_comodines(msg.get("texto", "") or "")
             vdict = variables or {}
             valores = [vdict.get(clave, "") or "" for clave in orden]
-            payload_, tipo = self.construir_payload_template(
+            payload_, _ = self.construir_payload_template(
                 telefono, nombre_template, idioma, variables=valores,
             )
         else:
-            payload_, tipo = self.construir_payload_texto(telefono, mensaje)
+            payload_, _ = self.construir_payload_texto(telefono, mensaje)
 
         try:
             data = await self.cliente.enviar(payload_)
@@ -513,27 +503,6 @@ class WhatsAppService:
         if not msg_id:
             return False, "", "La API no devolvió message id", "failed"
         return True, msg_id, None, "sent"
-
-    # ---------- Persistencia de message id ----------
-    def guardar_message_id(self, telefono: str, message_id: str, estado_envio: str,
-                           ambiente: str, descripcion_error: str | None = None) -> bool:
-        """Relaciona el message id de Meta con el último log del paciente."""
-        t = tabla_pacientes(ambiente)
-        match = _TEL_MATCH.format(col="telefono")
-        try:
-            with conectar(ambiente) as conn, conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE log_envios SET whatsapp_message_id = %s, estado_whatsapp = 'sent',"
-                    " estado_envio = %s, descripcion_error = %s"
-                    f" WHERE paciente_id = (SELECT id FROM {t} WHERE {match} LIMIT 1)"
-                    " ORDER BY id DESC LIMIT 1",
-                    (message_id, estado_envio, descripcion_error, telefono),
-                )
-                conn.commit()
-                return cur.rowcount > 0
-        except Exception as e:
-            log_error(f"guardar_message_id({telefono}, {ambiente})", e)
-            return False
 
     # ---------- Webhook ----------
     def verificar_webhook(self, mode: str, verify_token: str, challenge: str) -> bool | str:

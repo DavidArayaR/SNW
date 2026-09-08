@@ -1,10 +1,3 @@
-import json
-import os
-import urllib.error
-import urllib.parse
-import urllib.request
-import webbrowser
-
 from db import log_error
 from whatsapp_service import WhatsAppService
 

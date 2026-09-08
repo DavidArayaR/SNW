@@ -594,7 +594,7 @@ function setBloqueoEnvioConf(bloquear) {
   });
 }
 
-// Sincronizar con el .env global: si el archivo cambió a produccion/desarrollo, actualizar la selección
+// Sincronizar con el entorno global de la configuración: si cambió a produccion/desarrollo, actualizar la selección
 fetch("api/configuracion", { headers: authHeaders(), cache: "no-store" })
   .then((r) => (r.ok ? r.json() : null))
   .then((cfg) => {
