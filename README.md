@@ -410,9 +410,10 @@ propagar como error 500.
   confirmación, job y progreso.
 - **Producción**: si quien envía **no** es administrador, se genera un correo de
   confirmación al supervisor con el **costo aproximado del envío en grande y rojo**
-  (nº de mensajes × tarifa vigente de Meta para la categoría de la plantilla) y botones
-  **Confirmar** y **Rechazar** (con comentario); el envío no arranca hasta que se confirma.
-  Un administrador en producción envía directo, sin correo.
+  (nº de mensajes × tarifa vigente de Meta para la categoría de la plantilla, **total
+  redondeado hacia arriba**) y botones **Confirmar** y **Rechazar** (con comentario); el
+  envío no arranca hasta que se confirma. Un administrador en producción envía directo,
+  sin correo.
 - **Desarrollo**: envío directo, restringido a los números de `numeros_prueba_dev`;
   un usuario no-admin con `entorno = desarrollo` nunca puede apuntar a producción,
   aunque lo pida en la petición.

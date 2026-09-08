@@ -1,6 +1,7 @@
 import asyncio
 import csv as _csv
 import hashlib
+import math
 import html as _html
 import io as _io
 import json
@@ -1002,8 +1003,8 @@ def _config_correo() -> dict:
 
 
 def _fmt_moneda(monto: float, moneda: str) -> str:
-    """1234.5 -> '1.234,50 CLP' (miles con punto, decimal con coma)."""
-    s = f"{monto:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    entero = float(monto).is_integer()
+    s = (f"{monto:,.0f}" if entero else f"{monto:,.2f}").replace(",", "X").replace(".", ",").replace("X", ".")
     return f"{s} {moneda}"
 
 
@@ -1024,7 +1025,7 @@ def _costo_estimado_por_clave(clave: str, total: int) -> dict | None:
         "categoria": cat,
         "rate": float(rate),
         "total": total,
-        "costo": round(float(rate) * total, 2),
+        "costo": math.ceil(float(rate) * total),
     }
 
 
