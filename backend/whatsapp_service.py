@@ -169,6 +169,21 @@ class WhatsAppApiClient:
             resp = await cliente.get(url, params={"name": nombre}, headers=self._headers())
         return self._procesar_respuesta(resp)
 
+    async def eliminar_template(self, waba_id: str, nombre: str,
+                                template_id: str | None = None) -> dict:
+        """Borra un template en Meta (DELETE /{waba_id}/message_templates).
+
+        Con solo `name` se borran todas las variantes de idioma de ese nombre.
+        Si se pasa `template_id` (hsm_id) se borra únicamente esa variante.
+        """
+        params = {"name": nombre}
+        if template_id:
+            params["hsm_id"] = template_id
+        url = f"{graph_url()}/{waba_id}/message_templates"
+        async with httpx.AsyncClient(timeout=30) as cliente:
+            resp = await cliente.request("DELETE", url, params=params, headers=self._headers())
+        return self._procesar_respuesta(resp)
+
     def _procesar_respuesta(self, resp) -> dict:
         if resp.status_code in (200, 201):
             return resp.json()
@@ -424,6 +439,28 @@ class WhatsAppService:
             log_error("listar_templates_meta", e)
             return {"ok": False, "templates": [], "error": e.message}
         return {"ok": True, "templates": data.get("data", []), "error": None}
+
+    def eliminar_template_meta(self, nombre_template: str, template_id: str | None = None) -> dict:
+        """Borra el template en Meta. Devuelve {ok, error}.
+
+        Si Meta responde que el template no existe, se considera OK (ya no está,
+        que es justo lo que se busca). Cualquier otro fallo se reporta sin
+        romper el flujo: la plantilla local se borra igual."""
+        nombre_template = (nombre_template or "").strip()
+        if not nombre_template:
+            return {"ok": True, "error": None}
+        if not self.waba_id or not self.token:
+            return {"ok": False,
+                    "error": "Falta la cuenta de WhatsApp Business o el token (configúralos en Configuración)"}
+        try:
+            asyncio.run(self.cliente.eliminar_template(self.waba_id, nombre_template, template_id))
+            return {"ok": True, "error": None}
+        except ErrorWhatsApp as e:
+            msg = (e.message or "").lower()
+            if e.codigo in (100, 2593002) or "does not exist" in msg or "no existe" in msg or "not found" in msg:
+                return {"ok": True, "error": None}
+            log_error(f"eliminar_template_meta({nombre_template!r})", e)
+            return {"ok": False, "error": e.message}
 
     # ---------- Envío ----------
     def construir_payload_texto(self, telefono: str, mensaje: str, preview_url: bool = False) -> tuple:

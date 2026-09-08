@@ -721,12 +721,30 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
 @app.delete("/api/plantillas/{plantilla_id}")
 def eliminar_plantilla(plantilla_id: int, sesion: dict = Depends(sesion_actual)):
     plantillas = leer_plantillas()
-    restantes = [p for p in plantillas if p["id"] != plantilla_id]
-    if len(restantes) == len(plantillas):
+    objetivo = next((p for p in plantillas if p["id"] == plantilla_id), None)
+    if objetivo is None:
         raise HTTPException(404, detail="Plantilla no encontrada")
 
-    escribir_plantillas(restantes)
-    return {"ok": True}
+    # Borra también el template en Meta. Si Meta falla, se avisa pero la
+    # plantilla local se elimina igual (no dejamos algo a medias en el sistema).
+    aviso_meta = None
+    borrado_meta = False
+    nombre_template = (objetivo.get("whatsapp_template") or "").strip()
+    if nombre_template:
+        try:
+            res = WhatsAppService().eliminar_template_meta(
+                nombre_template, objetivo.get("whatsapp_template_id"),
+            )
+        except Exception as e:
+            log_error(f"eliminar_plantilla({plantilla_id}): fallo borrando en Meta", e)
+            res = {"ok": False, "error": str(e)}
+        if res.get("ok"):
+            borrado_meta = True
+        else:
+            aviso_meta = res.get("error") or "No se pudo borrar el template en Meta."
+
+    escribir_plantillas([p for p in plantillas if p["id"] != plantilla_id])
+    return {"ok": True, "meta_borrado": borrado_meta, "meta_advertencia": aviso_meta}
 
 
 def leer_config(ambiente: str | None = None) -> dict:

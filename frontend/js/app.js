@@ -108,6 +108,7 @@ async function eliminarPlantilla(id) {
   if (res.status === 401) { window.snwSalir(); return Promise.reject(new Error("Sesión expirada")); }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.detail ?? data.error ?? `Error ${res.status}`);
+  return data;
 }
 
 function slug(texto) {
@@ -484,10 +485,16 @@ $("#btnModalCancelar").addEventListener("click", () => (modalEl.hidden = true));
 
 $("#btnModalConfirmar").addEventListener("click", async () => {
   try {
-    await eliminarPlantilla(activaId);
+    const data = await eliminarPlantilla(activaId);
     plantillas = plantillas.filter((x) => x.id !== activaId);
     modalEl.hidden = true;
-    toast("Plantilla eliminada.", "ok");
+    if (data && data.meta_advertencia) {
+      toast(`Plantilla eliminada, pero en Meta: ${data.meta_advertencia}`, "error");
+    } else if (data && data.meta_borrado) {
+      toast("Plantilla eliminada (también en Meta).", "ok");
+    } else {
+      toast("Plantilla eliminada.", "ok");
+    }
     modoVacia();
   } catch (err) {
     modalEl.hidden = true;
