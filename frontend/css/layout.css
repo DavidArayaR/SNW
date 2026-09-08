@@ -1,0 +1,246 @@
+/* ============================================================
+   Layout con barra lateral (sidebar) — se carga DESPUÉS de
+   bootstrap.min.css y de styles.css para ganar las colisiones.
+   ============================================================ */
+
+:root {
+  --sidebar-ancho: 244px;
+  --topbar-alto: 56px;
+}
+
+/* Cascarón: sidebar fija + columna de contenido desplazada */
+.app-shell {
+  min-height: 100vh;
+}
+
+.app-main {
+  margin-left: var(--sidebar-ancho);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  transition: margin-left .2s ease;
+}
+
+/* ----- Sidebar ----- */
+.sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: var(--sidebar-ancho);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 12px;
+  background: linear-gradient(180deg, var(--verde-oscuro), var(--verde));
+  color: #fff;
+  z-index: 1040;
+  overflow-y: auto;
+  overflow-x: hidden;
+  transition: width .2s ease, transform .25s ease;
+}
+
+/* Botón para plegar/expandir (dentro de la sidebar, escritorio) */
+.sidebar__plegar {
+  align-self: flex-end;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin: -6px 2px 6px;
+  border: none;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, .14);
+  color: #fff;
+  font-size: .8rem;
+}
+.sidebar__plegar:hover { background: rgba(255, 255, 255, .28); }
+.sidebar__plegar i { transition: transform .2s ease; }
+
+.sidebar__brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px 14px;
+  color: #fff;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(255, 255, 255, .16);
+  margin-bottom: 10px;
+}
+.sidebar__brand i { font-size: 1.7rem; flex-shrink: 0; width: 1.9rem; text-align: center; }
+.sidebar__brand span { display: flex; flex-direction: column; line-height: 1.2; }
+.sidebar__brand strong { font-size: .98rem; font-weight: 700; }
+.sidebar__brand small { font-size: .72rem; opacity: .8; }
+
+.sidebar__nav { gap: 3px; }
+
+.sidebar .nav-link {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  color: rgba(255, 255, 255, .82);
+  font-size: .9rem;
+  font-weight: 600;
+  transition: background .15s, color .15s;
+}
+.sidebar .nav-link i {
+  flex-shrink: 0;
+  width: 1.25rem;
+  text-align: center;
+  font-size: .95rem;
+}
+.sidebar .nav-link:hover {
+  background: rgba(255, 255, 255, .13);
+  color: #fff;
+}
+.sidebar .nav-link.active {
+  background: #fff;
+  color: var(--verde-oscuro);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, .18);
+}
+
+.sidebar__salir {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 9px;
+  background: rgba(0, 0, 0, .16);
+  color: rgba(255, 255, 255, .9);
+  font-size: .9rem;
+  font-weight: 600;
+  text-align: left;
+}
+.sidebar__salir i { width: 1.25rem; text-align: center; flex-shrink: 0; }
+.sidebar__salir:hover { background: rgba(0, 0, 0, .3); color: #fff; }
+
+/* ----- Barra superior del contenido ----- */
+.app-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 1030;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: var(--topbar-alto);
+  padding: 8px 20px;
+  background: #fff;
+  border-bottom: 1px solid var(--borde);
+}
+.app-topbar__titulo {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--texto);
+}
+.app-topbar__sep { flex: 1; }
+
+/* Indicadores de contexto (ambiente / base de datos) en la barra superior */
+.app-topbar .badge {
+  background: #e7f3f1;
+  color: var(--verde-oscuro);
+  border: 1px solid #bcd9d2;
+}
+.app-topbar select.badge--select {
+  background: var(--verde-oscuro);
+  color: #fff;
+  border-color: var(--verde-oscuro);
+}
+
+/* Hamburguesa de la barra superior: sólo en móvil (abre el cajón).
+   En escritorio se pliega con el botón de dentro de la sidebar. */
+.sidebar-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 38px;
+  border: 1px solid var(--borde);
+  border-radius: 9px;
+  background: #fff;
+  color: var(--texto);
+  font-size: 1rem;
+}
+
+/* El contenido de la página vive aquí */
+.app-main > .layout { flex: 1; }
+
+/* ----- Sidebar plegada (solo escritorio) ----- */
+@media (min-width: 992px) {
+  .app-shell.sidebar-colapsada { --sidebar-ancho: 72px; }
+
+  .sidebar-colapsada .sidebar { padding: 16px 10px; }
+  .sidebar-colapsada .sidebar__brand {
+    justify-content: center;
+    gap: 0;
+    padding: 8px 0 12px;
+  }
+  .sidebar-colapsada .sidebar__brand span,
+  .sidebar-colapsada .nav-link span,
+  .sidebar-colapsada .sidebar__salir span { display: none; }
+
+  .sidebar-colapsada .sidebar__plegar { align-self: center; margin: -4px 0 8px; }
+  .sidebar-colapsada .sidebar__plegar i { transform: rotate(180deg); }
+
+  .sidebar-colapsada .sidebar__nav .nav-link,
+  .sidebar-colapsada .sidebar__salir {
+    justify-content: center;
+    gap: 0;
+    padding-left: 0;
+    padding-right: 0;
+  }
+}
+
+/* Portada sin sesión: sin sidebar ni barra superior */
+.app-shell.sin-sidebar .sidebar,
+.app-shell.sin-sidebar .sidebar-backdrop,
+.app-shell.sin-sidebar .app-topbar { display: none; }
+.app-shell.sin-sidebar .app-main { margin-left: 0; }
+
+/* La cinta de aviso (demo) queda dentro de la columna de contenido */
+.app-main .cinta-demo { position: static; }
+
+/* Backdrop para móvil */
+.sidebar-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 25, 30, .5);
+  z-index: 1035;
+}
+
+/* ----- Choques con Bootstrap ----- */
+/* Reboot pinta <code> de rosa; en esta app hereda el color del texto. */
+code { color: inherit; }
+
+/* La app maneja el toast con .visible + opacidad, no con la clase .show
+   de Bootstrap; anulamos su regla `.toast:not(.show){display:none}`
+   (misma especificidad, este archivo carga después). La opacidad la sigue
+   controlando styles.css (.toast / .toast.visible). */
+.toast:not(.show) { display: block; }
+.toast { pointer-events: none; }
+.toast.visible { pointer-events: auto; }
+
+/* ----- Responsive ----- */
+@media (max-width: 991.98px) {
+  /* En móvil la sidebar es un cajón deslizante; nunca "plegada". */
+  .app-main { margin-left: 0; }
+
+  .sidebar {
+    width: var(--sidebar-ancho);
+    transform: translateX(-100%);
+    box-shadow: 0 0 40px rgba(0, 0, 0, .35);
+  }
+  .app-shell.sidebar-abierta .sidebar { transform: translateX(0); }
+  .app-shell.sidebar-abierta .sidebar-backdrop { display: block; }
+
+  .sidebar-toggle { display: inline-flex; }
+  /* El botón de dentro de la sidebar sólo sirve en escritorio. */
+  .sidebar__plegar { display: none; }
+}
