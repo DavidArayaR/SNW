@@ -127,10 +127,6 @@
     "rol": "administrador",
     "nombre": "Administrador"
   },
-  "8fe7dc52068e46b5b248089158c45291": {
-    "rol": "administrador",
-    "nombre": "Administrador"
-  },
   "3e1b2a827bf749c989fa2b9184341ac1": {
     "rol": "administrador",
     "nombre": "Administrador"
@@ -379,10 +375,6 @@
     "rol": "administrador",
     "nombre": "Administrador"
   },
-  "f108b7779b3f4e60bbaf500fb2176f83": {
-    "rol": "administrador",
-    "nombre": "Administrador"
-  },
   "9738c1ea510f4758888c4ba8e3fd3721": {
     "rol": "usuario",
     "nombre": "Usuario Final"
@@ -444,6 +436,370 @@
     "nombre": "Administrador"
   },
   "0c6b40f4758749d3990d3a0abf641e77": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "cf86439544ac44c39ac8010b15e93b8f": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "f60c49f0281b46bf8dab4354da00500b": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "f8db3eea29904c3899d34e80e191f5a3": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "e7ccfd1406b9478abca344c5036a4acf": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "9d7c7d1bc3f9474ca1e2a9d38ad91d24": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "cd5673754e72415abed6c8f0c1696a4f": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "7418ff4307c74cf98f0f1ad48fd0eeac": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "51a97547cca14d8dafb1fc7bba0a8e23": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "08b5facca64e4f1183955cb96f715f8e": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "3ca74736825648a58ab9325a6bbb9162": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "598929ab9e1d4a479948d34ddabccb31": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "10206a404cd940b5856edfd5bfd23e8c": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "d351e1eea0a04f0aa76577cbf3ebf4e8": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "98e5f99edbef42918a8e9f5dda7c5eff": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "00e8f021f4eb45fd924d5f6a2bd50caf": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "9c88157ec257481b89a8d221151dd73d": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "c98eacd8f2174c749dc8aa7d32fee1b5": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "11586e4f69324bbcb20c43fbd87dcc71": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "acb0567d8e414af797c43eede26b892a": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "9de4630f3dc84bd2b577b972a61e27de": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "3e946e07cad14f17a4ed0ef234c81360": {
+    "rol": "usuario",
+    "nombre": "Usuario Final"
+  },
+  "ebb1e1aacf3b46129f6da4ea2bf9a507": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "b435ff5a436046f5a04fb1a603f0fea2": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "24f4bc952e8b4cec9163a75e9e11ff81": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "a6fe4a790d7641529cae7881c7d46424": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "3a83d360e0844d3d8844dcc34d63e7d3": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "03d3f743de48416d9130bb9e54b1bc0d": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "33e83d63a1f140179d4ae8143a4f2c0d": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "de58f52a92ad4a2d94b836bddc68586b": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "83d64c5416514557b2620e79b75ddfd4": {
+    "rol": "usuario",
+    "nombre": "Usuario Final"
+  },
+  "b2aa4ffeb98543b4a92f5d105da00155": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "50fd7f0b61ce4631a07ba467b83f38fe": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "f41e6dbde77a4f958b38f28b5c65c01f": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "6f94290d700e4850ab4b865e4e86b05b": {
+    "rol": "usuario",
+    "nombre": "Usuario Final"
+  },
+  "c8afa9184d074c75a74bbdcb805adb72": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "babecb53872e4711bdfbebae2b8da089": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "eb701df1a1434187b66bde783bdf1ee8": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "a39c4c7eca7244f99d6d95dabf48075d": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "136bb8fada1d47c48b7c0dabc419ead1": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "b9d7f528bbab4d029b941657d17043c3": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "caa3b8e273bf45088e6f8fc4b8362f45": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "baab6ed643714a18b3b19f8081d11f91": {
+    "rol": "usuario",
+    "nombre": "Usuario Final"
+  },
+  "cad4a11f4ee64863b831cf1116271df7": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "15815560aef348d1ad7a4bcf6f870b97": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "f083ee813def4a718a12189ea3ab87c4": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "d9063d01e829492086b18725c16d77fa": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "7bb1048057584d68bdf4478218353f81": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "8b50a9b1691d45059ee150d839a6f9f4": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "22faa2ad9fba414b8d4e7477fe0b1f35": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "2e2f0b30d13440a59183b4be672b38af": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "acbd072f4e124b90b6cdc07932b84b6b": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "47e9c10da3dd43ac80d05b2a7e26efa9": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "366e12915fab4465b788ab472f15d75f": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "b5d5cfd4336d4c4c8ecbd5656fccff0a": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "fe20c5ed8edf4282a2e7140b84071a5e": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "89ab146131ff4ee2bba0f259007b4c28": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "89af48d6cef342b990918804e7eb578c": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "47ad57608cdf4ce0b02b01e85659c351": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "456b331244024b99bcab9db2ee8ea789": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "688f3be6e729499bac6ae9466fb6cc34": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "e9daebbcd8d643c9a7ae2bb9daf5158d": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "370678a1a620451e8dea15daf25b4701": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "94d0c058d4c241f5b974702728ff62db": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "2871748a2371425990d24d8d335f451c": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "958f912bed5043e7abfbb740cbaa1ff3": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "0d9178575cd34858986e40539a0cebd1": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "6ce711fbeee94986a6e0d9eb3872539a": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "3250fd2d2c9c43d4a6f49dfc3390ebba": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "2a14ee362c224feca8fae1993b18625a": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "93a9038cf1c94f67bdea847dee200e18": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "68e621ef61854561bf5a92f7904710ee": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "1c13f3bfae3c47c288802bb793ec23f8": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "55c70f93a9a44a15a4f9a061d7055363": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "99d6bdddd41149cbbc5e0d04554edb16": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "d34338b27c11454d943e05c47689a7b4": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "4a1b80ed08cc404dbbca48e174bb61ae": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "76e217241d134d0895612efee2e1325f": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "e015b437d22f403c8766886188a8b955": {
+    "rol": "usuario",
+    "nombre": "Usuario Final"
+  },
+  "5b44065789ec40458b9d50de03b97e90": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "55ead4de14b34cd9970d87b8c5b09086": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "ef98536054754ba386b7d2528ecf915c": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "1d865cbd36dc4741abe39b32fb8def62": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "a952e8c6a77e44ea8fcf05320ab5df29": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "0d943249c793431097078c0b1daf8014": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "d0bdc74e107e46e59298d3a2d7ee914b": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "486fd827f2524141bb5c4f9a62ead0ea": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "00ef396399324274ab490b8a5a9fac27": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "d29e48283226419db812beb24b1bfe7e": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "ec612e32bfa2495a8fda325fe53c28e0": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "6de1f355a7a643d59c01ef7ccbc828f1": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "f5b64fff323f4e1ebb6d93daa0c4a160": {
     "rol": "administrador",
     "nombre": "Administrador"
   }

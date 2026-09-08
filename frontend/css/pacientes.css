@@ -47,7 +47,6 @@
   background: #66757f;
 }
 .stat--resp[data-respuesta="pendiente"]::before { background: #98a2ad; }
-.stat--resp[data-respuesta="click"]::before { background: #1a6fb5; }
 .stat--resp[data-respuesta="respondio"]::before { background: #1e7d4d; }
 .stat--resp[data-respuesta="baja"]::before { background: #b23b37; }
 
@@ -81,15 +80,19 @@
   overflow-y: auto;
 }
 
-#modalEnvio .modal__actions {
+#modalEnvio .modal__actions,
+#modalConfirmar .modal__actions {
   justify-content: space-between;
+  align-items: center;
   gap: 16px;
   margin-top: 22px;
+  flex-wrap: wrap;
 }
 
+.acciones-izq,
 .acciones-derecha {
   display: flex;
-  gap: 14px;
+  gap: 12px;
 }
 
 #listaPlantillasModal {
@@ -404,7 +407,6 @@ td.campo-id { color: var(--texto-suave); font-family: Consolas, monospace; }
   letter-spacing: .04em;
 }
 .respuesta-pendiente { background: #f0f2f5; color: #66757f; border: 1px solid #dde1e6; }
-.respuesta-click { background: #e8f4fd; color: #1a6fb5; border: 1px solid #b3d9f2; }
 .respuesta-respondio { background: #e5f6ec; color: #1e7d4d; border: 1px solid #bfe5cf; }
 .respuesta-baja { background: #fdecec; color: #b23b37; border: 1px solid #eec2c1; }
 

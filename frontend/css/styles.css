@@ -96,7 +96,18 @@ select.badge--select {
 .panel__head h2 { margin: 0; font-size: 1rem; }
 .panel__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 
-.tpl-list__aviso-sync { margin: 10px 18px 0; }
+.panel--list .panel__head {
+  flex-wrap: wrap;
+  align-items: center;
+  row-gap: 10px;
+}
+.panel--list .panel__actions {
+  flex-basis: 100%;
+  justify-content: flex-start;
+}
+.panel--list .panel__actions .btn { flex: 1 1 auto; justify-content: center; }
+
+.tpl-list__aviso-sync { margin: 12px 18px 4px; }
 
 .searchbox {
   margin: 12px 14px 6px;
@@ -301,7 +312,7 @@ button:disabled:hover { outline: none; }
 }
 .chip:hover { background: var(--verde); color: #fff; }
 
-.form-actions { display: flex; gap: 12px; }
+.form-actions { display: flex; flex-wrap: wrap; gap: 12px; }
 
 .empty-state {
   display: none;

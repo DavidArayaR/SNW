@@ -30,9 +30,8 @@ let hechosActual = 0;
 function setBloqueoEnvio(bloquear) {
   envioEnCurso = bloquear;
   document.querySelectorAll("button, input, select, textarea").forEach((el) => {
-    // No bloquear el toast ni la barra de progreso (no son inputs)
-    // El botón Cancelar siempre queda habilitado durante el envío
-    if (el.id === "btnCancelarEnvio") return;
+    // Cancelar y Cerrar del modal de envío siempre quedan disponibles.
+    if (el.id === "btnCancelarEnvio" || el.id === "btnCerrarModal") return;
     el.disabled = bloquear;
   });
   // Si se desbloquea, restaurar estados correctos vía render
@@ -129,7 +128,7 @@ function render() {
     const tr = document.createElement("tr");
     const respuesta = p.respuesta || "pendiente";
     const esBaja = respuesta === "baja" || !!p.whatsapp_opt_out;
-    const respuestaLabels = { pendiente: "Sin respuesta", click: "Hizo click", respondio: "Respondió", baja: "Se dio de baja" };
+    const respuestaLabels = { pendiente: "Sin respuesta", respondio: "Respondió", baja: "Se dio de baja" };
     tr.classList.toggle("es-baja", esBaja);
     const hayError = p.estado === "error" || p.ultimo_estado_envio === "error";
     const textoError = hayError && p.ultimo_error ? String(p.ultimo_error) : "";
@@ -162,7 +161,7 @@ function render() {
       `<td class="campo-respuesta">` +
         `<span class="respuesta-badge respuesta-${escaparHtml(respuesta)}" data-editable data-id="${p.id}" title="${escaparHtml(tituloResp + " · click para cambiar")}">${escaparHtml(respuestaLabels[respuesta] ?? respuesta)}</span>` +
         `<select class="respuesta-select" data-id="${p.id}" hidden>` +
-          ["pendiente", "respondio", "click", "baja"].map((v) =>
+          ["pendiente", "respondio", "baja"].map((v) =>
             `<option value="${v}"${v === respuesta ? " selected" : ""}>${respuestaLabels[v]}</option>`).join("") +
         `</select>` +
         subResp +
@@ -186,7 +185,7 @@ function render() {
     if (conteo[p.estado] !== undefined) conteo[p.estado]++;
   }
 
-  const conteoResp = { todas: pacientes.length, pendiente: 0, click: 0, respondio: 0, baja: 0 };
+  const conteoResp = { todas: pacientes.length, pendiente: 0, respondio: 0, baja: 0 };
   for (const p of pacientes) {
     const r = p.respuesta || "pendiente";
     if (conteoResp[r] !== undefined) conteoResp[r]++;
@@ -200,7 +199,6 @@ function render() {
     `<button type="button" class="stat stat--enviado${esActivoEstado("enviado") ? " activo" : ""}" data-estado="enviado">Enviados <strong>${conteo.enviado}</strong></button>` +
     `<button type="button" class="stat stat--error${esActivoEstado("error") ? " activo" : ""}" data-estado="error">Errores <strong>${conteo.error}</strong></button>` +
     `<button type="button" class="stat stat--resp${esActivoResp("pendiente") ? " activo" : ""}" data-respuesta="pendiente">Sin resp. <strong>${conteoResp.pendiente}</strong></button>` +
-    `<button type="button" class="stat stat--resp${esActivoResp("click") ? " activo" : ""}" data-respuesta="click">Click <strong>${conteoResp.click}</strong></button>` +
     `<button type="button" class="stat stat--resp${esActivoResp("respondio") ? " activo" : ""}" data-respuesta="respondio">Respondió <strong>${conteoResp.respondio}</strong></button>` +
     `<button type="button" class="stat stat--resp${esActivoResp("baja") ? " activo" : ""}" data-respuesta="baja">Baja <strong>${conteoResp.baja}</strong></button>`;
 
@@ -455,7 +453,7 @@ function abrirModal() {
   $("#faseConfig").hidden = false;
   $("#faseProgreso").hidden = true;
   $("#btnLanzarEnvio").hidden = true;
-  $("#btnCerrarModal").hidden = true;
+  $("#btnCerrarModal").disabled = false;
   $("#listaRechazados").innerHTML = "";
   $("#listaRechazados").hidden = true;
   $("#barraFill").style.width = "0%";
@@ -488,11 +486,6 @@ const avisoDevEl = $("#avisoDev");
 
 $("#btnCancelarEnvio").addEventListener("click", () => {
   const enProgreso = envioEnCurso && jobIdActual;
-  if (envioEnCurso && !enProgreso) {
-    clearInterval(timerPolling);
-    modalEl.hidden = true;
-    return;
-  }
   if (enProgreso) {
     clearInterval(timerPolling);
     const restantes = Math.max(0, totalActual - hechosActual);
@@ -502,7 +495,11 @@ $("#btnCancelarEnvio").addEventListener("click", () => {
     $("#btnConfirmarCancelar").disabled = false;
     $("#modalCancelar").hidden = false;
     pausarJob(jobIdActual);
+    return;
   }
+  // Sin envío en curso: se comporta como cerrar.
+  clearInterval(timerPolling);
+  modalEl.hidden = true;
 });
 
 $("#btnNoCancelar").addEventListener("click", () => {
@@ -547,8 +544,9 @@ modalEl.addEventListener("click", (e) => {
   }
 });
 $("#btnCerrarModal").addEventListener("click", () => {
-  if (envioEnCurso) return;
   clearInterval(timerPolling);
+  // Si había un envío en curso, el trabajo sigue en el servidor (se ve en Historial).
+  if (envioEnCurso) setBloqueoEnvio(false);
   seleccionados.clear();
   plantillaId = null;
   modalEl.hidden = true;
@@ -716,9 +714,9 @@ function seguirProgreso(jobId, total) {
 function finalizar(mensaje, esError) {
   $("#progresoTexto").textContent = mensaje;
   toast(mensaje, esError ? "error" : "ok");
-  // Habilitar solo el botón Cerrar para poder salir del modal
-  const btnCerrar = document.getElementById("btnCerrarModal");
-  if (btnCerrar) btnCerrar.disabled = false;
+  // Terminó el envío: ya no hay nada que iniciar ni que cancelar.
+  $("#btnCerrarModal").disabled = false;
+  $("#btnLanzarEnvio").hidden = true;
 }
 
 let toastTimer;

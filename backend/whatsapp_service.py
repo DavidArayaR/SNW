@@ -17,7 +17,7 @@ from pathlib import Path
 
 import httpx
 
-from db import conectar, columna_existe, config_get, log_error, tabla_pacientes
+from db import conectar, config_get, log_error, tabla_pacientes
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -36,7 +36,26 @@ def graph_url() -> str:
 
 
 # Palabras que determinan opt-out (baja) según políticas de WhatsApp.
-BAJA_KEYWORDS = ("baja", "cancelar", "no", "stop", "salir", "quit", "unsubscribe")
+# Detección de baja (opt-out). Se compara sobre el texto en minúsculas y sin
+# signos. `BAJA_EXACTAS`: solo si el mensaje ES exactamente eso.
+# `BAJA_PALABRAS`: si aparece como palabra suelta. `BAJA_FRASES`: como substring.
+BAJA_EXACTAS = ("no", "no.", "stop", "baja", "cancelar", "cancelo", "salir",
+                "quit", "unsubscribe", "eliminar", "remover", "detener")
+BAJA_PALABRAS = ("baja", "stop", "unsubscribe", "cancelar", "cancelo", "detener")
+BAJA_FRASES = (
+    "dar de baja", "darme de baja", "darse de baja", "me doy de baja", "de baja",
+    "quiero darme de baja", "quiero que me den de baja", "deseo darme de baja",
+    "no quiero recibir", "no deseo recibir", "no quiero mas mensajes",
+    "no me manden", "no me envien", "no enviar mas", "dejen de enviar",
+    "dejar de recibir", "dejen de mandar", "no molestar", "no me contacten",
+    "no me interesa", "ya no quiero", "no quiero saber", "borrame", "borrenme",
+    "sacame de", "sacarme de", "no quiero que me escriban",
+    "quitar de la lista", "sacar de la lista", "borrar mi numero", "eliminar mi numero",
+    "detener promociones", "detener promo", "stop promotions", "no promociones",
+    "cancelar suscripcion", "cancelar suscripción",
+)
+# Compatibilidad hacia atrás
+BAJA_KEYWORDS = BAJA_EXACTAS
 
 # Mapeo oficial de estados de Meta -> estados internos de log_envios.
 ESTADO_DIRECTO = {"sent": "enviado"}
@@ -65,19 +84,9 @@ def _normalizar_telefono(crudo: str) -> str | None:
     return None
 
 
-def _detectar_ambiente_por_telefono(telefono: str) -> str | None:
-    """Busca el teléfono en pacientes_dev y pacientes_prod y devuelve 'desarrollo' o 'produccion'."""
-    for ambiente in ("desarrollo", "produccion"):
-        t = tabla_pacientes(ambiente)
-        try:
-            with conectar(ambiente) as conn, conn.cursor() as cur:
-                cur.execute(f"SELECT id FROM {t} WHERE telefono = %s LIMIT 1", (telefono,))
-                if cur.fetchone():
-                    return ambiente
-        except Exception as e:
-            log_error(f"_detectar_ambiente_por_telefono({ambiente})", e)
-            continue
-    return None
+# Compara teléfonos ignorando el '+' inicial y los espacios (Meta manda el
+# wa_id como "56993921740"; la BD los guarda como "+56993921740").
+_TEL_MATCH = "REPLACE(REPLACE({col}, '+', ''), ' ', '') = REPLACE(REPLACE(%s, '+', ''), ' ', '')"
 
 
 def _hash_evento(payload: dict) -> str:
@@ -509,16 +518,16 @@ class WhatsAppService:
     def guardar_message_id(self, telefono: str, message_id: str, estado_envio: str,
                            ambiente: str, descripcion_error: str | None = None) -> bool:
         """Relaciona el message id de Meta con el último log del paciente."""
-        numero = telefono if telefono.startswith("+") else f"+{telefono}"
         t = tabla_pacientes(ambiente)
+        match = _TEL_MATCH.format(col="telefono")
         try:
             with conectar(ambiente) as conn, conn.cursor() as cur:
                 cur.execute(
                     "UPDATE log_envios SET whatsapp_message_id = %s, estado_whatsapp = 'sent',"
                     " estado_envio = %s, descripcion_error = %s"
-                    f" WHERE paciente_id = (SELECT id FROM {t} WHERE telefono = %s LIMIT 1)"
+                    f" WHERE paciente_id = (SELECT id FROM {t} WHERE {match} LIMIT 1)"
                     " ORDER BY id DESC LIMIT 1",
-                    (message_id, estado_envio, descripcion_error, numero),
+                    (message_id, estado_envio, descripcion_error, telefono),
                 )
                 conn.commit()
                 return cur.rowcount > 0
@@ -535,20 +544,28 @@ class WhatsAppService:
         return False
 
     def procesar_evento(self, body: dict) -> list[str]:
-        """Procesa un payload de webhook. Devuelve lista de acciones ejecutadas."""
+        """Procesa un payload de webhook. Devuelve lista de acciones ejecutadas.
+
+        Meta manda TODO (mensajes entrantes y cambios de estado de entrega) bajo
+        `field: "messages"`; se distinguen por el contenido de `value`:
+          - `value.messages[]`  -> mensaje entrante del cliente (respuesta / baja)
+          - `value.statuses[]`  -> cambio de estado (sent/delivered/read/failed)
+        """
         accion = []
         if self._evento_duplicado(body):
             accion.append("duplicado_omitido")
             return accion
 
         for entry in body.get("entry", []):
-            cambia = entry.get("changes") or []
-            for change in cambia:
+            for change in (entry.get("changes") or []):
                 campo = change.get("field", "")
-                valor = change.get("value", {})
-                if campo == "messages":
+                valor = change.get("value", {}) or {}
+                if campo == "message_template_status_update":
+                    accion.append(f"template_{valor.get('event', '?')}")
+                    continue
+                if valor.get("messages"):
                     accion += self._procesar_mensajes(valor)
-                elif campo == "status":
+                if valor.get("statuses"):
                     accion += self._procesar_estados(valor)
         self._guardar_evento(body)
         return accion
@@ -556,49 +573,61 @@ class WhatsAppService:
     def _procesar_mensajes(self, valor: dict) -> list[str]:
         """Mensajes entrantes del cliente (respuestas, bajas, etc.)."""
         acciones = []
-        telefono = (valor.get("contacts") or [{}])[0].get("wa_id", "")
+        # Meta manda el wa_id sin '+' (ej. "56993921740"); lo normalizamos.
+        crudo = (valor.get("contacts") or [{}])[0].get("wa_id", "")
+        telefono = _normalizar_telefono(crudo) or crudo
         for mensaje in valor.get("messages", []):
             tipo = mensaje.get("type", "")
             texto = ""
+            extra = ""  # payload de botón, etc. (también se revisa para baja)
             if tipo == "text":
                 texto = (mensaje.get("text") or {}).get("body", "")
             elif tipo == "button":
-                texto = (mensaje.get("button") or {}).get("text", "")
+                b = mensaje.get("button") or {}
+                texto = b.get("text", "")
+                extra = b.get("payload", "")
             elif tipo == "interactive":
                 inter = mensaje.get("interactive", {})
-                texto = (inter.get("button_reply") or inter.get("list_reply") or {}).get("title", "")
-            if not texto:
+                br = inter.get("button_reply") or inter.get("list_reply") or {}
+                texto = br.get("title", "")
+                extra = br.get("id", "") or br.get("description", "")
+            if not texto and not extra:
                 continue
-            info = self._registrar_respuesta(telefono, texto, mensaje.get("timestamp"))
+            info = self._registrar_respuesta(telefono, texto or extra, mensaje.get("timestamp"))
             acciones.append(f"respuesta_{info}")
 
-            if self._es_baja(texto):
+            if self._es_baja(texto) or self._es_baja(extra):
                 self._registrar_baja(telefono)
                 acciones.append("baja")
         return acciones
 
+    @staticmethod
+    def _detalle_errores(errores) -> str:
+        partes = []
+        for err in (errores or []):
+            data_err = err.get("error_data") or {}
+            partes.append(" - ".join(str(x) for x in (
+                err.get("code"), err.get("title"), err.get("message"),
+                data_err.get("details"),
+            ) if x))
+        return " | ".join(p for p in partes if p) or "Meta reportó el mensaje como fallido sin detalle"
+
     def _procesar_estados(self, valor: dict) -> list[str]:
-        """Cambios de estado: sent, delivered, read, failed."""
+        """Cambios de estado de entrega: sent, delivered, read, failed.
+        `value.statuses` es una lista; puede traer varios en un mismo evento."""
         acciones = []
-        estado = valor.get("status", "")
-        message_id = valor.get("message_id", "") or valor.get("wamid", "")
-        telefono = valor.get("phone_number", "") or valor.get("recipient_id", "")
-        if estado not in ESTADO_WHATSAPP or not message_id:
-            return acciones
-        detalle_error = None
-        if estado == "failed":
-            errores = valor.get("errors") or []
-            partes = []
-            for err in errores:
-                data_err = err.get("error_data") or {}
-                partes.append(" - ".join(str(x) for x in (
-                    err.get("code"), err.get("title"), err.get("message"),
-                    data_err.get("details"),
-                ) if x))
-            detalle_error = " | ".join(p for p in partes if p) or "Meta reportó el mensaje como fallido sin detalle"
-            log_error(f"webhook: mensaje {message_id} a {telefono} falló - {detalle_error}")
-        self._actualizar_estado(message_id, estado, detalle_error)
-        acciones.append(f"estado_{estado}")
+        for s in valor.get("statuses", []):
+            estado = s.get("status", "")
+            message_id = s.get("id", "") or s.get("message_id", "")
+            telefono = s.get("recipient_id", "") or s.get("phone_number", "")
+            if estado not in ESTADO_WHATSAPP or not message_id:
+                continue
+            detalle_error = None
+            if estado == "failed":
+                detalle_error = self._detalle_errores(s.get("errors"))
+                log_error(f"webhook: mensaje {message_id} a {telefono} falló - {detalle_error}")
+            self._actualizar_estado(message_id, estado, detalle_error)
+            acciones.append(f"estado_{estado}")
         return acciones
 
     # ---------- Persistencia de eventos ----------
@@ -627,23 +656,45 @@ class WhatsAppService:
                 log_error(f"_guardar_evento({ambiente})", e)
 
     # ---------- Registro de respuestas y estados ----------
+    _TABLAS_PAC = (tabla_pacientes("desarrollo"), tabla_pacientes("produccion"))
+
+    def _pacientes_con_tel(self, cur, telefono: str) -> list[dict]:
+        """Filas (id, nombre, telefono, tabla) de los pacientes cuyo teléfono
+        coincide, en ambas tablas (dev + prod). log_envios es compartida."""
+        match = _TEL_MATCH.format(col="telefono")
+        hallados = []
+        for t in self._TABLAS_PAC:
+            cur.execute(f"SELECT id, nombre, telefono FROM {t} WHERE {match} LIMIT 1", (telefono,))
+            row = cur.fetchone()
+            if row:
+                row["tabla"] = t
+                hallados.append(row)
+        return hallados
+
     def _registrar_respuesta(self, telefono: str, texto: str, timestamp: str) -> str:
-        amb = _detectar_ambiente_por_telefono(telefono)
-        if not amb:
-            return "sin_cliente"
-        t = tabla_pacientes(amb)
+        match = _TEL_MATCH.format(col="telefono")
         try:
-            with conectar(amb) as conn, conn.cursor() as cur:
-                if columna_existe(t, "estado", amb):
-                    cur.execute(
-                        f"UPDATE {t} SET estado = 'enviado' WHERE telefono = %s", (telefono,)
-                    )
+            with conectar() as conn, conn.cursor() as cur:
+                pacientes = self._pacientes_con_tel(cur, telefono)
+                if not pacientes:
+                    return "sin_cliente"
+                for p in pacientes:
+                    cur.execute(f"UPDATE {p['tabla']} SET estado = 'enviado' WHERE {match}", (telefono,))
+                    # Una respuesta real deja sin efecto una corrección manual previa.
+                    try:
+                        cur.execute(
+                            f"UPDATE {p['tabla']} SET respuesta_manual = NULL"
+                            f" WHERE {match} AND respuesta_manual IS NOT NULL",
+                            (telefono,),
+                        )
+                    except Exception:
+                        pass  # esquema sin la columna
+                p0 = pacientes[0]
                 cur.execute(
                     "INSERT INTO log_envios (envio_id, paciente_id, nombre_paciente, numero_telefono,"
                     " mensaje, plantilla_clave, estado_envio, respuesta, descripcion_error)"
-                    f" SELECT NULL, id, nombre, telefono, %s, 'respuesta', 'enviado', 'respondio', NULL"
-                    f" FROM {t} WHERE telefono = %s LIMIT 1",
-                    (texto, telefono),
+                    " VALUES (NULL, %s, %s, %s, %s, 'respuesta', 'enviado', 'respondio', NULL)",
+                    (p0["id"], p0["nombre"], p0["telefono"], (texto or "")[:2000]),
                 )
                 conn.commit()
             return "registrada"
@@ -652,22 +703,19 @@ class WhatsAppService:
             return "error"
 
     def _registrar_baja(self, telefono: str) -> None:
-        amb = _detectar_ambiente_por_telefono(telefono)
-        if not amb:
-            return
-        t = tabla_pacientes(amb)
+        match = _TEL_MATCH.format(col="telefono")
         try:
-            with conectar(amb) as conn, conn.cursor() as cur:
-                if columna_existe(t, "whatsapp_opt_out", amb):
+            with conectar() as conn, conn.cursor() as cur:
+                pacientes = self._pacientes_con_tel(cur, telefono)
+                if not pacientes:
+                    return
+                for p in pacientes:
+                    cur.execute(f"UPDATE {p['tabla']} SET whatsapp_opt_out = 1 WHERE {match}", (telefono,))
                     cur.execute(
-                        f"UPDATE {t} SET whatsapp_opt_out = 1 WHERE telefono = %s", (telefono,)
+                        "UPDATE log_envios SET respuesta = 'baja'"
+                        " WHERE paciente_id = %s ORDER BY id DESC LIMIT 1",
+                        (p["id"],),
                     )
-                cur.execute(
-                    "UPDATE log_envios SET respuesta = 'baja' WHERE paciente_id ="
-                    f" (SELECT id FROM {t} WHERE telefono = %s LIMIT 1)"
-                    " ORDER BY id DESC LIMIT 1",
-                    (telefono,),
-                )
                 conn.commit()
         except Exception as e:
             log_error(f"_registrar_baja({telefono})", e)
@@ -697,9 +745,18 @@ class WhatsAppService:
                 log_error(f"_actualizar_estado({ambiente}, msg={message_id}, estado={estado})", e)
                 continue
 
-    def _es_baja(self, texto: str) -> bool:
-        t = re.sub(r"[^\wáéíóúñ\s]", "", texto.lower()).strip()
-        return t in BAJA_KEYWORDS or t in ("quiero darme de baja", "darme de baja", "no quiero recibir mas")
+    @staticmethod
+    def _es_baja(texto: str) -> bool:
+        """True si el mensaje del paciente pide dejar de recibir mensajes."""
+        t = re.sub(r"[^\wáéíóúñ\s]", " ", (texto or "").lower())
+        t = re.sub(r"\s+", " ", t).strip()
+        if not t:
+            return False
+        if t in BAJA_EXACTAS:
+            return True
+        if set(t.split()) & set(BAJA_PALABRAS):
+            return True
+        return any(f in t for f in BAJA_FRASES)
 
 
 class WebhookHandler:

@@ -56,6 +56,7 @@ CONFIG_DEFAULTS = {
     "wa_template_lang": "es",
     "wa_webhook_path": "/api/whatsapp/webhook",
     "wa_graph_version": "v26.0",
+    "wa_moneda": "USD",
 }
 # Clave en la tabla -> variable de .env de la que se migra la primera vez.
 _CONFIG_ENV_LEGACY = {
@@ -112,31 +113,100 @@ def asegurar_tabla_config() -> None:
                     "INSERT IGNORE INTO configuracion (clave, valor) VALUES (%s, %s)",
                     (clave, valor),
                 )
+            # Rate card de WhatsApp (tarifas por mensaje descargadas de Meta).
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS tarifas_whatsapp ("
+                "  id INT AUTO_INCREMENT PRIMARY KEY,"
+                "  pais VARCHAR(60) NOT NULL DEFAULT 'Chile',"
+                "  moneda VARCHAR(8) DEFAULT 'USD',"
+                "  marketing DECIMAL(12,6) NULL,"
+                "  utility DECIMAL(12,6) NULL,"
+                "  authentication DECIMAL(12,6) NULL,"
+                "  service DECIMAL(12,6) NULL,"
+                "  efectiva_desde DATE NULL,"
+                "  hash CHAR(64) NOT NULL,"
+                "  fuente VARCHAR(255) NULL,"
+                "  csv_texto MEDIUMTEXT NULL,"
+                "  descargada DATETIME DEFAULT CURRENT_TIMESTAMP,"
+                "  UNIQUE KEY uq_hash (hash)"
+                ") CHARACTER SET utf8mb4"
+            )
+            # Corrección manual de la respuesta del paciente: gana sobre la
+            # señal automática 'pegajosa'. NULL = sin corrección.
+            for tp in ("pacientes_dev", "pacientes_prod"):
+                cur.execute(
+                    "SELECT"
+                    "  (SELECT COUNT(*) FROM information_schema.TABLES"
+                    "     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s) AS tabla,"
+                    "  (SELECT COUNT(*) FROM information_schema.COLUMNS"
+                    "     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s"
+                    "       AND COLUMN_NAME = 'respuesta_manual') AS col",
+                    (tp, tp),
+                )
+                fila = cur.fetchone() or {}
+                if not fila.get("tabla"):
+                    continue
+                if not fila.get("col"):
+                    cur.execute(f"ALTER TABLE {tp} ADD COLUMN respuesta_manual VARCHAR(12) NULL")
+                    # Traspasa las correcciones manuales antiguas (que antes se
+                    # guardaban como filas log 'ajuste_manual') a la nueva columna.
+                    cur.execute(
+                        f"UPDATE {tp} p SET p.respuesta_manual = ("
+                        "  SELECT le.respuesta FROM log_envios le"
+                        "  WHERE le.paciente_id = p.id AND le.plantilla_clave = 'ajuste_manual'"
+                        "  ORDER BY le.id DESC LIMIT 1)"
+                        " WHERE EXISTS (SELECT 1 FROM log_envios le2"
+                        "  WHERE le2.paciente_id = p.id AND le2.plantilla_clave = 'ajuste_manual')"
+                    )
+                # El tipo de respuesta 'click' se eliminó: pasa a 'respondió'.
+                cur.execute(f"UPDATE {tp} SET respuesta_manual = 'respondio' WHERE respuesta_manual = 'click'")
+
+            # Quita 'click' del ENUM de log_envios.respuesta (una sola vez).
+            cur.execute(
+                "SELECT COLUMN_TYPE AS t FROM information_schema.COLUMNS"
+                " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'log_envios'"
+                "   AND COLUMN_NAME = 'respuesta'"
+            )
+            ct = (cur.fetchone() or {}).get("t", "")
+            if "'click'" in ct:
+                cur.execute("UPDATE log_envios SET respuesta = 'respondio' WHERE respuesta = 'click'")
+                cur.execute(
+                    "ALTER TABLE log_envios MODIFY COLUMN respuesta"
+                    " ENUM('pendiente','respondio','baja') DEFAULT 'pendiente'"
+                )
             conn.commit()
     except Exception as e:
         log_error("asegurar_tabla_config", e)
     _config_cache = None
+    _columnas_cache.clear()
 
 
-def _cargar_config() -> dict:
+def _cargar_config() -> tuple[dict, bool]:
+    """Devuelve (valores, ok). ok=False si no se pudo leer la tabla (BD caída),
+    para no cachear valores por defecto de forma permanente."""
     valores = _config_semilla()
     try:
         with conectar() as conn, conn.cursor() as cur:
             cur.execute("SELECT clave, valor FROM configuracion")
             for row in cur.fetchall():
                 valores[row["clave"]] = "" if row["valor"] is None else row["valor"]
+        return valores, True
     except Exception as e:
         # 1146 = la tabla no existe todavía (primer arranque): se usa .env
         # como respaldo y asegurar_tabla_config() la creará enseguida.
         if getattr(e, "args", [None])[0] != 1146:
             log_error("_cargar_config (se usa .env como respaldo)", e)
-    return valores
+        return valores, False
 
 
 def config_all() -> dict:
     global _config_cache
     if _config_cache is None:
-        _config_cache = _cargar_config()
+        valores, ok = _cargar_config()
+        # Solo se cachea una lectura real; si la BD falló se reintenta luego.
+        if ok:
+            _config_cache = valores
+        return dict(valores)
     return dict(_config_cache)
 
 
@@ -207,10 +277,16 @@ def columnas_tabla(tabla: str, entorno: str | None = None) -> set:
                     " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s",
                     (tabla,),
                 )
-                _columnas_cache[clave] = {f["COLUMN_NAME"] for f in cur.fetchall()}
+                cols = {f["COLUMN_NAME"] for f in cur.fetchall()}
+            # Solo se cachea un resultado real. Si la consulta falla (BD caída)
+            # o la tabla aún no existe, se reintenta en la próxima llamada en
+            # vez de dejar la caché envenenada con un conjunto vacío.
+            if cols:
+                _columnas_cache[clave] = cols
+            return cols
         except Exception as e:
             log_error(f"columnas_tabla({tabla!r}, {entorno!r})", e)
-            _columnas_cache[clave] = set()
+            return set()
     return _columnas_cache[clave]
 
 

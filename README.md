@@ -40,15 +40,16 @@ snw/
 │   ├── mensajeria.html        Editor de plantillas, vista previa estilo WhatsApp, envío
 │   ├── pacientes.html         Base de datos de pacientes + envío masivo (solo admin)
 │   ├── historial.html         Historial de envíos (batch + detalle por paciente)
-│   ├── estadisticas.html      Contador mensual de mensajes enviados y desgloses
-│   ├── css/                   Estilos (styles.css compartido, pacientes.css, estadisticas.css)
-│   └── js/                    app.js (mensajería), pacientes.js, historial.js, estadisticas.js
+│   ├── estadisticas.html      Contador mensual de mensajes, desgloses y costos WhatsApp (admin)
+│   ├── css/                   styles.css (compartido), layout.css (sidebar), pacientes.css, estadisticas.css
+│   ├── js/                    layout.js (sidebar/sesión, común), app.js, pacientes.js, historial.js, estadisticas.js
+│   └── vendor/bootstrap/     Bootstrap 5.3.3 (CSS + bundle JS) servido localmente
 ├── data/
 │   ├── plantillas.json        Plantillas de mensajes + metadata del template en Meta
 │   ├── usuarios.json          Credenciales (admin / usuario), clave en SHA-256
 │   └── sesiones.json          Tokens de sesión activos
 ├── sql/
-│   └── snw_base.sql           Crea la base snw_base, sus 6 tablas y siembra los 2
+│   └── snw_base.sql           Crea la base snw_base, sus 7 tablas y siembra los 2
 │                                números autorizados (idempotente: IF NOT EXISTS / INSERT IGNORE)
 ├── backups/                   Volcados manuales (mysqldump) antes de operaciones destructivas
 ├── .env                       Solo credenciales de la BD (DB_*). No versionado.
@@ -103,11 +104,11 @@ reiniciar por la caché).
 |---|---|
 | App / envío | `entorno` (`desarrollo`/`produccion`), `metodo_envio` (`simulado`/`api_oficial`), `numeros_prueba_dev`, `numeros_prueba_prod`, `intervalo_ms`, `url_base` |
 | Correo | `smtp_host`, `smtp_port`, `smtp_user`, `smtp_pass`, `smtp_tls`, `correo_emisor`, `correo_destino` |
-| WhatsApp / Meta | `wa_token`, `wa_phone_id`, `wa_business_account_id`, `wa_verify_token`, `wa_template_nombre`, `wa_template_lang`, `wa_webhook_path`, `wa_graph_version` (por defecto `v26.0`) |
+| WhatsApp / Meta | `wa_token`, `wa_phone_id`, `wa_business_account_id`, `wa_verify_token`, `wa_template_nombre`, `wa_template_lang`, `wa_webhook_path`, `wa_graph_version` (por defecto `v26.0`), `wa_moneda` (moneda de facturación de la cuenta, se autodetecta desde Meta al actualizar tarifas — por defecto `USD`) |
 
 ## Base de datos
 
-**Una sola base MySQL, `snw_base`**, con 6 tablas (ver `sql/snw_base.sql`):
+**Una sola base MySQL, `snw_base`**, con 7 tablas (ver `sql/snw_base.sql`):
 
 **`pacientes_dev` / `pacientes_prod`** — mismo esquema, una tabla por entorno
 
@@ -119,6 +120,7 @@ reiniciar por la caché).
 | `info_extra` | VARCHAR(255) | Dato libre para el comodín `{info_extra}` |
 | `estado` | ENUM | `pendiente` / `enviado` / `error` |
 | `whatsapp_opt_out` | TINYINT(1) | 1 si el paciente pidió no recibir más mensajes |
+| `respuesta_manual` | VARCHAR(12) | Corrección manual de la respuesta (NULL = sin corrección); gana sobre la señal automática |
 | `fecha_actualizacion` | DATETIME | Última actualización |
 
 **`envios`** — un registro por cada "Iniciar envío" (batch-level, sin nombres de pacientes)
@@ -138,7 +140,7 @@ reiniciar por la caché).
 | `envio_id`, `paciente_id` | Enlaza al batch y al paciente |
 | `nombre_paciente`, `numero_telefono`, `mensaje` | Snapshot al momento del envío |
 | `estado_envio` | `enviado` / `error` / `numero_invalido` |
-| `respuesta` | `pendiente` / `click` / `respondio` / `baja` |
+| `respuesta` | `pendiente` / `respondio` / `baja` |
 | `whatsapp_message_id`, `estado_whatsapp` | ID del mensaje en Meta y su estado de entrega (`sent`/`delivered`/`read`/`failed`) |
 | `descripcion_error` | Detalle del error (de Meta o del sistema) |
 
@@ -150,6 +152,16 @@ SMTP, credenciales y datos de Meta, URL pública, webhook). Lo único que NO est
 las credenciales de la propia base de datos (`.env`). El backend crea y siembra esta tabla
 en el primer arranque; a partir de ahí es la fuente de verdad y se edita con
 `PUT /api/configuracion`. Ver la lista de claves en **Configuración** más arriba.
+
+**`tarifas_whatsapp`** — rate card de Meta: el precio por mensaje (Marketing / Utility /
+Authentication / Service) para Chile, en la moneda de facturación de la cuenta y en USD.
+Cada rate card distinto se guarda una sola vez (`UNIQUE KEY uq_hash`, hash de las tarifas),
+con su `efectiva_desde` y el CSV original (`csv_texto`). Lo llena `POST /api/tarifas/actualizar`,
+que descarga la [página de precios de Meta](https://developers.facebook.com/docs/whatsapp/pricing/),
+baja los CSV de rate card, extrae la fila «Chile» y detecta si hay tarifas nuevas o futuras.
+Se usa en la sección **Costos** de Estadísticas (solo admin) para estimar el gasto por
+día / mes / año aplicando a cada mensaje enviado la tarifa vigente en su fecha según la
+categoría de su plantilla.
 
 Las tablas de pacientes comparten `log_envios`, así que el backend siempre ubica el
 "último log" de un paciente con un `LEFT JOIN` correlacionado por `paciente_id`.
@@ -185,7 +197,7 @@ Reglas del editor:
 |---|---|---|
 | GET | `/api/pacientes?q=&ambiente=` | Lista con respuesta y error del último `log_envios` |
 | PUT | `/api/pacientes/{id}?ambiente=` | Cambiar `estado` (`pendiente`/`enviado`/`error`) |
-| PUT | `/api/pacientes/{id}/respuesta?ambiente=` | Cambiar `respuesta` (`pendiente`/`click`/`respondio`/`baja`) |
+| PUT | `/api/pacientes/{id}/respuesta?ambiente=` | Ajuste manual de la respuesta (`pendiente`/`respondio`/`baja`); `baja` activa el opt-out |
 
 ### Plantillas
 
@@ -229,7 +241,12 @@ Reglas del editor:
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/estadisticas` | Resumen para la página de Estadísticas: mensajes `enviado` del mes, desglose (fallidos/inválidos/respuestas), últimos 6 meses y totales históricos |
+| GET | `/api/estadisticas` | Resumen para Estadísticas (**solo envíos de producción**): mensajes `enviado` del mes, desglose, totales, `pacientes_por_respuesta` (cuántos pacientes de producción respondieron / se dieron de baja / no han respondido) y `webhook` (cuándo llegó el último evento de Meta — sirve para detectar que el webhook dejó de recibir) |
+| GET | `/api/estadisticas/envios?granularidad=dia\|mes\|anio` | Mensajes enviados de producción agrupados por periodo, para el gráfico de barras (día = últimos 30, mes = últimos 12, año = últimos 6) |
+| GET | `/api/estadisticas/costos?granularidad=dia\|mes\|anio` | (solo admin) Costo estimado agrupado por periodo. **Solo cuenta los mensajes de plantilla iniciados por la empresa** (la plantilla tiene un template Meta configurado y categoría Marketing / Utility / Authentication), aplicando la tarifa de `tarifas_whatsapp` vigente en su fecha. Los envíos de texto libre (respuestas dentro de la ventana de 24 h) son gratuitos y se devuelven aparte en `excluidos` |
+| GET | `/api/tarifas` | (solo admin) Tarifas guardadas: `vigente`, `proxima` (tarifa futura ya publicada por Meta), `usd_vigente`, `historial`, moneda de la cuenta y fecha de la última descarga |
+| POST | `/api/tarifas/actualizar` | (solo admin) Descarga la página de precios de Meta y sus CSV, guarda los rate cards nuevos de Chile (`INSERT IGNORE` por hash), autodetecta la moneda de facturación (`GET {waba}?fields=currency` → `wa_moneda`) y devuelve si hubo cambio |
+| GET | `/api/tarifas/chile.csv` | (solo admin) Descarga el CSV original del rate card de Chile (prefiere la moneda de la cuenta, si no USD) |
 
 ### Configuración
 
@@ -273,26 +290,69 @@ leyendo los templates existentes en Meta (solo `GET`, nunca crea/edita) y:
   todavía una plantilla local asociada (el texto se extrae del componente `BODY`; los
   `{{1}}`, `{{2}}` quedan tal cual porque no se sabe a qué comodín corresponden).
 
-### Estados de WhatsApp
+### Ruteo del webhook
+
+Meta manda **todo** bajo `field: "messages"`; el backend distingue por el contenido de
+`value`:
+
+- `value.messages[]` → mensaje entrante del cliente → `_procesar_mensajes`
+- `value.statuses[]` → cambio de estado de entrega → `_procesar_estados`
+- `field: "message_template_status_update"` → aprobación/rechazo de un template (se ignora)
+
+El `wa_id` de Meta viene **sin `+`** (`56993921740`); la comparación con `pacientes.telefono`
+(`+56993921740`) ignora el `+` y los espacios.
+
+### Estados de entrega
 
 Al enviar se guarda el `whatsapp_message_id` en `log_envios`. Los cambios de estado
 (`sent` → `delivered` → `read` → `failed`) llegan por webhook y actualizan
 `estado_whatsapp` (y, si es `failed`, también `estado_envio` y `descripcion_error` con el
-motivo que reporta Meta).
+motivo que reporta Meta — se ve en la columna **Error** de Pacientes).
 
 ### Respuestas entrantes
 
-Cuando un cliente responde, el webhook busca al paciente por teléfono, marca su
-`estado = 'enviado'`, e inserta una fila en `log_envios` con `respuesta = 'respondio'`.
+Cuando un cliente escribe de vuelta, el webhook marca su `estado = 'enviado'` e inserta una
+fila en `log_envios` (`plantilla_clave = 'respuesta'`, `respuesta = 'respondio'`) con el
+texto del mensaje. En **Pacientes** aparece el badge "Respondió" con la fecha (y el texto
+al pasar el mouse); en **Estadísticas** se cuenta en "Respuestas de pacientes".
 
 ### Sistema de baja (opt-out)
 
-Si el mensaje entrante coincide con una palabra de baja (`no`, `stop`, `baja`,
-`cancelar`, `darme de baja`...), el webhook marca `whatsapp_opt_out = 1` en el paciente y
-`respuesta = 'baja'` en su último `log_envios`. Un paciente en esa condición queda
-**excluido de cualquier envío futuro** (se filtra en `POST /api/notificaciones/enviar` y
-se deshabilita su checkbox en Pacientes). La detección es por contenido del mensaje; Meta
-no entrega un evento explícito de baja o de bloqueo de cuenta.
+Si el mensaje entrante coincide con una expresión de baja, el webhook marca
+`whatsapp_opt_out = 1` en el paciente (en ambas tablas si el número está en las dos) y
+`respuesta = 'baja'` en su `log_envios`. Un paciente así queda **excluido de cualquier
+envío futuro** (se filtra en `POST /api/notificaciones/enviar` y se deshabilita su checkbox
+en Pacientes).
+
+La detección (`_es_baja` en `whatsapp_service.py`) reconoce: palabras sueltas (`baja`,
+`stop`, `cancelar`, `no`…), frases (`darme de baja`, `no quiero recibir`, `dejar de
+recibir`, `no molestar`, `borrame`…) y el botón nativo de Meta en templates de marketing
+(`Detener promociones` / `Stop promotions`, incluido su `payload`). Meta no manda un evento
+explícito de baja.
+
+**Ajuste manual:** en Pacientes, hacer click en el badge de la columna **Respuesta** abre
+un selector para marcar a mano `respondió` / `se dio de baja` / etc. — útil si el webhook
+no llegó o el paciente avisó por otro canal. `PUT /api/pacientes/{id}/respuesta` (solo
+admin) guarda la corrección en la columna `respuesta_manual` de la tabla de pacientes;
+`baja` activa el opt-out y las demás lo revierten. Esa corrección **gana** sobre la señal
+automática y se limpia sola si más tarde llega una respuesta real por el webhook.
+
+### Quién respondió / se dio de baja
+
+La "respuesta efectiva" de un paciente se calcula con esta prioridad:
+
+1. **opt-out activo** → `baja`
+2. **corrección manual** (`respuesta_manual`), si existe
+3. **señal automática 'pegajosa'**: la más fuerte que haya tenido alguna vez
+   (`baja` > `respondió`); un envío posterior no la borra
+4. `pendiente`
+
+Se calcula igual en:
+
+- **`GET /api/pacientes`** → campo `respuesta` (columna y filtros en la página Pacientes: *quiénes*).
+- **`GET /api/estadisticas`** → `pacientes_por_respuesta` con los totales por estado (panel
+  "Respuestas de pacientes" en Estadísticas: *cuántos*). Solo cuenta pacientes de producción
+  con `estado = 'enviado'` — los que aún están `pendiente` o `error` no entran.
 
 ### Idempotencia del webhook
 
@@ -336,7 +396,10 @@ propagar como error 500.
   "Enviar mensaje" → envía esa plantilla a **todos los pacientes elegibles** del ambiente
   elegido (`pacientes: null`).
 - **Pacientes** (`pacientes.html`, solo admin): selecciona pacientes puntuales con
-  checkboxes/filtros → elige plantilla → "Iniciar envío" (`pacientes: [ids]`).
+  checkboxes/filtros → elige plantilla → "Iniciar envío" (`pacientes: [ids]`). Los
+  seleccionados que no pueden recibir (dados de baja, teléfono inválido, no autorizados
+  en dev) se listan como **rechazados** con el motivo, y el intento **igual queda en el
+  Historial** (0 enviados, N inválidos) aunque no salga ningún mensaje.
 - Ambos flujos terminan en el mismo `POST /api/notificaciones/enviar` y comparten
   confirmación, job y progreso.
 - **Producción**: si quien envía **no** es administrador, se genera un correo de
@@ -366,16 +429,34 @@ en `data/sesiones.json` (token → `{rol, nombre}`, sin expiración automática)
 
 ## Pantallas
 
-- **Landing** (`index.html`): navegación según rol (Pacientes solo visible si eres admin).
+Todas las pantallas comparten una **barra lateral** (sidebar) construida por `js/layout.js`:
+marca el enlace activo, oculta *Base de datos* si no eres admin y gestiona el cierre de
+sesión. En escritorio se pliega a modo icono con el botón «‹‹» de la propia sidebar (la
+preferencia se recuerda en `localStorage`); en pantallas angostas se convierte en un cajón
+que abre la «hamburguesa» de la barra superior. El estilo usa **Bootstrap 5.3** (servido
+desde `frontend/vendor/bootstrap/`) más `css/layout.css`.
+
+- **Landing** (`index.html`): sin sesión muestra la portada; con sesión, la sidebar y el
+  contenido informativo (Pacientes solo visible si eres admin).
 - **Login** (`login.html`): formulario de acceso, redirige a Pacientes (admin) o
   Mensajería (usuario) según el rol.
 - **Mensajería** (`mensajeria.html`): editor de plantillas con vista previa estilo
   WhatsApp (formato `*negrita*`/`_cursiva_`/`~tachado~`), nombre y template de Meta
   permanentes, botón **Sincronizar** con Meta, y envío directo a todos los pendientes.
 - **Pacientes** (`pacientes.html`, solo admin): tabla con estado editable en línea,
-  columna **Error** (motivo del último fallo de envío), filtros por estado/respuesta,
-  selección múltiple y envío masivo integrado.
+  columna **Error** (motivo del último fallo), columna **Respuesta** con la señal de
+  WhatsApp (Respondió / Se dio de baja / Sin respuesta) y su fecha, filtros por
+  estado/respuesta, selección múltiple y envío masivo. Aquí se ve **quiénes** respondieron
+  o se dieron de baja.
 - **Historial** (`historial.html`): envíos de ambas bases (o filtrado por una), detalle
   individual por paciente con estado, respuesta y error de cada mensaje.
-- **Estadísticas** (`estadisticas.html`): mensajes enviados en el mes en curso, desglose
-  del mes (enviados/fallidos/inválidos/respuestas), últimos 6 meses y totales históricos.
+- **Estadísticas** (`estadisticas.html`, **solo cuenta envíos de producción**): mensajes
+  enviados en el mes con su desglose; panel **"Respuestas de pacientes por WhatsApp"** con
+  botones de filtro (Todos / No han respondido / Respondieron / Se dieron
+  de baja) sobre una **comparación en barras** de los pacientes de producción por estado;
+  un **gráfico de barras** de mensajes enviados conmutable por día / mes / año y los
+  totales históricos. Solo el admin ve además el panel **"Costos de mensajes de WhatsApp"**:
+  tarifas vigentes de Meta para Chile por categoría, aviso cuando hay un cambio o una
+  tarifa futura, descarga del CSV de Chile y el mismo gráfico de barras aplicado al costo
+  estimado por día / mes / año (solo mensajes de plantilla facturables; los de texto libre
+  de la ventana de 24 h se excluyen y se indican bajo el total).

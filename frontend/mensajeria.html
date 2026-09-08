@@ -65,7 +65,7 @@
           <textarea id="inpMensaje" rows="7" placeholder="Escribe aquí el mensaje que recibirán los pacientes..."></textarea>
           <div class="field__foot">
             <p class="field__hint">Usa los botones verdes para insertar datos automáticos en el texto.</p>
-            <span id="contador" class="char-count">0 / 4096</span>
+            <span id="contador" class="char-count">0 / 1024</span>
           </div>
         </div>
 
@@ -190,9 +190,11 @@
       <ul id="listaRechazadosConf" class="rechazados" hidden></ul>
 
       <div class="modal__actions">
-        <button type="button" class="btn btn--ghost" id="btnCancelarConf">Cancelar</button>
+        <div class="acciones-izq">
+          <button type="button" class="btn btn--ghost" id="btnCerrarConf">Cerrar</button>
+          <button type="button" class="btn btn--danger" id="btnCancelarConf">Cancelar</button>
+        </div>
         <div class="acciones-derecha">
-          <button type="button" class="btn btn--primary" id="btnCerrarConf" hidden>Cerrar</button>
           <button type="button" class="btn btn--primary" id="btnLanzarConf" disabled>Iniciar Env&iacute;o</button>
         </div>
       </div>

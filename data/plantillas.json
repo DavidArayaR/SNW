@@ -54,5 +54,19 @@
     "whatsapp_template_rejected_reason": "NONE",
     "whatsapp_template_error": null,
     "actualizada": 1788545013118
+  },
+  {
+    "id": 5,
+    "clave": "testinggg",
+    "nombre": "testinggg",
+    "texto": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nulla mi ipsum, vestibulum ac scelerisque ac, mattis non nisi. Cras at nulla eu nisi accumsan convallis sed ac purus. Sed tristique at est sed tristique. Quisque nec pretium lacus. Mauris scelerisque justo vitae dignissim tempus. Fusce tempor nibh vel nisi luctus finibus. In eget nunc varius, auctor lacus et, pellentesque ante.",
+    "whatsapp_template": "testinggg",
+    "whatsapp_template_lang": "es",
+    "whatsapp_template_categoria": "UTILITY",
+    "actualizada": 1788876374620,
+    "whatsapp_template_id": "28171064105878622",
+    "whatsapp_template_status": "APPROVED",
+    "whatsapp_template_error": null,
+    "whatsapp_template_rejected_reason": null
   }
 ]

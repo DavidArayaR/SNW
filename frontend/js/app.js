@@ -1,4 +1,5 @@
 const API_URL = "api/plantillas";
+const MAX_MENSAJE = 1024; // límite de caracteres del cuerpo del mensaje (límite de Meta)
 
 let plantillas = [];
 let activaId = null;
@@ -36,6 +37,7 @@ const tituloForm = $("#tituloFormulario");
 const estadoVacio = $("#estadoVacio");
 const btnEliminar = $("#btnEliminar");
 const btnGuardar = $("#btnGuardar");
+const btnEnviarActual = $("#btnEnviarActual");
 const modalEl = $("#modalEliminar");
 const toastEl = $("#toast");
 
@@ -193,8 +195,8 @@ function actualizarPreview() {
 
 function actualizarContador() {
   const largo = inpMensaje.value.length;
-  contadorEl.textContent = `${largo} / 4096`;
-  contadorEl.classList.toggle("char-count--limite", largo > 4096);
+  contadorEl.textContent = `${largo} / ${MAX_MENSAJE}`;
+  contadorEl.classList.toggle("char-count--limite", largo > MAX_MENSAJE);
 }
 
 function validarComodines() {
@@ -319,6 +321,7 @@ function abrir(id) {
   }
   renderEstadoMeta(p);
   btnEliminar.hidden = false;
+  if (btnEnviarActual) btnEnviarActual.hidden = false;
   inpNombre.classList.remove("invalido");
   inpMensaje.classList.remove("invalido");
   if (hayTemplateMeta) inpTemplate.classList.remove("invalido");
@@ -341,6 +344,7 @@ function modoNueva() {
   }
   if (bloqueEstadoMeta) bloqueEstadoMeta.hidden = true;
   btnEliminar.hidden = true;
+  if (btnEnviarActual) btnEnviarActual.hidden = true;
   inpNombre.classList.remove("invalido");
   inpMensaje.classList.remove("invalido");
   if (hayTemplateMeta) inpTemplate.classList.remove("invalido");
@@ -358,6 +362,7 @@ function modoVacia() {
   estadoVacio.style.display = "flex";
   tituloForm.textContent = "Plantillas";
   btnEliminar.hidden = true;
+  if (btnEnviarActual) btnEnviarActual.hidden = true;
   renderLista(buscadorEl.value);
 }
 
@@ -400,6 +405,13 @@ formEl.addEventListener("submit", async (e) => {
 
   if (!nombre) return toast("Falta el nombre.", "error");
   if (!texto) return toast("El mensaje está vacío.", "error");
+  if (inpMensaje.value.length > MAX_MENSAJE) {
+    inpMensaje.classList.add("invalido");
+    return toast(
+      `El mensaje tiene ${inpMensaje.value.length} caracteres y el máximo es ${MAX_MENSAJE}. Acórtalo para poder guardar.`,
+      "error"
+    );
+  }
   if (hayTemplateMeta && !/^[a-z0-9_]+$/.test(whatsapp_template)) {
     return toast("El nombre de la plantilla debe tener al menos una letra o número (se usa para el template de Meta).", "error");
   }
@@ -575,9 +587,11 @@ let hechosActualConf = 0;
 function setBloqueoEnvioConf(bloquear) {
   envioEnCursoConf = bloquear;
   bloquearInterfaz(bloquear);
-  // El botón Cancelar siempre queda habilitado durante el envío.
-  const btnCancelar = document.getElementById("btnCancelarConf");
-  if (btnCancelar) btnCancelar.disabled = false;
+  // Cancelar y Cerrar del modal de envío siempre quedan disponibles.
+  ["btnCancelarConf", "btnCerrarConf"].forEach((id) => {
+    const b = document.getElementById(id);
+    if (b) b.disabled = false;
+  });
 }
 
 // Sincronizar con el .env global: si el archivo cambió a produccion/desarrollo, actualizar la selección
@@ -667,10 +681,9 @@ function abrirModalConf() {
   $("#confProgreso").hidden = true;
   $("#listaRechazadosConf").innerHTML = "";
   $("#listaRechazadosConf").hidden = true;
-  $("#btnCerrarConf").hidden = true;
+  $("#btnCerrarConf").disabled = false;
   $("#btnLanzarConf").disabled = true;
   $("#btnLanzarConf").hidden = false;
-  $("#btnCancelarConf").hidden = false;
 
   modalConf.hidden = false;
 }
@@ -744,11 +757,6 @@ async function actualizarResumenConf() {
 
 $("#btnCancelarConf").addEventListener("click", () => {
   const enProgreso = envioEnCursoConf && jobIdActualConf;
-  if (envioEnCursoConf && !enProgreso) {
-    clearInterval(timerPollingConf);
-    modalConf.hidden = true;
-    return;
-  }
   if (enProgreso) {
     clearInterval(timerPollingConf);
     const restantes = Math.max(0, totalActualConf - hechosActualConf);
@@ -758,7 +766,11 @@ $("#btnCancelarConf").addEventListener("click", () => {
     $("#btnConfirmarCancelarConf").disabled = false;
     $("#modalCancelarConf").hidden = false;
     pausarJobConf(jobIdActualConf);
+    return;
   }
+  // Sin envío en curso: se comporta como cerrar.
+  clearInterval(timerPollingConf);
+  modalConf.hidden = true;
 });
 $("#btnNoCancelarConf").addEventListener("click", () => {
   $("#modalCancelarConf").hidden = true;
@@ -801,8 +813,9 @@ modalConf.addEventListener("click", (e) => {
   }
 });
 $("#btnCerrarConf").addEventListener("click", () => {
-  if (envioEnCursoConf) return;
   clearInterval(timerPollingConf);
+  // Si había un envío en curso, el trabajo sigue en el servidor (se ve en Historial).
+  if (envioEnCursoConf) setBloqueoEnvioConf(false);
   modalConf.hidden = true;
 });
 $("#btnCerrarRechazoConf").addEventListener("click", () => ($("#modalRechazadoConf").hidden = true));
@@ -886,7 +899,6 @@ $("#btnLanzarConf").addEventListener("click", async () => {
     toast(`Error al iniciar el envío: ${err.message}`, "error");
     setBloqueoEnvioConf(false);
     $("#btnLanzarConf").hidden = false;
-    $("#btnCancelarConf").hidden = false;
   }
 });
 
@@ -962,9 +974,9 @@ function seguirProgresoConf(jobId, total) {
 
 function finalizarConf(mensaje, esError) {
   $("#progresoTextoConf").textContent = mensaje;
-  $("#btnCerrarConf").hidden = false;
+  // Terminó el envío: ya no hay nada que iniciar ni que cancelar.
   $("#btnCerrarConf").disabled = false;
-  $("#btnCancelarConf").hidden = true;
+  $("#btnLanzarConf").hidden = true;
   setBloqueoEnvioConf(false);
   toast(mensaje, esError ? "error" : "ok");
 }

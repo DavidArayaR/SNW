@@ -1,9 +1,14 @@
-import json
+import asyncio
+import csv as _csv
 import hashlib
+import html as _html
+import io as _io
+import json
 import re
 import threading
 import time
 import unicodedata
+import urllib.parse
 import uuid
 from pathlib import Path
 
@@ -12,9 +17,10 @@ import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+import httpx
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -61,8 +67,7 @@ app = FastAPI(title="SNW - API de Notificaciones WhatsApp")
 app.include_router(whatsapp_router)
 
 
-# Crea/siembra la tabla `configuracion` al arrancar (migración transparente
-# desde .env la primera vez).
+# Crea/siembra la tabla `configuracion` al arrancar
 asegurar_tabla_config()
 
 
@@ -76,6 +81,9 @@ async def sin_cache(request, call_next):
         raise
     respuesta.headers["Cache-Control"] = "no-store"
     return respuesta
+
+
+MAX_TEXTO_PLANTILLA = 1024  # máximo de caracteres del cuerpo del mensaje (límite de Meta)
 
 
 class PlantillaIn(BaseModel):
@@ -243,6 +251,38 @@ def from_pacientes(ambiente: str) -> str:
     )
 
 
+def expr_respuesta_efectiva(alias: str = "p", tiene_opt_out: bool = True,
+                            tiene_manual: bool = False) -> str:
+    """Respuesta de un paciente para saber quién interactuó por WhatsApp.
+
+    Prioridad:
+      1. opt-out activo  -> 'baja'
+      2. corrección manual (columna respuesta_manual), si existe
+      3. señal automática 'pegajosa': la más fuerte que haya tenido alguna vez
+         (baja > respondió), ignorando los ajustes manuales antiguos
+      4. 'pendiente'
+    Se usa igual en /api/pacientes y en /api/estadisticas."""
+    baja_opt = f"WHEN {alias}.whatsapp_opt_out = 1 THEN 'baja' " if tiene_opt_out else ""
+    manual = (
+        f"WHEN {alias}.respuesta_manual IS NOT NULL AND {alias}.respuesta_manual <> '' "
+        f"THEN {alias}.respuesta_manual "
+        if tiene_manual else ""
+    )
+    ex = lambda r: (
+        f"WHEN EXISTS(SELECT 1 FROM log_envios le WHERE le.paciente_id = {alias}.id"
+        f" AND COALESCE(le.plantilla_clave, '') <> 'ajuste_manual'"
+        f" AND le.respuesta = '{r}') THEN '{r}' "
+    )
+    return (
+        "(CASE "
+        + baja_opt
+        + manual
+        + ex("baja")
+        + ex("respondio")
+        + "ELSE 'pendiente' END)"
+    )
+
+
 def expr_select_pacientes(ambiente: str) -> str:
     """Genera las expresiones SELECT de la tabla pacientes adaptándose a las
     columnas reales existentes (soporta bases con esquema mínimo)."""
@@ -260,7 +300,11 @@ def expr_select_pacientes(ambiente: str) -> str:
         exprs.append("p.fecha_actualizacion")
     else:
         exprs.append("NULL AS fecha_actualizacion")
-    exprs.append("COALESCE(l.respuesta, 'pendiente') AS respuesta")
+    exprs.append(
+        expr_respuesta_efectiva("p", "whatsapp_opt_out" in cols, "respuesta_manual" in cols)
+        + " AS respuesta"
+    )
+    exprs.append("COALESCE(l.respuesta, 'pendiente') AS respuesta_ultimo_envio")
     if "whatsapp_opt_out" in cols:
         exprs.append("p.whatsapp_opt_out")
     else:
@@ -268,6 +312,16 @@ def expr_select_pacientes(ambiente: str) -> str:
     exprs.append("l.id AS ultimo_log_id")
     exprs.append("l.estado_envio AS ultimo_estado_envio")
     exprs.append("l.descripcion_error AS ultimo_error")
+    # Fecha y texto del último mensaje que ESCRIBIÓ el paciente (filas de log
+    # con plantilla_clave = 'respuesta', que inserta el webhook).
+    exprs.append(
+        "(SELECT le.fecha_hora FROM log_envios le WHERE le.paciente_id = p.id"
+        "  AND le.plantilla_clave = 'respuesta' ORDER BY le.id DESC LIMIT 1) AS ultima_respuesta_fecha"
+    )
+    exprs.append(
+        "(SELECT le.mensaje FROM log_envios le WHERE le.paciente_id = p.id"
+        "  AND le.plantilla_clave = 'respuesta' ORDER BY le.id DESC LIMIT 1) AS ultimo_mensaje_recibido"
+    )
     return ", ".join(exprs)
 
 
@@ -293,6 +347,8 @@ def listar_pacientes(q: str | None = Query(None), ambiente: str = Query("producc
     for f in filas:
         fecha = f.pop("fecha_actualizacion", None)
         f["actualizado"] = fecha.strftime("%d-%m-%Y %H:%M") if fecha else "—"
+        fr = f.get("ultima_respuesta_fecha")
+        f["ultima_respuesta_fecha"] = fr.strftime("%d-%m-%Y %H:%M") if fr else None
     return filas
 
 
@@ -331,18 +387,56 @@ def actualizar_paciente(paciente_id: int, body: EstadoPacienteIn,
 @app.put("/api/pacientes/{paciente_id}/respuesta")
 def actualizar_respuesta_paciente(paciente_id: int, body: RespuestaIn,
                                   ambiente: str = Query("produccion"),
-                                  sesion: dict = Depends(sesion_actual)):
-    if body.respuesta not in ("pendiente", "click", "respondio", "baja"):
-        raise HTTPException(400, detail="Respuesta inválida. Use: pendiente, click, respondio, baja")
+                                  sesion: dict = Depends(solo_admin)):
+    """Ajuste manual de la respuesta de un paciente (fallback si el webhook no
+    llegó, o si el paciente avisó por otro canal). 'baja' activa el opt-out."""
+    if body.respuesta not in ("pendiente", "respondio", "baja"):
+        raise HTTPException(400, detail="Respuesta inválida. Use: pendiente, respondio, baja")
+    t = tabla_pacientes(ambiente)
+    tiene_manual = columna_existe(t, "respuesta_manual", ambiente)
     with conectar(ambiente) as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT id FROM {t} WHERE id = %s", (paciente_id,))
+        if not cur.fetchone():
+            raise HTTPException(404, detail="Paciente no encontrado")
+
         cur.execute(
-            "UPDATE log_envios SET respuesta = %s WHERE id = ("
-            "  SELECT l.id FROM log_envios l WHERE l.paciente_id = %s ORDER BY l.id DESC LIMIT 1"
-            ")",
-            (body.respuesta, paciente_id),
+            f"UPDATE {t} SET whatsapp_opt_out = %s WHERE id = %s",
+            (1 if body.respuesta == "baja" else 0, paciente_id),
         )
+        # La corrección manual gana sobre la señal automática 'pegajosa'.
+        if tiene_manual:
+            cur.execute(
+                f"UPDATE {t} SET respuesta_manual = %s WHERE id = %s",
+                (body.respuesta, paciente_id),
+            )
+        # Deshace un 'baja' que el webhook hubiera marcado en el último envío.
+        if body.respuesta == "pendiente":
+            cur.execute(
+                "UPDATE log_envios SET respuesta = 'pendiente'"
+                " WHERE paciente_id = %s AND respuesta = 'baja'",
+                (paciente_id,),
+            )
+        elif not tiene_manual:
+            # Esquema antiguo sin columna: se conserva el mecanismo por log.
+            cur.execute(
+                "INSERT INTO log_envios (paciente_id, nombre_paciente, numero_telefono,"
+                " mensaje, plantilla_clave, estado_envio, respuesta)"
+                f" SELECT id, nombre, telefono, %s, 'ajuste_manual', 'enviado', %s"
+                f" FROM {t} WHERE id = %s",
+                (f"[Ajuste manual · {sesion.get('nombre', 'admin')}]", body.respuesta, paciente_id),
+            )
         conn.commit()
-    return {"ok": True}
+
+        cur.execute(
+            "SELECT " + expr_select_pacientes(ambiente) + from_pacientes(ambiente) + " WHERE p.id = %s",
+            (paciente_id,),
+        )
+        fila = cur.fetchone()
+    fecha = fila.pop("fecha_actualizacion", None)
+    fila["actualizado"] = fecha.strftime("%d-%m-%Y %H:%M") if fecha else "—"
+    fr = fila.get("ultima_respuesta_fecha")
+    fila["ultima_respuesta_fecha"] = fr.strftime("%d-%m-%Y %H:%M") if fr else None
+    return fila
 
 
 def _registrar_template_meta(p: dict, nombre_anterior: str | None = None,
@@ -560,6 +654,8 @@ def sincronizar_plantillas_meta(sesion: dict = Depends(sesion_actual)):
 def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(sesion_actual)):
     if not body.nombre.strip() or not body.texto.strip():
         raise HTTPException(400, detail="Nombre y mensaje son obligatorios")
+    if len(body.texto) > MAX_TEXTO_PLANTILLA:
+        raise HTTPException(400, detail=f"El mensaje supera el limite de {MAX_TEXTO_PLANTILLA} caracteres")
 
     plantillas = leer_plantillas()
     clave = slug(body.clave or body.nombre)
@@ -589,6 +685,8 @@ def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(sesion_actual)):
 def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = Depends(sesion_actual)):
     if not body.nombre.strip() or not body.texto.strip():
         raise HTTPException(400, detail="Nombre y mensaje son obligatorios")
+    if len(body.texto) > MAX_TEXTO_PLANTILLA:
+        raise HTTPException(400, detail=f"El mensaje supera el limite de {MAX_TEXTO_PLANTILLA} caracteres")
 
     plantillas = leer_plantillas()
     for p in plantillas:
@@ -1097,11 +1195,10 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         base_select = "SELECT " + expr_select_pacientes(amb) + from_pacientes(amb)
 
         if body.pacientes:
+            # Se traen TODOS los seleccionados (incluidos los de baja) para poder
+            # informar al usuario por qué se descartó cada uno.
             placeholders = ", ".join("%s" for _ in body.pacientes)
-            where = f" WHERE p.id IN ({placeholders})"
-            if tiene_opt_out:
-                where += " AND p.whatsapp_opt_out = 0"
-            cur.execute(base_select + where, tuple(body.pacientes))
+            cur.execute(base_select + f" WHERE p.id IN ({placeholders})", tuple(body.pacientes))
         else:
             if amb == "desarrollo":
                 # En desarrollo se puede reenviar sin importar el estado del paciente;
@@ -1150,6 +1247,8 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
             actualizar_telefono(p["id"], telefono, amb)
 
         if amb == "desarrollo" and telefono not in autorizados:
+            rechazados.append({"id": p["id"], "nombre": nombre_completo, "telefono": telefono,
+                               "motivo": f"Número no autorizado en base {amb}"})
             registrar_historial(p["id"], nombre_completo, telefono, plantilla["clave"],
                                 "", "error", f"Número no autorizado en base {amb}",
                                 ambiente=amb)
@@ -1168,7 +1267,20 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         })
 
     if not destinatarios:
-        return {"iniciado": False, "total": 0, "rechazados": rechazados, "requiere_confirmacion": False}
+        # Aunque no salga ningún mensaje, si hubo rechazados se deja constancia
+        # del intento en el historial (0 enviados, N inválidos).
+        envio_id = None
+        if rechazados:
+            envio_id = crear_envio_batch(nombre_base(amb), plantilla["clave"],
+                                         plantilla["nombre"], len(rechazados), amb)
+            if envio_id:
+                actualizar_envio_batch(envio_id, amb, invalidos=len(rechazados))
+                for r in rechazados:
+                    registrar_historial(r.get("id"), r.get("nombre"), r.get("telefono"),
+                                        plantilla["clave"], "", "numero_invalido",
+                                        r.get("motivo"), ambiente=amb, envio_id=envio_id)
+        return {"iniciado": False, "total": 0, "rechazados": rechazados,
+                "requiere_confirmacion": False, "envio_id": envio_id}
 
     # En producción se requiere confirmación por correo del supervisor,
     # salvo que el usuario sea administrador (envía directo sin correo).
@@ -1458,9 +1570,19 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
 def detalle_historial(envio_id: int, ambiente: str = Query("produccion"),
                       sesion: dict = Depends(sesion_actual)):
     # log_envios es única para todo el sistema; el detalle se busca por envio_id.
-    sql = ("SELECT id, nombre_paciente, numero_telefono, plantilla_clave,"
-           " estado_envio, respuesta, descripcion_error, fecha_hora, mensaje FROM log_envios"
-           " WHERE envio_id = %s ORDER BY id")
+    # Para 'respuesta' se usa la señal EFECTIVA actual del paciente (respondió /
+    # se dio de baja / sin respuesta), no el valor congelado en la fila de envío.
+    t = tabla_pacientes(ambiente)
+    tiene_opt = columna_existe(t, "whatsapp_opt_out", ambiente)
+    re_expr = expr_respuesta_efectiva("pac", tiene_opt, columna_existe(t, "respuesta_manual", ambiente))
+    sql = (
+        "SELECT le.id, le.nombre_paciente, le.numero_telefono, le.estado_envio,"
+        " le.descripcion_error, le.fecha_hora,"
+        f" (CASE WHEN pac.id IS NOT NULL THEN {re_expr}"
+        "        ELSE COALESCE(le.respuesta, 'pendiente') END) AS respuesta"
+        f" FROM log_envios le LEFT JOIN {t} pac ON pac.id = le.paciente_id"
+        " WHERE le.envio_id = %s ORDER BY le.id"
+    )
     with conectar(ambiente) as conn, conn.cursor() as cur:
         cur.execute(sql, (envio_id,))
         filas = cur.fetchall()
@@ -1473,17 +1595,45 @@ def detalle_historial(envio_id: int, ambiente: str = Query("produccion"),
 def actualizar_respuesta(registro_id: int, body: EstadoPacienteIn,
                          ambiente: str = Query("produccion"),
                          sesion: dict = Depends(sesion_actual)):
-    if body.estado not in ("pendiente", "click", "respondio", "baja"):
-        raise HTTPException(400, detail="Respuesta inválida. Use: pendiente, click, respondio, baja")
+    if body.estado not in ("pendiente", "respondio", "baja"):
+        raise HTTPException(400, detail="Respuesta inválida. Use: pendiente, respondio, baja")
     with conectar(ambiente) as conn, conn.cursor() as cur:
         cur.execute("UPDATE log_envios SET respuesta = %s WHERE id = %s", (body.estado, registro_id))
         conn.commit()
     return {"ok": True}
 
 
+def _pacientes_por_respuesta(ambiente: str) -> dict:
+    """Cuántos pacientes hay en cada estado de respuesta de WhatsApp
+    (pendiente / respondió / baja), usando la señal 'pegajosa'.
+
+    Solo se cuentan los pacientes a los que YA se les envió un mensaje
+    (estado = 'enviado'); los pendientes y los que fallaron quedan fuera."""
+    t = tabla_pacientes(ambiente)
+    tiene_opt = columna_existe(t, "whatsapp_opt_out", ambiente)
+    re_expr = expr_respuesta_efectiva("p", tiene_opt, columna_existe(t, "respuesta_manual", ambiente))
+    where = " WHERE p.estado = 'enviado'" if columna_existe(t, "estado", ambiente) else ""
+    base = {"pendiente": 0, "respondio": 0, "baja": 0}
+    try:
+        with conectar(ambiente) as conn, conn.cursor() as cur:
+            cur.execute(f"SELECT {re_expr} AS r, COUNT(*) AS n FROM {t} p{where} GROUP BY r")
+            for row in cur.fetchall():
+                if row["r"] in base:
+                    base[row["r"]] = int(row["n"] or 0)
+    except Exception as e:
+        log_error(f"_pacientes_por_respuesta({ambiente})", e)
+    base["total"] = sum(base.values())
+    return base
+
+
+# En las estadísticas SOLO cuentan los envíos de producción, no los de
+# desarrollo/pruebas. Cada fila de log_envios se ata a su lote (envios.base_datos).
+_SOLO_PROD = "envio_id IN (SELECT id FROM envios WHERE base_datos = 'pacientes_prod')"
+
+
 @app.get("/api/estadisticas")
 def estadisticas(sesion: dict = Depends(sesion_actual)):
-    """Resumen de envíos para la página de Estadísticas."""
+    """Resumen de envíos para la página de Estadísticas (solo producción)."""
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT"
@@ -1491,26 +1641,27 @@ def estadisticas(sesion: dict = Depends(sesion_actual)):
             "  SUM(estado_envio = 'error') AS fallidos,"
             "  SUM(estado_envio = 'numero_invalido') AS invalidos,"
             "  SUM(respuesta = 'respondio') AS respondio,"
-            "  SUM(respuesta = 'click') AS click,"
             "  SUM(respuesta = 'baja') AS baja"
             " FROM log_envios"
             " WHERE fecha_hora >= DATE_FORMAT(CURDATE(), '%Y-%m-01')"
+            f"   AND {_SOLO_PROD}"
         )
         mes = cur.fetchone() or {}
 
-        cur.execute(
-            "SELECT DATE_FORMAT(fecha_hora, '%Y-%m') AS mes, COUNT(*) AS enviados"
-            " FROM log_envios"
-            " WHERE estado_envio = 'enviado'"
-            "   AND fecha_hora >= DATE_FORMAT(CURDATE() - INTERVAL 5 MONTH, '%Y-%m-01')"
-            " GROUP BY mes ORDER BY mes"
-        )
-        por_mes = [{"mes": r["mes"], "enviados": int(r["enviados"] or 0)} for r in cur.fetchall()]
-
-        cur.execute("SELECT COUNT(*) AS n FROM log_envios WHERE estado_envio = 'enviado'")
+        cur.execute(f"SELECT COUNT(*) AS n FROM log_envios WHERE estado_envio = 'enviado' AND {_SOLO_PROD}")
         total_enviados = int((cur.fetchone() or {}).get("n", 0))
-        cur.execute("SELECT COUNT(*) AS n FROM envios")
+        cur.execute("SELECT COUNT(*) AS n FROM envios WHERE base_datos = 'pacientes_prod'")
         total_batches = int((cur.fetchone() or {}).get("n", 0))
+
+        # Salud del webhook: cuándo llegó el último evento de Meta.
+        cur.execute("SELECT COUNT(*) AS n, MAX(recibido) AS ult FROM whatsapp_eventos")
+        w = cur.fetchone() or {}
+        ult = w.get("ult")
+        webhook = {
+            "total_eventos": int(w.get("n") or 0),
+            "ultimo_evento": ult.strftime("%d-%m-%Y %H:%M") if ult else None,
+            "hace_horas": round((time.time() - ult.timestamp()) / 3600, 1) if ult else None,
+        }
 
     enviados_mes = int(mes.get("enviados") or 0)
     return {
@@ -1519,11 +1670,391 @@ def estadisticas(sesion: dict = Depends(sesion_actual)):
         "fallidos_mes": int(mes.get("fallidos") or 0),
         "invalidos_mes": int(mes.get("invalidos") or 0),
         "respondio_mes": int(mes.get("respondio") or 0),
-        "click_mes": int(mes.get("click") or 0),
         "baja_mes": int(mes.get("baja") or 0),
         "total_enviados_historico": total_enviados,
         "total_batches": total_batches,
-        "por_mes": por_mes,
+        "pacientes_por_respuesta": _pacientes_por_respuesta("produccion"),
+        "webhook": webhook,
+    }
+
+
+@app.get("/api/estadisticas/envios")
+def estadisticas_envios(granularidad: str = Query("mes"), sesion: dict = Depends(sesion_actual)):
+    """Mensajes enviados agrupados por periodo (para el gráfico de barras)."""
+    if granularidad not in ("dia", "mes", "anio"):
+        raise HTTPException(400, detail="granularidad debe ser dia, mes o anio")
+    # (formato de DATE_FORMAT, ventana hacia atrás)
+    # Sin parámetros en execute(): PyMySQL no pasa por mogrify, así que '%' va simple.
+    cfg = {
+        "dia": ("%Y-%m-%d", "CURDATE() - INTERVAL 29 DAY"),
+        "mes": ("%Y-%m", "DATE_FORMAT(CURDATE() - INTERVAL 11 MONTH, '%Y-%m-01')"),
+        "anio": ("%Y", "DATE_FORMAT(CURDATE() - INTERVAL 5 YEAR, '%Y-01-01')"),
+    }[granularidad]
+    fmt, desde = cfg
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"SELECT DATE_FORMAT(fecha_hora, '{fmt}') AS periodo, COUNT(*) AS enviados"
+            " FROM log_envios"
+            " WHERE estado_envio = 'enviado'"
+            f"   AND fecha_hora >= {desde}"
+            f"   AND {_SOLO_PROD}"
+            " GROUP BY periodo ORDER BY periodo"
+        )
+        filas = [{"periodo": r["periodo"], "enviados": int(r["enviados"] or 0)}
+                 for r in cur.fetchall()]
+    return {
+        "granularidad": granularidad,
+        "filas": filas,
+        "total": sum(f["enviados"] for f in filas),
+    }
+
+
+# ===========================================================================
+#  Tarifas de WhatsApp (rate card de Meta) y costos de los envíos  — SOLO ADMIN
+# ===========================================================================
+
+PRICING_PAGE = "https://developers.facebook.com/docs/whatsapp/pricing/"
+_MESES_EN = {m: i for i, m in enumerate(
+    ["january", "february", "march", "april", "may", "june", "july",
+     "august", "september", "october", "november", "december"], 1)}
+_CATS = ("marketing", "utility", "authentication", "service")
+
+
+def _parse_fecha_efectiva(txt: str) -> str | None:
+    m = re.search(r"effective\s+([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})", txt or "", re.I)
+    if not m:
+        return None
+    mes = _MESES_EN.get(m.group(1).lower())
+    if not mes:
+        return None
+    try:
+        return f"{int(m.group(3)):04d}-{mes:02d}-{int(m.group(2)):02d}"
+    except ValueError:
+        return None
+
+
+def _extraer_chile_csv(texto: str) -> dict | None:
+    """Del CSV de un rate card de Meta saca la fila de Chile (tarifas por
+    categoría, en USD) y la fecha efectiva."""
+    filas = list(_csv.reader(_io.StringIO(texto)))
+    if not filas:
+        return None
+    efectiva = _parse_fecha_efectiva(filas[0][0] if filas[0] else "")
+
+    idx_h = None
+    for i, f in enumerate(filas):
+        if f and f[0].strip().lower() in ("market", "country") and "marketing" in ",".join(f).lower():
+            idx_h = i
+            break
+    if idx_h is None:
+        return None
+    header = [c.strip().lower() for c in filas[idx_h]]
+
+    def col(nombre):
+        return next((j for j, h in enumerate(header) if nombre in h), None)
+
+    js = {c: col(c) for c in _CATS}
+    for f in filas[idx_h + 1:]:
+        if not f or f[0].strip().lower() != "chile":
+            continue
+
+        def val(j):
+            if j is None or j >= len(f):
+                return None
+            v = (f[j] or "").strip().lower()
+            if v in ("", "n/a", "na", "-", "free"):
+                return 0.0 if v == "free" else None
+            try:
+                return float(v)
+            except ValueError:
+                return None
+
+        rates = {c: val(js[c]) for c in _CATS}
+        return {
+            "moneda": (f[1].strip() if len(f) > 1 else "USD") or "USD",
+            "efectiva_desde": efectiva,
+            **rates,
+        }
+    return None
+
+
+async def _bajar_csvs(urls: list[str]) -> list[str]:
+    sem = asyncio.Semaphore(16)
+    out: list[str] = []
+    async with httpx.AsyncClient(timeout=15, follow_redirects=True,
+                                 headers={"User-Agent": "Mozilla/5.0"}) as c:
+        async def uno(u):
+            async with sem:
+                try:
+                    r = await c.get(u)
+                    if r.status_code == 200 and "chile" in r.text.lower():
+                        out.append(r.text)
+                except Exception:
+                    pass
+        await asyncio.gather(*[uno(u) for u in urls])
+    return out
+
+
+def _fetch_tarifas_meta() -> list[dict]:
+    """Descarga la página de precios de Meta, baja sus CSV de rate card y
+    devuelve las tarifas de Chile encontradas (una por rate card distinto)."""
+    with httpx.Client(timeout=25, follow_redirects=True,
+                      headers={"User-Agent": "Mozilla/5.0"}) as c:
+        pg = c.get(PRICING_PAGE).text
+
+    reales, vistos = [], set()
+    for L in re.findall(r'href="(https://l\.facebook\.com/l\.php\?u=[^"]+\.csv[^"]*)"', pg):
+        m = re.search(r'[?&]u=([^&]+)', _html.unescape(L))
+        if not m:
+            continue
+        u = urllib.parse.unquote(m.group(1))
+        if u.split("?")[0] in vistos:
+            continue
+        vistos.add(u.split("?")[0])
+        reales.append(u)
+    if not reales:
+        return []
+
+    textos = asyncio.run(_bajar_csvs(reales))
+    resultados, hashes = [], set()
+    for txt in textos:
+        ch = _extraer_chile_csv(txt)
+        if not ch or not any(ch.get(c) for c in ("marketing", "utility", "authentication")):
+            continue
+        h = hashlib.sha256(
+            "|".join(f"{ch.get(c)}" for c in _CATS).encode("utf-8")
+        ).hexdigest()
+        if h in hashes:
+            continue
+        hashes.add(h)
+        resultados.append({**ch, "hash": h, "csv_texto": txt})
+    return resultados
+
+
+def _moneda_cuenta() -> str:
+    """Moneda de facturación de la cuenta de Meta (CLP, USD, ...)."""
+    return (config_get("wa_moneda", "USD") or "USD").strip().upper() or "USD"
+
+
+def _tarifas_guardadas(moneda: str | None = None) -> list[dict]:
+    # Los '%' de DATE_FORMAT se escapan como '%%' porque PyMySQL siempre pasa
+    # la consulta por mogrify cuando se le entregan parámetros.
+    sql = (
+        "SELECT id, pais, moneda, marketing, utility, authentication, service,"
+        " DATE_FORMAT(efectiva_desde, '%%Y-%%m-%%d') AS efectiva_desde,"
+        " DATE_FORMAT(descargada, '%%d-%%m-%%Y %%H:%%i') AS descargada"
+        " FROM tarifas_whatsapp"
+    )
+    args: list = []
+    if moneda:
+        sql += " WHERE moneda = %s"
+        args = [moneda]
+    sql += " ORDER BY (efectiva_desde IS NULL), efectiva_desde DESC, id DESC"
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(sql, args)
+        filas = cur.fetchall()
+    for f in filas:
+        for c in _CATS:
+            f[c] = float(f[c]) if f[c] is not None else None
+    return filas
+
+
+def _tarifa_para_fecha(tarifas: list[dict], fecha_iso: str | None) -> dict | None:
+    """Tarifa vigente en una fecha 'YYYY-MM-...' (o la más reciente si no hay match)."""
+    if not tarifas:
+        return None
+    conf = [t for t in tarifas if t.get("efectiva_desde")]
+    if fecha_iso:
+        aplicables = [t for t in conf if t["efectiva_desde"] <= fecha_iso]
+        if aplicables:
+            return max(aplicables, key=lambda t: t["efectiva_desde"])
+    if conf:
+        return min(conf, key=lambda t: t["efectiva_desde"])
+    return tarifas[0]
+
+
+def _tarifa_vigente(tarifas: list[dict]) -> dict | None:
+    return _tarifa_para_fecha(tarifas, time.strftime("%Y-%m-%d"))
+
+
+def _tarifa_proxima(tarifas: list[dict]) -> dict | None:
+    hoy = time.strftime("%Y-%m-%d")
+    futuras = [t for t in tarifas if t.get("efectiva_desde") and t["efectiva_desde"] > hoy]
+    return min(futuras, key=lambda t: t["efectiva_desde"]) if futuras else None
+
+
+def _obtener_moneda_meta() -> str | None:
+    """Consulta a Meta la moneda de facturación de la WABA (ej. CLP, USD)."""
+    from whatsapp_service import graph_url
+    s = WhatsAppService()
+    if not s.waba_id or not s.token:
+        return None
+    try:
+        with httpx.Client(timeout=15) as c:
+            r = c.get(f"{graph_url()}/{s.waba_id}",
+                      params={"fields": "currency"},
+                      headers={"Authorization": f"Bearer {s.token}"})
+        if r.status_code == 200:
+            return (r.json().get("currency") or "").strip().upper() or None
+    except Exception as e:
+        log_error("_obtener_moneda_meta", e)
+    return None
+
+
+@app.get("/api/tarifas")
+def obtener_tarifas(sesion: dict = Depends(solo_admin)):
+    moneda = _moneda_cuenta()
+    tarifas = _tarifas_guardadas(moneda) or _tarifas_guardadas("USD")
+    todas = _tarifas_guardadas()
+    return {
+        "moneda": moneda,
+        "vigente": _tarifa_vigente(tarifas),
+        "proxima": _tarifa_proxima(tarifas),
+        "usd_vigente": _tarifa_vigente(_tarifas_guardadas("USD")),
+        "historial": tarifas,
+        "ultima_descarga": todas[0]["descargada"] if todas else None,
+        "nunca_descargada": not todas,
+    }
+
+
+@app.post("/api/tarifas/actualizar")
+def actualizar_tarifas(sesion: dict = Depends(solo_admin)):
+    try:
+        encontradas = _fetch_tarifas_meta()
+    except Exception as e:
+        log_error("actualizar_tarifas: no se pudo descargar de Meta", e)
+        raise HTTPException(502, detail=f"No se pudo descargar la página de precios de Meta: {e}")
+    if not encontradas:
+        raise HTTPException(502, detail="No se encontró ningún rate card con la fila de Chile en la página de Meta.")
+
+    moneda_meta = _obtener_moneda_meta()
+    if moneda_meta:
+        config_set({"wa_moneda": moneda_meta})
+
+    nuevas = 0
+    with conectar() as conn, conn.cursor() as cur:
+        for t in encontradas:
+            cur.execute(
+                "INSERT IGNORE INTO tarifas_whatsapp"
+                " (pais, moneda, marketing, utility, authentication, service, efectiva_desde, hash, fuente, csv_texto)"
+                " VALUES ('Chile', %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (t["moneda"], t.get("marketing"), t.get("utility"), t.get("authentication"),
+                 t.get("service"), t.get("efectiva_desde"), t["hash"], PRICING_PAGE, t["csv_texto"]),
+            )
+            nuevas += cur.rowcount
+        conn.commit()
+
+    moneda = _moneda_cuenta()
+    tarifas = _tarifas_guardadas(moneda) or _tarifas_guardadas("USD")
+    return {
+        "ok": True,
+        "moneda": moneda,
+        "encontradas": len(encontradas),
+        "nuevas": nuevas,
+        "cambio": nuevas > 0,
+        "vigente": _tarifa_vigente(tarifas),
+        "proxima": _tarifa_proxima(tarifas),
+    }
+
+
+@app.get("/api/tarifas/chile.csv")
+def descargar_tarifa_csv(sesion: dict = Depends(solo_admin)):
+    moneda = _moneda_cuenta()
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT csv_texto FROM tarifas_whatsapp WHERE moneda IN (%s, 'USD')"
+            " ORDER BY (moneda <> %s), (efectiva_desde IS NULL), efectiva_desde DESC, id DESC LIMIT 1",
+            (moneda, moneda),
+        )
+        fila = cur.fetchone()
+    if not fila or not fila.get("csv_texto"):
+        raise HTTPException(404, detail="Todavía no se ha descargado ningún rate card.")
+    return PlainTextResponse(
+        fila["csv_texto"], media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="whatsapp_tarifas_chile.csv"'},
+    )
+
+
+_CATS_FACTURABLES = ("marketing", "utility", "authentication")
+
+
+def _categorias_por_clave() -> dict:
+    """clave de plantilla -> categoría facturable de Meta.
+
+    SOLO incluye plantillas que se envían como *template* aprobado (tienen un
+    `whatsapp_template` configurado) y con categoría facturable. Los mensajes de
+    texto libre —las respuestas dentro de la ventana de 24 h de atención al
+    cliente— son gratuitos desde nov-2024, así que no entran en el costo.
+    """
+    m = {}
+    for p in leer_plantillas():
+        cat = (p.get("whatsapp_template_categoria") or "").strip().lower()
+        tiene_template = bool((p.get("whatsapp_template") or "").strip())
+        if p.get("clave") and tiene_template and cat in _CATS_FACTURABLES:
+            m[p["clave"]] = cat
+    return m
+
+
+@app.get("/api/estadisticas/costos")
+def estadisticas_costos(granularidad: str = Query("mes"), sesion: dict = Depends(solo_admin)):
+    if granularidad not in ("dia", "mes", "anio"):
+        raise HTTPException(400, detail="granularidad debe ser dia, mes o anio")
+    fmt = {"dia": "%Y-%m-%d", "mes": "%Y-%m", "anio": "%Y"}[granularidad]
+
+    moneda = _moneda_cuenta()
+    tarifas = _tarifas_guardadas(moneda) or _tarifas_guardadas("USD")
+    cats_clave = _categorias_por_clave()
+
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"SELECT DATE_FORMAT(fecha_hora, '{fmt}') AS periodo, plantilla_clave AS clave, COUNT(*) AS n"
+            " FROM log_envios"
+            " WHERE estado_envio = 'enviado'"
+            "   AND plantilla_clave NOT IN ('respuesta', 'ajuste_manual')"
+            f"   AND {_SOLO_PROD}"
+            " GROUP BY periodo, plantilla_clave ORDER BY periodo"
+        )
+        crudo = cur.fetchall()
+
+    periodos: dict[str, dict] = {}
+    tot = {"mensajes": 0, "costo": 0.0, "por_categoria": {c: 0 for c in _CATS}}
+    excluidos = 0  # mensajes de texto libre / ventana 24 h (no facturables)
+    for r in crudo:
+        per = r["periodo"]
+        n = int(r["n"] or 0)
+        cat = cats_clave.get(r["clave"])
+        if cat is None:
+            # Envío que no salió como template facturable: no se cobra.
+            excluidos += n
+            periodos.setdefault(per, {
+                "periodo": per, "mensajes": 0, "costo": 0.0, "excluidos": 0,
+                "por_categoria": {c: 0 for c in _CATS},
+            })["excluidos"] += n
+            continue
+        tarifa = _tarifa_para_fecha(tarifas, per if len(per) >= 7 else per + "-12")
+        rate = (tarifa.get(cat) if tarifa else None) or 0.0
+        costo = n * rate
+
+        p = periodos.setdefault(per, {
+            "periodo": per, "mensajes": 0, "costo": 0.0, "excluidos": 0,
+            "por_categoria": {c: 0 for c in _CATS},
+        })
+        p["mensajes"] += n
+        p["costo"] = round(p["costo"] + costo, 4)
+        p["por_categoria"][cat] += n
+        tot["mensajes"] += n
+        tot["costo"] = round(tot["costo"] + costo, 4)
+        tot["por_categoria"][cat] += n
+
+    vig = _tarifa_vigente(tarifas)
+    return {
+        "granularidad": granularidad,
+        "moneda": (vig or {}).get("moneda") or moneda,
+        "tarifa_vigente": vig,
+        "sin_tarifas": not tarifas,
+        "filas": [periodos[k] for k in sorted(periodos)],
+        "total": {"mensajes": tot["mensajes"], "costo": round(tot["costo"], 4),
+                  "excluidos": excluidos, "por_categoria": tot["por_categoria"]},
     }
 
 

@@ -25,6 +25,11 @@ function nombreMes(ym) {
   return `${MESES[(m || 1) - 1]} ${a}`;
 }
 
+function fechaDMA(iso) {
+  const m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : iso || "—";
+}
+
 const num = (n) => Number(n || 0).toLocaleString("es-CL");
 
 function chip(label, valor, clase, resp) {
@@ -56,28 +61,384 @@ function render(d) {
     chip("Fallidos", d.fallidos_mes, "stat--error") +
     chip("Inválidos", d.invalidos_mes, "stat--invalido") +
     chip("Respondieron", d.respondio_mes, "stat--resp", "respondio") +
-    chip("Clicks", d.click_mes, "stat--resp", "click") +
     chip("Bajas", d.baja_mes, "stat--resp", "baja");
-
-  const porMes = Array.isArray(d.por_mes) ? d.por_mes : [];
-  const maxMes = Math.max(1, ...porMes.map((m) => m.enviados));
-  $("#meses").innerHTML = porMes.length
-    ? porMes
-        .map(
-          (m) => `
-        <li class="mes-fila">
-          <span class="mes-nombre">${nombreMes(m.mes)}</span>
-          <span class="mes-barra"><span style="width:${Math.round((m.enviados / maxMes) * 100)}%"></span></span>
-          <span class="mes-num">${num(m.enviados)}</span>
-        </li>`
-        )
-        .join("")
-    : '<li class="mes-vacio">Sin envíos registrados todavía.</li>';
 
   $("#statsTotal").innerHTML =
     chip("Mensajes enviados", d.total_enviados_historico, "stat--total") +
     chip("Envíos realizados", d.total_batches, "stat--total");
+
+  renderRespuestasPacientes(d.pacientes_por_respuesta || {});
+  renderWebhookSalud(d.webhook || {});
+}
+
+function renderWebhookSalud(w) {
+  const el = $("#webhookSalud");
+  if (!el) return;
+  const horas = w.hace_horas;
+  const stale = horas == null || horas > 24;
+  el.hidden = false;
+  el.classList.toggle("webhook-salud--alerta", stale);
+  if (!w.total_eventos) {
+    el.textContent = "⚠ Nunca se ha recibido un evento del webhook de WhatsApp. Revisa en Meta que el webhook esté configurado y suscrito al campo «messages», y que el túnel público (ngrok) esté arriba.";
+  } else if (stale) {
+    el.textContent = `⚠ El webhook de WhatsApp no recibe eventos desde hace ${horas} h (último: ${w.ultimo_evento}). Si esperabas respuestas, revisa el webhook en Meta y que ngrok/el servidor sigan corriendo.`;
+  } else {
+    el.textContent = `Webhook de WhatsApp activo · último evento hace ${horas} h (${w.ultimo_evento}) · ${num(w.total_eventos)} en total.`;
+  }
+}
+
+const RESP_CATS = [
+  { cat: "pendiente", label: "No han respondido" },
+  { cat: "respondio", label: "Respondieron" },
+  { cat: "baja", label: "Se dieron de baja" },
+];
+let respCatSel = "todos";
+
+function renderRespuestasPacientes(r) {
+  const el = $("#respuestasPacientes");
+  const total = r && r.total ? r.total : 0;
+  if (!total) {
+    el.innerHTML = '<p class="mes-vacio" style="padding:14px 18px;">Sin pacientes registrados.</p>';
+    return;
+  }
+  const maxCat = Math.max(...RESP_CATS.map((c) => r[c.cat] || 0), 1);
+
+  const toggles =
+    `<button type="button" class="stat" data-cat="todos">Todos <strong>${num(total)}</strong></button>` +
+    RESP_CATS.map(
+      (c) =>
+        `<button type="button" class="stat stat--resp" data-respuesta="${c.cat}" data-cat="${c.cat}">` +
+        `${c.label} <strong>${num(r[c.cat] || 0)}</strong></button>`
+    ).join("");
+
+  const filas = RESP_CATS.map((c) => {
+    const v = r[c.cat] || 0;
+    const pct = Math.round((v / total) * 100);
+    return `
+      <div class="comp-fila" data-cat="${c.cat}">
+        <span class="comp-nombre">${c.label}</span>
+        <span class="comp-barra comp-barra--${c.cat}"><span style="width:${Math.round((v / maxCat) * 100)}%"></span></span>
+        <span class="comp-num"><strong>${num(v)}</strong> · ${pct}%</span>
+      </div>`;
+  }).join("");
+
+  el.innerHTML =
+    `<div class="resp-toggles" id="respToggles">${toggles}</div>` +
+    `<div class="comp" id="respComp">${filas}</div>`;
+
+  document.querySelectorAll("#respToggles .stat").forEach((b) =>
+    b.addEventListener("click", () => aplicarRespCat(b.dataset.cat))
+  );
+  aplicarRespCat(respCatSel);
+}
+
+function aplicarRespCat(cat) {
+  respCatSel = cat;
+  document.querySelectorAll("#respToggles .stat").forEach((b) =>
+    b.classList.toggle("activo", b.dataset.cat === cat)
+  );
+  document.querySelectorAll("#respComp .comp-fila").forEach((f) =>
+    f.classList.toggle("atenuada", cat !== "todos" && f.dataset.cat !== cat)
+  );
 }
 
 $("#btnActualizar").addEventListener("click", cargar);
 cargar();
+
+/* ================================================================== *
+ *  Gráficos de barras por periodo (día / mes / año)
+ * ================================================================== */
+const ES_ADMIN = localStorage.getItem("snw_rol") === "administrador";
+
+const CAT_LABEL = {
+  marketing: "Marketing",
+  utility: "Utilidad",
+  authentication: "Autenticación",
+  service: "Servicio",
+};
+
+function fmtMoneda(n, mon) {
+  try {
+    return new Intl.NumberFormat("es-CL", {
+      style: "currency", currency: mon || "USD", maximumFractionDigits: 2,
+    }).format(Number(n || 0));
+  } catch {
+    return `${num(n)} ${mon || ""}`.trim();
+  }
+}
+
+function etiquetaPeriodo(p, gran) {
+  if (gran === "mes") return nombreMes(p);
+  if (gran === "anio") return String(p);
+  const [a, m, d] = String(p).split("-");
+  return `${d} ${(MESES[(Number(m) || 1) - 1] || "").slice(0, 3)} ${a}`;
+}
+
+// Tope "redondo" del eje Y, un poco por encima del valor máximo, para que
+// la barra más alta y su etiqueta quepan bajo la línea superior.
+function techoLindo(v) {
+  if (!v || v <= 0) return 0;
+  const obj = v * 1.12;
+  const mag = Math.pow(10, Math.floor(Math.log10(obj)));
+  const n = obj / mag;
+  const paso = [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10].find((s) => n <= s) || 10;
+  return paso * mag;
+}
+
+// Etiqueta compacta para el eje del gráfico de barras.
+function etiquetaCorta(p, gran) {
+  if (gran === "anio") return String(p);
+  const [a, m, d] = String(p).split("-");
+  const mes = (MESES[(Number(m) || 1) - 1] || "").slice(0, 3);
+  return gran === "dia" ? `${Number(d)} ${mes}` : `${mes} ${a}`;
+}
+
+/**
+ * Dibuja un gráfico de barras verticales con eje Y y líneas de referencia.
+ *   el     : contenedor .grafico-barras
+ *   items  : [{ periodo, valor, sub? }]
+ *   opts   : { gran, fmtValor(v), vacio }
+ */
+function pintarGrafico(el, items, { gran, fmtValor, vacio }) {
+  if (!items.length) {
+    el.innerHTML = `<p class="mes-vacio" style="padding:8px 18px;">${vacio || "Sin datos."}</p>`;
+    return;
+  }
+  const max = Math.max(...items.map((i) => i.valor), 0);
+  const techo = techoLindo(max);
+  const PASOS = 4;
+
+  const eje = [];
+  for (let i = PASOS; i >= 0; i--) eje.push(`<span>${fmtValor((techo * i) / PASOS)}</span>`);
+  const lineas = Array.from({ length: PASOS + 1 }, () => "<i></i>").join("");
+
+  const cols = items
+    .map((it) => {
+      const pct = techo ? Math.max(1.5, (it.valor / techo) * 100) : 0;
+      const tip = `${etiquetaPeriodo(it.periodo, gran)}: ${fmtValor(it.valor)}` +
+        (it.sub ? ` · ${it.sub}` : "");
+      return `
+      <div class="gb-col" title="${tip}">
+        <span class="gb-barra-zona">
+          <span class="gb-barra" style="height:${pct}%">
+            <span class="gb-valor">${fmtValor(it.valor)}</span>
+          </span>
+        </span>
+        <span class="gb-label">${etiquetaCorta(it.periodo, gran)}</span>
+      </div>`;
+    })
+    .join("");
+
+  el.innerHTML =
+    `<div class="gb-eje">${eje.join("")}</div>` +
+    `<div class="gb-area"><div class="gb-lineas">${lineas}</div>` +
+    `<div class="gb-cols">${cols}</div></div>`;
+}
+
+/* -- Mensajes enviados (para todos los usuarios) -------------------- */
+let granEnvios = "mes";
+
+async function cargarEnvios(gran) {
+  granEnvios = gran;
+  document.querySelectorAll("#enviosTabs button").forEach((b) =>
+    b.classList.toggle("activo", b.dataset.gran === gran)
+  );
+  try {
+    const res = await fetch(`api/estadisticas/envios?granularidad=${gran}`, {
+      headers: authHeaders(), cache: "no-store",
+    });
+    if (res.status === 401) { window.snwSalir(); return; }
+    if (!res.ok) throw new Error();
+    const d = await res.json();
+    pintarGrafico($("#enviosGrafico"), (d.filas || []).map((f) => ({ periodo: f.periodo, valor: f.enviados })), {
+      gran: d.granularidad,
+      fmtValor: (v) => num(Math.round(v)),
+      vacio: "Sin mensajes enviados en este periodo.",
+    });
+  } catch {
+    $("#enviosGrafico").innerHTML =
+      '<p class="mes-vacio" style="padding:8px 18px;">No se pudo cargar el gráfico.</p>';
+  }
+}
+
+document.querySelectorAll("#enviosTabs button").forEach((b) =>
+  b.addEventListener("click", () => cargarEnvios(b.dataset.gran))
+);
+cargarEnvios("mes");
+
+/* -- Costos de mensajes de WhatsApp (solo administrador) ----------- */
+let granCostos = "mes";
+
+async function cargarTarifas() {
+  try {
+    const res = await fetch("api/tarifas", { headers: authHeaders(), cache: "no-store" });
+    if (res.status === 401) { window.snwSalir(); return; }
+    if (!res.ok) throw new Error();
+    renderTarifas(await res.json());
+  } catch {
+    $("#tarifasVigente").innerHTML =
+      '<p class="mes-vacio" style="padding:8px 0;">No se pudieron cargar las tarifas.</p>';
+  }
+}
+
+function renderTarifas(d) {
+  const v = d.vigente;
+  const alerta = $("#tarifasAlerta");
+  alerta.hidden = true;
+  alerta.classList.remove("webhook-salud--alerta");
+
+  if (d.nunca_descargada) {
+    alerta.hidden = false;
+    alerta.classList.add("webhook-salud--alerta");
+    alerta.textContent =
+      "⚠ Todavía no se han descargado las tarifas de Meta. Pulsa «Actualizar tarifas».";
+  } else if (d.proxima) {
+    alerta.hidden = false;
+    alerta.classList.add("webhook-salud--alerta");
+    alerta.textContent =
+      `⚠ Meta publicó una tarifa nueva que entra en vigor el ${fechaDMA(d.proxima.efectiva_desde)}: ` +
+      `Marketing ${fmtMoneda(d.proxima.marketing, d.proxima.moneda)}, ` +
+      `Utilidad ${fmtMoneda(d.proxima.utility, d.proxima.moneda)}, ` +
+      `Autenticación ${fmtMoneda(d.proxima.authentication, d.proxima.moneda)}.`;
+  }
+
+  if (!v) {
+    $("#tarifasVigente").innerHTML =
+      '<p class="mes-vacio" style="padding:8px 0;">Sin tarifas guardadas todavía.</p>';
+    $("#tarifasPie").textContent = "";
+    return;
+  }
+
+  const cats = ["marketing", "utility", "authentication"];
+  $("#tarifasVigente").innerHTML = cats
+    .map(
+      (c) => `
+      <div class="tarifa-card">
+        <span class="tarifa-card__cat">${CAT_LABEL[c]}</span>
+        <span class="tarifa-card__precio">${v[c] != null ? fmtMoneda(v[c], v.moneda) : "—"}</span>
+        <span class="tarifa-card__unidad">por mensaje</span>
+      </div>`
+    )
+    .join("");
+
+  $("#tarifasPie").innerHTML =
+    `Moneda de facturación: <strong>${d.moneda}</strong> · ` +
+    `vigente desde ${fechaDMA(v.efectiva_desde)} · ` +
+    `actualizado ${d.ultima_descarga || "—"} · ` +
+    '<a href="#" id="btnCsvChile">Descargar CSV de Chile</a>';
+  $("#btnCsvChile").addEventListener("click", descargarCsvChile);
+}
+
+async function descargarCsvChile(e) {
+  e.preventDefault();
+  try {
+    const res = await fetch("api/tarifas/chile.csv", { headers: authHeaders() });
+    if (!res.ok) throw new Error();
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "whatsapp_tarifas_chile.csv";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch {
+    toast("No se pudo descargar el CSV.", "error");
+  }
+}
+
+async function actualizarTarifas() {
+  const btn = $("#btnActualizarTarifas");
+  btn.disabled = true;
+  const previo = btn.textContent;
+  btn.textContent = "Actualizando…";
+  try {
+    const res = await fetch("api/tarifas/actualizar", { method: "POST", headers: authHeaders() });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(d.detail || "");
+    toast(
+      d.cambio
+        ? `Tarifas actualizadas: ${d.nuevas} nueva(s). Moneda: ${d.moneda}.`
+        : `Las tarifas ya estaban al día. Moneda: ${d.moneda}.`,
+      "ok"
+    );
+    await cargarTarifas();
+    await cargarCostos(granCostos);
+  } catch (err) {
+    toast("No se pudieron actualizar las tarifas. " + (err.message || ""), "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = previo;
+  }
+}
+
+async function cargarCostos(gran) {
+  granCostos = gran;
+  document.querySelectorAll("#costosTabs button").forEach((b) =>
+    b.classList.toggle("activo", b.dataset.gran === gran)
+  );
+  try {
+    const res = await fetch(`api/estadisticas/costos?granularidad=${gran}`, {
+      headers: authHeaders(), cache: "no-store",
+    });
+    if (res.status === 401) { window.snwSalir(); return; }
+    if (!res.ok) throw new Error();
+    renderCostos(await res.json());
+  } catch {
+    $("#costosBarras").innerHTML =
+      '<p class="mes-vacio" style="padding:8px 18px;">No se pudieron cargar los costos.</p>';
+    $("#costosTotal").textContent = "";
+  }
+}
+
+function renderCostos(d) {
+  const filas = Array.isArray(d.filas) ? d.filas : [];
+  const mon = d.moneda;
+
+  if (d.sin_tarifas) {
+    $("#costosBarras").innerHTML =
+      '<p class="mes-vacio" style="padding:8px 18px;">Sin tarifas guardadas: no se puede estimar el costo. Pulsa «Actualizar tarifas».</p>';
+    $("#costosTotal").textContent = "";
+    return;
+  }
+  if (!filas.length) {
+    $("#costosBarras").innerHTML =
+      '<p class="mes-vacio" style="padding:8px 18px;">Sin mensajes enviados todavía.</p>';
+    $("#costosTotal").textContent = "";
+    return;
+  }
+
+  pintarGrafico(
+    $("#costosBarras"),
+    filas.map((f) => ({
+      periodo: f.periodo,
+      valor: f.costo,
+      sub: `${num(f.mensajes)} mensaje(s)`,
+    })),
+    { gran: d.granularidad, fmtValor: (v) => fmtMoneda(v, mon) }
+  );
+
+  const t = d.total || { costo: 0, mensajes: 0, excluidos: 0, por_categoria: {} };
+  const desglose = Object.entries(t.por_categoria || {})
+    .filter(([, n]) => n)
+    .map(([c, n]) => `${CAT_LABEL[c] || c}: ${num(n)}`)
+    .join(" · ");
+  const excl = Number(t.excluidos || 0);
+  $("#costosTotal").innerHTML =
+    `<strong>Total:</strong> ${fmtMoneda(t.costo, mon)} · ${num(t.mensajes)} mensajes de plantilla` +
+    (desglose ? ` · ${desglose}` : "") +
+    (excl
+      ? `<br><span class="costos-nota">No se cuentan ${num(excl)} mensaje(s) de texto libre ` +
+        `(respuestas dentro de la ventana de 24 h): Meta no los cobra.</span>`
+      : "");
+}
+
+if (ES_ADMIN && $("#panelCostos")) {
+  $("#btnActualizarTarifas").addEventListener("click", actualizarTarifas);
+  document.querySelectorAll("#costosTabs button").forEach((b) =>
+    b.addEventListener("click", () => cargarCostos(b.dataset.gran))
+  );
+  cargarTarifas();
+  cargarCostos("mes");
+}

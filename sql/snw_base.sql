@@ -1,13 +1,14 @@
 -- ============================================================
 -- SNW - Base de datos única (snw_base)
 -- ============================================================
--- Infraestructura de la base de datos con 6 tablas:
+-- Infraestructura de la base de datos con 7 tablas:
 --   - pacientes_dev   : números autorizados para pruebas de desarrollo
 --   - pacientes_prod  : números autorizados (sin datos ficticios)
 --   - envios          : lotes de envío (una fila por "Iniciar envío")
 --   - log_envios      : historial individual de mensajes
 --   - whatsapp_eventos: eventos del webhook (idempotencia)
 --   - configuracion   : ajustes editables de la app (entorno, método de envío, etc.)
+--   - tarifas_whatsapp: rate card de Meta (tarifas por mensaje, para costos)
 --
 -- Es idempotente (IF NOT EXISTS / INSERT IGNORE): crea la estructura y
 -- siembra solo los 2 números autorizados. Está pensado para ejecutarse
@@ -28,6 +29,7 @@ CREATE TABLE IF NOT EXISTS pacientes_dev (
   info_extra VARCHAR(255) DEFAULT NULL,
   estado ENUM('pendiente','enviado','error') NOT NULL DEFAULT 'pendiente',
   whatsapp_opt_out TINYINT(1) NOT NULL DEFAULT 0,
+  respuesta_manual VARCHAR(12) DEFAULT NULL,
   fecha_actualizacion DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
@@ -39,6 +41,7 @@ CREATE TABLE IF NOT EXISTS pacientes_prod (
   info_extra VARCHAR(255) DEFAULT NULL,
   estado ENUM('pendiente','enviado','error') NOT NULL DEFAULT 'pendiente',
   whatsapp_opt_out TINYINT(1) NOT NULL DEFAULT 0,
+  respuesta_manual VARCHAR(12) DEFAULT NULL,
   fecha_actualizacion DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
@@ -67,7 +70,7 @@ CREATE TABLE IF NOT EXISTS log_envios (
   mensaje TEXT,
   plantilla_clave VARCHAR(50) DEFAULT NULL,
   estado_envio ENUM('enviado','error','numero_invalido') NOT NULL,
-  respuesta ENUM('pendiente','click','respondio','baja') DEFAULT 'pendiente',
+  respuesta ENUM('pendiente','respondio','baja') DEFAULT 'pendiente',
   whatsapp_message_id VARCHAR(255) DEFAULT NULL,
   estado_whatsapp ENUM('sent','delivered','read','failed') DEFAULT NULL,
   descripcion_error VARCHAR(255) DEFAULT NULL,
@@ -116,7 +119,26 @@ INSERT IGNORE INTO configuracion (clave, valor) VALUES
   ('wa_template_nombre', ''),
   ('wa_template_lang', 'es'),
   ('wa_webhook_path', '/api/whatsapp/webhook'),
-  ('wa_graph_version', 'v26.0');
+  ('wa_graph_version', 'v26.0'),
+  ('wa_moneda', 'USD');
+
+-- Rate card de WhatsApp: tarifas por mensaje (USD) descargadas de la página
+-- de precios de Meta. Cada rate card distinto se guarda una vez (uq_hash).
+CREATE TABLE IF NOT EXISTS tarifas_whatsapp (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  pais VARCHAR(60) NOT NULL DEFAULT 'Chile',
+  moneda VARCHAR(8) DEFAULT 'USD',
+  marketing DECIMAL(12,6) NULL,
+  utility DECIMAL(12,6) NULL,
+  authentication DECIMAL(12,6) NULL,
+  service DECIMAL(12,6) NULL,
+  efectiva_desde DATE NULL,
+  hash CHAR(64) NOT NULL,
+  fuente VARCHAR(255) NULL,
+  csv_texto MEDIUMTEXT NULL,
+  descargada DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_hash (hash)
+) CHARACTER SET utf8mb4;
 
 -- ------------------------------------------------------------
 -- Datos: pacientes_dev (números autorizados)

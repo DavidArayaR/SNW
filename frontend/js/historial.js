@@ -116,7 +116,7 @@ function abrirDetalle(envio, detalle) {
   if (!detalle.length) {
     body.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#66757f;">Sin detalle individual registrado.</td></tr>';
   } else {
-    const pesoRespuesta = { respondio: 0, click: 1, baja: 2, pendiente: 3 };
+    const pesoRespuesta = { respondio: 0, baja: 1, pendiente: 2 };
     const orden = [...detalle].sort(
       (x, y) => (pesoRespuesta[x.respuesta] ?? 3) - (pesoRespuesta[y.respuesta] ?? 3) || (x.id - y.id)
     );
@@ -135,7 +135,7 @@ function abrirDetalle(envio, detalle) {
 }
 
 function respuestaLabel(r) {
-  return { pendiente: "Sin respuesta", click: "Hizo click", respondio: "Respondió", baja: "Se dio de baja" }[r] ?? r;
+  return { pendiente: "Sin respuesta", respondio: "Respondió", baja: "Se dio de baja" }[r] ?? r;
 }
 
 $("#btnCerrarDetalle").addEventListener("click", () => ($("#modalDetalle").hidden = true));

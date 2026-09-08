@@ -26,44 +26,264 @@
    el respiro inferior dentro de un panel. */
 .panel .stats { padding-bottom: 16px; }
 
-/* Barras por mes */
-.meses {
-  list-style: none;
-  margin: 0;
-  padding: 14px 18px 18px;
+.webhook-salud {
+  margin: 10px 18px 0;
+  padding: 9px 13px;
+  border-radius: 8px;
+  background: #eef4f1;
+  border: 1px solid #cfe0d9;
+  color: var(--texto-suave);
+  font-size: .82rem;
+  line-height: 1.4;
+}
+.webhook-salud--alerta {
+  background: #fdf6e7;
+  border-color: #ecd9ac;
+  color: #8a6410;
+  font-weight: 600;
+}
+
+/* Respuestas de pacientes: botones de filtro + comparación */
+.resp-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 14px 18px 6px;
+}
+.resp-toggles button.stat {
+  font: inherit;
+  font-size: .82rem;
+  font-weight: 600;
+}
+
+.comp {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
+  padding: 12px 18px 18px;
 }
-.mes-fila {
+.comp-fila {
   display: grid;
-  grid-template-columns: 130px 1fr 60px;
+  grid-template-columns: 132px 1fr 110px;
   align-items: center;
   gap: 12px;
-  font-size: .88rem;
+  font-size: .86rem;
+  transition: opacity .15s;
 }
-.mes-nombre { color: var(--texto-suave); text-transform: capitalize; }
-.mes-barra {
-  height: 12px;
+.comp-fila.atenuada { opacity: .26; }
+.comp-nombre { color: var(--texto-suave); }
+.comp-barra {
+  height: 20px;
   background: #eef1f4;
+  border: 1px solid var(--borde);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.comp-barra > span {
+  display: block;
+  height: 100%;
+  min-width: 2px;
+  border-radius: 6px 0 0 6px;
+  transition: width .3s;
+}
+.comp-barra--pendiente > span { background: #98a2ad; }
+.comp-barra--respondio > span { background: #1e7d4d; }
+.comp-barra--baja > span      { background: #b23b37; }
+.comp-num {
+  text-align: right;
+  color: var(--texto-suave);
+  font-variant-numeric: tabular-nums;
+}
+.comp-num strong { color: var(--texto); }
+
+.mes-vacio { color: var(--texto-suave); padding: 6px 0; }
+
+/* Costos de mensajes (solo admin) */
+.tarifas-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  padding: 14px 18px 4px;
+}
+.tarifa-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+  background: #f7faf9;
+}
+.tarifa-card__cat {
+  font-size: .74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--texto-suave);
+}
+.tarifa-card__precio {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: var(--verde-oscuro);
+  font-variant-numeric: tabular-nums;
+}
+.tarifa-card__unidad { font-size: .74rem; color: var(--texto-suave); }
+
+.tarifas-pie {
+  margin: 8px 18px 0;
+  font-size: .8rem;
+  color: var(--texto-suave);
+}
+.tarifas-pie a { color: var(--verde-oscuro); font-weight: 600; }
+
+.costos-cabecera {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 20px 18px 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--borde);
+}
+.costos-cabecera h3 { margin: 0; font-size: 1rem; }
+
+.grafico-tabs {
+  display: inline-flex;
+  border: 1px solid var(--borde);
   border-radius: 999px;
   overflow: hidden;
 }
-.mes-barra > span {
-  display: block;
-  height: 100%;
-  background: linear-gradient(90deg, var(--verde), #25d366);
-  border-radius: 999px;
-  min-width: 2px;
+.grafico-tabs button {
+  border: 0;
+  background: transparent;
+  padding: 6px 16px;
+  font: inherit;
+  font-size: .84rem;
+  color: var(--texto-suave);
+  cursor: pointer;
 }
-.mes-num {
-  text-align: right;
+.grafico-tabs button + button { border-left: 1px solid var(--borde); }
+.grafico-tabs button.activo {
+  background: var(--verde);
+  color: #fff;
   font-weight: 700;
-  font-variant-numeric: tabular-nums;
 }
-.mes-vacio { color: var(--texto-suave); padding: 6px 0; }
+/* El contenedor recorta el contorno; se dibuja hacia dentro. */
+.grafico-tabs button:hover { outline-offset: -2px; }
+
+/* Gráfico de barras verticales por periodo (mensajes enviados y costos).
+   Alturas en píxeles: zona de barras = 150px, fila de etiquetas = 18px. */
+.grafico-barras {
+  --gb-alto: 150px;
+  --gb-label: 18px;
+  --gb-top: 20px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 6px 18px 12px;
+}
+/* Eje Y: valores de referencia alineados con las líneas */
+.gb-eje {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: var(--gb-alto);
+  margin-top: var(--gb-top);
+  padding-right: 4px;
+  text-align: right;
+  font-size: .68rem;
+  color: var(--texto-suave);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.gb-area {
+  position: relative;
+  flex: 1;
+  overflow-x: auto;
+  padding-top: var(--gb-top);
+}
+/* Líneas horizontales de referencia */
+.gb-lineas {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: var(--gb-top);
+  height: var(--gb-alto);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  pointer-events: none;
+}
+.gb-lineas i { border-top: 1px dashed var(--borde); }
+.gb-lineas i:last-child { border-top-style: solid; }
+.gb-cols {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: safe center;
+  gap: 22px;
+}
+.gb-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 0 0 auto;
+  width: 72px;
+}
+.gb-barra-zona {
+  height: var(--gb-alto);
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.gb-barra {
+  position: relative;
+  width: 66%;
+  min-width: 22px;
+  background: linear-gradient(180deg, #34c3a0, #1f8a70);
+  border-radius: 6px 6px 0 0;
+  min-height: 3px;
+}
+.gb-valor {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 4px;
+  font-size: .7rem;
+  font-weight: 700;
+  color: var(--verde-oscuro);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.gb-label {
+  height: var(--gb-label);
+  line-height: var(--gb-label);
+  margin-top: 6px;
+  font-size: .74rem;
+  color: var(--texto-suave);
+  text-align: center;
+  white-space: nowrap;
+  text-transform: capitalize;
+}
+
+.costos-total {
+  margin: 4px 18px 16px;
+  font-size: .86rem;
+  color: var(--texto);
+}
+.costos-nota {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: .8rem;
+  color: var(--texto-suave);
+}
 
 @media (max-width: 560px) {
   .hero-num { font-size: 2.6rem; }
-  .mes-fila { grid-template-columns: 96px 1fr 48px; gap: 8px; }
+  .costos-cabecera { flex-direction: column; align-items: flex-start; }
+  .comp-fila { grid-template-columns: 92px 1fr 88px; gap: 8px; }
 }
