@@ -159,6 +159,16 @@ select.badge--select {
 .btn--danger-ghost { background: transparent; color: var(--rojo); border: 1px solid #eec2c1; }
 .btn--danger-ghost:hover { background: #fdf3f3; }
 
+/* Todos los botones muestran un contorno al pasar el ratón. */
+.btn:hover,
+button:hover {
+  outline: 2px solid var(--verde);
+  outline-offset: 2px;
+}
+.btn:disabled:hover,
+.btn[disabled]:hover,
+button:disabled:hover { outline: none; }
+
 .panel--editor { min-height: 60vh; }
 .panel--editor form { padding: 20px 24px 26px; }
 
