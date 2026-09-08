@@ -1,0 +1,44 @@
+[
+  {
+    "id": 1,
+    "clave": "default",
+    "nombre": "default",
+    "texto": "¡Hola {nombre} 👋!\n\n💚 Esta semana, en *Salud Mental Para Todos* aprovecha tu sesión a solo *$25.000*.\n\n✍️ Escríbenos para agendar tu hora antes de que termine la promoción. \n¡Cuidarte también es quererte! 🏥✨",
+    "whatsapp_template": "default",
+    "whatsapp_template_lang": "es",
+    "whatsapp_template_categoria": "MARKETING",
+    "actualizada": 1788794189823,
+    "whatsapp_template_id": "1382444860710230",
+    "whatsapp_template_status": "APPROVED",
+    "whatsapp_template_error": null,
+    "whatsapp_template_rejected_reason": "NONE"
+  },
+  {
+    "id": 2,
+    "clave": "descuento_25",
+    "nombre": "descuento 25",
+    "texto": "¡Hola {nombre} 👋!\n\n💚 Esta semana, aprovecha un *25% de descuento* en tu sesión de *Salud Mental*.\n\n✍️ Escríbenos para agendar tu hora antes de que termine la promoción.\n¡Cuidarte también es quererte! 🏥✨",
+    "whatsapp_template": "descuento_25",
+    "whatsapp_template_lang": "es",
+    "whatsapp_template_categoria": "MARKETING",
+    "actualizada": 1788541540895,
+    "whatsapp_template_id": "1737252654192451",
+    "whatsapp_template_status": "APPROVED",
+    "whatsapp_template_error": null,
+    "whatsapp_template_rejected_reason": "NONE"
+  },
+  {
+    "id": 4,
+    "clave": "hello_world",
+    "nombre": "Hello world",
+    "texto": "Welcome and congratulations!! This message demonstrates your ability to send a WhatsApp message notification from the Cloud API, hosted by Meta. Thank you for taking the time to test with us.",
+    "whatsapp_template": "hello_world",
+    "whatsapp_template_lang": "en_US",
+    "whatsapp_template_categoria": "UTILITY",
+    "whatsapp_template_id": "1285483704651425",
+    "whatsapp_template_status": "APPROVED",
+    "whatsapp_template_rejected_reason": "NONE",
+    "whatsapp_template_error": null,
+    "actualizada": 1788545013118
+  }
+]
