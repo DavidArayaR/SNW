@@ -802,5 +802,61 @@
   "f5b64fff323f4e1ebb6d93daa0c4a160": {
     "rol": "administrador",
     "nombre": "Administrador"
+  },
+  "a3bc47ea63df4d4bbe6629eaf46e59ef": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "9c309025f6fd476eb9a462dc972c8357": {
+    "rol": "usuario",
+    "nombre": "Usuario Final"
+  },
+  "6601d4c620dd49de9af1f4565fc4b641": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "54db87ea8dbc40cd98a4aff27037f725": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "37e6efb3cd4c45a09b22f0689c30c5fa": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "22d2feaff7ae464e834901eb1e8b6abc": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "227b8d93a1a64ea0a0fab6bf49e76178": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "9e65d97ca0634a5f9987a110d59e82cc": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "1b1e31f1f71a4fd89dc1fb91298cacb7": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "36fa5e2296784e7eaa5c32d94b03eca0": {
+    "rol": "usuario",
+    "nombre": "Usuario Final"
+  },
+  "1dbfb59b5640445ab4d74a9a20eded5f": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "a1740a7a070243439700c6f2ad35f53c": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "37c4abac996241e58085e7fee8eecd2e": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "c0d91b231e9246e49490b8dd8bf0a793": {
+    "rol": "administrador",
+    "nombre": "Administrador"
   }
 }

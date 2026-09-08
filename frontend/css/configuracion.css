@@ -1,0 +1,147 @@
+/* Página de Configuración (solo admin) */
+
+.config-intro {
+  margin: 4px 0 18px;
+  font-size: .88rem;
+  color: var(--texto-suave);
+  line-height: 1.5;
+}
+.config-intro code {
+  background: #eef1f4;
+  border-radius: 5px;
+  padding: 1px 6px;
+  font-size: .85em;
+}
+
+.config-seccion { margin-bottom: 18px; }
+.config-seccion .panel__head h2 {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.config-seccion .panel__head h2 i { color: var(--verde); width: 1.1rem; text-align: center; }
+
+.config-campos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 6px 22px;
+  padding: 16px 18px 20px;
+}
+
+.config-campo { margin-bottom: 12px; }
+.config-campo label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* styles.css solo estiliza input[type=text]; aquí cubrimos number/password. */
+.config-campo input:not([type="checkbox"]),
+.config-campo select {
+  width: 100%;
+  border: 1.5px solid var(--borde);
+  border-radius: 10px;
+  padding: 11px 13px;
+  font: inherit;
+  font-size: .93rem;
+  color: var(--texto);
+  background: #fbfcfd;
+}
+.config-campo input:not([type="checkbox"]):focus,
+.config-campo select:focus { border-color: var(--verde); outline: none; }
+.config-clave {
+  font-family: Consolas, monospace;
+  font-size: .72rem;
+  font-weight: 400;
+  color: var(--texto-suave);
+  background: #f0f2f5;
+  border-radius: 5px;
+  padding: 1px 6px;
+}
+.config-campo .field__hint { margin-top: 5px; }
+
+/* Marca de campo modificado sin guardar */
+.config-campo--cambiado > label { color: var(--verde-oscuro); }
+.config-campo--cambiado input:not([type="checkbox"]),
+.config-campo--cambiado select {
+  border-color: var(--verde);
+  background: #f3faf8;
+}
+
+/* Campo calculado de solo lectura (URL del webhook) */
+.config-campo--derivado { grid-column: 1 / -1; }
+.config-campo--derivado input[readonly] {
+  background: #eef1f4;
+  color: var(--texto);
+  cursor: text;
+  font-family: Consolas, "SFMono-Regular", monospace;
+  font-size: .86rem;
+}
+.config-copiar i { pointer-events: none; }
+.config-webhook-meta {
+  margin-top: 6px;
+  padding: 8px 11px;
+  border-radius: 8px;
+  background: #fdf6e7;
+  border: 1px solid #ecd9ac;
+  color: #8a6410;
+}
+.config-webhook-meta a { color: #8a6410; font-weight: 700; }
+
+/* Campo secreto con botón de ojo */
+.config-secreto { position: relative; }
+.config-secreto input { padding-right: 42px; }
+.config-ojo {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--texto-suave);
+}
+.config-ojo:hover { background: #eef1f4; color: var(--texto); }
+
+/* Interruptor booleano */
+.config-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-weight: 500;
+  font-size: .9rem;
+  cursor: pointer;
+}
+.config-switch input { width: 18px; height: 18px; accent-color: var(--verde); }
+
+/* Barra flotante de guardar */
+.config-guardar-fijo {
+  position: sticky;
+  bottom: 14px;
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  background: var(--verde-oscuro);
+  color: #fff;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .28);
+}
+.config-guardar-fijo #cambiosResumen {
+  font-size: .82rem;
+  opacity: .92;
+  word-break: break-word;
+}
+.config-guardar-fijo__btns { display: flex; gap: 10px; }
+.config-guardar-fijo .btn--ghost {
+  color: #fff;
+  border-color: rgba(255, 255, 255, .4);
+  background: transparent;
+}
+.config-guardar-fijo .btn--ghost:hover { background: rgba(255, 255, 255, .12); }

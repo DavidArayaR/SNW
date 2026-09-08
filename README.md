@@ -41,8 +41,9 @@ snw/
 │   ├── pacientes.html         Base de datos de pacientes + envío masivo (solo admin)
 │   ├── historial.html         Historial de envíos (batch + detalle por paciente)
 │   ├── estadisticas.html      Contador mensual de mensajes, desgloses y costos WhatsApp (admin)
-│   ├── css/                   styles.css (compartido), layout.css (sidebar), pacientes.css, estadisticas.css
-│   ├── js/                    layout.js (sidebar/sesión, común), app.js, pacientes.js, historial.js, estadisticas.js
+│   ├── configuracion.html     Editor de todos los ajustes por secciones (solo admin)
+│   ├── css/                   styles.css (compartido), layout.css (sidebar), pacientes.css, estadisticas.css, configuracion.css
+│   ├── js/                    layout.js (sidebar/sesión, común), app.js, pacientes.js, historial.js, estadisticas.js, configuracion.js
 │   └── vendor/bootstrap/     Bootstrap 5.3.3 (CSS + bundle JS) servido localmente
 ├── data/
 │   ├── plantillas.json        Plantillas de mensajes + metadata del template en Meta
@@ -96,9 +97,11 @@ snw/
 vive el resto.
 
 **Todo lo demás vive en la tabla `configuracion`** (clave/valor). El backend la crea y la
-siembra en el primer arranque (tomando lo que hubiera en un `.env` antiguo). Se edita con
-`PUT /api/configuracion` (solo admin) sin reiniciar, o con `UPDATE configuracion` (requiere
-reiniciar por la caché).
+siembra en el primer arranque (tomando lo que hubiera en un `.env` antiguo). Se edita desde
+la página **Configuración** (`configuracion.html`, solo admin) — que muestra TODAS las claves
+por secciones (Aplicación, URL pública, Correo/SMTP, WhatsApp) — o con `UPDATE configuracion`
+(requiere reiniciar por la caché). Los cambios de la página se aplican sin reiniciar (salvo
+el `entorno` activo, que las demás pantallas leen al cargar).
 
 | Grupo | Claves |
 |---|---|
@@ -252,8 +255,10 @@ Reglas del editor:
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/configuracion?ambiente=` | Vista **segura** de la config (no devuelve el token de Meta ni la clave SMTP en claro) |
-| PUT | `/api/configuracion` | (solo admin) Guarda cualquier clave de la tabla `configuracion`, sin reiniciar (`entorno`, `metodo_envio`, `numeros_prueba_dev/prod`, `intervalo_ms`, `url_base`, `smtp_*`, `correo_*`, `wa_*`) |
+| GET | `/api/configuracion?ambiente=` | Vista **segura** de la config para el resto de páginas (no devuelve el token de Meta ni la clave SMTP en claro) |
+| PUT | `/api/configuracion` | (solo admin) Guarda claves sueltas de `configuracion` sin reiniciar |
+| GET | `/api/configuracion/todo` | (solo admin) TODAS las claves con su **valor real** (incluye secretos) + metadata de secciones, para la página Configuración |
+| PUT | `/api/configuracion/todo` | (solo admin) `{cambios: {clave: valor, …}}` — valida clave conocida, enums (`entorno`, `metodo_envio`) y enteros (`intervalo_ms`, `smtp_port`); persiste con `config_set` |
 
 ### Webhook de WhatsApp (Meta)
 
@@ -460,3 +465,9 @@ desde `frontend/vendor/bootstrap/`) más `css/layout.css`.
   tarifa futura, descarga del CSV de Chile y el mismo gráfico de barras aplicado al costo
   estimado por día / mes / año (solo mensajes de plantilla facturables; los de texto libre
   de la ventana de 24 h se excluyen y se indican bajo el total).
+- **Configuración** (`configuracion.html`, solo admin): edita **todas** las claves de la
+  tabla `configuracion` por secciones (Aplicación, URL pública, Correo/SMTP, WhatsApp).
+  Muestra el valor real (los secretos con botón de ojo), marca los campos modificados,
+  guarda solo lo cambiado con una barra flotante y avisa si sales con cambios sin guardar.
+  La sección WhatsApp incluye un campo calculado de solo lectura con la **URL del webhook**
+  (URL base + ruta), con botón de copiar y enlace al panel de Webhooks de Meta.

@@ -27,6 +27,7 @@ from pydantic import BaseModel
 from db import (
     conectar, entorno_valido, log_error, nombre_base, columnas_tabla, columna_existe,
     tabla_pacientes, asegurar_tabla_config, config_all, config_get, config_set,
+    CONFIG_DEFAULTS,
 )
 from motor_envio import obtener_canal
 from whatsapp_service import WhatsAppService
@@ -827,6 +828,116 @@ def actualizar_configuracion(body: ConfigIn, sesion: dict = Depends(solo_admin))
         config_set(cambios)
 
     return leer_config()
+
+
+# ---------------------------------------------------------------------------
+#  Página de Configuración (solo admin): ver y editar TODAS las claves.
+# ---------------------------------------------------------------------------
+_CONFIG_SECCIONES = [
+    {
+        "id": "app", "titulo": "Aplicación", "icono": "fa-sliders",
+        "campos": [
+            {"clave": "entorno", "etiqueta": "Entorno activo", "tipo": "select",
+             "opciones": ["desarrollo", "produccion"],
+             "ayuda": "En «desarrollo» los envíos masivos se bloquean y solo salen a los números de prueba."},
+            {"clave": "metodo_envio", "etiqueta": "Método de envío", "tipo": "select",
+             "opciones": ["simulado", "api_oficial"],
+             "ayuda": "«simulado» no manda nada real; «api_oficial» usa la WhatsApp Cloud API de Meta."},
+            {"clave": "intervalo_ms", "etiqueta": "Intervalo entre mensajes (ms)", "tipo": "number"},
+            {"clave": "numeros_prueba_dev", "etiqueta": "Números de prueba · desarrollo", "tipo": "text",
+             "ayuda": "Separados por coma. En entorno de desarrollo solo se envía a estos."},
+            {"clave": "numeros_prueba_prod", "etiqueta": "Números de prueba · producción", "tipo": "text",
+             "ayuda": "Separados por coma."},
+        ],
+    },
+    {
+        "id": "url", "titulo": "URL pública", "icono": "fa-link",
+        "campos": [
+            {"clave": "url_base", "etiqueta": "URL base del servidor", "tipo": "text",
+             "ayuda": "Dominio público (ngrok o servidor) que se usa en los links del correo y del webhook. Ej: https://mi-dominio.com"},
+        ],
+    },
+    {
+        "id": "correo", "titulo": "Correo / SMTP", "icono": "fa-envelope",
+        "campos": [
+            {"clave": "smtp_host", "etiqueta": "Servidor SMTP", "tipo": "text"},
+            {"clave": "smtp_port", "etiqueta": "Puerto", "tipo": "number"},
+            {"clave": "smtp_user", "etiqueta": "Usuario", "tipo": "text"},
+            {"clave": "smtp_pass", "etiqueta": "Contraseña", "tipo": "password", "secreto": True},
+            {"clave": "smtp_tls", "etiqueta": "Usar TLS / STARTTLS", "tipo": "bool"},
+            {"clave": "correo_emisor", "etiqueta": "Correo emisor (From)", "tipo": "text"},
+            {"clave": "correo_destino", "etiqueta": "Correo del supervisor (confirmaciones)", "tipo": "text"},
+        ],
+    },
+    {
+        "id": "whatsapp", "titulo": "WhatsApp · Meta Cloud API", "icono": "fa-whatsapp", "marca": True,
+        "campos": [
+            {"clave": "wa_token", "etiqueta": "Access token", "tipo": "password", "secreto": True},
+            {"clave": "wa_phone_id", "etiqueta": "Phone number ID", "tipo": "text"},
+            {"clave": "wa_business_account_id", "etiqueta": "WhatsApp Business Account ID (WABA)", "tipo": "text"},
+            {"clave": "wa_verify_token", "etiqueta": "Verify token del webhook", "tipo": "password", "secreto": True},
+            {"clave": "wa_webhook_path", "etiqueta": "Ruta del webhook", "tipo": "text",
+             "ayuda": "Se concatena a la URL base. Debe empezar con «/». Ej: /api/whatsapp/webhook"},
+            {"tipo": "derivado", "etiqueta": "URL del webhook (para pegar en Meta)",
+             "formula": ["url_base", "wa_webhook_path"],
+             "ayuda": "URL base del servidor + ruta del webhook. Cópiala y pégala en el panel de "
+                      "Webhooks de Meta; si cambia (nueva URL de servidor), hay que actualizarla allí.",
+             "enlace": {
+                 "url": "https://developers.facebook.com/apps/1392977325249373/webhooks/?business_id=799315784581199&view=whatsapp_business_account",
+                 "texto": "Abrir Webhooks en Meta",
+             }},
+            {"clave": "wa_template_nombre", "etiqueta": "Template por defecto", "tipo": "text"},
+            {"clave": "wa_template_lang", "etiqueta": "Idioma del template", "tipo": "text"},
+            {"clave": "wa_graph_version", "etiqueta": "Versión de Graph API", "tipo": "text",
+             "ayuda": "Ej: v26.0"},
+            {"clave": "wa_moneda", "etiqueta": "Moneda de facturación", "tipo": "text",
+             "ayuda": "Se autodetecta al pulsar «Actualizar tarifas» en Estadísticas. Ej: CLP, USD."},
+        ],
+    },
+]
+_CONFIG_ENUM = {
+    "entorno": ("desarrollo", "produccion"),
+    "metodo_envio": ("simulado", "api_oficial"),
+}
+
+
+def _config_valores() -> dict:
+    cfg = config_all()
+    return {c: ("" if cfg.get(c) is None else str(cfg.get(c))) for c in CONFIG_DEFAULTS}
+
+
+@app.get("/api/configuracion/todo")
+def obtener_configuracion_completa(sesion: dict = Depends(solo_admin)):
+    """Todas las claves de configuración con su valor real (incluye secretos)."""
+    return {"secciones": _CONFIG_SECCIONES, "valores": _config_valores()}
+
+
+class ConfigTodoIn(BaseModel):
+    cambios: dict[str, str]
+
+
+@app.put("/api/configuracion/todo")
+def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends(solo_admin)):
+    cambios: dict[str, str] = {}
+    for clave, valor in (body.cambios or {}).items():
+        if clave not in CONFIG_DEFAULTS:
+            raise HTTPException(400, detail=f"Clave de configuración desconocida: «{clave}»")
+        v = "" if valor is None else str(valor).strip()
+        if clave in _CONFIG_ENUM and v not in _CONFIG_ENUM[clave]:
+            raise HTTPException(400, detail=f"«{clave}»: usa uno de {', '.join(_CONFIG_ENUM[clave])}")
+        if clave in ("intervalo_ms", "smtp_port"):
+            try:
+                n = int(v or "0")
+            except ValueError:
+                raise HTTPException(400, detail=f"«{clave}» debe ser un número entero")
+            v = str(max(1 if clave == "smtp_port" else 0, n))
+        if clave == "smtp_tls":
+            v = "true" if v.lower() in ("true", "1", "on", "si", "sí") else "false"
+        cambios[clave] = v
+
+    if cambios:
+        config_set(cambios)
+    return {"valores": _config_valores()}
 
 
 class PruebaWAIn(BaseModel):

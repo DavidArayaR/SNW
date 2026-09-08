@@ -26,7 +26,10 @@
     location.replace("login.html");
     return;
   }
-  if (PAGINA === "pacientes" && !ES_ADMIN) { location.replace("mensajeria.html"); return; }
+  if ((PAGINA === "pacientes" || PAGINA === "configuracion") && !ES_ADMIN) {
+    location.replace("mensajeria.html");
+    return;
+  }
 
   const btnLogin = document.getElementById("btnLogin");
   if (btnLogin) btnLogin.hidden = true;
@@ -43,6 +46,7 @@
     { pagina: "mensajeria",   href: "mensajeria.html",   icono: "fa-paper-plane",       texto: "Mensajería" },
     { pagina: "historial",    href: "historial.html",    icono: "fa-clock-rotate-left", texto: "Historial" },
     { pagina: "estadisticas", href: "estadisticas.html", icono: "fa-chart-column",      texto: "Estadísticas" },
+    { pagina: "configuracion", href: "configuracion.html", icono: "fa-gear",            texto: "Configuración", admin: true },
   ];
 
   const items = LINKS
