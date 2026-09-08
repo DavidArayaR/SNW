@@ -735,6 +735,43 @@ function refrescarAvisoAdminConf() {
   }
 }
 
+// Selector de cuántos mensajes enviar (solo producción). Mantiene el slider
+// y el número sincronizados y devuelve el valor elegido.
+function limiteEnvioConf() {
+  const fila = $("#filaLimiteConf");
+  if (!fila || fila.hidden) return null;
+  const n = parseInt($("#limiteNumConf").value, 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+function configurarLimiteConf(max) {
+  const fila = $("#filaLimiteConf");
+  const range = $("#limiteRangeConf");
+  const num = $("#limiteNumConf");
+  const esProd = ambienteConf === "produccion";
+
+  if (!esProd || max <= 0) {
+    fila.hidden = true;
+    return;
+  }
+  fila.hidden = false;
+  range.max = num.max = String(max);
+  range.min = num.min = "1";
+  $("#limiteMaxConf").textContent = max;
+  // Por defecto se envían todos los pendientes.
+  range.value = num.value = String(max);
+}
+
+(function sincronizarLimiteConf() {
+  const range = $("#limiteRangeConf");
+  const num = $("#limiteNumConf");
+  if (!range || !num) return;
+  const clamp = (v) => Math.min(Math.max(1, parseInt(v, 10) || 1), parseInt(num.max, 10) || 1);
+  range.addEventListener("input", () => { num.value = range.value; });
+  num.addEventListener("input", () => { range.value = clamp(num.value); });
+  num.addEventListener("change", () => { num.value = range.value = clamp(num.value); });
+})();
+
 async function actualizarResumenConf() {
   const dd = $("#confDestinatarios");
   dd.textContent = "Contando...";
@@ -749,9 +786,11 @@ async function actualizarResumenConf() {
     if (res.status === 401) { window.snwSalir(); return; }
     const data = await res.json();
     dd.textContent = `${data.pendientes} pendiente(s) · base: ${data.base_datos}`;
+    configurarLimiteConf(data.pendientes || 0);
     $("#btnLanzarConf").disabled = data.pendientes === 0;
   } catch {
     dd.textContent = "No se pudieron contar.";
+    configurarLimiteConf(0);
   }
 }
 
@@ -830,10 +869,13 @@ $("#btnLanzarConf").addEventListener("click", async () => {
   setBloqueoEnvioConf(true);
 
   try {
+    const cuerpo = { plantilla_id: activaId, ambiente: ambienteConf };
+    const lim = limiteEnvioConf();
+    if (lim != null) cuerpo.limite = lim;
     const res = await fetch("api/notificaciones/enviar", {
       method: "POST",
       headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ plantilla_id: activaId, ambiente: ambienteConf }),
+      body: JSON.stringify(cuerpo),
     });
     if (res.status === 401) { window.snwSalir(); setBloqueoEnvioConf(false); return; }
     const data = await res.json();

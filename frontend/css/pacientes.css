@@ -223,6 +223,35 @@
 .detalle-fila dt { color: var(--texto-suave); }
 .detalle-fila dd { margin: 0; font-weight: 600; text-align: right; word-break: break-word; }
 
+/* Selector de cuántos mensajes enviar (solo producción) */
+.conf-limite-fila { flex-direction: column; align-items: stretch; gap: 9px; }
+.conf-limite-fila dt { text-align: left; }
+.conf-limite {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  text-align: left;
+  font-weight: 400;
+}
+.conf-limite input[type="range"] {
+  width: 100%;
+  accent-color: var(--verde);
+  cursor: pointer;
+}
+.conf-limite__abajo { display: flex; align-items: center; gap: 10px; }
+.conf-limite__abajo input[type="number"] {
+  width: 88px;
+  border: 1.5px solid var(--borde);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font: inherit;
+  text-align: center;
+  color: var(--texto);
+  background: #fbfcfd;
+}
+.conf-limite__abajo input[type="number"]:focus { border-color: var(--verde); outline: none; }
+.conf-limite__abajo span { color: var(--texto-suave); font-size: .85rem; }
+
 .detalle-subtitulo {
   margin: 16px 0 6px;
   font-size: .78rem;

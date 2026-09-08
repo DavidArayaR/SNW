@@ -218,7 +218,7 @@ Reglas del editor:
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| POST | `/api/notificaciones/enviar` | Inicia el envío `{pacientes: [ids] \| null, plantilla_id, ambiente}`. `pacientes: null` = todos los elegibles (usado desde Mensajería) |
+| POST | `/api/notificaciones/enviar` | Inicia el envío `{pacientes: [ids] \| null, plantilla_id, ambiente, limite?}`. `pacientes: null` = todos los elegibles (usado desde Mensajería). `limite` (solo producción) recorta cuántos pendientes entran en esta tanda; el resto quedan pendientes |
 | POST | `/api/notificaciones/destinatarios` | Cuenta pacientes totales/pendientes de un ambiente |
 | GET | `/api/notificaciones/jobs/{job_id}` | Progreso en vivo del envío en curso |
 | POST | `/api/notificaciones/jobs/{job_id}/pausa` \| `/reanudar` \| `/cancelar` | Control del job en curso |
@@ -399,7 +399,8 @@ propagar como error 500.
 
 - **Mensajería** (`mensajeria.html`): al editar una plantilla existente aparece
   "Enviar mensaje" → envía esa plantilla a **todos los pacientes elegibles** del ambiente
-  elegido (`pacientes: null`).
+  elegido (`pacientes: null`). En **producción** el modal muestra un slider + campo numérico
+  (1 … pendientes) para acotar cuántos se envían en esta tanda; el resto quedan pendientes.
 - **Pacientes** (`pacientes.html`, solo admin): selecciona pacientes puntuales con
   checkboxes/filtros → elige plantilla → "Iniciar envío" (`pacientes: [ids]`). Los
   seleccionados que no pueden recibir (dados de baja, teléfono inválido, no autorizados
@@ -408,9 +409,10 @@ propagar como error 500.
 - Ambos flujos terminan en el mismo `POST /api/notificaciones/enviar` y comparten
   confirmación, job y progreso.
 - **Producción**: si quien envía **no** es administrador, se genera un correo de
-  confirmación al supervisor con botones **Confirmar** y **Rechazar** (con comentario);
-  el envío no arranca hasta que se confirma. Un administrador en producción envía
-  directo, sin correo.
+  confirmación al supervisor con el **costo aproximado del envío en grande y rojo**
+  (nº de mensajes × tarifa vigente de Meta para la categoría de la plantilla) y botones
+  **Confirmar** y **Rechazar** (con comentario); el envío no arranca hasta que se confirma.
+  Un administrador en producción envía directo, sin correo.
 - **Desarrollo**: envío directo, restringido a los números de `numeros_prueba_dev`;
   un usuario no-admin con `entorno = desarrollo` nunca puede apuntar a producción,
   aunque lo pida en la petición.

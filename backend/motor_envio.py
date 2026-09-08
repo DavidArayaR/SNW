@@ -17,7 +17,11 @@ class MotorSimulado:
 
     def enviar(self, telefono: str, mensaje: str, plantilla: dict | None = None, variables: dict | None = None):
         vista = mensaje.replace("\n", " ")[:60]
-        print(f"[MOTOR {self.nombre}] -> {telefono}: {vista}...")
+        try:
+            print(f"[MOTOR {self.nombre}] -> {telefono}: {vista}...")
+        except UnicodeEncodeError:
+            # La consola de Windows (cp1252) no puede imprimir emojis del mensaje.
+            print(f"[MOTOR {self.nombre}] -> {telefono}: ({len(mensaje)} caracteres)")
         return True, None, None
 
 

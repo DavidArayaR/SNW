@@ -100,6 +100,7 @@ class EnvioIn(BaseModel):
     pacientes: list[int] | None = None
     plantilla_id: int
     ambiente: str | None = None
+    limite: int | None = None  # solo producción: cuántos enviar de los pendientes
 
 
 class ConfigIn(BaseModel):
@@ -1000,7 +1001,35 @@ def _config_correo() -> dict:
     }
 
 
-def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, plantilla_texto: str, ambiente: str) -> bool:
+def _fmt_moneda(monto: float, moneda: str) -> str:
+    """1234.5 -> '1.234,50 CLP' (miles con punto, decimal con coma)."""
+    s = f"{monto:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"{s} {moneda}"
+
+
+def _costo_estimado_por_clave(clave: str, total: int) -> dict | None:
+    """Costo aproximado de enviar `total` mensajes de esta plantilla, en la
+    moneda de facturación de la cuenta. None si no hay tarifas descargadas o la
+    plantilla no se factura (texto libre / sin template)."""
+    cat = _categorias_por_clave().get(clave)
+    if not cat:
+        return None
+    moneda = _moneda_cuenta()
+    vig = _tarifa_vigente(_tarifas_guardadas(moneda) or _tarifas_guardadas("USD"))
+    rate = (vig or {}).get(cat)
+    if rate is None:
+        return None
+    return {
+        "moneda": (vig or {}).get("moneda") or moneda,
+        "categoria": cat,
+        "rate": float(rate),
+        "total": total,
+        "costo": round(float(rate) * total, 2),
+    }
+
+
+def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, plantilla_texto: str,
+                                ambiente: str, plantilla_clave: str = "") -> bool:
     c = _config_correo()
     emisor, destino = c["emisor"], c["destino"]
     base = url_base()
@@ -1009,18 +1038,36 @@ def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, p
         return False
     host, port, user, pwd, tls = c["host"], c["port"], c["user"], c["pwd"], c["tls"]
 
+    costo = _costo_estimado_por_clave(plantilla_clave, total)
+    costo_txt = _fmt_moneda(costo["costo"], costo["moneda"]) if costo else "no disponible"
+
     if not host or not pwd:
         # Modo simulado: logear URL para pruebas sin SMTP real
-        print(f"[CORREO SIMULADO] Para {destino} desde {emisor}: confirmar {base}/api/notificaciones/confirmar/{token} | rechazar {base}/api/notificaciones/rechazar/{token} - {total} personas, plantilla '{plantilla_nombre}', base {ambiente}")
+        print(f"[CORREO SIMULADO] Para {destino} desde {emisor}: confirmar {base}/api/notificaciones/confirmar/{token} | rechazar {base}/api/notificaciones/rechazar/{token} - {total} personas, plantilla '{plantilla_nombre}', base {ambiente}, costo aprox. {costo_txt}")
         return True
 
     confirm_url = f"{base}/api/notificaciones/confirmar/{token}"
     reject_url = f"{base}/api/notificaciones/rechazar/{token}"
-    subject = f"[SNW] Confirmar envío masivo - {total} destinatarios"
+    subject = f"[SNW] Confirmar envío masivo - {total} destinatarios (~{costo_txt})"
+
+    if costo:
+        bloque_costo = f"""
+      <div style="text-align:center; margin:26px 0;">
+        <p style="margin:0 0 4px; font-size:13px; color:#66757f;">Costo aproximado de este envío</p>
+        <p style="margin:0; font-size:40px; line-height:1.1; font-weight:bold; color:#d11a1a;">{costo_txt}</p>
+        <p style="margin:8px 0 0; font-size:12px; color:#66757f;">{total} mensajes &times; {_fmt_moneda(costo['rate'], costo['moneda'])} c/u &middot; categoría {costo['categoria'].capitalize()}</p>
+      </div>"""
+    else:
+        bloque_costo = """
+      <p style="text-align:center; margin:24px 0; font-size:13px; color:#b23b37; font-weight:bold;">
+        Costo aproximado no disponible (revisa las tarifas de Meta en Estadísticas).
+      </p>"""
+
     html = f"""
     <html><body style="font-family: Arial, sans-serif; color: #24303c;">
       <h2>Solicitud de envío masivo</h2>
       <p>Se ha solicitado enviar la plantilla <strong>{plantilla_nombre}</strong> a <strong>{total} personas</strong> desde la base de datos <strong>{ambiente}</strong>.</p>
+      {bloque_costo}
       <div style="background:#f5f7f8; border-left:4px solid #128c7e; padding:14px 16px; margin:18px 0; border-radius:6px;">
         <p style="margin:0 0 6px; font-size:12px; color:#66757f; font-weight:bold;">Mensaje a enviar:</p>
         <p style="margin:0; white-space:pre-wrap; font-family:Consolas,monospace; font-size:13px; color:#24303c;">{plantilla_texto}</p>
@@ -1377,6 +1424,12 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
             },
         })
 
+    # En producción se puede limitar cuántos se envían de esta tanda; el resto
+    # queda pendiente para un envío posterior. En desarrollo no aplica.
+    if amb == "produccion" and body.limite is not None and destinatarios:
+        n = max(1, min(int(body.limite), len(destinatarios)))
+        destinatarios = destinatarios[:n]
+
     if not destinatarios:
         # Aunque no salga ningún mensaje, si hubo rechazados se deja constancia
         # del intento en el historial (0 enviados, N inválidos).
@@ -1419,7 +1472,8 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
                 registrar_historial(r.get("id"), r.get("nombre"), r.get("telefono"),
                                     plantilla["clave"], "", "numero_invalido",
                                     r.get("motivo"), ambiente=amb, envio_id=envio_id)
-        _enviar_correo_confirmacion(token, len(destinatarios), plantilla["nombre"], plantilla["texto"], amb)
+        _enviar_correo_confirmacion(token, len(destinatarios), plantilla["nombre"], plantilla["texto"],
+                                    amb, plantilla["clave"])
         return {"requiere_confirmacion": True, "solicitud_id": token, "total": len(destinatarios),
                 "ambiente": amb, "rechazados": rechazados,
                 "confirm_url": f"{url_base()}/api/notificaciones/confirmar/{token}"}
