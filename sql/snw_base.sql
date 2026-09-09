@@ -1,7 +1,7 @@
 -- ============================================================
 -- SNW - Base de datos única (snw_base)
 -- ============================================================
--- Infraestructura de la base de datos con 7 tablas:
+-- Infraestructura de la base de datos con 9 tablas:
 --   - pacientes_dev   : números autorizados para pruebas de desarrollo
 --   - pacientes_prod  : números autorizados (sin datos ficticios)
 --   - envios          : lotes de envío (una fila por "Iniciar envío")
@@ -9,10 +9,13 @@
 --   - whatsapp_eventos: eventos del webhook (idempotencia)
 --   - configuracion   : ajustes editables de la app (entorno, método de envío, etc.)
 --   - tarifas_whatsapp: rate card de Meta (tarifas por mensaje, para costos)
+--   - call_center_log : respuestas enviadas a pacientes interesados + número de call center asignado
+--   - usuarios        : cuentas de la app (rol + permisos, clave SHA-256)
 --
 -- Es idempotente (IF NOT EXISTS / INSERT IGNORE): crea la estructura y
--- siembra solo los 2 números autorizados. Está pensado para ejecutarse
--- una sola vez (INICIAR_SNW.bat lo omite si la base ya existe).
+-- siembra los 2 números autorizados y las cuentas por defecto
+-- (admin/admin123, usuario/usuario123, dev/dev123). Está pensado para
+-- ejecutarse una sola vez (INICIAR_SNW.bat lo omite si la base ya existe).
 -- ============================================================
 
 CREATE DATABASE IF NOT EXISTS snw_base CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -144,6 +147,50 @@ CREATE TABLE IF NOT EXISTS tarifas_whatsapp (
   descargada DATETIME DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_hash (hash)
 ) CHARACTER SET utf8mb4;
+
+-- Log de las respuestas enviadas a pacientes interesados (mensaje de call
+-- center). Se guarda qué número de call center se asignó, para repartir la
+-- carga: la siguiente respuesta usa el número menos usado.
+CREATE TABLE IF NOT EXISTS call_center_log (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  paciente_id INT DEFAULT NULL,
+  nombre_paciente VARCHAR(150) DEFAULT NULL,
+  numero_paciente VARCHAR(20) DEFAULT NULL,
+  numero_call_center VARCHAR(20) NOT NULL,
+  plantilla_clave VARCHAR(50) DEFAULT NULL,
+  automatico TINYINT(1) NOT NULL DEFAULT 0,
+  estado ENUM('enviado','error') NOT NULL DEFAULT 'enviado',
+  descripcion_error VARCHAR(255) DEFAULT NULL,
+  base_datos VARCHAR(50) DEFAULT NULL,
+  fecha_hora DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_numero (numero_call_center),
+  INDEX idx_fecha (fecha_hora)
+) CHARACTER SET utf8mb4;
+
+-- Cuentas de la aplicación. `usuario` es el correo (o un identificador corto
+-- para las cuentas semilla); `permisos` es una lista separada por comas y solo
+-- aplica al rol `usuario` (admin y desarrollador tienen acceso implícito).
+-- La página de Configuración es exclusiva del rol `desarrollador`.
+CREATE TABLE IF NOT EXISTS usuarios (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  usuario VARCHAR(150) NOT NULL,
+  nombre VARCHAR(150) NOT NULL DEFAULT '',
+  rol ENUM('usuario','administrador','desarrollador') NOT NULL DEFAULT 'usuario',
+  permisos VARCHAR(500) NOT NULL DEFAULT '',
+  clave_hash CHAR(64) NOT NULL,
+  creado DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_usuario (usuario)
+) CHARACTER SET utf8mb4;
+
+-- Cuentas por defecto (clave = SHA-256). El backend además garantiza `dev`
+-- en cada arranque si falta. Máximo 4 cuentas de rol `desarrollador`.
+INSERT IGNORE INTO usuarios (usuario, nombre, rol, permisos, clave_hash) VALUES
+  ('admin', 'Administrador', 'administrador', '',
+   '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9'),
+  ('usuario', 'Usuario Final', 'usuario', 'mensajeria,historial,estadisticas,plantillas_editar',
+   'dfa7a2273567dcd1efffb9a46308e91c20fa13c44c3441bc69cd6a7869b3f7fd'),
+  ('dev', 'Desarrollador', 'desarrollador', '',
+   '87274af01876341455b32d805946f272871bb42effa6604dccf28bb027afa82b');
 
 -- ------------------------------------------------------------
 -- Datos: pacientes_dev (números autorizados)

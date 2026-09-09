@@ -64,10 +64,13 @@
       </div>
     </section>
 
-    <section class="panel" id="panelCallCenter" data-solo-admin>
+    <section class="panel" id="panelCallCenter" data-perm="call_center">
       <div class="panel__head">
         <h2>Plantillas de call center</h2>
-        <button id="btnNuevaCC" class="btn btn--primary" type="button">+ Nueva</button>
+        <div class="panel__actions">
+          <button id="btnVerLogCC" class="btn btn--ghost" type="button">Ver registro de env&iacute;os</button>
+          <button id="btnNuevaCC" class="btn btn--primary" type="button">+ Nueva</button>
+        </div>
       </div>
       <p class="field__hint" style="margin: 12px 18px 0;">
         Mensajes que se env&iacute;an a un paciente que responde que le interesa. Se manda uno
@@ -110,7 +113,7 @@
       <h3 id="mensajesTitulo">Mensajes del paciente</h3>
       <div id="msgPacienteCab" class="msg-cab"></div>
       <div id="msgHilo" class="msg-hilo"></div>
-      <div class="msg-acciones" data-solo-admin>
+      <div class="msg-acciones" data-perm="call_center">
         <label class="msg-interes">
           <input type="checkbox" id="chkInteresado">
           <span>Marcar como interesado</span>
@@ -162,6 +165,30 @@
           <button type="submit" class="btn btn--primary" id="btnGuardarCC">Guardar</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <div id="modalCCLog" class="modal" hidden>
+    <div class="modal__card modal__card--detalle" role="dialog" aria-modal="true">
+      <h3>Registro de respuestas de call center</h3>
+      <p id="ccLogContadores" class="field__hint" style="margin: 0 0 10px;"></p>
+      <div class="tabla-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Paciente</th>
+              <th>N&uacute;mero asignado</th>
+              <th>Origen</th>
+              <th>Estado</th>
+            </tr>
+          </thead>
+          <tbody id="ccLogBody"></tbody>
+        </table>
+      </div>
+      <div class="modal__actions">
+        <button type="button" class="btn btn--primary" id="btnCerrarLogCC">Cerrar</button>
+      </div>
     </div>
   </div>
 

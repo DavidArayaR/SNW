@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SNW &middot; Crear cuenta</title>
+  <link rel="stylesheet" href="css/tema.css">
+  <script src="js/tema.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      font-family: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+      background:
+        linear-gradient(rgba(7, 94, 84, .82), rgba(18, 140, 126, .88)),
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='.06'%3E%3Ccircle cx='40' cy='40' r='14'/%3E%3Cpath d='M20 60l8-8M52 12l8 8'/%3E%3C/g%3E%3C/svg%3E");
+      color: var(--texto);
+      padding: 20px;
+    }
+    :root[data-tema="oscuro"] body {
+      background:
+        linear-gradient(rgba(10, 22, 20, .9), rgba(16, 30, 27, .94)),
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='.04'%3E%3Ccircle cx='40' cy='40' r='14'/%3E%3Cpath d='M20 60l8-8M52 12l8 8'/%3E%3C/g%3E%3C/svg%3E");
+    }
+    .card {
+      width: 100%;
+      max-width: 400px;
+      background: var(--panel);
+      color: var(--texto);
+      border-radius: 16px;
+      padding: 32px 32px 26px;
+      box-shadow: 0 22px 60px rgba(0, 0, 0, .35);
+    }
+    .logo {
+      display: grid;
+      place-items: center;
+      width: 56px;
+      height: 56px;
+      margin: 0 auto 14px;
+      border-radius: 50%;
+      background: var(--btn-primary-bg);
+      color: var(--btn-primary-fg);
+      font-size: 1.5rem;
+    }
+    h1 { margin: 0 0 4px; text-align: center; font-size: 1.25rem; }
+    .sub { margin: 0 0 22px; text-align: center; color: var(--texto-suave); font-size: .86rem; }
+    label { display: block; margin-bottom: 6px; font-weight: 600; font-size: .87rem; }
+    input {
+      width: 100%;
+      border: 1.5px solid var(--borde);
+      border-radius: 10px;
+      padding: 11px 13px;
+      font: inherit;
+      font-size: .95rem;
+      margin-bottom: 14px;
+      background: var(--surface-2);
+      color: var(--texto);
+    }
+    input:focus { border-color: var(--verde); outline: none; }
+    input.malo { border-color: var(--danger-fg); }
+    button {
+      width: 100%;
+      border: none;
+      border-radius: 10px;
+      background: var(--btn-primary-bg);
+      color: var(--btn-primary-fg);
+      padding: 13px;
+      font: inherit;
+      font-weight: 700;
+      font-size: .98rem;
+      cursor: pointer;
+    }
+    button:hover { filter: brightness(1.07); }
+    button:disabled { opacity: .6; cursor: wait; }
+    .reglas { margin: 0 0 16px; padding-left: 18px; font-size: .78rem; color: var(--texto-suave); line-height: 1.7; }
+    .reglas li.ok { color: var(--ok-fg); }
+    .reglas li.ok::marker { content: "\2713  "; }
+    .aviso {
+      display: none;
+      margin: -4px 0 14px;
+      padding: 10px 13px;
+      border-radius: 8px;
+      font-size: .85rem;
+    }
+    .aviso.visible { display: block; }
+    .aviso--error { background: var(--danger-bg); border: 1px solid var(--danger-bd); color: var(--danger-fg); }
+    .aviso--ok { background: var(--ok-bg); border: 1px solid var(--ok-bd); color: var(--ok-fg); }
+    .nota { margin: 18px 0 0; text-align: center; color: var(--texto-suave); font-size: .8rem; line-height: 1.7; }
+    a { color: var(--verde); }
+  </style>
+</head>
+<body>
+
+  <div class="card">
+    <div class="logo">&#128100;</div>
+    <h1>Crear una cuenta</h1>
+    <p class="sub">Reg&iacute;strate con tu correo para acceder a SNW</p>
+
+    <form id="formRegistro" novalidate>
+      <label for="inpUsuario">Correo electr&oacute;nico</label>
+      <input type="email" id="inpUsuario" autocomplete="username" placeholder="nombre@empresa.cl" required>
+
+      <label for="inpClave">Contrase&ntilde;a</label>
+      <input type="password" id="inpClave" autocomplete="new-password" required>
+
+      <ul class="reglas" id="reglas">
+        <li data-regla="len">Al menos 8 caracteres</li>
+        <li data-regla="min">Una letra min&uacute;scula</li>
+        <li data-regla="may">Una letra may&uacute;scula</li>
+        <li data-regla="num">Un n&uacute;mero</li>
+      </ul>
+
+      <label for="inpClave2">Repite la contrase&ntilde;a</label>
+      <input type="password" id="inpClave2" autocomplete="new-password" required>
+
+      <p class="aviso" id="msg"></p>
+      <button type="submit" id="btnCrear">Crear cuenta</button>
+    </form>
+
+    <p class="nota">
+      ¿Ya tienes cuenta? <a href="login.html">Iniciar sesi&oacute;n</a><br>
+      <a href="index.html">Volver a la p&aacute;gina principal</a>
+    </p>
+  </div>
+
+  <script>
+    if (window.snwMontarFabTema) window.snwMontarFabTema();
+
+    const $ = (s) => document.querySelector(s);
+    const inpUsuario = $("#inpUsuario");
+    const inpClave = $("#inpClave");
+    const inpClave2 = $("#inpClave2");
+    const msg = $("#msg");
+    const btn = $("#btnCrear");
+
+    const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/;
+
+    function chequeos(clave) {
+      return {
+        len: clave.length >= 8 && clave.length <= 128,
+        min: /[a-z]/.test(clave),
+        may: /[A-Z]/.test(clave),
+        num: /\d/.test(clave),
+      };
+    }
+
+    function pintarReglas() {
+      const c = chequeos(inpClave.value);
+      document.querySelectorAll("#reglas li").forEach((li) => {
+        li.classList.toggle("ok", !!c[li.dataset.regla]);
+      });
+    }
+    inpClave.addEventListener("input", pintarReglas);
+
+    function mostrar(texto, tipo) {
+      msg.textContent = texto;
+      msg.className = "aviso visible aviso--" + tipo;
+    }
+
+    $("#formRegistro").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      msg.className = "aviso";
+      const correo = inpUsuario.value.trim().toLowerCase();
+      const clave = inpClave.value;
+
+      inpUsuario.classList.toggle("malo", !EMAIL_RE.test(correo));
+      if (!EMAIL_RE.test(correo)) return mostrar("Escribe un correo electrónico válido.", "error");
+
+      const c = chequeos(clave);
+      if (!(c.len && c.min && c.may && c.num)) {
+        inpClave.classList.add("malo");
+        return mostrar("La contraseña no cumple los requisitos.", "error");
+      }
+      inpClave.classList.remove("malo");
+
+      if (clave !== inpClave2.value) {
+        inpClave2.classList.add("malo");
+        return mostrar("Las contraseñas no coinciden.", "error");
+      }
+      inpClave2.classList.remove("malo");
+
+      btn.disabled = true;
+      btn.textContent = "Creando...";
+      try {
+        const res = await fetch("api/auth/registro", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ usuario: correo, clave: clave }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || "No se pudo crear la cuenta.");
+        mostrar("Cuenta creada. Redirigiendo al inicio de sesión…", "ok");
+        setTimeout(() => location.replace("login.html"), 1400);
+      } catch (ex) {
+        mostrar(ex.message, "error");
+        btn.disabled = false;
+        btn.textContent = "Crear cuenta";
+      }
+    });
+  </script>
+</body>
+</html>

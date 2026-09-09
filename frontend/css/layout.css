@@ -157,9 +157,9 @@
   border: 1px solid var(--brand-tint-bd);
 }
 .app-topbar select.badge--select {
-  background: var(--verde);
+  background: var(--btn-primary-bg);
   color: var(--btn-primary-fg);
-  border-color: var(--verde);
+  border-color: var(--btn-primary-bg);
 }
 
 /* Hamburguesa de la barra superior: sólo en móvil (abre el cajón).

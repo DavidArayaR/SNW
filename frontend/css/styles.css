@@ -43,7 +43,7 @@ select.badge--select {
   font-family: inherit;
   font-weight: 700;
   cursor: pointer;
-  background: var(--verde);
+  background: var(--btn-primary-bg);
   color: var(--btn-primary-fg);
   padding-right: 26px;
 }
@@ -152,11 +152,11 @@ select.badge--select {
 }
 .btn:hover { filter: brightness(1.06); }
 .btn--lg { padding: 12px 22px; font-size: .95rem; }
-.btn--primary { background: var(--verde); color: var(--btn-primary-fg); }
-.btn--ghost { background: transparent; color: var(--texto-suave); border: 1px solid var(--borde); }
-.btn--ghost:hover { background: var(--hover); }
-.btn--danger { background: var(--rojo); color: var(--btn-danger-fg); }
-.btn--danger-ghost { background: transparent; color: var(--rojo); border: 1px solid var(--danger-bd); }
+.btn--primary { background: var(--btn-primary-bg); color: var(--btn-primary-fg); }
+.btn--ghost { background: transparent; color: var(--btn-ghost-fg); border: 1px solid var(--borde); }
+.btn--ghost:hover { background: var(--hover); border-color: var(--verde); }
+.btn--danger { background: var(--btn-danger-bg); color: var(--btn-danger-fg); }
+.btn--danger-ghost { background: transparent; color: var(--danger-fg); border: 1px solid var(--danger-fg); }
 .btn--danger-ghost:hover { background: var(--danger-bg); }
 
 /* Todos los botones muestran un contorno al pasar el ratón. */
@@ -300,7 +300,7 @@ button:disabled:hover { outline: none; }
   font-size: .82rem;
   transition: all .15s;
 }
-.chip:hover { background: var(--verde); color: var(--btn-primary-fg); }
+.chip:hover { background: var(--btn-primary-bg); color: var(--btn-primary-fg); }
 
 .form-actions { display: flex; flex-wrap: wrap; gap: 12px; }
 

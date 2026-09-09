@@ -6,8 +6,17 @@ function authHeaders(extra = {}) {
   return { Authorization: "Bearer " + (localStorage.getItem("snw_token") || ""), ...extra };
 }
 
-if (!localStorage.getItem("snw_token")) location.replace("login.html");
-else if (localStorage.getItem("snw_rol") !== "administrador") location.replace("mensajeria.html");
+if (!localStorage.getItem("snw_token")) {
+  location.replace("login.html");
+} else {
+  const rol = localStorage.getItem("snw_rol");
+  const priv = rol === "administrador" || rol === "desarrollador";
+  let perms = [];
+  try { perms = JSON.parse(localStorage.getItem("snw_permisos") || "[]"); } catch (e) { perms = []; }
+  if (!priv && (!Array.isArray(perms) || perms.indexOf("pacientes") === -1)) {
+    location.replace("mensajeria.html");
+  }
+}
 
 let ambienteAdmin = localStorage.getItem("snw_ambiente_admin");
 let _ambienteInicializado = false;
@@ -576,7 +585,7 @@ $("#btnLanzarEnvio").addEventListener("click", async () => {
       const espera = document.getElementById("modalEspera");
       espera.hidden = false;
       const linkEl = document.getElementById("linkConfirmacionEspera");
-      if (linkEl && data.confirm_url && localStorage.getItem("snw_rol") === "administrador") {
+      if (linkEl && data.confirm_url && window.snwEsPrivilegiado) {
         linkEl.innerHTML = `Para pruebas sin correo: <a href="${data.confirm_url}" target="_blank">Confirmar manualmente</a> · <a href="${data.confirm_url.replace('confirmar', 'rechazar')}" target="_blank" style="color:#b23b37;">Rechazar</a>`;
       }
       const beforeUnload = (e) => { e.preventDefault(); e.returnValue = ""; return ""; };

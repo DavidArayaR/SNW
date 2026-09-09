@@ -5,6 +5,7 @@ function authHeaders(extra = {}) {
 }
 
 if (!localStorage.getItem("snw_token")) location.replace("login.html");
+else if (localStorage.getItem("snw_rol") !== "desarrollador") location.replace("mensajeria.html");
 
 const toastEl = $("#toast");
 let toastTimer;

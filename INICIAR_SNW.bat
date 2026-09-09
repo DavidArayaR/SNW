@@ -32,7 +32,7 @@ if not errorlevel 1 (
 echo       Primera ejecucion: cargando snw_base.sql...
 "%MYSQL%" --default-character-set=utf8mb4 -u root -h 127.0.0.1 -P 3306 < "%~dp0sql\snw_base.sql" >nul 2>nul
 if errorlevel 1 goto ERROR_SQL
-echo  [OK] snw_base.sql cargado (5 tablas + 2 numeros autorizados).
+echo  [OK] snw_base.sql cargado (9 tablas + cuentas admin/usuario/dev + 2 numeros autorizados).
 goto CHECKEAR_DEPS
 
 :SIN_MYSQL

@@ -13,7 +13,7 @@ con la **WhatsApp Business Cloud API** de Meta (v26.0).
 | Backend / API | Python + FastAPI + Uvicorn |
 | Base de datos | MySQL / MariaDB (XAMPP, PyMySQL) — una sola base, `snw_base` |
 | Plantillas | Archivo JSON (`data/plantillas.json`) |
-| Usuarios / sesiones | Archivos JSON (`data/usuarios.json` con SHA-256, `data/sesiones.json`) |
+| Usuarios | Tabla `usuarios` en `snw_base` (rol + permisos, clave SHA-256). Sesiones en `data/sesiones.json` |
 | WhatsApp | WhatsApp Business Cloud API (Meta Graph API v26.0) o motor simulado |
 | Correo | SMTP (configurable en la tabla `configuracion`) — confirmación de envíos en producción |
 | Configuración | Tabla `configuracion` en MySQL (todo salvo credenciales de BD, que van en `.env`) |
@@ -37,21 +37,24 @@ snw/
 ├── frontend/
 │   ├── index.html             Landing con navegación por rol
 │   ├── login.html             Inicio de sesión
+│   ├── registro.html          Alta pública de cuenta (correo + contraseña segura)
 │   ├── mensajeria.html        Editor de plantillas, vista previa estilo WhatsApp, envío
-│   ├── pacientes.html         Base de datos de pacientes + envío masivo (solo admin)
+│   ├── pacientes.html         Base de datos de pacientes + envío masivo (permiso: pacientes)
 │   ├── historial.html         Historial de envíos (batch + detalle por paciente)
-│   ├── estadisticas.html      Contador mensual de mensajes, desgloses y costos WhatsApp (admin)
-│   ├── configuracion.html     Editor de todos los ajustes por secciones (solo admin)
-│   ├── css/                   tema.css (paleta claro/oscuro), styles.css (compartido), layout.css (sidebar), pacientes.css, estadisticas.css, configuracion.css
-│   ├── js/                    tema.js (modo claro/oscuro), layout.js (sidebar/sesión, común), app.js, pacientes.js, historial.js, estadisticas.js, configuracion.js
+│   ├── estadisticas.html      Contador mensual de mensajes, desgloses y costos WhatsApp
+│   ├── configuracion.html     Editor de todos los ajustes por secciones (solo desarrollador)
+│   ├── usuarios.html          Gestión de cuentas y permisos (admin / desarrollador)
+│   ├── css/                   tema.css (paleta claro/oscuro), styles.css (compartido), layout.css (sidebar), pacientes.css, estadisticas.css, configuracion.css, usuarios.css
+│   ├── js/                    tema.js (modo claro/oscuro), layout.js (sidebar/sesión/permisos, común), app.js, pacientes.js, historial.js, estadisticas.js, configuracion.js, usuarios.js
 │   └── vendor/bootstrap/     Bootstrap 5.3.3 (CSS + bundle JS) servido localmente
 ├── data/
 │   ├── plantillas.json        Plantillas de mensajes + metadata del template en Meta
-│   ├── usuarios.json          Credenciales (admin / usuario), clave en SHA-256
 │   └── sesiones.json          Tokens de sesión activos
+│                                (las cuentas viven en la tabla `usuarios`)
 ├── sql/
-│   └── snw_base.sql           Crea la base snw_base, sus 7 tablas y siembra los 2
-│                                números autorizados (idempotente: IF NOT EXISTS / INSERT IGNORE)
+│   └── snw_base.sql           Crea la base snw_base, sus 9 tablas y siembra los 2
+│                                números autorizados y las cuentas admin/usuario/dev
+│                                (idempotente: IF NOT EXISTS / INSERT IGNORE)
 ├── backups/                   Volcados manuales (mysqldump) antes de operaciones destructivas
 ├── .env                       Solo credenciales de la BD (DB_*). No versionado.
 ├── .env.example                Plantilla del .env (solo DB_*)
@@ -98,7 +101,7 @@ vive el resto.
 
 **Todo lo demás vive en la tabla `configuracion`** (clave/valor). El backend la crea y la
 siembra con los valores por defecto en el primer arranque. Se edita desde
-la página **Configuración** (`configuracion.html`, solo admin) — que muestra TODAS las claves
+la página **Configuración** (`configuracion.html`, **solo rol desarrollador**) — que muestra TODAS las claves
 por secciones (Aplicación, URL pública, Correo/SMTP, WhatsApp) — o con `UPDATE configuracion`
 (requiere reiniciar por la caché). Los cambios de la página se aplican sin reiniciar (salvo
 el `entorno` activo, que las demás pantallas leen al cargar).
@@ -112,7 +115,9 @@ el `entorno` activo, que las demás pantallas leen al cargar).
 
 ## Base de datos
 
-**Una sola base MySQL, `snw_base`**, con 7 tablas (ver `sql/snw_base.sql`):
+**Una sola base MySQL, `snw_base`**, con 9 tablas (ver `sql/snw_base.sql`).
+La tabla **`usuarios`** guarda las cuentas de la app (`usuario` correo, `nombre`, `rol`,
+`permisos` CSV, `clave_hash` SHA-256). Las demás:
 
 **`pacientes_dev` / `pacientes_prod`** — mismo esquema, una tabla por entorno
 
@@ -165,9 +170,15 @@ Cada rate card distinto se guarda una sola vez (`UNIQUE KEY uq_hash`, hash de la
 con su `efectiva_desde` y el CSV original (`csv_texto`). Lo llena `POST /api/tarifas/actualizar`,
 que descarga la [página de precios de Meta](https://developers.facebook.com/docs/whatsapp/pricing/),
 baja los CSV de rate card, extrae la fila «Chile» y detecta si hay tarifas nuevas o futuras.
-Se usa en la sección **Costos** de Estadísticas (solo admin) para estimar el gasto por
+Se usa en la sección **Costos** de Estadísticas (permiso `tarifas_editar`) para estimar el gasto por
 día / mes / año aplicando a cada mensaje enviado la tarifa vigente en su fecha según la
 categoría de su plantilla.
+
+**`call_center_log`** — una fila por cada respuesta de call center enviada a un paciente
+interesado, con el `numero_call_center` que se le asignó, si fue `automatico` o manual y el
+`estado` (`enviado`/`error`). El contador de usos por número sale de aquí (`GROUP BY
+numero_call_center`) y sirve para elegir, en la siguiente respuesta, el número menos usado.
+Se ve en el **modal «Ver registro»** de la sección *Plantillas de call center* del Historial.
 
 Las tablas de pacientes comparten `log_envios`, así que el backend siempre ubica el
 "último log" de un paciente con un `LEFT JOIN` correlacionado por `paciente_id`.
@@ -194,10 +205,22 @@ Reglas del editor:
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| POST | `/api/auth/login` | `{usuario, clave}` → `{token, rol, nombre}` |
+| POST | `/api/auth/registro` | Alta pública `{usuario, clave}`. `usuario` debe ser un correo válido; `clave` ≥ 8 con minúscula, mayúscula y número. Nace con rol `usuario` y permisos básicos (`mensajeria`, `historial`, `estadisticas`, `plantillas_editar`) |
+| POST | `/api/auth/login` | `{usuario, clave}` → `{token, rol, nombre, permisos}` |
+| GET | `/api/auth/me` | Rol y permisos vigentes de la sesión (el frontend lo usa para refrescarse si un admin cambió los permisos) |
+| PUT | `/api/auth/clave` | Cambiar **la propia** contraseña: `{clave_actual, clave_nueva}`. Valida la actual y la fuerza de la nueva. Disponible para cualquier cuenta (botón «Cambiar contraseña» de la barra lateral) |
 | POST | `/api/auth/logout` | Invalida el token actual |
 
-### Pacientes (solo admin)
+### Usuarios (rol `administrador` o `desarrollador`)
+
+| Método | Endpoint | Descripción |
+|---|---|---|
+| GET | `/api/usuarios` | Cuentas con `rol`, `permisos`, `editable`/`motivo_bloqueo` según quién pregunta, más `desarrolladores`/`max_desarrolladores` |
+| PUT | `/api/usuarios/{correo}` | `{permisos?, nombre?, rol?}`. `rol` solo lo cambia un desarrollador; promover a `desarrollador` da 409 si ya hay 4. Nadie modifica su propia cuenta; un administrador solo toca cuentas de rol `usuario` |
+| PUT | `/api/usuarios/{correo}/clave` | Restablece la contraseña de **otra** cuenta: `{clave_nueva}`. Un desarrollador puede con cualquiera; un administrador solo con cuentas de rol `usuario`. La cuenta afectada pierde sus sesiones. Para la propia se usa `PUT /api/auth/clave` |
+| DELETE | `/api/usuarios/{correo}` | Elimina la cuenta y cierra sus sesiones (mismas reglas que PUT) |
+
+### Pacientes (permiso: `pacientes`)
 
 | Método | Endpoint | Descripción |
 |---|---|---|
@@ -240,12 +263,16 @@ página Historial. Al arrancar se siembra una si no hay ninguna.
   call center (`https://wa.me/<número>`, mensaje interactivo `cta_url`). Los **números son
   globales** y se configuran en **Configuración → Call center** (`call_center_numeros`, uno o
   varios separados por coma), no por plantilla. Si hay uno, se usa ese; si hay varios, cada
-  respuesta toma uno solo, rotando (round-robin) para repartir entre ellos. El texto del
-  botón (`cc_boton_texto`) sí es por plantilla (máx. 20 car.).
+  respuesta toma **el número menos usado** según `call_center_log` (empates y todos-en-cero →
+  uno al azar entre los mínimos). El texto del botón (`cc_boton_texto`) sí es por plantilla
+  (máx. 20 car.).
+- **Registro:** cada envío (auto o manual) queda en `call_center_log` con el número asignado.
+  Se consulta con `GET /api/call-center/log` y se ve en el modal **«Ver registro»**.
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/plantillas/call-center` | `{plantillas, numeros_call_center, auto_segundos}`. Cada plantilla trae `cc_boton`, `cc_boton_texto`, `cc_auto`, `es_auto_efectiva` |
+| GET | `/api/plantillas/call-center` | `{plantillas, numeros_call_center, contadores, auto_segundos}`. Cada plantilla trae `cc_boton`, `cc_boton_texto`, `cc_auto`, `es_auto_efectiva` |
+| GET | `/api/call-center/log` | `{entradas, contadores}` — últimas 200 respuestas de call center + usos por número |
 | POST | `/api/plantillas/call-center` | Crear `{nombre, texto, boton, boton_texto, auto}` |
 | PUT | `/api/plantillas/call-center/{id}` | Actualizar `{nombre, texto, boton, boton_texto, auto}` (marcar `auto` desmarca las demás) |
 | DELETE | `/api/plantillas/call-center/{id}` | Eliminar |
@@ -258,7 +285,7 @@ página Historial. Al arrancar se siembra una si no hay ninguna.
 | POST | `/api/notificaciones/destinatarios` | Cuenta pacientes totales/pendientes de un ambiente |
 | GET | `/api/notificaciones/jobs/{job_id}` | Progreso en vivo del envío en curso |
 | POST | `/api/notificaciones/jobs/{job_id}/pausa` \| `/reanudar` \| `/cancelar` | Control del job en curso |
-| POST | `/api/notificaciones/prueba-wa` | (solo admin) Envía un mensaje de prueba real vía API oficial |
+| POST | `/api/notificaciones/prueba-wa` | (solo desarrollador) Envía un mensaje de prueba real vía API oficial |
 
 ### Confirmación / rechazo por correo (producción)
 
@@ -282,19 +309,19 @@ página Historial. Al arrancar se siembra una si no hay ninguna.
 |---|---|---|
 | GET | `/api/estadisticas` | Resumen para Estadísticas (**solo envíos de producción**): mensajes `enviado` del mes, desglose, totales, `pacientes_por_respuesta` (cuántos pacientes de producción respondieron / se dieron de baja / no han respondido) y `webhook` (cuándo llegó el último evento de Meta — sirve para detectar que el webhook dejó de recibir) |
 | GET | `/api/estadisticas/envios?granularidad=dia\|mes\|anio` | Mensajes enviados de producción agrupados por periodo, para el gráfico de barras (día = últimos 30, mes = últimos 12, año = últimos 6) |
-| GET | `/api/estadisticas/costos?granularidad=dia\|mes\|anio` | (solo admin) Costo estimado agrupado por periodo. **Solo cuenta los mensajes de plantilla iniciados por la empresa** (la plantilla tiene un template Meta configurado y categoría Marketing / Utility / Authentication), aplicando la tarifa de `tarifas_whatsapp` vigente en su fecha. Los envíos de texto libre (respuestas dentro de la ventana de 24 h) son gratuitos y se devuelven aparte en `excluidos` |
-| GET | `/api/tarifas` | (solo admin) Tarifas guardadas: `vigente`, `proxima` (tarifa futura ya publicada por Meta), `usd_vigente`, `historial`, moneda de la cuenta y fecha de la última descarga |
-| POST | `/api/tarifas/actualizar` | (solo admin) Descarga la página de precios de Meta y sus CSV, guarda los rate cards nuevos de Chile (`INSERT IGNORE` por hash), autodetecta la moneda de facturación (`GET {waba}?fields=currency` → `wa_moneda`) y devuelve si hubo cambio |
-| GET | `/api/tarifas/chile.csv` | (solo admin) Descarga el CSV original del rate card de Chile (prefiere la moneda de la cuenta, si no USD) |
+| GET | `/api/estadisticas/costos?granularidad=dia\|mes\|anio` | (permiso `tarifas_editar`) Costo estimado agrupado por periodo. **Solo cuenta los mensajes de plantilla iniciados por la empresa** (la plantilla tiene un template Meta configurado y categoría Marketing / Utility / Authentication), aplicando la tarifa de `tarifas_whatsapp` vigente en su fecha. Los envíos de texto libre (respuestas dentro de la ventana de 24 h) son gratuitos y se devuelven aparte en `excluidos` |
+| GET | `/api/tarifas` | (permiso `tarifas_editar`) Tarifas guardadas: `vigente`, `proxima` (tarifa futura ya publicada por Meta), `usd_vigente`, `historial`, moneda de la cuenta y fecha de la última descarga |
+| POST | `/api/tarifas/actualizar` | (permiso `tarifas_editar`) Descarga la página de precios de Meta y sus CSV, guarda los rate cards nuevos de Chile (`INSERT IGNORE` por hash), autodetecta la moneda de facturación (`GET {waba}?fields=currency` → `wa_moneda`) y devuelve si hubo cambio |
+| GET | `/api/tarifas/chile.csv` | (permiso `tarifas_editar`) Descarga el CSV original del rate card de Chile (prefiere la moneda de la cuenta, si no USD) |
 
-### Configuración
+### Configuración (solo rol `desarrollador`)
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/configuracion?ambiente=` | Vista **segura** de la config para el resto de páginas (no devuelve el token de Meta ni la clave SMTP en claro) |
-| PUT | `/api/configuracion` | (solo admin) Guarda claves sueltas de `configuracion` sin reiniciar |
-| GET | `/api/configuracion/todo` | (solo admin) TODAS las claves con su **valor real** (incluye secretos) + metadata de secciones, para la página Configuración |
-| PUT | `/api/configuracion/todo` | (solo admin) `{cambios: {clave: valor, …}}` — valida clave conocida, enums (`entorno`, `metodo_envio`) y enteros (`intervalo_ms`, `smtp_port`, `call_center_auto_segundos`); `call_center_numeros` se normaliza a lista de solo-dígitos separada por coma; persiste con `config_set` |
+| GET | `/api/configuracion?ambiente=` | Vista **segura** de la config para el resto de páginas — cualquier sesión (no devuelve el token de Meta ni la clave SMTP en claro) |
+| PUT | `/api/configuracion` | Guarda claves sueltas de `configuracion` sin reiniciar |
+| GET | `/api/configuracion/todo` | TODAS las claves con su **valor real** (incluye secretos) + metadata de secciones, para la página Configuración |
+| PUT | `/api/configuracion/todo` | `{cambios: {clave: valor, …}}` — valida clave conocida, enums (`entorno`, `metodo_envio`) y enteros (`intervalo_ms`, `smtp_port`, `call_center_auto_segundos`); `call_center_numeros` se normaliza a lista de solo-dígitos separada por coma; persiste con `config_set` |
 
 ### Webhook de WhatsApp (Meta)
 
@@ -459,23 +486,23 @@ propagar como error 500.
   "Enviar mensaje" → envía esa plantilla a **todos los pacientes elegibles** del ambiente
   elegido (`pacientes: null`). En **producción** el modal muestra un slider + campo numérico
   (1 … pendientes) para acotar cuántos se envían en esta tanda; el resto quedan pendientes.
-- **Pacientes** (`pacientes.html`, solo admin): selecciona pacientes puntuales con
+- **Pacientes** (`pacientes.html`, permiso `pacientes`): selecciona pacientes puntuales con
   checkboxes/filtros → elige plantilla → "Iniciar envío" (`pacientes: [ids]`). Los
   seleccionados que no pueden recibir (dados de baja, teléfono inválido, no autorizados
   en dev) se listan como **rechazados** con el motivo, y el intento **igual queda en el
   Historial** (0 enviados, N inválidos) aunque no salga ningún mensaje.
 - Ambos flujos terminan en el mismo `POST /api/notificaciones/enviar` y comparten
   confirmación, job y progreso.
-- **Producción**: si quien envía **no** es administrador, se genera un correo de
-  confirmación al supervisor con el **costo aproximado del envío en grande y rojo**
+- **Producción**: si quien envía **no** tiene el permiso `envio_produccion`, se genera un
+  correo de confirmación al supervisor con el **costo aproximado del envío en grande y rojo**
   (nº de mensajes × tarifa vigente de Meta para la categoría de la plantilla, **total
   redondeado hacia arriba**) y botones **Confirmar** y **Rechazar** (con comentario); el
   envío no arranca hasta que se confirma. Un envío rechazado queda en el **Historial**
-  con estado `rechazado` y el comentario del supervisor (ya no se borra). Un administrador
-  en producción envía directo, sin correo.
+  con estado `rechazado` y el comentario del supervisor (ya no se borra). Con el permiso
+  `envio_produccion` (implícito para admin/dev) el envío en producción sale directo, sin correo.
 - **Desarrollo**: envío directo, restringido a los números de `numeros_prueba_dev`;
-  un usuario no-admin con `entorno = desarrollo` nunca puede apuntar a producción,
-  aunque lo pida en la petición.
+  sin el permiso `envio_produccion`, con `entorno = desarrollo` la petición nunca
+  puede apuntar a producción aunque lo pida.
 - **Motor intercambiable** (`metodo_envio`): `simulado` (no envía nada real, solo
   registra en consola) o `api_oficial` (WhatsApp Business Cloud API).
 - **Cola en background**: cada envío corre como `BackgroundTask` de FastAPI con
@@ -484,20 +511,58 @@ propagar como error 500.
 - **Historial batch**: cada envío se registra en `envios` (una fila por "Iniciar envío"),
   y cada mensaje individual en `log_envios`.
 
-## Usuarios
+## Usuarios, roles y permisos
 
-| Usuario | Contraseña | Rol | Acceso |
-|---|---|---|---|
-| `admin` | `admin123` | administrador | Todo: Pacientes, Mensajería, Historial, configuración, links de prueba en el correo de confirmación, envío directo en producción |
-| `usuario` | `usuario123` | usuario | Mensajería (crear/editar plantillas, ver estado y sincronizar con Meta), Historial y Estadísticas; sin acceso a Pacientes ni a Configuración; en producción sus envíos requieren confirmación del supervisor |
+Las cuentas viven en la tabla **`usuarios`** de `snw_base` (`usuario` = correo,
+`clave_hash` SHA-256, `rol`, `permisos` como lista CSV). Cualquiera se registra desde
+**`registro.html`** (correo válido + contraseña segura); la cuenta nace con rol `usuario`
+y acceso básico. Un administrador o desarrollador ajusta permisos desde **`usuarios.html`**.
 
-Las credenciales viven en `data/usuarios.json` (clave en SHA-256); las sesiones activas
-en `data/sesiones.json` (token → `{rol, nombre}`, sin expiración automática).
+**Roles:**
+
+| Rol | Alcance | Puede gestionar |
+|---|---|---|
+| `usuario` | Solo lo que tenga en `permisos` | — |
+| `administrador` | Todo **salvo la página Configuración** | Permisos de las cuentas de rol `usuario` (nunca las de otro admin/dev ni la suya) |
+| `desarrollador` | Acceso total, **incluida Configuración** | Rol **y** permisos de cualquier cuenta salvo la suya |
+
+**Permisos** (campo `permisos` de la tabla; los roles privilegiados los tienen todos de forma implícita):
+
+- Páginas: `pacientes`, `mensajeria`, `historial`, `estadisticas`
+- Acciones: `plantillas_editar`, `envio_produccion` (enviar en producción sin confirmación del supervisor), `tarifas_editar`, `call_center`
+
+**Configuración** no es un permiso asignable: la página y sus endpoints son exclusivos del
+rol `desarrollador` (dependencia `solo_dev` en el backend).
+
+El backend revalida rol y permisos desde la tabla en **cada** petición, así que un cambio
+surte efecto de inmediato (la página se recarga sola vía `GET /api/auth/me`) y una cuenta
+eliminada pierde la sesión.
+
+**Contraseñas.** Cualquiera cambia la suya desde el botón «Cambiar contraseña» de la barra
+lateral (pide la actual). En `usuarios.html`, con «Restablecer contraseña» un desarrollador
+la cambia a cualquiera y un administrador solo a cuentas de rol `usuario`; la cuenta
+afectada tiene que volver a iniciar sesión. Toda contraseña nueva debe ser segura.
+
+**Cuenta de desarrollador:** el sistema garantiza `dev` / `dev123` (rol `desarrollador`)
+en cada arranque si no existe. **Solo puede haber 4 cuentas `desarrollador`**; al intentar
+promover una quinta el backend responde 409.
+
+| Cuenta semilla | Contraseña | Rol |
+|---|---|---|
+| `admin` | `admin123` | administrador |
+| `usuario` | `usuario123` | usuario (`mensajeria`, `historial`, `estadisticas`, `plantillas_editar`) |
+| `dev` | `dev123` | desarrollador |
+
+`sql/snw_base.sql` crea la tabla y siembra estas tres cuentas. Si al primer arranque
+existía un `data/usuarios.json` antiguo, el backend lo importa a la tabla y lo archiva como
+`usuarios.json.migrado`. Las sesiones activas siguen en `data/sesiones.json`
+(token → `{usuario, rol, nombre, permisos}`, sin expiración automática).
 
 ## Pantallas
 
 Todas las pantallas comparten una **barra lateral** (sidebar) construida por `js/layout.js`:
-marca el enlace activo, oculta *Base de datos* si no eres admin y gestiona el cierre de
+marca el enlace activo, muestra solo las páginas permitidas para la cuenta (`window.snwPuede`)
+y gestiona el cierre de
 sesión. En escritorio se pliega a modo icono con el botón «‹‹» de la propia sidebar (la
 preferencia se recuerda en `localStorage`); en pantallas angostas se convierte en un cajón
 que abre la «hamburguesa» de la barra superior. El estilo usa **Bootstrap 5.3** (servido
@@ -509,14 +574,20 @@ como variables CSS: `:root` para claro y `:root[data-tema="oscuro"]` para oscuro
 antes del primer render para que no haya parpadeo. Se cambia con el botón **Modo oscuro /
 claro** de la sidebar, o con el botón flotante en la portada y el login (páginas sin sidebar).
 
-- **Landing** (`index.html`): sin sesión muestra la portada; con sesión, la sidebar y el
-  contenido informativo (Pacientes solo visible si eres admin).
-- **Login** (`login.html`): formulario de acceso, redirige a Pacientes (admin) o
-  Mensajería (usuario) según el rol.
-- **Mensajería** (`mensajeria.html`): editor de plantillas con vista previa estilo
-  WhatsApp (formato `*negrita*`/`_cursiva_`/`~tachado~`), nombre y template de Meta
-  permanentes, botón **Sincronizar** con Meta, y envío directo a todos los pendientes.
-- **Pacientes** (`pacientes.html`, solo admin): tabla con estado editable en línea,
+- **Landing** (`index.html`): sin sesión muestra la portada con los botones **Iniciar
+  sesión** y **Crear cuenta**; con sesión, la sidebar y el contenido informativo. El menú
+  lateral solo muestra las páginas permitidas para la cuenta.
+- **Login** (`login.html`) / **Registro** (`registro.html`): acceso y alta pública de
+  cuenta (correo + contraseña segura). Tras entrar, redirige a Pacientes (admin/dev) o
+  Mensajería según los permisos.
+- **Mensajería** (`mensajeria.html`, permiso `mensajeria`): editor de plantillas con vista
+  previa estilo WhatsApp (formato `*negrita*`/`_cursiva_`/`~tachado~`), nombre y template
+  de Meta permanentes, botón **Sincronizar** con Meta, y envío directo a todos los
+  pendientes. Sin el permiso `plantillas_editar` el editor queda de solo lectura.
+- **Usuarios** (`usuarios.html`, rol admin/desarrollador): alta implícita por registro;
+  se elige una cuenta en un desplegable y el panel de abajo muestra sus datos: nombre,
+  permisos, rol (solo el desarrollador), restablecer contraseña y eliminar. Máximo 4 desarrolladores.
+- **Pacientes** (`pacientes.html`, permiso `pacientes`): tabla con estado editable en línea,
   columna **Error** (motivo del último fallo), columna **Respuesta** con la señal de
   WhatsApp (Respondió / Se dio de baja / Sin respuesta) y su fecha, filtros por
   estado/respuesta, selección múltiple y envío masivo. Aquí se ve **quiénes** respondieron
@@ -528,12 +599,12 @@ claro** de la sidebar, o con el botón flotante en la portada y el login (págin
   botones de filtro (Todos / No han respondido / Respondieron / Se dieron
   de baja) sobre una **comparación en barras** de los pacientes de producción por estado;
   un **gráfico de barras** de mensajes enviados conmutable por día / mes / año y los
-  totales históricos. Solo el admin ve además el panel **"Costos de mensajes de WhatsApp"**:
+  totales históricos. Con el permiso `tarifas_editar` se ve además el panel **"Costos de mensajes de WhatsApp"**:
   tarifas vigentes de Meta para Chile por categoría, aviso cuando hay un cambio o una
   tarifa futura, descarga del CSV de Chile y el mismo gráfico de barras aplicado al costo
   estimado por día / mes / año (solo mensajes de plantilla facturables; los de texto libre
   de la ventana de 24 h se excluyen y se indican bajo el total).
-- **Configuración** (`configuracion.html`, solo admin): edita **todas** las claves de la
+- **Configuración** (`configuracion.html`, **solo rol desarrollador**): edita **todas** las claves de la
   tabla `configuracion` por secciones (Aplicación, URL pública, Correo/SMTP, WhatsApp).
   Muestra el valor real (los secretos con botón de ojo), marca los campos modificados,
   guarda solo lo cambiado con una barra flotante y avisa si sales con cambios sin guardar.

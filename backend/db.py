@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import traceback
@@ -104,6 +105,40 @@ def asegurar_tabla_config() -> None:
                 "  UNIQUE KEY uq_hash (hash)"
                 ") CHARACTER SET utf8mb4"
             )
+            # Log de las respuestas enviadas a pacientes interesados (mensaje de
+            # call center): registra qué número de call center se asignó, para
+            # repartir la carga entre los números configurados.
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS call_center_log ("
+                "  id INT AUTO_INCREMENT PRIMARY KEY,"
+                "  paciente_id INT DEFAULT NULL,"
+                "  nombre_paciente VARCHAR(150) DEFAULT NULL,"
+                "  numero_paciente VARCHAR(20) DEFAULT NULL,"
+                "  numero_call_center VARCHAR(20) NOT NULL,"
+                "  plantilla_clave VARCHAR(50) DEFAULT NULL,"
+                "  automatico TINYINT(1) NOT NULL DEFAULT 0,"
+                "  estado ENUM('enviado','error') NOT NULL DEFAULT 'enviado',"
+                "  descripcion_error VARCHAR(255) DEFAULT NULL,"
+                "  base_datos VARCHAR(50) DEFAULT NULL,"
+                "  fecha_hora DATETIME DEFAULT CURRENT_TIMESTAMP,"
+                "  INDEX idx_numero (numero_call_center),"
+                "  INDEX idx_fecha (fecha_hora)"
+                ") CHARACTER SET utf8mb4"
+            )
+            # Cuentas de la aplicación (antes en data/usuarios.json).
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS usuarios ("
+                "  id INT AUTO_INCREMENT PRIMARY KEY,"
+                "  usuario VARCHAR(150) NOT NULL,"
+                "  nombre VARCHAR(150) NOT NULL DEFAULT '',"
+                "  rol ENUM('usuario','administrador','desarrollador') NOT NULL DEFAULT 'usuario',"
+                "  permisos VARCHAR(500) NOT NULL DEFAULT '',"
+                "  clave_hash CHAR(64) NOT NULL,"
+                "  creado DATETIME DEFAULT CURRENT_TIMESTAMP,"
+                "  UNIQUE KEY uq_usuario (usuario)"
+                ") CHARACTER SET utf8mb4"
+            )
+            _sembrar_usuarios(cur)
             # Corrección manual de la respuesta del paciente: gana sobre la
             # señal automática 'pegajosa'. NULL = sin corrección.
             # `interesado`: el paciente mostró interés real ("me interesa", "quiero
@@ -193,6 +228,205 @@ def asegurar_tabla_config() -> None:
         log_error("asegurar_tabla_config", e)
     _config_cache = None
     _columnas_cache.clear()
+
+
+# ---------------------------------------------------------------------------
+# Cuentas de usuario
+# ---------------------------------------------------------------------------
+USUARIOS_JSON = BASE_DIR / "data" / "usuarios.json"
+
+ROLES_USUARIO = ("usuario", "administrador", "desarrollador")
+MAX_DESARROLLADORES = 4
+
+# La página de Configuración es exclusiva del rol `desarrollador`: no es un
+# permiso asignable (ni el administrador la ve).
+PERMISOS_VALIDOS = (
+    "pacientes", "mensajeria", "historial", "estadisticas",
+    "plantillas_editar", "envio_produccion", "tarifas_editar", "call_center",
+)
+PERMISOS_BASICOS = ["mensajeria", "historial", "estadisticas", "plantillas_editar"]
+
+# Cuentas creadas automáticamente la primera vez (o si faltan). El hash es
+# SHA-256 de la contraseña indicada.
+_USUARIOS_SEMILLA = [
+    {"usuario": "admin", "nombre": "Administrador", "rol": "administrador",
+     "permisos": "", "clave_hash": "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9"},
+    {"usuario": "usuario", "nombre": "Usuario Final", "rol": "usuario",
+     "permisos": ",".join(PERMISOS_BASICOS),
+     "clave_hash": "dfa7a2273567dcd1efffb9a46308e91c20fa13c44c3441bc69cd6a7869b3f7fd"},
+]
+# Cuenta de desarrollador que el sistema garantiza en cada arranque (dev / dev123).
+_USUARIO_DEV = {
+    "usuario": "dev", "nombre": "Desarrollador", "rol": "desarrollador",
+    "permisos": "",
+    "clave_hash": "87274af01876341455b32d805946f272871bb42effa6604dccf28bb027afa82b",
+}
+
+
+def _permisos_csv(permisos) -> str:
+    if isinstance(permisos, str):
+        items = [p.strip() for p in permisos.split(",")]
+    else:
+        items = list(permisos or [])
+    vistos, out = set(), []
+    for p in items:
+        if p in PERMISOS_VALIDOS and p not in vistos:
+            vistos.add(p)
+            out.append(p)
+    return ",".join(out)
+
+
+def _sembrar_usuarios(cur) -> None:
+    """Puebla la tabla `usuarios` la primera vez y garantiza la cuenta `dev`.
+
+    Se llama dentro de asegurar_tabla_config(), con la transacción abierta."""
+    cur.execute("SELECT COUNT(*) AS n FROM usuarios")
+    vacia = (cur.fetchone() or {}).get("n", 0) == 0
+
+    if vacia:
+        # Migración: si existe data/usuarios.json se importa; si no, semillas.
+        importados = []
+        try:
+            if USUARIOS_JSON.exists():
+                datos = json.loads(USUARIOS_JSON.read_text(encoding="utf-8"))
+                if isinstance(datos, list):
+                    importados = datos
+        except Exception as e:
+            log_error("_sembrar_usuarios: usuarios.json ilegible", e)
+        filas = importados or _USUARIOS_SEMILLA
+        for u in filas:
+            correo = str(u.get("usuario", "")).strip().lower()
+            ch = str(u.get("clave_hash", "")).strip()
+            if not correo or not ch:
+                continue
+            rol = u.get("rol") if u.get("rol") in ROLES_USUARIO else "usuario"
+            cur.execute(
+                "INSERT IGNORE INTO usuarios (usuario, nombre, rol, permisos, clave_hash)"
+                " VALUES (%s, %s, %s, %s, %s)",
+                (correo, (u.get("nombre") or correo.split("@")[0])[:150], rol,
+                 _permisos_csv(u.get("permisos")), ch),
+            )
+        if importados and USUARIOS_JSON.exists():
+            try:
+                USUARIOS_JSON.rename(USUARIOS_JSON.with_suffix(".json.migrado"))
+            except Exception as e:
+                log_error("_sembrar_usuarios: no se pudo archivar usuarios.json", e)
+
+    # Garantiza la cuenta `dev` en cada arranque (respetando el tope de 4).
+    cur.execute("SELECT COUNT(*) AS n FROM usuarios WHERE usuario = 'dev'")
+    if (cur.fetchone() or {}).get("n", 0) == 0:
+        cur.execute("SELECT COUNT(*) AS n FROM usuarios WHERE rol = 'desarrollador'")
+        if (cur.fetchone() or {}).get("n", 0) < MAX_DESARROLLADORES:
+            cur.execute(
+                "INSERT IGNORE INTO usuarios (usuario, nombre, rol, permisos, clave_hash)"
+                " VALUES (%s, %s, %s, %s, %s)",
+                (_USUARIO_DEV["usuario"], _USUARIO_DEV["nombre"], _USUARIO_DEV["rol"],
+                 _USUARIO_DEV["permisos"], _USUARIO_DEV["clave_hash"]),
+            )
+        else:
+            log_error("_sembrar_usuarios: ya hay 4 desarrolladores; no se creó la cuenta 'dev'")
+
+
+def _fila_usuario(row: dict) -> dict:
+    return {
+        "usuario": row["usuario"],
+        "nombre": row.get("nombre") or "",
+        "rol": row.get("rol") or "usuario",
+        "permisos": [p for p in (row.get("permisos") or "").split(",") if p],
+        "clave_hash": row.get("clave_hash") or "",
+    }
+
+
+def usuarios_listar() -> list[dict]:
+    try:
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT usuario, nombre, rol, permisos, clave_hash FROM usuarios"
+                " ORDER BY FIELD(rol,'desarrollador','administrador','usuario'), usuario"
+            )
+            return [_fila_usuario(r) for r in cur.fetchall()]
+    except Exception as e:
+        log_error("usuarios_listar", e)
+        return []
+
+
+def usuario_buscar(correo: str) -> dict | None:
+    correo = (correo or "").strip().lower()
+    if not correo:
+        return None
+    try:
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT usuario, nombre, rol, permisos, clave_hash FROM usuarios"
+                " WHERE usuario = %s", (correo,),
+            )
+            row = cur.fetchone()
+            return _fila_usuario(row) if row else None
+    except Exception as e:
+        log_error("usuario_buscar", e)
+        return None
+
+
+def contar_desarrolladores(excluir: str | None = None) -> int:
+    try:
+        with conectar() as conn, conn.cursor() as cur:
+            if excluir:
+                cur.execute(
+                    "SELECT COUNT(*) AS n FROM usuarios WHERE rol = 'desarrollador' AND usuario <> %s",
+                    ((excluir or "").strip().lower(),),
+                )
+            else:
+                cur.execute("SELECT COUNT(*) AS n FROM usuarios WHERE rol = 'desarrollador'")
+            return int((cur.fetchone() or {}).get("n", 0))
+    except Exception as e:
+        log_error("contar_desarrolladores", e)
+        return MAX_DESARROLLADORES  # ante la duda, bloquea nuevas promociones
+
+
+def usuario_crear(correo: str, nombre: str, rol: str, permisos, clave_hash: str) -> None:
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO usuarios (usuario, nombre, rol, permisos, clave_hash)"
+            " VALUES (%s, %s, %s, %s, %s)",
+            ((correo or "").strip().lower(), (nombre or "")[:150],
+             rol if rol in ROLES_USUARIO else "usuario", _permisos_csv(permisos), clave_hash),
+        )
+        conn.commit()
+
+
+def usuario_actualizar(correo: str, *, nombre: str | None = None,
+                       rol: str | None = None, permisos=None) -> None:
+    sets, params = [], []
+    if nombre is not None:
+        sets.append("nombre = %s")
+        params.append(nombre[:150])
+    if rol is not None and rol in ROLES_USUARIO:
+        sets.append("rol = %s")
+        params.append(rol)
+    if permisos is not None:
+        sets.append("permisos = %s")
+        params.append(_permisos_csv(permisos))
+    if not sets:
+        return
+    params.append((correo or "").strip().lower())
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(f"UPDATE usuarios SET {', '.join(sets)} WHERE usuario = %s", params)
+        conn.commit()
+
+
+def usuario_cambiar_clave(correo: str, clave_hash: str) -> None:
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE usuarios SET clave_hash = %s WHERE usuario = %s",
+            (clave_hash, (correo or "").strip().lower()),
+        )
+        conn.commit()
+
+
+def usuario_borrar(correo: str) -> None:
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM usuarios WHERE usuario = %s", ((correo or "").strip().lower(),))
+        conn.commit()
 
 
 def _cargar_config() -> tuple[dict, bool]:

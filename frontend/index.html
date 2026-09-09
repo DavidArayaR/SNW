@@ -37,8 +37,8 @@
       letter-spacing: .06em;
     }
     main { max-width: 960px; margin: -34px auto 40px; padding: 0 20px; }
-    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; }
-    .card {
+    .info-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; }
+    .info-card {
       background: var(--panel);
       border: 1px solid var(--borde);
       border-radius: 14px;
@@ -46,16 +46,17 @@
       box-shadow: var(--sombra);
       display: flex;
       flex-direction: column;
+      color: var(--texto);
     }
-    .card h2 { margin: 0 0 8px; font-size: 1.08rem; }
-    .card p { margin: 0; font-size: .9rem; color: var(--texto-suave); line-height: 1.55; flex: 1; }
-    .card ul { margin: 0 0 16px; padding-left: 18px; font-size: .86rem; color: var(--texto-suave); }
-    .card ul li { margin-bottom: 4px; }
+    .info-card h2 { margin: 0 0 8px; font-size: 1.08rem; color: var(--texto); }
+    .info-card p { margin: 0; font-size: .9rem; color: var(--texto-suave); line-height: 1.55; flex: 1; }
+    .info-card ul { margin: 0 0 16px; padding-left: 18px; font-size: .86rem; color: var(--texto-suave); }
+    .info-card ul li { margin-bottom: 4px; }
     .btn {
       display: inline-block;
       text-align: center;
       text-decoration: none;
-      background: var(--verde);
+      background: var(--btn-primary-bg);
       color: var(--btn-primary-fg);
       padding: 11px 18px;
       border-radius: 10px;
@@ -64,16 +65,33 @@
       transition: filter .15s;
     }
     .btn:hover { filter: brightness(1.07); }
+    [hidden] { display: none !important; }
+    .hero__acciones {
+      margin-top: 26px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+    }
+    .hero__acciones .btn { min-width: 220px; }
     .btn--login {
       background: #fff;
       color: #2f6d5d;
       font-weight: 700;
       padding: 13px 32px;
       font-size: 1rem;
-      margin-top: 26px;
       border: 2px solid rgba(255,255,255,.35);
     }
     .btn--login:hover { background: rgba(255,255,255,.92); filter: none; }
+    .btn--registro {
+      background: transparent;
+      color: #fff;
+      font-weight: 700;
+      padding: 13px 32px;
+      font-size: 1rem;
+      border: 2px solid rgba(255,255,255,.55);
+    }
+    .btn--registro:hover { background: rgba(255,255,255,.14); filter: none; }
     section.info {
       background: var(--panel);
       border: 1px solid var(--borde);
@@ -109,13 +127,13 @@
       display: grid;
       place-items: center;
       border-radius: 50%;
-      background: var(--verde);
+      background: var(--btn-primary-bg);
       color: var(--btn-primary-fg);
       font-weight: 700;
       font-size: .9rem;
     }
     .pasos li strong { color: var(--texto); }
-    section.info + section.info, .cards { margin-top: 18px; }
+    section.info + section.info, .info-cards { margin-top: 18px; }
     footer { text-align: center; color: var(--texto-suave); font-size: .82rem; padding: 8px 20px 34px; }
     @media (max-width: 640px) {
       .hero { padding: 40px 18px 52px; }
@@ -140,7 +158,10 @@
     <header class="hero">
       <h1>Sistema de Notificaciones WhatsApp (SNW)</h1>
       <p>M&oacute;dulo web para gestionar y enviar notificaciones masivas de WhatsApp a pacientes de forma r&aacute;pida, organizada y centralizada, directamente desde la plataforma de la empresa.</p>
-      <a id="btnLogin" class="btn btn--login" href="login.html">Iniciar sesi&oacute;n</a>
+      <div id="heroAcciones" class="hero__acciones">
+        <a id="btnLogin" class="btn btn--login" href="login.html">Iniciar sesi&oacute;n</a>
+        <a id="btnRegistro" class="btn btn--registro" href="registro.html">Crear cuenta</a>
+      </div>
     </header>
 
 <main>
@@ -170,16 +191,16 @@
     <p><strong>Producci&oacute;n:</strong> es el env&iacute;o real a los pacientes. Cuando lo inicia alguien que no es administrador, primero se manda un correo a un supervisor con el detalle y el costo estimado; el env&iacute;o no arranca hasta que el supervisor lo confirma (o lo rechaza con un comentario, que queda registrado).</p>
   </section>
 
-  <div class="cards">
-    <div class="card">
+  <div class="info-cards">
+    <div class="info-card">
       <h2>Respuestas y bajas</h2>
       <p>Cuando un paciente responde por WhatsApp, SNW lo detecta y lo refleja en su ficha. Si el mensaje pide dejar de recibir avisos («baja», «no me contacten», etc.), el paciente queda dado de baja autom&aacute;ticamente y no se le vuelve a escribir.</p>
     </div>
-    <div class="card">
+    <div class="info-card">
       <h2>Historial</h2>
       <p>Cada tanda de env&iacute;o queda guardada con su fecha, la plantilla usada y cu&aacute;ntos mensajes se enviaron, fallaron o eran n&uacute;meros inv&aacute;lidos. Se puede abrir el detalle paciente por paciente.</p>
     </div>
-    <div class="card">
+    <div class="info-card">
       <h2>Estad&iacute;sticas</h2>
       <p>Un panel resume la actividad: mensajes enviados por d&iacute;a, mes o a&ntilde;o, costo aproximado por per&iacute;odo y c&oacute;mo respondieron los pacientes (respondieron, no respondieron, se dieron de baja).</p>
     </div>

@@ -148,7 +148,7 @@ cargar();
 /* ================================================================== *
  *  Gráficos de barras por periodo (día / mes / año)
  * ================================================================== */
-const ES_ADMIN = localStorage.getItem("snw_rol") === "administrador";
+const ES_ADMIN = !!window.snwPuede && window.snwPuede("tarifas_editar");
 
 const CAT_LABEL = {
   marketing: "Marketing",

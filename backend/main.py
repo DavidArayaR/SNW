@@ -5,6 +5,7 @@ import math
 import html as _html
 import io as _io
 import json
+import random
 import re
 import threading
 import time
@@ -28,6 +29,9 @@ from db import (
     conectar, entorno_valido, log_error, nombre_base, columnas_tabla, columna_existe,
     tabla_pacientes, asegurar_tabla_config, config_all, config_get, config_set,
     CONFIG_DEFAULTS,
+    ROLES_USUARIO, PERMISOS_VALIDOS, PERMISOS_BASICOS, MAX_DESARROLLADORES,
+    usuarios_listar, usuario_buscar, usuario_crear, usuario_actualizar, usuario_borrar,
+    usuario_cambiar_clave, contar_desarrolladores,
 )
 from motor_envio import obtener_canal
 import whatsapp_service
@@ -142,8 +146,56 @@ class LoginIn(BaseModel):
     clave: str
 
 
-USUARIOS_FILE = BASE_DIR / "data" / "usuarios.json"
+class RegistroIn(BaseModel):
+    usuario: str
+    clave: str
+
+
+class UsuarioUpdIn(BaseModel):
+    rol: str | None = None
+    permisos: list[str] | None = None
+    nombre: str | None = None
+
+
+class ClavePropiaIn(BaseModel):
+    clave_actual: str
+    clave_nueva: str
+
+
+class ClaveAjenaIn(BaseModel):
+    clave_nueva: str
+
+
 SESIONES_FILE = BASE_DIR / "data" / "sesiones.json"
+
+# --- Roles y permisos --------------------------------------------------------
+# Hay tres roles. `administrador` y `desarrollador` tienen TODOS los permisos de
+# forma implícita; la lista `permisos` solo se consulta para el rol `usuario`.
+#   - usuario:       solo ve/hace lo que tenga en `permisos`.
+#   - administrador: acceso total; puede editar los permisos de las cuentas de
+#                    rol `usuario` (nunca las de otro admin/dev ni las propias).
+#   - desarrollador: acceso total; puede editar rol y permisos de cualquier
+#                    cuenta excepto la suya. Máximo MAX_DESARROLLADORES cuentas.
+# Las cuentas viven en la tabla `usuarios` (ver db.py).
+ROLES = ROLES_USUARIO
+ROLES_PRIVILEGIADOS = {"administrador", "desarrollador"}
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]{2,}$")
+
+
+def validar_clave_segura(clave: str) -> str | None:
+    """Devuelve un mensaje de error si la contraseña no es segura, o None si lo es."""
+    if len(clave) < 8:
+        return "La contraseña debe tener al menos 8 caracteres."
+    if len(clave) > 128:
+        return "La contraseña no puede superar los 128 caracteres."
+    if not re.search(r"[a-z]", clave):
+        return "La contraseña debe incluir al menos una letra minúscula."
+    if not re.search(r"[A-Z]", clave):
+        return "La contraseña debe incluir al menos una letra mayúscula."
+    if not re.search(r"\d", clave):
+        return "La contraseña debe incluir al menos un número."
+    return None
 
 
 def _cargar_sesiones() -> dict[str, dict]:
@@ -166,15 +218,11 @@ def guardar_sesiones() -> None:
 SESIONES: dict[str, dict] = _cargar_sesiones()
 
 
-def cargar_usuarios() -> list:
-    try:
-        datos = json.loads(USUARIOS_FILE.read_text(encoding="utf-8"))
-        return datos if isinstance(datos, list) else []
-    except FileNotFoundError:
-        return []
-    except Exception as e:
-        log_error(f"cargar_usuarios: {USUARIOS_FILE.name} ilegible", e)
-        return []
+def permisos_efectivos(usuario: dict) -> list[str]:
+    """Permisos reales de una cuenta: todos si el rol es privilegiado."""
+    if usuario.get("rol") in ROLES_PRIVILEGIADOS:
+        return list(PERMISOS_VALIDOS)
+    return [p for p in (usuario.get("permisos") or []) if p in PERMISOS_VALIDOS]
 
 
 def sesion_actual(request: Request) -> dict:
@@ -183,38 +231,98 @@ def sesion_actual(request: Request) -> dict:
     sesion = SESIONES.get(token)
     if not sesion:
         raise HTTPException(401, detail="Sesión no válida. Inicia sesión nuevamente.")
+    # El archivo de usuarios es la fuente de verdad: al validar cada petición se
+    # refrescan rol y permisos, de modo que un cambio del administrador surte
+    # efecto de inmediato y una cuenta eliminada queda sin sesión.
+    correo = str(sesion.get("usuario", "")).strip().lower()
+    if correo:
+        u = usuario_buscar(correo)
+        if u is None:
+            SESIONES.pop(token, None)
+            guardar_sesiones()
+            raise HTTPException(401, detail="Tu cuenta ya no está disponible. Inicia sesión de nuevo.")
+        sesion["rol"] = u.get("rol", "usuario")
+        sesion["permisos"] = permisos_efectivos(u)
+    else:
+        sesion.setdefault("permisos", list(PERMISOS_VALIDOS)
+                          if sesion.get("rol") in ROLES_PRIVILEGIADOS else [])
     return sesion
 
 
+def tiene_permiso(sesion: dict, permiso: str) -> bool:
+    if sesion.get("rol") in ROLES_PRIVILEGIADOS:
+        return True
+    return permiso in (sesion.get("permisos") or [])
+
+
+def exigir(*permisos: str):
+    """Dependencia FastAPI: exige al menos uno de los permisos indicados."""
+    def dep(sesion: dict = Depends(sesion_actual)) -> dict:
+        if not any(tiene_permiso(sesion, p) for p in permisos):
+            raise HTTPException(403, detail="No tienes permiso para acceder a esta sección.")
+        return sesion
+    return dep
+
+
 def solo_admin(sesion: dict = Depends(sesion_actual)) -> dict:
-    if sesion.get("rol") != "administrador":
-        raise HTTPException(403, detail="Esta sección requiere rol administrador")
+    """Zona privilegiada: administrador o desarrollador."""
+    if sesion.get("rol") not in ROLES_PRIVILEGIADOS:
+        raise HTTPException(403, detail="Esta sección requiere rol administrador.")
+    return sesion
+
+
+def solo_dev(sesion: dict = Depends(sesion_actual)) -> dict:
+    """Zona exclusiva del rol desarrollador (p. ej. Configuración)."""
+    if sesion.get("rol") != "desarrollador":
+        raise HTTPException(403, detail="Esta sección es exclusiva del rol desarrollador.")
     return sesion
 
 
 @app.post("/api/auth/login")
 def login(body: LoginIn):
-    usuarios = cargar_usuarios()
     clave_hash = hashlib.sha256(body.clave.encode("utf-8")).hexdigest()
-    usuario = next(
-        (
-            u
-            for u in usuarios
-            if str(u.get("usuario", "")).lower() == body.usuario.strip().lower()
-            and u.get("clave_hash") == clave_hash
-        ),
-        None,
-    )
-    if usuario is None:
+    usuario = usuario_buscar(body.usuario)
+    if usuario is None or usuario.get("clave_hash") != clave_hash:
         raise HTTPException(401, detail="Usuario o contraseña incorrectos")
 
     token = uuid.uuid4().hex
     SESIONES[token] = {
+        "usuario": str(usuario.get("usuario", "")).strip().lower(),
         "rol": usuario.get("rol", "usuario"),
         "nombre": usuario.get("nombre", body.usuario),
+        "permisos": permisos_efectivos(usuario),
     }
     guardar_sesiones()
-    return {"token": token, "rol": SESIONES[token]["rol"], "nombre": SESIONES[token]["nombre"]}
+    s = SESIONES[token]
+    return {"token": token, "rol": s["rol"], "nombre": s["nombre"], "permisos": s["permisos"]}
+
+
+@app.get("/api/auth/me")
+def auth_me(sesion: dict = Depends(sesion_actual)):
+    """Rol y permisos vigentes de la sesión actual (para refrescar el cliente)."""
+    return {
+        "usuario": sesion.get("usuario"),
+        "nombre": sesion.get("nombre"),
+        "rol": sesion.get("rol"),
+        "permisos": sesion.get("permisos") or [],
+    }
+
+
+@app.put("/api/auth/clave")
+def cambiar_clave_propia(body: ClavePropiaIn, sesion: dict = Depends(sesion_actual)):
+    """Cualquier cuenta puede cambiar su propia contraseña indicando la actual."""
+    correo = str(sesion.get("usuario", "")).strip().lower()
+    u = usuario_buscar(correo)
+    if u is None:
+        raise HTTPException(401, detail="Tu cuenta ya no está disponible. Inicia sesión de nuevo.")
+    actual_hash = hashlib.sha256(body.clave_actual.encode("utf-8")).hexdigest()
+    if u.get("clave_hash") != actual_hash:
+        raise HTTPException(403, detail="La contraseña actual no es correcta.")
+    err = validar_clave_segura(body.clave_nueva)
+    if err:
+        raise HTTPException(422, detail=err)
+    usuario_cambiar_clave(correo, hashlib.sha256(body.clave_nueva.encode("utf-8")).hexdigest())
+    return {"ok": True}
 
 
 @app.post("/api/auth/logout")
@@ -222,6 +330,139 @@ def logout(request: Request):
     authz = request.headers.get("Authorization", "")
     token = authz[7:] if authz.startswith("Bearer ") else ""
     SESIONES.pop(token, None)
+    guardar_sesiones()
+    return {"ok": True}
+
+
+@app.post("/api/auth/registro", status_code=201)
+def registro(body: RegistroIn):
+    """Alta pública de una cuenta. El correo hace de usuario y debe ser válido;
+    la contraseña debe ser segura. La cuenta nace con rol `usuario` y los
+    permisos básicos (mensajería, historial, estadísticas)."""
+    correo = body.usuario.strip().lower()
+    if not _EMAIL_RE.match(correo):
+        raise HTTPException(422, detail="Escribe un correo electrónico válido.")
+    err = validar_clave_segura(body.clave)
+    if err:
+        raise HTTPException(422, detail=err)
+    if usuario_buscar(correo) is not None:
+        raise HTTPException(409, detail="Ya existe una cuenta con ese correo.")
+    usuario_crear(
+        correo, correo.split("@")[0], "usuario", list(PERMISOS_BASICOS),
+        hashlib.sha256(body.clave.encode("utf-8")).hexdigest(),
+    )
+    return {"ok": True}
+
+
+def _puede_gestionar(actor: dict, objetivo: dict) -> tuple[bool, str]:
+    """Reglas de quién puede tocar la cuenta `objetivo`."""
+    if str(objetivo.get("usuario", "")).strip().lower() == str(actor.get("usuario", "")).strip().lower():
+        return False, "No puedes modificar tu propia cuenta."
+    if actor.get("rol") == "administrador" and objetivo.get("rol") in ROLES_PRIVILEGIADOS:
+        return False, "Un administrador solo puede gestionar cuentas de rol «usuario»."
+    return True, ""
+
+
+@app.get("/api/usuarios")
+def listar_usuarios(sesion: dict = Depends(solo_admin)):
+    yo = str(sesion.get("usuario", "")).strip().lower()
+    filas = []
+    for u in usuarios_listar():
+        rol = u.get("rol", "usuario")
+        es_actual = str(u.get("usuario", "")).strip().lower() == yo
+        puede, motivo = _puede_gestionar(sesion, u)
+        filas.append({
+            "usuario": u.get("usuario"),
+            "nombre": u.get("nombre") or "",
+            "rol": rol,
+            "permisos": permisos_efectivos(u),
+            "rol_total": rol in ROLES_PRIVILEGIADOS,
+            "es_actual": es_actual,
+            "editable": puede,
+            "motivo_bloqueo": motivo,
+        })
+    return {
+        "usuarios": filas,
+        "permisos_validos": list(PERMISOS_VALIDOS),
+        "roles": list(ROLES),
+        "mi_rol": sesion.get("rol"),
+        "puede_cambiar_rol": sesion.get("rol") == "desarrollador",
+        "desarrolladores": contar_desarrolladores(),
+        "max_desarrolladores": MAX_DESARROLLADORES,
+    }
+
+
+@app.put("/api/usuarios/{usuario}")
+def actualizar_usuario(usuario: str, body: UsuarioUpdIn, sesion: dict = Depends(solo_admin)):
+    obj = usuario_buscar(usuario)
+    if obj is None:
+        raise HTTPException(404, detail="Usuario no encontrado.")
+    puede, motivo = _puede_gestionar(sesion, obj)
+    if not puede:
+        raise HTTPException(403, detail=motivo)
+
+    nuevo_rol = None
+    if body.rol is not None and body.rol != obj.get("rol"):
+        if sesion.get("rol") != "desarrollador":
+            raise HTTPException(403, detail="Solo un desarrollador puede cambiar el rol de una cuenta.")
+        if body.rol not in ROLES:
+            raise HTTPException(422, detail="Rol no válido.")
+        if body.rol == "desarrollador" and contar_desarrolladores(excluir=obj["usuario"]) >= MAX_DESARROLLADORES:
+            raise HTTPException(409, detail=f"Solo puede haber {MAX_DESARROLLADORES} desarrolladores.")
+        nuevo_rol = body.rol
+
+    nuevo_nombre = None
+    if body.nombre is not None:
+        nuevo_nombre = body.nombre.strip()[:120] or obj.get("nombre") or obj["usuario"].split("@")[0]
+
+    nuevos_permisos = None
+    if body.permisos is not None:
+        nuevos_permisos = [p for p in body.permisos if p in PERMISOS_VALIDOS]
+
+    usuario_actualizar(obj["usuario"], nombre=nuevo_nombre, rol=nuevo_rol, permisos=nuevos_permisos)
+    fresco = usuario_buscar(obj["usuario"]) or obj
+    return {"ok": True, "usuario": fresco["usuario"], "rol": fresco["rol"],
+            "permisos": permisos_efectivos(fresco)}
+
+
+@app.delete("/api/usuarios/{usuario}")
+def eliminar_usuario(usuario: str, sesion: dict = Depends(solo_admin)):
+    obj = usuario_buscar(usuario)
+    if obj is None:
+        raise HTTPException(404, detail="Usuario no encontrado.")
+    puede, motivo = _puede_gestionar(sesion, obj)
+    if not puede:
+        raise HTTPException(403, detail=motivo)
+    correo = str(obj.get("usuario", "")).strip().lower()
+    usuario_borrar(correo)
+    for tk, s in list(SESIONES.items()):
+        if str(s.get("usuario", "")).strip().lower() == correo:
+            SESIONES.pop(tk, None)
+    guardar_sesiones()
+    return {"ok": True}
+
+
+@app.put("/api/usuarios/{usuario}/clave")
+def cambiar_clave_usuario(usuario: str, body: ClaveAjenaIn, sesion: dict = Depends(solo_admin)):
+    """Restablece la contraseña de OTRA cuenta. Un desarrollador puede hacerlo con
+    cualquiera; un administrador solo con cuentas de rol `usuario`. La cuenta
+    afectada pierde sus sesiones. Para la propia cuenta se usa PUT /api/auth/clave."""
+    obj = usuario_buscar(usuario)
+    if obj is None:
+        raise HTTPException(404, detail="Usuario no encontrado.")
+    correo = str(obj.get("usuario", "")).strip().lower()
+    if correo == str(sesion.get("usuario", "")).strip().lower():
+        raise HTTPException(400, detail="Para tu propia cuenta usa «Cambiar mi contraseña».")
+    puede, motivo = _puede_gestionar(sesion, obj)
+    if not puede:
+        raise HTTPException(403, detail=motivo)
+    err = validar_clave_segura(body.clave_nueva)
+    if err:
+        raise HTTPException(422, detail=err)
+    usuario_cambiar_clave(correo, hashlib.sha256(body.clave_nueva.encode("utf-8")).hexdigest())
+    for tk, s in list(SESIONES.items()):
+        if str(s.get("usuario", "")).strip().lower() == correo:
+            SESIONES.pop(tk, None)
     guardar_sesiones()
     return {"ok": True}
 
@@ -366,7 +607,7 @@ def expr_select_pacientes(ambiente: str) -> str:
 
 @app.get("/api/pacientes")
 def listar_pacientes(q: str | None = Query(None), ambiente: str = Query("produccion"),
-                     sesion: dict = Depends(solo_admin)):
+                     sesion: dict = Depends(exigir("pacientes"))):
     sql = "SELECT " + expr_select_pacientes(ambiente) + from_pacientes(ambiente)
     args: list = []
     if q and q.strip():
@@ -402,7 +643,7 @@ class RespuestaIn(BaseModel):
 @app.put("/api/pacientes/{paciente_id}")
 def actualizar_paciente(paciente_id: int, body: EstadoPacienteIn,
                         ambiente: str = Query("produccion"),
-                        sesion: dict = Depends(solo_admin)):
+                        sesion: dict = Depends(exigir("pacientes"))):
     if body.estado not in ("pendiente", "enviado", "error"):
         raise HTTPException(400, detail="Estado inválido. Use: pendiente, enviado o error")
     t = tabla_pacientes(ambiente)
@@ -426,7 +667,7 @@ def actualizar_paciente(paciente_id: int, body: EstadoPacienteIn,
 @app.put("/api/pacientes/{paciente_id}/respuesta")
 def actualizar_respuesta_paciente(paciente_id: int, body: RespuestaIn,
                                   ambiente: str = Query("produccion"),
-                                  sesion: dict = Depends(solo_admin)):
+                                  sesion: dict = Depends(exigir("pacientes"))):
     """Ajuste manual de la respuesta de un paciente (fallback si el webhook no
     llegó, o si el paciente avisó por otro canal). 'baja' activa el opt-out."""
     if body.respuesta not in ("pendiente", "respondio", "baja"):
@@ -483,7 +724,7 @@ def actualizar_respuesta_paciente(paciente_id: int, body: RespuestaIn,
 
 @app.get("/api/pacientes/{paciente_id}/mensajes")
 def mensajes_paciente(paciente_id: int, ambiente: str = Query("produccion"),
-                      sesion: dict = Depends(sesion_actual)):
+                      sesion: dict = Depends(exigir("historial", "pacientes"))):
     """Todos los mensajes (entrantes y salientes) de un paciente, para revisar
     a mano si su interés es real. Los entrantes se guardan tal cual los escribió.
     Accesible a cualquier usuario (solo lectura)."""
@@ -539,7 +780,7 @@ class InteresIn(BaseModel):
 @app.put("/api/pacientes/{paciente_id}/interes")
 def marcar_interes(paciente_id: int, body: InteresIn,
                    ambiente: str = Query("produccion"),
-                   sesion: dict = Depends(solo_admin)):
+                   sesion: dict = Depends(exigir("call_center", "pacientes"))):
     """Marca/desmarca a mano a un paciente como interesado. Marcarlo sobreescribe
     cualquier baja previa (opt-out, corrección manual y señal 'pegajosa')."""
     t = tabla_pacientes(ambiente)
@@ -587,43 +828,76 @@ def _call_center_numeros() -> list[str]:
     return out
 
 
-_cc_num_lock = threading.Lock()
-_cc_num_idx = 0
+def _contadores_call_center() -> dict:
+    """{numero: nº de respuestas enviadas con ese número}, solo para los números
+    configurados actualmente (según call_center_log, envíos con éxito)."""
+    usos = {n: 0 for n in _call_center_numeros()}
+    if not usos:
+        return usos
+    try:
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT numero_call_center AS n, COUNT(*) AS c FROM call_center_log"
+                "  WHERE estado = 'enviado' GROUP BY numero_call_center"
+            )
+            for row in cur.fetchall():
+                if row["n"] in usos:
+                    usos[row["n"]] = int(row["c"] or 0)
+    except Exception as e:
+        log_error("_contadores_call_center", e)
+    return usos
 
 
-def _call_center_numero_siguiente() -> str:
-    """Elige UN número del call center para una respuesta. Si hay uno, ese; si
-    hay varios, va rotando (round-robin) para repartir entre ellos."""
+def _elegir_numero_call_center() -> str:
+    """Elige el número del call center para la próxima respuesta: el que menos
+    veces se ha usado (según call_center_log). Si varios empatan en el mínimo, 
+    incluido el caso de todos en 0, se elige uno al azar entre ellos."""
     nums = _call_center_numeros()
     if not nums:
         return ""
     if len(nums) == 1:
         return nums[0]
-    global _cc_num_idx
-    with _cc_num_lock:
-        n = nums[_cc_num_idx % len(nums)]
-        _cc_num_idx += 1
-    return n
+    usos = _contadores_call_center()
+    minimo = min(usos.values())
+    return random.choice([n for n in nums if usos.get(n, 0) == minimo])
 
 
-def _cc_datos_envio(plantilla: dict, pac: dict) -> tuple[str, dict]:
-    """Devuelve (texto renderizado, datos_plantilla) para enviar una plantilla
-    de call center como texto libre; añade el botón que abre el chat del call
-    center si la plantilla lo pide y hay al menos un número configurado."""
+def _registrar_call_center_log(paciente_id, nombre, numero_paciente, numero_cc,
+                               plantilla_clave, automatico, estado, error, base_datos) -> None:
+    try:
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO call_center_log (paciente_id, nombre_paciente, numero_paciente,"
+                " numero_call_center, plantilla_clave, automatico, estado, descripcion_error, base_datos)"
+                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (paciente_id, nombre, numero_paciente, numero_cc, plantilla_clave,
+                 1 if automatico else 0, estado, (error or "")[:255] or None, base_datos),
+            )
+            conn.commit()
+    except Exception as e:
+        log_error("_registrar_call_center_log", e)
+
+
+def _cc_datos_envio(plantilla: dict, pac: dict) -> tuple[str, dict, str]:
+    """Devuelve (texto renderizado, datos_plantilla, numero_asignado). Añade el
+    botón que abre el chat del call center si la plantilla lo pide y hay al
+    menos un número configurado; el número se elige por menor uso."""
     texto = renderizar_mensaje(plantilla.get("texto", ""), pac)
     datos = {"texto": texto}
-    numero = _call_center_numero_siguiente()
-    if plantilla.get("cc_boton") and numero:
-        datos["cta"] = {
-            "texto": (plantilla.get("cc_boton_texto") or "Ir al call center")[:20],
-            "url": f"https://wa.me/{numero}",
-        }
-    return texto, datos
+    numero = ""
+    if plantilla.get("cc_boton"):
+        numero = _elegir_numero_call_center()
+        if numero:
+            datos["cta"] = {
+                "texto": (plantilla.get("cc_boton_texto") or "Ir al call center")[:20],
+                "url": f"https://wa.me/{numero}",
+            }
+    return texto, datos, numero
 
 
-def _despachar_call_center(pac: dict, ambiente: str, plantilla: dict) -> dict:
+def _despachar_call_center(pac: dict, ambiente: str, plantilla: dict, automatico: bool = False) -> dict:
     """Envía la plantilla de call center a un paciente y lo registra en el
-    historial. Devuelve {ok, error, telefono}. No lanza excepciones."""
+    historial y en call_center_log. Devuelve {ok, error, telefono}. No lanza."""
     telefono = normalizar_telefono((pac.get("telefono") or "").strip())
     if telefono is None:
         return {"ok": False, "error": "El teléfono del paciente no es válido", "telefono": None}
@@ -633,7 +907,7 @@ def _despachar_call_center(pac: dict, ambiente: str, plantilla: dict) -> dict:
         return {"ok": False, "error": "El número no está autorizado en la base de desarrollo", "telefono": telefono}
 
     nombre = " ".join(x for x in [pac.get("nombre"), pac.get("apellido")] if x)
-    texto, datos_plantilla = _cc_datos_envio(plantilla, pac)
+    texto, datos_plantilla, numero_cc = _cc_datos_envio(plantilla, pac)
 
     canal = obtener_canal(cfg)
     try:
@@ -650,7 +924,12 @@ def _despachar_call_center(pac: dict, ambiente: str, plantilla: dict) -> dict:
     registrar_historial(pac.get("id"), nombre, telefono, CALL_CENTER_CLAVE, texto,
                         "enviado" if ok else "error", error, ambiente=ambiente,
                         whatsapp_message_id=message_id)
-    return {"ok": ok, "error": error, "telefono": telefono}
+    if numero_cc:
+        _registrar_call_center_log(
+            pac.get("id"), nombre, telefono, numero_cc, plantilla.get("clave"),
+            automatico, "enviado" if ok else "error", error, nombre_base(ambiente),
+        )
+    return {"ok": ok, "error": error, "telefono": telefono, "numero_call_center": numero_cc}
 
 
 def _plantilla_call_center_auto() -> dict | None:
@@ -708,9 +987,11 @@ def _enviar_call_center_auto(tel: str) -> None:
                     # último envío de plantilla): no se repite.
                     if ult_cc is not None and (ult_plantilla is None or ult_cc > ult_plantilla):
                         continue
-                res = _despachar_call_center(pac, amb, plantilla)
+                res = _despachar_call_center(pac, amb, plantilla, automatico=True)
                 if res.get("ok"):
-                    print(f"[CALL-CENTER auto] enviado a {res['telefono']} ({amb})", flush=True)
+                    print(f"[CALL-CENTER auto] enviado a {res['telefono']} ({amb})"
+                          + (f" · call center {res['numero_call_center']}" if res.get("numero_call_center") else ""),
+                          flush=True)
                 else:
                     log_error(f"_enviar_call_center_auto({tel}, {amb}): {res.get('error')}")
             except Exception as e:
@@ -746,7 +1027,7 @@ whatsapp_service.al_detectar_interes = _programar_call_center_auto
 @app.post("/api/pacientes/{paciente_id}/call-center")
 def enviar_call_center(paciente_id: int, ambiente: str = Query("produccion"),
                        plantilla_id: int | None = Query(None),
-                       sesion: dict = Depends(solo_admin)):
+                       sesion: dict = Depends(exigir("call_center"))):
     """Envía a mano a un paciente interesado una plantilla de call center. Si
     hay varias plantillas hay que indicar `plantilla_id`."""
     t = tabla_pacientes(ambiente)
@@ -901,7 +1182,7 @@ def _clave_libre(base: str, ocupadas: set) -> str:
 
 
 @app.post("/api/plantillas/sincronizar-meta")
-def sincronizar_plantillas_meta(sesion: dict = Depends(sesion_actual)):
+def sincronizar_plantillas_meta(sesion: dict = Depends(exigir("plantillas_editar"))):
     """Meta es la fuente de verdad para los templates: esta cuenta no tiene
     permiso para crear/editar templates vía API, así que se gestionan a mano
     en Meta y aquí solo se leen (GET). Esta acción:
@@ -989,7 +1270,7 @@ def sincronizar_plantillas_meta(sesion: dict = Depends(sesion_actual)):
 
 
 @app.post("/api/plantillas", status_code=201)
-def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(sesion_actual)):
+def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(exigir("plantillas_editar"))):
     if not body.nombre.strip() or not body.texto.strip():
         raise HTTPException(400, detail="Nombre y mensaje son obligatorios")
     if len(body.texto) > MAX_TEXTO_PLANTILLA:
@@ -1020,7 +1301,7 @@ def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(sesion_actual)):
 
 
 @app.put("/api/plantillas/{plantilla_id}")
-def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = Depends(sesion_actual)):
+def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = Depends(exigir("plantillas_editar"))):
     if not body.nombre.strip() or not body.texto.strip():
         raise HTTPException(400, detail="Nombre y mensaje son obligatorios")
     if len(body.texto) > MAX_TEXTO_PLANTILLA:
@@ -1064,7 +1345,7 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
 
 
 @app.delete("/api/plantillas/{plantilla_id}")
-def eliminar_plantilla(plantilla_id: int, sesion: dict = Depends(sesion_actual)):
+def eliminar_plantilla(plantilla_id: int, sesion: dict = Depends(exigir("plantillas_editar"))):
     plantillas = leer_plantillas()
     objetivo = next((p for p in plantillas if p["id"] == plantilla_id), None)
     if objetivo is None:
@@ -1125,7 +1406,7 @@ def _cc_campos(body: PlantillaCCIn) -> dict:
 
 
 @app.get("/api/plantillas/call-center")
-def listar_plantillas_cc(sesion: dict = Depends(solo_admin)):
+def listar_plantillas_cc(sesion: dict = Depends(exigir("call_center"))):
     ccs = sorted(plantillas_call_center(), key=lambda p: p.get("actualizada", 0), reverse=True)
     # Marca cuál se usaría en el envío automático (la marcada, o la más antigua).
     auto = _plantilla_call_center_auto()
@@ -1138,12 +1419,34 @@ def listar_plantillas_cc(sesion: dict = Depends(solo_admin)):
     return {
         "plantillas": ccs,
         "numeros_call_center": _call_center_numeros(),
+        "contadores": _contadores_call_center(),
         "auto_segundos": segundos,
     }
 
 
+@app.get("/api/call-center/log")
+def obtener_call_center_log(sesion: dict = Depends(exigir("call_center"))):
+    """Últimas respuestas enviadas a pacientes interesados, con el número de
+    call center asignado a cada una, y el contador de usos por número."""
+    entradas = []
+    try:
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, nombre_paciente, numero_paciente, numero_call_center,"
+                " plantilla_clave, automatico, estado, descripcion_error, base_datos, fecha_hora"
+                " FROM call_center_log ORDER BY id DESC LIMIT 200"
+            )
+            for r in cur.fetchall():
+                r["fecha"] = r.pop("fecha_hora").strftime("%d-%m-%Y %H:%M")
+                r["automatico"] = bool(r["automatico"])
+                entradas.append(r)
+    except Exception as e:
+        log_error("obtener_call_center_log", e)
+    return {"entradas": entradas, "contadores": _contadores_call_center()}
+
+
 @app.post("/api/plantillas/call-center", status_code=201)
-def crear_plantilla_cc(body: PlantillaCCIn, sesion: dict = Depends(solo_admin)):
+def crear_plantilla_cc(body: PlantillaCCIn, sesion: dict = Depends(exigir("call_center"))):
     _valida_texto_cc(body.nombre, body.texto)
     campos = _cc_campos(body)
     plantillas = leer_plantillas()
@@ -1169,7 +1472,7 @@ def crear_plantilla_cc(body: PlantillaCCIn, sesion: dict = Depends(solo_admin)):
 
 
 @app.put("/api/plantillas/call-center/{plantilla_id}")
-def actualizar_plantilla_cc(plantilla_id: int, body: PlantillaCCIn, sesion: dict = Depends(solo_admin)):
+def actualizar_plantilla_cc(plantilla_id: int, body: PlantillaCCIn, sesion: dict = Depends(exigir("call_center"))):
     _valida_texto_cc(body.nombre, body.texto)
     campos = _cc_campos(body)
     plantillas = leer_plantillas()
@@ -1192,7 +1495,7 @@ def actualizar_plantilla_cc(plantilla_id: int, body: PlantillaCCIn, sesion: dict
 
 
 @app.delete("/api/plantillas/call-center/{plantilla_id}")
-def eliminar_plantilla_cc(plantilla_id: int, sesion: dict = Depends(solo_admin)):
+def eliminar_plantilla_cc(plantilla_id: int, sesion: dict = Depends(exigir("call_center"))):
     plantillas = leer_plantillas()
     objetivo = next(
         (p for p in plantillas if p["id"] == plantilla_id and p.get("especial") == CALL_CENTER_CLAVE),
@@ -1249,7 +1552,7 @@ def obtener_configuracion(ambiente: str | None = Query(None),
 
 
 @app.put("/api/configuracion")
-def actualizar_configuracion(body: ConfigIn, sesion: dict = Depends(solo_admin)):
+def actualizar_configuracion(body: ConfigIn, sesion: dict = Depends(solo_dev)):
     cambios: dict[str, str] = {}
 
     if body.entorno is not None:
@@ -1394,7 +1697,7 @@ def _config_valores() -> dict:
 
 
 @app.get("/api/configuracion/todo")
-def obtener_configuracion_completa(sesion: dict = Depends(solo_admin)):
+def obtener_configuracion_completa(sesion: dict = Depends(solo_dev)):
     """Todas las claves de configuración con su valor real (incluye secretos)."""
     return {"secciones": _CONFIG_SECCIONES, "valores": _config_valores()}
 
@@ -1404,7 +1707,7 @@ class ConfigTodoIn(BaseModel):
 
 
 @app.put("/api/configuracion/todo")
-def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends(solo_admin)):
+def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends(solo_dev)):
     cambios: dict[str, str] = {}
     for clave, valor in (body.cambios or {}).items():
         if clave not in CONFIG_DEFAULTS:
@@ -1436,7 +1739,7 @@ class PruebaWAIn(BaseModel):
 
 
 @app.post("/api/notificaciones/prueba-wa")
-def probar_api_wa(body: PruebaWAIn, sesion: dict = Depends(solo_admin)):
+def probar_api_wa(body: PruebaWAIn, sesion: dict = Depends(solo_dev)):
     """Envía un mensaje real vía la API oficial para validar las credenciales de WhatsApp."""
     cfg = leer_config()
     if cfg["metodo_envio"] != "api_oficial":
@@ -1810,16 +2113,16 @@ def _procesar_job(job_id: str) -> None:
 
 @app.post("/api/notificaciones/enviar", status_code=202)
 def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
-                  sesion: dict = Depends(sesion_actual)):
+                  sesion: dict = Depends(exigir("mensajeria"))):
     try:
         amb = entorno_valido(body.ambiente)
     except ValueError:
         raise HTTPException(400, detail=f"Entorno inválido: '{body.ambiente}'")
 
-    # En ambiente de desarrollo, el usuario normal solo puede enviar a la base
-    # de desarrollo (números autorizados); nunca a producción.
+    # En ambiente de desarrollo, quien no tenga permiso de envío en producción
+    # solo puede enviar a la base de desarrollo (números autorizados).
     entorno_global = config_get("entorno", "desarrollo").strip().lower()
-    if entorno_global == "desarrollo" and sesion.get("rol") != "administrador":
+    if entorno_global == "desarrollo" and not tiene_permiso(sesion, "envio_produccion"):
         amb = "desarrollo"
 
     if not body.pacientes and body.pacientes is not None:
@@ -1939,9 +2242,9 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         return {"iniciado": False, "total": 0, "rechazados": rechazados,
                 "requiere_confirmacion": False, "envio_id": envio_id}
 
-    # En producción se requiere confirmación por correo del supervisor,
-    # salvo que el usuario sea administrador (envía directo sin correo).
-    if amb == "produccion" and sesion.get("rol") != "administrador":
+    # En producción se requiere confirmación por correo del supervisor, salvo
+    # que la cuenta tenga el permiso de envío directo en producción.
+    if amb == "produccion" and not tiene_permiso(sesion, "envio_produccion"):
         token = uuid.uuid4().hex
         envio_id = crear_envio_batch(nombre_base(amb), plantilla["clave"], plantilla["nombre"],
                                      len(destinatarios) + len(rechazados), amb)
@@ -2123,7 +2426,7 @@ class DestinosIn(BaseModel):
 
 
 @app.post("/api/notificaciones/destinatarios")
-def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(sesion_actual)):
+def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensajeria"))):
     try:
         amb = entorno_valido(body.ambiente)
     except ValueError:
@@ -2156,7 +2459,7 @@ def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(sesion_actual)
 
 
 @app.get("/api/notificaciones/jobs/{job_id}")
-def estado_job(job_id: str, sesion: dict = Depends(sesion_actual)):
+def estado_job(job_id: str, sesion: dict = Depends(exigir("mensajeria"))):
     job = JOBS.get(job_id)
     if job is None:
         raise HTTPException(404, detail="Envío no encontrado")
@@ -2165,7 +2468,7 @@ def estado_job(job_id: str, sesion: dict = Depends(sesion_actual)):
 
 
 @app.post("/api/notificaciones/jobs/{job_id}/cancelar")
-def cancelar_job(job_id: str, sesion: dict = Depends(sesion_actual)):
+def cancelar_job(job_id: str, sesion: dict = Depends(exigir("mensajeria"))):
     job = JOBS.get(job_id)
     if job is None:
         raise HTTPException(404, detail="Envío no encontrado")
@@ -2176,7 +2479,7 @@ def cancelar_job(job_id: str, sesion: dict = Depends(sesion_actual)):
 
 
 @app.post("/api/notificaciones/jobs/{job_id}/pausa")
-def pausar_job(job_id: str, sesion: dict = Depends(sesion_actual)):
+def pausar_job(job_id: str, sesion: dict = Depends(exigir("mensajeria"))):
     job = JOBS.get(job_id)
     if job is None:
         raise HTTPException(404, detail="Envío no encontrado")
@@ -2187,7 +2490,7 @@ def pausar_job(job_id: str, sesion: dict = Depends(sesion_actual)):
 
 
 @app.post("/api/notificaciones/jobs/{job_id}/reanudar")
-def reanudar_job(job_id: str, sesion: dict = Depends(sesion_actual)):
+def reanudar_job(job_id: str, sesion: dict = Depends(exigir("mensajeria"))):
     job = JOBS.get(job_id)
     if job is None:
         raise HTTPException(404, detail="Envío no encontrado")
@@ -2199,7 +2502,7 @@ def reanudar_job(job_id: str, sesion: dict = Depends(sesion_actual)):
 
 @app.get("/api/notificaciones/historial")
 def listar_historial(q: str | None = Query(None), estado: str | None = Query(None),
-                     ambiente: str = Query("produccion"), sesion: dict = Depends(sesion_actual)):
+                     ambiente: str = Query("produccion"), sesion: dict = Depends(exigir("historial"))):
     com_col = "comentario" if "comentario" in columnas_tabla("envios", "produccion") else "NULL AS comentario"
     sql = ("SELECT id, base_datos, plantilla_clave, plantilla_nombre, total_pacientes,"
            f" enviados, fallidos, invalidos, estado, {com_col}, fecha_hora FROM envios")
@@ -2233,7 +2536,7 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
 
 @app.get("/api/notificaciones/historial/{envio_id}/detalle")
 def detalle_historial(envio_id: int, ambiente: str = Query("produccion"),
-                      sesion: dict = Depends(sesion_actual)):
+                      sesion: dict = Depends(exigir("historial"))):
     # log_envios es única para todo el sistema; el detalle se busca por envio_id.
     # Para 'respuesta' se usa la señal EFECTIVA actual del paciente (respondió /
     # se dio de baja / sin respuesta), no el valor congelado en la fila de envío.
@@ -2270,7 +2573,7 @@ def detalle_historial(envio_id: int, ambiente: str = Query("produccion"),
 @app.put("/api/notificaciones/historial/{registro_id}/respuesta")
 def actualizar_respuesta(registro_id: int, body: EstadoPacienteIn,
                          ambiente: str = Query("produccion"),
-                         sesion: dict = Depends(sesion_actual)):
+                         sesion: dict = Depends(exigir("historial"))):
     if body.estado not in ("pendiente", "respondio", "baja"):
         raise HTTPException(400, detail="Respuesta inválida. Use: pendiente, respondio, baja")
     with conectar(ambiente) as conn, conn.cursor() as cur:
@@ -2308,7 +2611,7 @@ _SOLO_PROD = "envio_id IN (SELECT id FROM envios WHERE base_datos = 'pacientes_p
 
 
 @app.get("/api/estadisticas")
-def estadisticas(sesion: dict = Depends(sesion_actual)):
+def estadisticas(sesion: dict = Depends(exigir("estadisticas"))):
     """Resumen de envíos para la página de Estadísticas (solo producción)."""
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(
@@ -2355,7 +2658,7 @@ def estadisticas(sesion: dict = Depends(sesion_actual)):
 
 
 @app.get("/api/estadisticas/envios")
-def estadisticas_envios(granularidad: str = Query("mes"), sesion: dict = Depends(sesion_actual)):
+def estadisticas_envios(granularidad: str = Query("mes"), sesion: dict = Depends(exigir("estadisticas"))):
     """Mensajes enviados agrupados por periodo (para el gráfico de barras)."""
     if granularidad not in ("dia", "mes", "anio"):
         raise HTTPException(400, detail="granularidad debe ser dia, mes o anio")
@@ -2578,7 +2881,7 @@ def _obtener_moneda_meta() -> str | None:
 
 
 @app.get("/api/tarifas")
-def obtener_tarifas(sesion: dict = Depends(solo_admin)):
+def obtener_tarifas(sesion: dict = Depends(exigir("tarifas_editar"))):
     moneda = _moneda_cuenta()
     tarifas = _tarifas_guardadas(moneda) or _tarifas_guardadas("USD")
     todas = _tarifas_guardadas()
@@ -2594,7 +2897,7 @@ def obtener_tarifas(sesion: dict = Depends(solo_admin)):
 
 
 @app.post("/api/tarifas/actualizar")
-def actualizar_tarifas(sesion: dict = Depends(solo_admin)):
+def actualizar_tarifas(sesion: dict = Depends(exigir("tarifas_editar"))):
     try:
         encontradas = _fetch_tarifas_meta()
     except Exception as e:
@@ -2634,7 +2937,7 @@ def actualizar_tarifas(sesion: dict = Depends(solo_admin)):
 
 
 @app.get("/api/tarifas/chile.csv")
-def descargar_tarifa_csv(sesion: dict = Depends(solo_admin)):
+def descargar_tarifa_csv(sesion: dict = Depends(exigir("tarifas_editar"))):
     moneda = _moneda_cuenta()
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(
@@ -2672,7 +2975,7 @@ def _categorias_por_clave() -> dict:
 
 
 @app.get("/api/estadisticas/costos")
-def estadisticas_costos(granularidad: str = Query("mes"), sesion: dict = Depends(solo_admin)):
+def estadisticas_costos(granularidad: str = Query("mes"), sesion: dict = Depends(exigir("tarifas_editar"))):
     if granularidad not in ("dia", "mes", "anio"):
         raise HTTPException(400, detail="granularidad debe ser dia, mes o anio")
     fmt = {"dia": "%Y-%m-%d", "mes": "%Y-%m", "anio": "%Y"}[granularidad]

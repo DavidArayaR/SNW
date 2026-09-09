@@ -49,6 +49,18 @@ const DATOS_EJEMPLO = {
 
 if (!localStorage.getItem("snw_token")) location.replace("login.html");
 
+// Permiso para crear / editar / eliminar plantillas. Sin él, el panel de
+// edición queda de solo lectura: se puede elegir una plantilla y enviarla,
+// pero no modificarla.
+const PUEDE_EDITAR_PLANTILLAS = !window.snwPuede || window.snwPuede("plantillas_editar");
+
+function aplicarModoSoloLecturaPlantillas() {
+  if (PUEDE_EDITAR_PLANTILLAS) return;
+  [btnGuardar, btnEliminar, $("#btnCancelar"), $("#btnNuevaEmpty"), avisoNombrePermanente,
+   document.querySelector(".field__hint.atajos")].forEach((el) => el && (el.hidden = true));
+  document.querySelectorAll(".wildcards").forEach((el) => (el.hidden = true));
+}
+
 function authHeaders(extra = {}) {
   return { Authorization: "Bearer " + (localStorage.getItem("snw_token") || ""), ...extra };
 }
@@ -277,6 +289,10 @@ function sincronizarTemplateConNombre() {
 // en Meta, quedan bloqueados. Las plantillas antiguas sin template todavía
 // pueden completarlos. El nombre del template está SIEMPRE bloqueado.
 function actualizarBloqueoCampos() {
+  if (!PUEDE_EDITAR_PLANTILLAS) {
+    formEl.querySelectorAll("input, textarea, select").forEach((el) => { el.disabled = true; });
+    return;
+  }
   const esExistente = !!activaId;
   inpNombre.disabled = esExistente;
   inpNombre.title = esExistente
@@ -315,7 +331,7 @@ function abrir(id) {
   activaId = id;
   estadoVacio.style.display = "none";
   formEl.style.display = "";
-  tituloForm.textContent = `Editando: ${p.nombre}`;
+  tituloForm.textContent = PUEDE_EDITAR_PLANTILLAS ? `Editando: ${p.nombre}` : p.nombre;
   inpNombre.value = p.nombre;
   inpMensaje.value = p.texto;
   if (hayTemplateMeta) {
@@ -323,7 +339,7 @@ function abrir(id) {
     inpTemplateCategoria.value = p.whatsapp_template_categoria || "UTILITY";
   }
   renderEstadoMeta(p);
-  btnEliminar.hidden = false;
+  btnEliminar.hidden = !PUEDE_EDITAR_PLANTILLAS;
   if (btnEnviarActual) btnEnviarActual.hidden = false;
   inpNombre.classList.remove("invalido");
   inpMensaje.classList.remove("invalido");
@@ -391,6 +407,7 @@ function cancelarEdicion() {
 
 formEl.addEventListener("submit", async (e) => {
   e.preventDefault();
+  if (!PUEDE_EDITAR_PLANTILLAS) return;
 
   const nombre = inpNombre.value.trim();
   const texto = inpMensaje.value.trim();
@@ -528,8 +545,8 @@ inpNombre.addEventListener("input", () => {
 });
 inpMensaje.addEventListener("input", refrescarEditor);
 buscadorEl.addEventListener("input", () => renderLista(buscadorEl.value));
-$("#btnNueva").addEventListener("click", intentarNueva);
-$("#btnNuevaEmpty").addEventListener("click", intentarNueva);
+$("#btnNueva")?.addEventListener("click", intentarNueva);
+$("#btnNuevaEmpty")?.addEventListener("click", intentarNueva);
 
 document.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
@@ -649,11 +666,12 @@ if (!localStorage.getItem("snw_ambiente_admin") && !localStorage.getItem("snw_am
 }
 actualizarBadgeMensajeria();
 
-// Devuelve true si el usuario normal debe quedar restringido a la base de
-// desarrollo (cuando el entorno global del sistema es desarrollo).
+// Devuelve true si la cuenta debe quedar restringida a la base de desarrollo
+// (cuando el entorno global del sistema es desarrollo y no tiene permiso de
+// envío directo en producción).
 function usuarioRestringidoADesarrollo() {
-  const rol = localStorage.getItem("snw_rol");
-  return rol !== "administrador" && entornoGlobal === "desarrollo";
+  const puedeProd = window.snwPuede && window.snwPuede("envio_produccion");
+  return !puedeProd && entornoGlobal === "desarrollo";
 }
 
 // Aplica la restricción de base de datos en el modal de envío.
@@ -732,11 +750,11 @@ function refrescarAvisoDevConf() {
     .catch(() => {});
 }
 
-// Aviso rojo para el administrador: en producción envía directo sin confirmación.
+// Aviso rojo: en producción esta cuenta envía directo, sin confirmación de supervisor.
 function refrescarAvisoAdminConf() {
   const box = $("#confAvisoAdmin");
-  const rol = localStorage.getItem("snw_rol");
-  const esAdminProduccion = rol === "administrador" && ambienteConf === "produccion";
+  const puedeProd = window.snwPuede && window.snwPuede("envio_produccion");
+  const esAdminProduccion = puedeProd && ambienteConf === "produccion";
   box.hidden = !esAdminProduccion;
   if (esAdminProduccion) {
     box.textContent =
@@ -897,7 +915,7 @@ $("#btnLanzarConf").addEventListener("click", async () => {
       const espera = document.getElementById("modalEspera");
       espera.hidden = false;
       const linkEl = document.getElementById("linkConfirmacionEsperaMsg");
-      if (linkEl && data.confirm_url && localStorage.getItem("snw_rol") === "administrador") {
+      if (linkEl && data.confirm_url && window.snwEsPrivilegiado) {
         linkEl.innerHTML = `Para pruebas sin correo: <a href="${data.confirm_url}" target="_blank">Confirmar manualmente</a> · <a href="${data.confirm_url.replace('confirmar', 'rechazar')}" target="_blank" style="color:#b23b37;">Rechazar</a>`;
       }
       const beforeUnload = (e) => { e.preventDefault(); e.returnValue = ""; return ""; };
@@ -1112,5 +1130,6 @@ if (btnSincronizarMeta) {
   });
 }
 
+aplicarModoSoloLecturaPlantillas();
 modoVacia();
 cargar();

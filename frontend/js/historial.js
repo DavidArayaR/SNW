@@ -338,6 +338,7 @@ function toast(msg, tipo = "ok") {
 const listaCCEl = $("#listaCC");           // null si no es admin (data-solo-admin)
 const modalCCEl = $("#modalCC");
 let ccNumeros = [];
+let ccContadores = {};
 let ccAutoSegundos = 10;
 
 async function cargarCC() {
@@ -350,6 +351,7 @@ async function cargarCC() {
     const data = await r.json();
     plantillasCC = data.plantillas || [];
     ccNumeros = data.numeros_call_center || [];
+    ccContadores = data.contadores || {};
     ccAutoSegundos = data.auto_segundos ?? 10;
     renderCC();
   } catch {
@@ -362,14 +364,17 @@ function renderCC() {
   const aviso = $("#ccAviso");
   if (aviso) {
     if (!ccNumeros.length) {
-      aviso.textContent = "⚠ No hay ningún número de call center configurado: el botón no se añadirá. Configúralo en Configuración.";
+      aviso.innerHTML = "⚠ No hay ningún número de call center configurado: el botón no se añadirá. Configúralo en Configuración.";
       aviso.style.color = "var(--warn-fg)";
     } else {
-      const nums = ccNumeros.map((n) => "+" + n).join(", ");
-      const rep = ccNumeros.length > 1 ? " (se van repartiendo entre respuestas)" : "";
-      aviso.textContent = ccAutoSegundos > 0
-        ? `Envío automático activado: se manda ${ccAutoSegundos} s después de detectar interés. Número${ccNumeros.length > 1 ? "s" : ""}: ${nums}${rep}.`
-        : `Envío automático desactivado (Configuración). Número${ccNumeros.length > 1 ? "s" : ""} del call center: ${nums}${rep}.`;
+      const nums = ccNumeros
+        .map((n) => `+${n} <span class="cc-uso">(${ccContadores[n] ?? 0} ${(ccContadores[n] ?? 0) === 1 ? "envío" : "envíos"})</span>`)
+        .join(", ");
+      const rep = ccNumeros.length > 1 ? " · cada respuesta usa el número menos usado" : "";
+      const cab = ccAutoSegundos > 0
+        ? `Envío automático activado: se manda ${ccAutoSegundos} s después de detectar interés.`
+        : "Envío automático desactivado (Configuración).";
+      aviso.innerHTML = `${cab} Número${ccNumeros.length > 1 ? "s" : ""}: ${nums}${rep}.`;
       aviso.style.color = "var(--texto-suave)";
     }
   }
@@ -439,6 +444,7 @@ if (listaCCEl) {
     if (bo) borrarCC(Number(bo.dataset.ccBorrar));
   });
   $("#btnNuevaCC").addEventListener("click", () => abrirEditorCC(null));
+  $("#btnVerLogCC").addEventListener("click", abrirLogCC);
   $("#ccTexto").addEventListener("input", actualizarContadorCC);
   $("#ccBoton").addEventListener("change", sincronizarBotonCC);
   $("#btnCancelarCC").addEventListener("click", () => (modalCCEl.hidden = true));
@@ -490,6 +496,48 @@ async function borrarCC(id) {
   } catch (err) {
     toast(`No se pudo eliminar: ${err.message}`, "error");
   }
+}
+
+async function abrirLogCC() {
+  const modal = $("#modalCCLog");
+  const body = $("#ccLogBody");
+  const cont = $("#ccLogContadores");
+  if (!modal) return;
+  body.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--texto-suave);">Cargando…</td></tr>`;
+  modal.hidden = false;
+  try {
+    const r = await fetch("api/call-center/log", { headers: authHeaders(), cache: "no-store" });
+    if (r.status === 401) { window.snwSalir(); return; }
+    if (!r.ok) throw new Error();
+    const data = await r.json();
+    const c = data.contadores || {};
+    cont.innerHTML = Object.keys(c).length
+      ? "Usos por número: " + Object.entries(c).map(([n, u]) => `<strong>+${escaparHtml(n)}</strong> ${u}`).join(" · ")
+      : "Sin números configurados.";
+    const filas = data.entradas || [];
+    body.innerHTML = filas.length
+      ? filas.map((f) => {
+          const est = f.estado === "error"
+            ? `<span class="respuesta-badge respuesta-baja">error</span>`
+            : `<span class="respuesta-badge respuesta-respondio">enviado</span>`;
+          return `<tr>` +
+            `<td class="campo-fecha">${escaparHtml(f.fecha)}</td>` +
+            `<td class="campo-nombre">${escaparHtml(f.nombre_paciente ?? "—")}<br><span class="campo-tel">${escaparHtml(f.numero_paciente ?? "")}</span></td>` +
+            `<td class="campo-tel">+${escaparHtml(f.numero_call_center)}</td>` +
+            `<td>${f.automatico ? "automático" : "manual"}</td>` +
+            `<td>${est}${f.descripcion_error ? `<div class="hist-msg">${escaparHtml(f.descripcion_error)}</div>` : ""}</td>` +
+            `</tr>`;
+        }).join("")
+      : `<tr><td colspan="5" style="text-align:center;color:var(--texto-suave);">Todavía no se ha enviado ninguna respuesta de call center.</td></tr>`;
+  } catch {
+    body.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--danger-fg);">No se pudo cargar el registro.</td></tr>`;
+  }
+}
+
+const modalCCLogEl = $("#modalCCLog");
+if (modalCCLogEl) {
+  $("#btnCerrarLogCC").addEventListener("click", () => (modalCCLogEl.hidden = true));
+  modalCCLogEl.addEventListener("click", (e) => { if (e.target === modalCCLogEl) modalCCLogEl.hidden = true; });
 }
 
 cargar();
