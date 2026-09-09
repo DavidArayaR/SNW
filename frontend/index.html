@@ -53,7 +53,7 @@
       flex-direction: column;
     }
     .card h2 { margin: 0 0 8px; font-size: 1.08rem; }
-    .card p { margin: 0 0 16px; font-size: .9rem; color: var(--suave); line-height: 1.55; flex: 1; }
+    .card p { margin: 0; font-size: .9rem; color: var(--suave); line-height: 1.55; flex: 1; }
     .card ul { margin: 0 0 16px; padding-left: 18px; font-size: .86rem; color: var(--suave); }
     .card ul li { margin-bottom: 4px; }
     .btn {
@@ -95,16 +95,32 @@
       font-family: Consolas, monospace;
       font-size: .85em;
     }
-    .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
-    .chip {
-      background: #e7f3f1;
-      color: var(--verde-oscuro);
-      border: 1px solid #bcd9d2;
-      border-radius: 999px;
-      padding: 4px 13px;
-      font-size: .8rem;
-      font-weight: 600;
+    .pasos { margin: 6px 0 0; padding: 0; list-style: none; counter-reset: paso; }
+    .pasos li {
+      position: relative;
+      padding: 0 0 18px 44px;
+      border-left: 2px solid #d7e6e3;
+      margin-left: 14px;
     }
+    .pasos li:last-child { border-left-color: transparent; padding-bottom: 0; }
+    .pasos li::before {
+      counter-increment: paso;
+      content: counter(paso);
+      position: absolute;
+      left: -16px;
+      top: -2px;
+      width: 30px;
+      height: 30px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--verde);
+      color: #fff;
+      font-weight: 700;
+      font-size: .9rem;
+    }
+    .pasos li strong { color: var(--texto); }
+    section.info + section.info, .cards { margin-top: 18px; }
     footer { text-align: center; color: var(--suave); font-size: .82rem; padding: 8px 20px 34px; }
     @media (max-width: 640px) {
       .hero { padding: 40px 18px 52px; }
@@ -134,21 +150,45 @@
 
 <main>
   <section class="info">
-    <h2>¿C&oacute;mo funciona el env&iacute;o?</h2>
-    <p><strong>Tres pasos:</strong> elige la plantilla del mensaje, selecciona la base de datos a la que enviar los mensajes y presiona «Iniciar Env&iacute;o». El sistema valida autom&aacute;ticamente cada n&uacute;mero (formato internacional chileno <code>+569XXXXXXXXX</code>, corrigiendo errores comunes), descarta los inv&aacute;lidos sin interrumpir la cola, procesa el env&iacute;o en segundo plano con un intervalo entre mensajes y registra el resultado de cada intento en el historial.</p>
-    <p>En <strong>entorno de desarrollo</strong> los env&iacute;os masivos se bloquean y solo salen mensajes hacia los n&uacute;meros de prueba autorizados. En <strong>producci&oacute;n</strong>, cada env&iacute;o requiere confirmaci&oacute;n por correo electr&oacute;nico de un supervisor antes de procesarse.</p>
+    <h2>¿Qu&eacute; hace SNW?</h2>
+    <p>SNW re&uacute;ne en un solo lugar el env&iacute;o de mensajes de WhatsApp a los pacientes: recordatorios de citas, avisos y campa&ntilde;as. En vez de escribir uno por uno, se elige un mensaje ya preparado y el sistema lo manda a toda la lista, controla qu&eacute; lleg&oacute; y qu&eacute; no, y guarda un registro de todo.</p>
   </section>
 
   <section class="info">
-    <h2>Tecnolog&iacute;as</h2>
-    <div class="chips">
-      <span class="chip">Python · FastAPI</span>
-      <span class="chip">MySQL / MariaDB</span>
-      <span class="chip">HTML5 + CSS + JavaScript</span>
-      <span class="chip">WhatsApp Business Cloud API</span>
-      <span class="chip">WhatsApp Web</span>
-    </div>
+    <h2>El env&iacute;o, paso a paso</h2>
+    <ol class="pasos">
+      <li><strong>Elige la plantilla.</strong> Es el texto del mensaje. Puede incluir datos del paciente (nombre, fecha de la cita, etc.) que se completan solos al enviar.</li>
+      <li><strong>Elige a qui&eacute;n enviar.</strong> Se selecciona la base de pacientes; el sistema toma a todos los que a&uacute;n no recibieron ese mensaje. Opcionalmente se puede limitar cu&aacute;ntos salen en esta tanda.</li>
+      <li><strong>Confirma y presiona «Iniciar Env&iacute;o».</strong> Antes de empezar se muestra un resumen: cu&aacute;ntos mensajes, a qu&eacute; base y el costo aproximado.</li>
+      <li><strong>El sistema env&iacute;a en segundo plano.</strong> Va uno por uno con una pausa entre mensajes, se puede pausar o cancelar, y al terminar queda todo en el historial.</li>
+    </ol>
   </section>
+
+  <section class="info">
+    <h2>Antes de enviar: revisi&oacute;n de n&uacute;meros</h2>
+    <p>Cada n&uacute;mero se revisa y se corrige al formato chileno <code>+569XXXXXXXX</code> (arreglando errores t&iacute;picos como que falte el <code>+56</code> o el <code>9</code>). Los n&uacute;meros que no se pueden arreglar se marcan como inv&aacute;lidos y se saltan, sin frenar el resto de la cola.</p>
+  </section>
+
+  <section class="info">
+    <h2>Dos modos de trabajo</h2>
+    <p><strong>Pruebas:</strong> los env&iacute;os masivos est&aacute;n bloqueados y los mensajes solo salen hacia unos pocos n&uacute;meros autorizados. Sirve para revisar un mensaje sin riesgo de mandarlo a todos.</p>
+    <p><strong>Producci&oacute;n:</strong> es el env&iacute;o real a los pacientes. Cuando lo inicia alguien que no es administrador, primero se manda un correo a un supervisor con el detalle y el costo estimado; el env&iacute;o no arranca hasta que el supervisor lo confirma (o lo rechaza con un comentario, que queda registrado).</p>
+  </section>
+
+  <div class="cards">
+    <div class="card">
+      <h2>Respuestas y bajas</h2>
+      <p>Cuando un paciente responde por WhatsApp, SNW lo detecta y lo refleja en su ficha. Si el mensaje pide dejar de recibir avisos («baja», «no me contacten», etc.), el paciente queda dado de baja autom&aacute;ticamente y no se le vuelve a escribir.</p>
+    </div>
+    <div class="card">
+      <h2>Historial</h2>
+      <p>Cada tanda de env&iacute;o queda guardada con su fecha, la plantilla usada y cu&aacute;ntos mensajes se enviaron, fallaron o eran n&uacute;meros inv&aacute;lidos. Se puede abrir el detalle paciente por paciente.</p>
+    </div>
+    <div class="card">
+      <h2>Estad&iacute;sticas</h2>
+      <p>Un panel resume la actividad: mensajes enviados por d&iacute;a, mes o a&ntilde;o, costo aproximado por per&iacute;odo y c&oacute;mo respondieron los pacientes (respondieron, no respondieron, se dieron de baja).</p>
+    </div>
+  </div>
     </main>
 
     <footer>SNW &middot; Sistema de Notificaciones WhatsApp</footer>
