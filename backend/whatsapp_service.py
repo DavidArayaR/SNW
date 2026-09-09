@@ -821,6 +821,11 @@ class WhatsAppService:
                     return
                 for p in pacientes:
                     cur.execute(f"UPDATE {p['tabla']} SET whatsapp_opt_out = 1 WHERE {match}", (telefono,))
+                    # Al darse de baja se quita la marca de interés (si la tenía).
+                    try:
+                        cur.execute(f"UPDATE {p['tabla']} SET interesado = 0 WHERE {match}", (telefono,))
+                    except Exception:
+                        pass  # esquema sin la columna
                     cur.execute(
                         "UPDATE log_envios SET respuesta = 'baja'"
                         " WHERE paciente_id = %s ORDER BY id DESC LIMIT 1",

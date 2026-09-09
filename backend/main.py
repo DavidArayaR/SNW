@@ -442,6 +442,9 @@ def actualizar_respuesta_paciente(paciente_id: int, body: RespuestaIn,
             f"UPDATE {t} SET whatsapp_opt_out = %s WHERE id = %s",
             (1 if body.respuesta == "baja" else 0, paciente_id),
         )
+        # Al marcar 'baja' se quita la marca de interés.
+        if body.respuesta == "baja" and columna_existe(t, "interesado", ambiente):
+            cur.execute(f"UPDATE {t} SET interesado = 0 WHERE id = %s", (paciente_id,))
         # La corrección manual gana sobre la señal automática 'pegajosa'.
         if tiene_manual:
             cur.execute(

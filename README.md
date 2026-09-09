@@ -125,7 +125,7 @@ el `entorno` activo, que las demás pantallas leen al cargar).
 | `estado` | ENUM | `pendiente` / `enviado` / `error` |
 | `whatsapp_opt_out` | TINYINT(1) | 1 si el paciente pidió no recibir más mensajes |
 | `respuesta_manual` | VARCHAR(12) | Corrección manual de la respuesta (NULL = sin corrección); gana sobre la señal automática |
-| `interesado` | TINYINT(1) | 1 si el paciente mostró interés real (por webhook o a mano). Marcarlo revierte una baja previa |
+| `interesado` | TINYINT(1) | 1 si el paciente mostró interés real (por webhook o a mano). Marcarlo revierte una baja previa; darse de baja lo pone en 0 |
 | `fecha_actualizacion` | DATETIME | Última actualización |
 
 **`envios`** — un registro por cada "Iniciar envío" (batch-level, sin nombres de pacientes)
@@ -382,8 +382,10 @@ tampoco cuenta como interés.
 
 Cuando el webhook detecta interés marca `pacientes.interesado = 1` y **revierte cualquier
 baja previa** (pone `whatsapp_opt_out = 0` y convierte las filas `respuesta = 'baja'` del
-paciente a `'respondio'`). Así, si el paciente escribió "quiero darme de baja" y más tarde
-"en realidad me interesa", vuelve a quedar contactable. En el **detalle de un envío del
+paciente a `'respondio'`). Al revés, cuando el paciente **se da de baja** se le quita la
+marca de interés (`interesado = 0`), tanto por webhook como por el ajuste manual. Así, si
+escribió "quiero darme de baja" y más tarde "en realidad me interesa", la badge de
+*interesado* desaparece y vuelve a aparecer con cada cambio. En el **detalle de un envío del
 Historial** hay una columna *Detalle* con un botón **«Ver mensajes»** (para cualquier
 usuario) que abre el hilo completo del paciente; un admin además puede marcar/desmarcar
 `interesado` a mano ahí y, si está interesado, enviarle el mensaje de call center.
