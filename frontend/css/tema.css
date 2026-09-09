@@ -1,0 +1,136 @@
+/* ============================================================
+   Paleta de la app: tonos pastel en claro y oscuro.
+   Se carga ANTES que el resto de CSS. El modo se controla con
+   el atributo data-tema="oscuro" en <html> (ver js/tema.js).
+   ============================================================ */
+
+:root {
+  color-scheme: light;
+
+  /* Superficies */
+  --fondo: #eef3f1;
+  --panel: #ffffff;
+  --panel-2: #f6faf8;
+  --surface-2: #f4f8f6;
+  --surface-3: #e8efec;
+  --hover: #eaf3ef;
+  --linea: #eef2f0;
+  --borde: #dde6e2;
+
+  /* Texto */
+  --texto: #35423d;
+  --texto-suave: #75857e;
+  --suave: #75857e; /* alias usado en algunas reglas antiguas */
+
+  /* Marca (verde WhatsApp en versión apagada / pastel) */
+  --verde: #4ea896;
+  --verde-oscuro: #3b8070;
+  --btn-primary-fg: #ffffff;
+  --btn-danger-fg: #ffffff;
+  --brand-tint: #e4f1ec;
+  --brand-tint-bd: #c2dbd2;
+  --brand-tint-fg: #3b8070;
+
+  /* Degradado de la barra lateral (siempre verde, no cambia de rol en oscuro) */
+  --sidebar-1: #3b8070;
+  --sidebar-2: #4ea896;
+
+  /* Estados semánticos: fondo / texto / borde */
+  --rojo: #cf7d7d;
+  --ok-bg: #e3f4e9;   --ok-fg: #2e7d52;   --ok-bd: #c2e3cf;
+  --warn-bg: #fbf1dd; --warn-fg: #8c6216; --warn-bd: #ecd9ac;
+  --danger-bg: #fae9e9; --danger-fg: #b0484a; --danger-bd: #e6c6c6;
+  --info-bg: #ece9f8; --info-fg: #644a9c; --info-bd: #d6cdef;
+  --neutral-bg: #eef1f0; --neutral-fg: #6b7a74; --neutral-bd: #dde3e0;
+
+  /* Burbujas de chat / vista previa */
+  --chat-bg: #e7e0d8;
+  --chat-in: #ffffff;   --chat-in-bd: #e3e7ea;
+  --chat-out: #dcf3cf;  --chat-out-bd: #bfe6ac;
+  --chat-time: #5a7a56;
+
+  /* Gráficos de barras */
+  --grafico-1: #46b79a;
+  --grafico-2: #2f9077;
+
+  /* Varios */
+  --sombra: 0 1px 3px rgba(50, 70, 62, .09), 0 6px 18px rgba(50, 70, 62, .06);
+  --overlay: rgba(26, 38, 34, .5);
+  --toast-bg: #2b3a34;
+  --toast-fg: #ffffff;
+  --radio: 12px;
+}
+
+:root[data-tema="oscuro"] {
+  color-scheme: dark;
+
+  --fondo: #1b211f;
+  --panel: #252e2b;
+  --panel-2: #2b3532;
+  --surface-2: #2c3633;
+  --surface-3: #323d39;
+  --hover: #2f3a36;
+  --linea: #333e3a;
+  --borde: #3b4743;
+
+  --texto: #e1e8e4;
+  --texto-suave: #9db0a8;
+  --suave: #9db0a8;
+
+  --verde: #5cb7a1;
+  --verde-oscuro: #86d2bd;
+  --btn-primary-fg: #10201c;
+  --btn-danger-fg: #2a1717;
+  --brand-tint: #2b3d37;
+  --brand-tint-bd: #3f574f;
+  --brand-tint-fg: #9fded0;
+
+  --sidebar-1: #0f322b;
+  --sidebar-2: #17493f;
+
+  --rojo: #dd9393;
+  --ok-bg: #26382e;   --ok-fg: #9edcb6;   --ok-bd: #3c5748;
+  --warn-bg: #3a3324; --warn-fg: #e7c88c; --warn-bd: #564a2e;
+  --danger-bg: #3b2a2a; --danger-fg: #eba9a9; --danger-bd: #5a3f3f;
+  --info-bg: #302c45; --info-fg: #c6b8f2; --info-bd: #463f64;
+  --neutral-bg: #2f3936; --neutral-fg: #a6b4ae; --neutral-bd: #3e4a46;
+
+  --chat-bg: #1e2523;
+  --chat-in: #2d3835;   --chat-in-bd: #3a4642;
+  --chat-out: #2f4034;  --chat-out-bd: #3f5546;
+  --chat-time: #8fae8a;
+
+  --grafico-1: #57c2a8;
+  --grafico-2: #3f9c84;
+
+  --sombra: 0 1px 3px rgba(0, 0, 0, .4), 0 6px 20px rgba(0, 0, 0, .32);
+  --overlay: rgba(0, 0, 0, .62);
+  --toast-bg: #0f1614;
+  --toast-fg: #e6efeb;
+}
+
+/* Transición suave al cambiar de modo */
+:root.tema-anim,
+:root.tema-anim * {
+  transition: background-color .2s ease, border-color .2s ease, color .15s ease !important;
+}
+
+/* Botón flotante de tema (páginas sin sidebar: portada e inicio de sesión) */
+.tema-fab {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 70;
+  width: 42px;
+  height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--borde);
+  border-radius: 50%;
+  background: var(--panel);
+  color: var(--texto);
+  font-size: 1rem;
+  box-shadow: var(--sombra);
+}
+.tema-fab:hover { filter: brightness(1.05); }

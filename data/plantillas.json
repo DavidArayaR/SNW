@@ -3,13 +3,13 @@
     "id": 1,
     "clave": "default",
     "nombre": "default",
-    "texto": "¡Hola {nombre} 👋!\n\n💚 Esta semana, en *Salud Mental Para Todos* aprovecha tu sesión a solo *$25.000*.\n\n✍️ Escríbenos para agendar tu hora antes de que termine la promoción. \n¡Cuidarte también es quererte! 🏥✨",
+    "texto": "¡Hola {nombre} 👋!\n\n💚 Esta semana, en *Salud Mental Para Todos* aprovecha tu sesión a solo *$25.000*.\n\n✍️ Escríbe *_Me interesa_* para agendar tu hora antes de que termine la promoción. \n¡Cuidarte también es quererte! 🏥✨",
     "whatsapp_template": "default",
     "whatsapp_template_lang": "es",
     "whatsapp_template_categoria": "MARKETING",
-    "actualizada": 1788794189823,
+    "actualizada": 1788970526475,
     "whatsapp_template_id": "1382444860710230",
-    "whatsapp_template_status": "APPROVED",
+    "whatsapp_template_status": "PENDING",
     "whatsapp_template_error": null,
     "whatsapp_template_rejected_reason": "NONE"
   },
@@ -17,13 +17,13 @@
     "id": 2,
     "clave": "descuento_25",
     "nombre": "descuento 25",
-    "texto": "¡Hola {nombre} 👋!\n\n💚 Esta semana, aprovecha un *25% de descuento* en tu sesión de *Salud Mental*.\n\n✍️ Escríbenos para agendar tu hora antes de que termine la promoción.\n¡Cuidarte también es quererte! 🏥✨",
+    "texto": "¡Hola {nombre} 👋!\n\n💚 Esta semana, aprovecha un *25% de descuento* en tu sesión de *Salud Mental*.\n\n✍️ Escríbe *_Me interesa_* para agendar tu hora antes de que termine la promoción.\n¡Cuidarte también es quererte! 🏥✨",
     "whatsapp_template": "descuento_25",
     "whatsapp_template_lang": "es",
     "whatsapp_template_categoria": "MARKETING",
-    "actualizada": 1788541540895,
+    "actualizada": 1788970543182,
     "whatsapp_template_id": "1737252654192451",
-    "whatsapp_template_status": "APPROVED",
+    "whatsapp_template_status": "PENDING",
     "whatsapp_template_error": null,
     "whatsapp_template_rejected_reason": "NONE"
   },
@@ -45,8 +45,11 @@
     "id": 5,
     "clave": "call_center",
     "nombre": "Mensaje para paciente interesado (call center)",
-    "texto": "¡Hola {nombre}! Gracias por tu interés. Puedes hablar directamente con nuestro equipo de atención en este enlace: https://wa.me/56900000000",
+    "texto": "¡Hola {nombre}! Gracias por tu interés. Nuestro equipo de atención te puede ayudar directamente por WhatsApp.",
     "especial": "call_center",
-    "actualizada": 1788963149280
+    "actualizada": 1788967074320,
+    "cc_boton": true,
+    "cc_boton_texto": "Ir al call center",
+    "cc_auto": true
   }
 ]

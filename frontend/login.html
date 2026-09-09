@@ -4,15 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SNW · Iniciar sesi&oacute;n</title>
+  <link rel="stylesheet" href="css/tema.css">
+  <script src="js/tema.js"></script>
   <style>
-    :root {
-      --verde: #128c7e;
-      --verde-oscuro: #075e54;
-      --texto: #24303c;
-      --suave: #66757f;
-      --borde: #dde1e6;
-      --rojo: #d9534f;
-    }
     * { box-sizing: border-box; }
     body {
       margin: 0;
@@ -26,13 +20,19 @@
       color: var(--texto);
       padding: 20px;
     }
+    :root[data-tema="oscuro"] body {
+      background:
+        linear-gradient(rgba(10, 22, 20, .9), rgba(16, 30, 27, .94)),
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='.04'%3E%3Ccircle cx='40' cy='40' r='14'/%3E%3Cpath d='M20 60l8-8M52 12l8 8'/%3E%3C/g%3E%3C/svg%3E");
+    }
     .card {
       width: 100%;
       max-width: 380px;
-      background: #fff;
+      background: var(--panel);
+      color: var(--texto);
       border-radius: 16px;
       padding: 34px 32px 28px;
-      box-shadow: 0 22px 60px rgba(0, 0, 0, .3);
+      box-shadow: 0 22px 60px rgba(0, 0, 0, .35);
     }
     .logo {
       display: grid;
@@ -42,11 +42,11 @@
       margin: 0 auto 14px;
       border-radius: 50%;
       background: var(--verde);
-      color: #fff;
+      color: var(--btn-primary-fg);
       font-size: 1.5rem;
     }
     h1 { margin: 0 0 4px; text-align: center; font-size: 1.25rem; }
-    .sub { margin: 0 0 24px; text-align: center; color: var(--suave); font-size: .86rem; }
+    .sub { margin: 0 0 24px; text-align: center; color: var(--texto-suave); font-size: .86rem; }
     label { display: block; margin-bottom: 6px; font-weight: 600; font-size: .87rem; }
     input {
       width: 100%;
@@ -56,7 +56,8 @@
       font: inherit;
       font-size: .95rem;
       margin-bottom: 16px;
-      background: #fbfcfd;
+      background: var(--surface-2);
+      color: var(--texto);
     }
     input:focus { border-color: var(--verde); outline: none; }
     button {
@@ -64,7 +65,7 @@
       border: none;
       border-radius: 10px;
       background: var(--verde);
-      color: #fff;
+      color: var(--btn-primary-fg);
       padding: 13px;
       font: inherit;
       font-weight: 700;
@@ -78,13 +79,13 @@
       margin: -6px 0 14px;
       padding: 10px 13px;
       border-radius: 8px;
-      background: #fdecec;
-      border: 1px solid #eec2c1;
-      color: #8c2f2c;
+      background: var(--danger-bg);
+      border: 1px solid var(--danger-bd);
+      color: var(--danger-fg);
       font-size: .85rem;
     }
     .error.visible { display: block; }
-    .nota { margin: 18px 0 0; text-align: center; color: var(--suave); font-size: .76rem; line-height: 1.6; }
+    .nota { margin: 18px 0 0; text-align: center; color: var(--texto-suave); font-size: .76rem; line-height: 1.6; }
     a { color: var(--verde); }
   </style>
 </head>
@@ -111,6 +112,8 @@
   </div>
 
   <script>
+    if (window.snwMontarFabTema) window.snwMontarFabTema();
+
     (async function () {
       const t = localStorage.getItem("snw_token");
       if (!t) return;

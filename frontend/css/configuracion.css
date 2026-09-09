@@ -7,7 +7,7 @@
   line-height: 1.5;
 }
 .config-intro code {
-  background: #eef1f4;
+  background: var(--surface-3);
   border-radius: 5px;
   padding: 1px 6px;
   font-size: .85em;
@@ -46,7 +46,7 @@
   font: inherit;
   font-size: .93rem;
   color: var(--texto);
-  background: #fbfcfd;
+  background: var(--surface-2);
 }
 .config-campo input:not([type="checkbox"]):focus,
 .config-campo select:focus { border-color: var(--verde); outline: none; }
@@ -55,7 +55,7 @@
   font-size: .72rem;
   font-weight: 400;
   color: var(--texto-suave);
-  background: #f0f2f5;
+  background: var(--surface-3);
   border-radius: 5px;
   padding: 1px 6px;
 }
@@ -66,13 +66,13 @@
 .config-campo--cambiado input:not([type="checkbox"]),
 .config-campo--cambiado select {
   border-color: var(--verde);
-  background: #f3faf8;
+  background: var(--brand-tint);
 }
 
 /* Campo calculado de solo lectura (URL del webhook) */
 .config-campo--derivado { grid-column: 1 / -1; }
 .config-campo--derivado input[readonly] {
-  background: #eef1f4;
+  background: var(--surface-3);
   color: var(--texto);
   cursor: text;
   font-family: Consolas, "SFMono-Regular", monospace;
@@ -83,11 +83,11 @@
   margin-top: 6px;
   padding: 8px 11px;
   border-radius: 8px;
-  background: #fdf6e7;
-  border: 1px solid #ecd9ac;
-  color: #8a6410;
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-bd);
+  color: var(--warn-fg);
 }
-.config-webhook-meta a { color: #8a6410; font-weight: 700; }
+.config-webhook-meta a { color: var(--warn-fg); font-weight: 700; }
 
 /* Campo secreto con botón de ojo */
 .config-secreto { position: relative; }
@@ -104,7 +104,7 @@
   background: transparent;
   color: var(--texto-suave);
 }
-.config-ojo:hover { background: #eef1f4; color: var(--texto); }
+.config-ojo:hover { background: var(--surface-3); color: var(--texto); }
 
 /* Interruptor booleano */
 .config-switch {

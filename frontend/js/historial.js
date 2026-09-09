@@ -6,8 +6,6 @@ function authHeaders(extra = {}) {
 
 if (!localStorage.getItem("snw_token")) location.replace("login.html");
 
-const ES_ADMIN = localStorage.getItem("snw_rol") === "administrador";
-
 let registros = [];
 let filtro = "";
 let filtroEstado = "todos";
@@ -127,10 +125,15 @@ function abrirDetalle(envio, detalle) {
   const body = $("#detalleBody");
   body.innerHTML = "";
 
+  // Columna extra "Detalle" con el botón «Ver mensajes».
+  const thMsgs = $("#thDetalleMensajes");
+  if (thMsgs) thMsgs.hidden = false;
+  const cols = 4;
+
   if ((envio?.estado || "") === "rechazado") {
     const c = (envio.comentario ?? "").trim();
     body.innerHTML =
-      `<tr><td colspan="3" class="hist-rechazo-detalle">` +
+      `<tr><td colspan="${cols}" class="hist-rechazo-detalle">` +
       `Envío rechazado por el supervisor. No se envió ningún mensaje.` +
       (c ? `<br><span>Comentario: «${escaparHtml(c)}»</span>` : "") +
       `</td></tr>`;
@@ -139,7 +142,7 @@ function abrirDetalle(envio, detalle) {
   }
 
   if (!detalle.length) {
-    body.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#66757f;">Sin detalle individual registrado.</td></tr>';
+    body.innerHTML = `<tr><td colspan="${cols}" style="text-align:center;color:#66757f;">Sin detalle individual registrado.</td></tr>`;
   } else {
     const pesoRespuesta = { respondio: 0, baja: 1, pendiente: 2 };
     const orden = [...detalle].sort(
@@ -151,17 +154,18 @@ function abrirDetalle(envio, detalle) {
       const msgHtml = msg
         ? `<div class="hist-msg${d.respuesta_interes ? " hist-msg--interes" : ""}">«${escaparHtml(msg)}»</div>`
         : "";
-      const btnMsgs = (ES_ADMIN && d.paciente_id)
-        ? `<button type="button" class="btn btn--sm btn--ghost hist-ver-msgs" data-mensajes="${d.paciente_id}">Ver mensajes</button>`
-        : "";
       const marcaInteres = d.interesado
         ? `<span class="hist-tag-interes" title="Marcado como interesado">interesado</span>`
         : "";
+      const celdaMsgs = d.paciente_id
+        ? `<td class="hist-col-msgs"><button type="button" class="btn btn--sm btn--ghost" data-mensajes="${d.paciente_id}">Ver mensajes</button></td>`
+        : `<td class="hist-col-msgs">—</td>`;
       const tr = document.createElement("tr");
       tr.innerHTML =
-        `<td class="campo-nombre">${escaparHtml(d.nombre_paciente ?? "—")}${marcaInteres}${btnMsgs ? `<div>${btnMsgs}</div>` : ""}</td>` +
+        `<td class="campo-nombre">${escaparHtml(d.nombre_paciente ?? "—")}${marcaInteres}</td>` +
         `<td><span class="respuesta-badge respuesta-${escaparHtml(r)}">${escaparHtml(respuestaLabel(r))}</span>${msgHtml}</td>` +
-        `<td class="campo-fecha">${escaparHtml(d.fecha ?? "—")}</td>`;
+        `<td class="campo-fecha">${escaparHtml(d.fecha ?? "—")}</td>` +
+        celdaMsgs;
       body.appendChild(tr);
     }
   }
@@ -189,7 +193,6 @@ async function abrirMensajes(pacienteId) {
       headers: authHeaders(), cache: "no-store",
     });
     if (r.status === 401) { window.snwSalir(); return; }
-    if (r.status === 403) { toast("Solo un administrador puede ver los mensajes.", "error"); return; }
     if (!r.ok) throw new Error();
     const data = await r.json();
     renderMensajes(data);
@@ -227,13 +230,14 @@ function renderMensajes(data) {
         `<div class="msg-meta">${meta}</div></div>`;
     }).join("");
   }
-  hilo.scrollTop = hilo.scrollHeight;
-
   const chk = $("#chkInteresado");
   if (chk) chk.checked = !!pac.interesado;
   actualizarAccionCC(!!pac.interesado);
 
   $("#modalMensajes").hidden = false;
+  // Ya visible: salta al final (mensajes más recientes). Se difiere para que
+  // el navegador calcule la altura real del hilo.
+  requestAnimationFrame(() => { hilo.scrollTop = hilo.scrollHeight; });
 }
 
 // Ajusta el selector + botón "Enviar call center" según el interés del paciente
@@ -333,6 +337,8 @@ function toast(msg, tipo = "ok") {
 
 const listaCCEl = $("#listaCC");           // null si no es admin (data-solo-admin)
 const modalCCEl = $("#modalCC");
+let ccNumeros = [];
+let ccAutoSegundos = 10;
 
 async function cargarCC() {
   if (!listaCCEl) return;
@@ -341,7 +347,10 @@ async function cargarCC() {
     if (r.status === 401) { window.snwSalir(); return; }
     if (r.status === 403) { return; }
     if (!r.ok) throw new Error();
-    plantillasCC = await r.json();
+    const data = await r.json();
+    plantillasCC = data.plantillas || [];
+    ccNumeros = data.numeros_call_center || [];
+    ccAutoSegundos = data.auto_segundos ?? 10;
     renderCC();
   } catch {
     listaCCEl.innerHTML = `<p class="cc-vacio">No se pudieron cargar las plantillas de call center.</p>`;
@@ -350,15 +359,32 @@ async function cargarCC() {
 
 function renderCC() {
   if (!listaCCEl) return;
+  const aviso = $("#ccAviso");
+  if (aviso) {
+    if (!ccNumeros.length) {
+      aviso.textContent = "⚠ No hay ningún número de call center configurado: el botón no se añadirá. Configúralo en Configuración.";
+      aviso.style.color = "var(--warn-fg)";
+    } else {
+      const nums = ccNumeros.map((n) => "+" + n).join(", ");
+      const rep = ccNumeros.length > 1 ? " (se van repartiendo entre respuestas)" : "";
+      aviso.textContent = ccAutoSegundos > 0
+        ? `Envío automático activado: se manda ${ccAutoSegundos} s después de detectar interés. Número${ccNumeros.length > 1 ? "s" : ""}: ${nums}${rep}.`
+        : `Envío automático desactivado (Configuración). Número${ccNumeros.length > 1 ? "s" : ""} del call center: ${nums}${rep}.`;
+      aviso.style.color = "var(--texto-suave)";
+    }
+  }
   if (!plantillasCC.length) {
     listaCCEl.innerHTML = `<p class="cc-vacio">Todavía no hay ninguna plantilla de call center.</p>`;
     return;
   }
   listaCCEl.innerHTML = plantillasCC.map((p) => {
     const primera = String(p.texto ?? "").split("\n")[0] || "(sin contenido)";
+    const tags =
+      (p.es_auto_efectiva ? `<span class="cc-tag cc-tag--auto">automática</span>` : "") +
+      (p.cc_boton ? `<span class="cc-tag">con botón</span>` : "");
     return `<div class="cc-item">` +
       `<div class="cc-item__txt">` +
-      `<strong>${escaparHtml(p.nombre ?? "(sin nombre)")}</strong>` +
+      `<div class="cc-item__cab"><strong>${escaparHtml(p.nombre ?? "(sin nombre)")}</strong>${tags}</div>` +
       `<span>${escaparHtml(primera)}</span>` +
       `</div>` +
       `<div class="cc-item__acc">` +
@@ -374,9 +400,28 @@ function abrirEditorCC(id) {
   $("#ccTitulo").textContent = p ? `Editar: ${p.nombre}` : "Nueva plantilla de call center";
   $("#ccNombre").value = p ? p.nombre : "";
   $("#ccTexto").value = p ? p.texto : "";
+  $("#ccBoton").checked = p ? p.cc_boton !== false : true;
+  $("#ccBotonTexto").value = (p && p.cc_boton_texto) || "Ir al call center";
+  $("#ccAuto").checked = p ? !!p.cc_auto : (plantillasCC.length === 0);
+  sincronizarBotonCC();
   actualizarContadorCC();
   modalCCEl.hidden = false;
   $("#ccNombre").focus();
+}
+
+function sincronizarBotonCC() {
+  const on = $("#ccBoton").checked;
+  $("#ccBotonTextoWrap").hidden = !on;
+  const hint = $("#ccBotonHint");
+  if (hint && on && !ccNumeros.length) {
+    hint.textContent = "Falta configurar el número del call center en Configuración; hasta entonces el botón no se enviará.";
+    hint.style.color = "var(--warn-fg)";
+  } else if (hint) {
+    hint.textContent = ccNumeros.length > 1
+      ? "El botón lleva a uno de los números configurados en Configuración (se reparten). Máx. 20 caracteres."
+      : "El botón lleva al número configurado en Configuración. Máx. 20 caracteres.";
+    hint.style.color = "var(--texto-suave)";
+  }
 }
 
 function actualizarContadorCC() {
@@ -395,6 +440,7 @@ if (listaCCEl) {
   });
   $("#btnNuevaCC").addEventListener("click", () => abrirEditorCC(null));
   $("#ccTexto").addEventListener("input", actualizarContadorCC);
+  $("#ccBoton").addEventListener("change", sincronizarBotonCC);
   $("#btnCancelarCC").addEventListener("click", () => (modalCCEl.hidden = true));
   modalCCEl.addEventListener("click", (e) => { if (e.target === modalCCEl) modalCCEl.hidden = true; });
 
@@ -405,13 +451,19 @@ if (listaCCEl) {
     if (!nombre || !texto.trim()) { toast("Nombre y mensaje son obligatorios.", "error"); return; }
     if (texto.length > MAX_CC) { toast(`El mensaje supera los ${MAX_CC} caracteres.`, "error"); return; }
     const esNueva = ccEditId == null;
+    const cuerpo = {
+      nombre, texto,
+      boton: $("#ccBoton").checked,
+      boton_texto: $("#ccBotonTexto").value.trim() || "Ir al call center",
+      auto: $("#ccAuto").checked,
+    };
     try {
       const r = await fetch(
         esNueva ? "api/plantillas/call-center" : `api/plantillas/call-center/${ccEditId}`,
         {
           method: esNueva ? "POST" : "PUT",
           headers: authHeaders({ "Content-Type": "application/json" }),
-          body: JSON.stringify({ nombre, texto }),
+          body: JSON.stringify(cuerpo),
         },
       );
       const data = await r.json().catch(() => ({}));
@@ -442,5 +494,3 @@ async function borrarCC(id) {
 
 cargar();
 cargarCC();
-
-

@@ -6,25 +6,20 @@
   <title>SNW — Sistema de Notificaciones WhatsApp</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
+  <link rel="stylesheet" href="css/tema.css">
   <link rel="stylesheet" href="css/styles.css">
   <link rel="stylesheet" href="css/layout.css">
+  <script src="js/tema.js"></script>
   <style>
-    :root {
-      --verde: #128c7e;
-      --verde-oscuro: #075e54;
-      --texto: #24303c;
-      --suave: #66757f;
-      --borde: #dde1e6;
-    }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       font-family: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
       color: var(--texto);
-      background: #f0f2f5;
+      background: var(--fondo);
     }
     .hero {
-      background: linear-gradient(135deg, var(--verde-oscuro), var(--verde));
+      background: linear-gradient(135deg, #2f6d5d, #3f9a86);
       color: #fff;
       padding: 56px 24px 64px;
       text-align: center;
@@ -44,24 +39,24 @@
     main { max-width: 960px; margin: -34px auto 40px; padding: 0 20px; }
     .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; }
     .card {
-      background: #fff;
+      background: var(--panel);
       border: 1px solid var(--borde);
       border-radius: 14px;
       padding: 22px;
-      box-shadow: 0 1px 3px rgba(0,0,0,.08), 0 8px 22px rgba(0,0,0,.05);
+      box-shadow: var(--sombra);
       display: flex;
       flex-direction: column;
     }
     .card h2 { margin: 0 0 8px; font-size: 1.08rem; }
-    .card p { margin: 0; font-size: .9rem; color: var(--suave); line-height: 1.55; flex: 1; }
-    .card ul { margin: 0 0 16px; padding-left: 18px; font-size: .86rem; color: var(--suave); }
+    .card p { margin: 0; font-size: .9rem; color: var(--texto-suave); line-height: 1.55; flex: 1; }
+    .card ul { margin: 0 0 16px; padding-left: 18px; font-size: .86rem; color: var(--texto-suave); }
     .card ul li { margin-bottom: 4px; }
     .btn {
       display: inline-block;
       text-align: center;
       text-decoration: none;
       background: var(--verde);
-      color: #fff;
+      color: var(--btn-primary-fg);
       padding: 11px 18px;
       border-radius: 10px;
       font-weight: 600;
@@ -71,7 +66,7 @@
     .btn:hover { filter: brightness(1.07); }
     .btn--login {
       background: #fff;
-      color: var(--verde-oscuro);
+      color: #2f6d5d;
       font-weight: 700;
       padding: 13px 32px;
       font-size: 1rem;
@@ -80,16 +75,16 @@
     }
     .btn--login:hover { background: rgba(255,255,255,.92); filter: none; }
     section.info {
-      background: #fff;
+      background: var(--panel);
       border: 1px solid var(--borde);
       border-radius: 14px;
       padding: 26px 28px;
       margin-top: 18px;
     }
     section.info h2 { margin: 0 0 12px; font-size: 1.15rem; }
-    section.info p, section.info li { font-size: .92rem; line-height: 1.65; color: #3d4b56; }
+    section.info p, section.info li { font-size: .92rem; line-height: 1.65; color: var(--texto); }
     code {
-      background: #eef1f4;
+      background: var(--surface-3);
       border-radius: 6px;
       padding: 2px 7px;
       font-family: Consolas, monospace;
@@ -99,7 +94,7 @@
     .pasos li {
       position: relative;
       padding: 0 0 18px 44px;
-      border-left: 2px solid #d7e6e3;
+      border-left: 2px solid var(--brand-tint-bd);
       margin-left: 14px;
     }
     .pasos li:last-child { border-left-color: transparent; padding-bottom: 0; }
@@ -115,13 +110,13 @@
       place-items: center;
       border-radius: 50%;
       background: var(--verde);
-      color: #fff;
+      color: var(--btn-primary-fg);
       font-weight: 700;
       font-size: .9rem;
     }
     .pasos li strong { color: var(--texto); }
     section.info + section.info, .cards { margin-top: 18px; }
-    footer { text-align: center; color: var(--suave); font-size: .82rem; padding: 8px 20px 34px; }
+    footer { text-align: center; color: var(--texto-suave); font-size: .82rem; padding: 8px 20px 34px; }
     @media (max-width: 640px) {
       .hero { padding: 40px 18px 52px; }
       .hero h1 { font-size: 1.5rem; }

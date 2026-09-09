@@ -63,6 +63,12 @@ INTERES_EXACTAS = (
 INTERES_FRASES = (
     "me interesa", "si me interesa", "sí me interesa", "me interesaria",
     "me interesaría", "estoy interesad", "si estoy interesad", "sí estoy interesad",
+    "estoy bien interesad", "estoy muy interesad", "estoy super interesad",
+    "bien interesad", "muy interesad", "super interesad", "re interesad",
+    "quede interesad", "quedé interesad", "sigo interesad", "aun interesad",
+    "aún interesad", "todavia interesad", "todavía interesad", "claro que me interesa",
+    "obvio que me interesa", "por supuesto me interesa", "me interesa mucho",
+    "me interesa bastante", "me interesa harto", "me interesa el",
     "me gustaria", "me gustaría", "quiero saber mas", "quiero saber más",
     "mas informacion", "más información", "mas info", "más info",
     "quiero agendar", "quiero reservar", "quiero una hora", "quiero la hora",
@@ -75,23 +81,39 @@ INTERES_FRASES = (
     "sí por favor", "quiero mas informacion", "quiero más información",
 )
 
+# Palabra de negación como palabra suelta ("no", "nooo", "nunca", "jamás"…):
+# el mensaje NO cuenta como interés aunque contenga "interesa/interesado/interesada".
+_RE_NEGACION = re.compile(r"^(no+|nop+|nel|nunca|jamas|jamás|tampoco|negativo)$")
+_RE_INTERESAR = re.compile(r"interes(a|an|ada|ado|adas|ados|aria|aría|arme|e|o|ó)\b")
+
 
 def es_mensaje_interes(texto: str) -> bool:
     """True si el mensaje del paciente muestra interés ('me interesa', 'sí',
-    'quiero agendar'…). Una baja NUNCA cuenta como interés."""
+    'quiero agendar'…). Una negación ('no', 'nunca'…) o una baja lo anulan
+    aunque el texto contenga 'interesa'."""
     t = re.sub(r"[^\wáéíóúñ\s]", " ", (texto or "").lower())
     t = re.sub(r"\s+", " ", t).strip()
     if not t:
+        return False
+    if any(_RE_NEGACION.match(w) for w in t.split()):
         return False
     if t in BAJA_EXACTAS or any(f in t for f in BAJA_FRASES):
         return False
     if t in INTERES_EXACTAS:
         return True
-    return any(f in t for f in INTERES_FRASES)
+    if any(f in t for f in INTERES_FRASES):
+        return True
+    # Cualquier forma del verbo "interesar" (sin negación de por medio) cuenta.
+    return bool(_RE_INTERESAR.search(t))
 
 
 # Estados de entrega que Meta reporta por webhook.
 ESTADO_WHATSAPP = {"sent", "delivered", "read", "failed"}
+
+# Callback opcional que main.py registra: se llama con el teléfono del paciente
+# cuando el webhook detecta un mensaje de interés, para programar el envío
+# automático del mensaje de call center.
+al_detectar_interes = None
 
 
 def _normalizar_telefono(crudo: str) -> str | None:
@@ -514,6 +536,30 @@ class WhatsAppService:
         }
         return payload, "texto"
 
+    def construir_payload_cta_url(self, telefono: str, mensaje: str,
+                                  boton_texto: str, url: str) -> tuple:
+        """Payload de mensaje interactivo con un botón que abre una URL
+        (válido dentro de la ventana de 24 h). Meta: interactive / cta_url."""
+        numero = telefono.lstrip("+")
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": numero,
+            "type": "interactive",
+            "interactive": {
+                "type": "cta_url",
+                "body": {"text": (mensaje or "")[:1024]},
+                "action": {
+                    "name": "cta_url",
+                    "parameters": {
+                        "display_text": (boton_texto or "Abrir")[:20],
+                        "url": url,
+                    },
+                },
+            },
+        }
+        return payload, "cta_url"
+
     def construir_payload_template(self, telefono: str, nombre: str, lang: str,
                                    variables: list[str] | None = None, componentes: dict | None = None) -> tuple:
         """Payload para un template aprobado de Meta."""
@@ -556,6 +602,7 @@ class WhatsAppService:
         msg = plantilla or {}
         nombre_template = msg.get("whatsapp_template")
         idioma = msg.get("whatsapp_template_lang") or config_get("wa_template_lang", "es")
+        cta = msg.get("cta") if isinstance(msg, dict) else None
 
         if nombre_template:
             orden = self.extraer_orden_comodines(msg.get("texto", "") or "")
@@ -563,6 +610,10 @@ class WhatsAppService:
             valores = [vdict.get(clave, "") or "" for clave in orden]
             payload_, _ = self.construir_payload_template(
                 telefono, nombre_template, idioma, variables=valores,
+            )
+        elif cta and cta.get("url"):
+            payload_, _ = self.construir_payload_cta_url(
+                telefono, mensaje, cta.get("texto") or "Abrir", cta["url"],
             )
         else:
             payload_, _ = self.construir_payload_texto(telefono, mensaje)
@@ -650,6 +701,11 @@ class WhatsAppService:
                 # dice que le interesa, se revierte la baja.
                 self._registrar_interes(telefono)
                 acciones.append("interes")
+                if callable(al_detectar_interes):
+                    try:
+                        al_detectar_interes(telefono)
+                    except Exception as e:
+                        log_error(f"al_detectar_interes({telefono})", e)
             elif baja:
                 self._registrar_baja(telefono)
                 acciones.append("baja")

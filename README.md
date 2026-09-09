@@ -42,8 +42,8 @@ snw/
 │   ├── historial.html         Historial de envíos (batch + detalle por paciente)
 │   ├── estadisticas.html      Contador mensual de mensajes, desgloses y costos WhatsApp (admin)
 │   ├── configuracion.html     Editor de todos los ajustes por secciones (solo admin)
-│   ├── css/                   styles.css (compartido), layout.css (sidebar), pacientes.css, estadisticas.css, configuracion.css
-│   ├── js/                    layout.js (sidebar/sesión, común), app.js, pacientes.js, historial.js, estadisticas.js, configuracion.js
+│   ├── css/                   tema.css (paleta claro/oscuro), styles.css (compartido), layout.css (sidebar), pacientes.css, estadisticas.css, configuracion.css
+│   ├── js/                    tema.js (modo claro/oscuro), layout.js (sidebar/sesión, común), app.js, pacientes.js, historial.js, estadisticas.js, configuracion.js
 │   └── vendor/bootstrap/     Bootstrap 5.3.3 (CSS + bundle JS) servido localmente
 ├── data/
 │   ├── plantillas.json        Plantillas de mensajes + metadata del template en Meta
@@ -106,6 +106,7 @@ el `entorno` activo, que las demás pantallas leen al cargar).
 | Grupo | Claves |
 |---|---|
 | App / envío | `entorno` (`desarrollo`/`produccion`), `metodo_envio` (`simulado`/`api_oficial`), `numeros_prueba_dev`, `numeros_prueba_prod`, `intervalo_ms`, `url_base` |
+| Call center | `call_center_numeros` (uno o varios números, solo dígitos, separados por coma, a los que lleva el botón CTA), `call_center_auto_segundos` (espera antes del envío automático tras detectar interés; 0 = desactivado) |
 | Correo | `smtp_host`, `smtp_port`, `smtp_user`, `smtp_pass`, `smtp_tls`, `correo_emisor`, `correo_destino` |
 | WhatsApp / Meta | `wa_token`, `wa_phone_id`, `wa_business_account_id`, `wa_verify_token`, `wa_template_nombre`, `wa_template_lang`, `wa_webhook_path`, `wa_graph_version` (por defecto `v26.0`), `wa_moneda` (moneda de facturación de la cuenta, se autodetecta desde Meta al actualizar tarifas — por defecto `USD`) |
 
@@ -203,9 +204,9 @@ Reglas del editor:
 | GET | `/api/pacientes?q=&ambiente=` | Lista con respuesta y error del último `log_envios` |
 | PUT | `/api/pacientes/{id}?ambiente=` | Cambiar `estado` (`pendiente`/`enviado`/`error`) |
 | PUT | `/api/pacientes/{id}/respuesta?ambiente=` | Ajuste manual de la respuesta (`pendiente`/`respondio`/`baja`); `baja` activa el opt-out |
-| GET | `/api/pacientes/{id}/mensajes?ambiente=` | Todos los mensajes (entrantes y salientes) del paciente, para revisar si su interés es real. Marca `interes: true` los entrantes que suenan a interés |
+| GET | `/api/pacientes/{id}/mensajes?ambiente=` | **(cualquier usuario, solo lectura)** Todos los mensajes (entrantes y salientes) del paciente, para revisar si su interés es real. Marca `interes: true` los entrantes que suenan a interés. Es lo que muestra el botón **«Ver mensajes»** de la columna *Detalle* en el modal del Historial |
 | PUT | `/api/pacientes/{id}/interes?ambiente=` | `{interesado: bool}` — marca/desmarca a mano. Marcarlo **revierte una baja previa** (opt-out, corrección manual y señal 'pegajosa') |
-| POST | `/api/pacientes/{id}/call-center?ambiente=&plantilla_id=` | Envía al paciente **interesado** una plantilla de call center (texto libre, ventana de 24 h). Requiere `interesado = 1`; `plantilla_id` es obligatorio si hay más de una plantilla de call center |
+| POST | `/api/pacientes/{id}/call-center?ambiente=&plantilla_id=` | Envía **a mano** al paciente **interesado** una plantilla de call center (texto libre + botón CTA, ventana de 24 h). Requiere `interesado = 1`; `plantilla_id` obligatorio si hay más de una |
 
 ### Plantillas
 
@@ -221,17 +222,32 @@ Reglas del editor:
 
 #### Plantillas de call center
 
-Plantillas normales con `especial: "call_center"` en `plantillas.json`: mensajes con el
-link al chat del call center que se envían **solo a pacientes interesados** desde el
-Historial. **No** tienen template de Meta (van como texto libre) ni entran en los envíos
-masivos (`iniciar_envio` las rechaza). Se gestionan desde la sección **"Plantillas de call
-center"** al final de la página Historial. Al arrancar se siembra una si no hay ninguna.
+Plantillas normales con `especial: "call_center"` en `plantillas.json`: el mensaje que
+recibe un paciente que responde que **le interesa**. **No** tienen template de Meta (van
+como texto libre, ventana de 24 h) ni entran en los envíos masivos (`iniciar_envio` las
+rechaza). Se gestionan desde la sección **"Plantillas de call center"** al final de la
+página Historial. Al arrancar se siembra una si no hay ninguna.
+
+- **Envío automático:** cuando el webhook detecta interés, tras `call_center_auto_segundos`
+  (Configuración; 0 = desactivado) se manda la plantilla marcada como **automática** (`cc_auto`;
+  si ninguna lo está, la más antigua). Se manda **una vez por cada plantilla enviada al
+  paciente**: si desde el último call center hubo un nuevo envío de plantilla y el paciente
+  vuelve a mostrar interés, se le manda otro; si ya lo recibió después del último envío de
+  plantilla, no se repite (aunque mande varios mensajes de interés seguidos — hay además un
+  guard por número mientras hay un envío programado). También se puede mandar a mano desde
+  «Ver mensajes».
+- **Botón:** cada plantilla puede incluir (`cc_boton`) un botón CTA que abre el chat del
+  call center (`https://wa.me/<número>`, mensaje interactivo `cta_url`). Los **números son
+  globales** y se configuran en **Configuración → Call center** (`call_center_numeros`, uno o
+  varios separados por coma), no por plantilla. Si hay uno, se usa ese; si hay varios, cada
+  respuesta toma uno solo, rotando (round-robin) para repartir entre ellos. El texto del
+  botón (`cc_boton_texto`) sí es por plantilla (máx. 20 car.).
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/plantillas/call-center` | Lista las plantillas de call center |
-| POST | `/api/plantillas/call-center` | Crear `{nombre, texto}` |
-| PUT | `/api/plantillas/call-center/{id}` | Actualizar `{nombre, texto}` (el nombre sí se puede cambiar) |
+| GET | `/api/plantillas/call-center` | `{plantillas, numeros_call_center, auto_segundos}`. Cada plantilla trae `cc_boton`, `cc_boton_texto`, `cc_auto`, `es_auto_efectiva` |
+| POST | `/api/plantillas/call-center` | Crear `{nombre, texto, boton, boton_texto, auto}` |
+| PUT | `/api/plantillas/call-center/{id}` | Actualizar `{nombre, texto, boton, boton_texto, auto}` (marcar `auto` desmarca las demás) |
 | DELETE | `/api/plantillas/call-center/{id}` | Eliminar |
 
 ### Envíos
@@ -278,7 +294,7 @@ center"** al final de la página Historial. Al arrancar se siembra una si no hay
 | GET | `/api/configuracion?ambiente=` | Vista **segura** de la config para el resto de páginas (no devuelve el token de Meta ni la clave SMTP en claro) |
 | PUT | `/api/configuracion` | (solo admin) Guarda claves sueltas de `configuracion` sin reiniciar |
 | GET | `/api/configuracion/todo` | (solo admin) TODAS las claves con su **valor real** (incluye secretos) + metadata de secciones, para la página Configuración |
-| PUT | `/api/configuracion/todo` | (solo admin) `{cambios: {clave: valor, …}}` — valida clave conocida, enums (`entorno`, `metodo_envio`) y enteros (`intervalo_ms`, `smtp_port`); persiste con `config_set` |
+| PUT | `/api/configuracion/todo` | (solo admin) `{cambios: {clave: valor, …}}` — valida clave conocida, enums (`entorno`, `metodo_envio`) y enteros (`intervalo_ms`, `smtp_port`, `call_center_auto_segundos`); `call_center_numeros` se normaliza a lista de solo-dígitos separada por coma; persiste con `config_set` |
 
 ### Webhook de WhatsApp (Meta)
 
@@ -358,15 +374,19 @@ explícito de baja.
 **Mensajes de interés:** el texto literal de cada respuesta del paciente se guarda en
 `log_envios.mensaje`. En el **detalle de un envío del Historial** aparece bajo la respuesta
 de cada paciente, y se resalta **en verde** cuando el mensaje muestra intención positiva
-(`me interesa`, `sí`, `quiero agendar`, `confirmo`…). La detección es `es_mensaje_interes`
-en `whatsapp_service.py`; una baja nunca cuenta como interés.
+(`me interesa`, `estoy bien interesado`, `sí`, `quiero agendar`, `confirmo`… o cualquier
+forma del verbo *interesar*). La detección es `es_mensaje_interes` en `whatsapp_service.py`.
+**Una negación anula el interés:** si el mensaje contiene `no` (o `nooo`, `nunca`, `jamás`,
+`tampoco`…) como palabra suelta, no se marca como interés aunque diga «interesa». Una baja
+tampoco cuenta como interés.
 
 Cuando el webhook detecta interés marca `pacientes.interesado = 1` y **revierte cualquier
 baja previa** (pone `whatsapp_opt_out = 0` y convierte las filas `respuesta = 'baja'` del
 paciente a `'respondio'`). Así, si el paciente escribió "quiero darme de baja" y más tarde
-"en realidad me interesa", vuelve a quedar contactable. Desde el **detalle del Historial**
-(botón **Ver mensajes** en cada paciente) un admin ve el hilo completo, puede marcar/
-desmarcar `interesado` a mano y, si está interesado, enviarle el mensaje de call center.
+"en realidad me interesa", vuelve a quedar contactable. En el **detalle de un envío del
+Historial** hay una columna *Detalle* con un botón **«Ver mensajes»** (para cualquier
+usuario) que abre el hilo completo del paciente; un admin además puede marcar/desmarcar
+`interesado` a mano ahí y, si está interesado, enviarle el mensaje de call center.
 
 **Ajuste manual:** en Pacientes, hacer click en el badge de la columna **Respuesta** abre
 un selector para marcar a mano `respondió` / `se dio de baja` / etc. — útil si el webhook
@@ -480,6 +500,12 @@ sesión. En escritorio se pliega a modo icono con el botón «‹‹» de la pro
 preferencia se recuerda en `localStorage`); en pantallas angostas se convierte en un cajón
 que abre la «hamburguesa» de la barra superior. El estilo usa **Bootstrap 5.3** (servido
 desde `frontend/vendor/bootstrap/`) más `css/layout.css`.
+
+**Tema claro / oscuro.** La paleta (tonos pastel en ambos modos) vive en `css/tema.css`
+como variables CSS: `:root` para claro y `:root[data-tema="oscuro"]` para oscuro. `js/tema.js`
+—cargado en el `<head>` de todas las páginas— aplica el tema guardado (`localStorage.snw_tema`)
+antes del primer render para que no haya parpadeo. Se cambia con el botón **Modo oscuro /
+claro** de la sidebar, o con el botón flotante en la portada y el login (páginas sin sidebar).
 
 - **Landing** (`index.html`): sin sesión muestra la portada; con sesión, la sidebar y el
   contenido informativo (Pacientes solo visible si eres admin).

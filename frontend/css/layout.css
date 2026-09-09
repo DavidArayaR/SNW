@@ -33,7 +33,7 @@
   flex-direction: column;
   gap: 4px;
   padding: 16px 12px;
-  background: linear-gradient(180deg, var(--verde-oscuro), var(--verde));
+  background: linear-gradient(180deg, var(--sidebar-1), var(--sidebar-2));
   color: #fff;
   z-index: 1040;
   overflow-y: auto;
@@ -99,12 +99,12 @@
 }
 .sidebar .nav-link.active {
   background: #fff;
-  color: var(--verde-oscuro);
+  color: #0b473c;
   box-shadow: 0 2px 10px rgba(0, 0, 0, .18);
 }
 
+.sidebar__tema,
 .sidebar__salir {
-  margin-top: auto;
   display: flex;
   align-items: center;
   gap: 13px;
@@ -118,10 +118,15 @@
   font-weight: 600;
   text-align: left;
 }
+.sidebar__tema { margin-top: auto; background: rgba(255, 255, 255, .12); }
+.sidebar__salir { margin-top: 4px; }
+.sidebar__tema i,
 .sidebar__salir i { width: 1.25rem; text-align: center; flex-shrink: 0; }
+.sidebar__tema:hover { background: rgba(255, 255, 255, .22); color: #fff; }
 .sidebar__salir:hover { background: rgba(0, 0, 0, .3); color: #fff; }
 
 /* Contorno de hover claro para los botones sobre el fondo oscuro de la sidebar. */
+.sidebar__tema:hover,
 .sidebar__salir:hover,
 .sidebar__plegar:hover { outline-color: rgba(255, 255, 255, .9); }
 
@@ -135,7 +140,7 @@
   gap: 12px;
   min-height: var(--topbar-alto);
   padding: 8px 20px;
-  background: #fff;
+  background: var(--panel);
   border-bottom: 1px solid var(--borde);
 }
 .app-topbar__titulo {
@@ -147,14 +152,14 @@
 
 /* Indicadores de contexto (ambiente / base de datos) en la barra superior */
 .app-topbar .badge {
-  background: #e7f3f1;
-  color: var(--verde-oscuro);
-  border: 1px solid #bcd9d2;
+  background: var(--brand-tint);
+  color: var(--brand-tint-fg);
+  border: 1px solid var(--brand-tint-bd);
 }
 .app-topbar select.badge--select {
-  background: var(--verde-oscuro);
-  color: #fff;
-  border-color: var(--verde-oscuro);
+  background: var(--verde);
+  color: var(--btn-primary-fg);
+  border-color: var(--verde);
 }
 
 /* Hamburguesa de la barra superior: sólo en móvil (abre el cajón).
@@ -167,7 +172,7 @@
   height: 38px;
   border: 1px solid var(--borde);
   border-radius: 9px;
-  background: #fff;
+  background: var(--panel);
   color: var(--texto);
   font-size: 1rem;
 }
@@ -187,12 +192,14 @@
   }
   .sidebar-colapsada .sidebar__brand span,
   .sidebar-colapsada .nav-link span,
+  .sidebar-colapsada .sidebar__tema span,
   .sidebar-colapsada .sidebar__salir span { display: none; }
 
   .sidebar-colapsada .sidebar__plegar { align-self: center; margin: -4px 0 8px; }
   .sidebar-colapsada .sidebar__plegar i { transform: rotate(180deg); }
 
   .sidebar-colapsada .sidebar__nav .nav-link,
+  .sidebar-colapsada .sidebar__tema,
   .sidebar-colapsada .sidebar__salir {
     justify-content: center;
     gap: 0;
@@ -215,7 +222,7 @@
   display: none;
   position: fixed;
   inset: 0;
-  background: rgba(15, 25, 30, .5);
+  background: var(--overlay);
   z-index: 1035;
 }
 

@@ -21,6 +21,7 @@
     if (PAGINA === "inicio") {
       const sh = document.querySelector(".app-shell");
       if (sh) sh.classList.add("sin-sidebar");
+      if (window.snwMontarFabTema) window.snwMontarFabTema();
       return;
     }
     location.replace("login.html");
@@ -67,8 +68,22 @@
       `<button type="button" class="sidebar__plegar" id="btnPlegar" aria-label="Plegar o expandir el menú">` +
       `<i class="fa-solid fa-angles-left"></i></button>` +
       `<ul class="nav flex-column sidebar__nav">${items}</ul>` +
+      `<button type="button" class="sidebar__tema" id="btnTema" title="Cambiar entre modo claro y oscuro">` +
+      `<i class="fa-solid fa-moon"></i><span>Modo oscuro</span></button>` +
       `<button type="button" class="sidebar__salir" id="btnSalir" title="Cerrar sesión">` +
       `<i class="fa-solid fa-right-from-bracket"></i><span>Cerrar sesión</span></button>`;
+
+    const btnTema = document.getElementById("btnTema");
+    const pintarTema = () => {
+      const oscuro = window.snwTemaOscuro && window.snwTemaOscuro();
+      btnTema.querySelector("i").className = oscuro ? "fa-solid fa-sun" : "fa-solid fa-moon";
+      btnTema.querySelector("span").textContent = oscuro ? "Modo claro" : "Modo oscuro";
+    };
+    pintarTema();
+    btnTema.addEventListener("click", () => {
+      if (window.snwToggleTema) window.snwToggleTema();
+      pintarTema();
+    });
 
     document.getElementById("btnSalir").addEventListener("click", async () => {
       try {

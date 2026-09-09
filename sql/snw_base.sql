@@ -106,6 +106,8 @@ INSERT IGNORE INTO configuracion (clave, valor) VALUES
   ('numeros_prueba_prod', ''),
   ('intervalo_ms', '1000'),
   ('url_base', ''),
+  ('call_center_numeros', ''),
+  ('call_center_auto_segundos', '10'),
   -- Correo (confirmación de envíos en producción)
   ('smtp_host', ''),
   ('smtp_port', '587'),

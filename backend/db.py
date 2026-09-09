@@ -40,6 +40,12 @@ CONFIG_DEFAULTS = {
     "numeros_prueba_prod": "",
     "intervalo_ms": "1000",
     "url_base": "",
+    # Call center: uno o varios números (solo dígitos, con código de país,
+    # separados por coma) a los que lleva el botón de las plantillas de call
+    # center, y segundos de espera antes del envío automático cuando un paciente
+    # muestra interés (0 = desactivado).
+    "call_center_numeros": "",
+    "call_center_auto_segundos": "10",
     # Correo (confirmación de envíos en producción)
     "smtp_host": "",
     "smtp_port": "587",
@@ -169,6 +175,18 @@ def asegurar_tabla_config() -> None:
                     )
                 if not e.get("tiene_com"):
                     cur.execute("ALTER TABLE envios ADD COLUMN comentario VARCHAR(255) NULL")
+
+            # `call_center_numero` (un solo número) pasó a `call_center_numeros`
+            # (uno o varios, separados por coma). Se traspasa una vez.
+            cur.execute("SELECT clave, valor FROM configuracion WHERE clave IN ('call_center_numero', 'call_center_numeros')")
+            cc = {r["clave"]: (r["valor"] or "") for r in cur.fetchall()}
+            if cc.get("call_center_numero") and not cc.get("call_center_numeros"):
+                cur.execute(
+                    "INSERT INTO configuracion (clave, valor) VALUES ('call_center_numeros', %s)"
+                    " ON DUPLICATE KEY UPDATE valor = VALUES(valor)",
+                    (cc["call_center_numero"],),
+                )
+            cur.execute("DELETE FROM configuracion WHERE clave = 'call_center_numero'")
 
             conn.commit()
     except Exception as e:

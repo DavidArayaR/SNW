@@ -6,9 +6,11 @@
   <title>SNW · Historial</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
+  <link rel="stylesheet" href="css/tema.css">
   <link rel="stylesheet" href="css/styles.css">
   <link rel="stylesheet" href="css/pacientes.css">
   <link rel="stylesheet" href="css/layout.css">
+  <script src="js/tema.js"></script>
 </head>
 <body data-pagina="historial">
 
@@ -68,9 +70,12 @@
         <button id="btnNuevaCC" class="btn btn--primary" type="button">+ Nueva</button>
       </div>
       <p class="field__hint" style="margin: 12px 18px 0;">
-        Mensajes con el link al chat del call center. Se env&iacute;an solo a pacientes marcados como
-        interesados (bot&oacute;n «Ver mensajes» en el detalle de un env&iacute;o). No se usan en env&iacute;os masivos.
+        Mensajes que se env&iacute;an a un paciente que responde que le interesa. Se manda uno
+        autom&aacute;ticamente tras unos segundos (plantilla marcada como autom&aacute;tica), y tambi&eacute;n
+        se puede enviar a mano desde «Ver mensajes» en el detalle de un env&iacute;o. No se usan en env&iacute;os masivos.
+        El n&uacute;mero del call center y la espera se configuran en <strong>Configuraci&oacute;n</strong>.
       </p>
+      <p id="ccAviso" class="field__hint" style="margin: 6px 18px 0;"></p>
       <div id="listaCC" class="cc-lista"></div>
     </section>
 
@@ -88,6 +93,7 @@
               <th>Paciente</th>
               <th>Respuesta</th>
               <th>Fecha</th>
+              <th id="thDetalleMensajes">Detalle</th>
             </tr>
           </thead>
           <tbody id="detalleBody"></tbody>
@@ -132,12 +138,25 @@
         </div>
         <div class="field">
           <label for="ccTexto">Mensaje</label>
-          <textarea id="ccTexto" rows="5" placeholder="Incluye el enlace al chat, p. ej. https://wa.me/56900000000"></textarea>
+          <textarea id="ccTexto" rows="5" placeholder="Ej: ¡Hola {nombre}! Gracias por tu interés, nuestro equipo te puede ayudar."></textarea>
           <div class="field__foot">
             <p class="field__hint">Puedes usar <code>{nombre}</code>, <code>{apellido}</code>, <code>{info_extra}</code>.</p>
             <span id="ccContador" class="char-count">0 / 1024</span>
           </div>
         </div>
+        <label class="cc-check">
+          <input type="checkbox" id="ccBoton" checked>
+          <span>Incluir bot&oacute;n que abre el chat del call center</span>
+        </label>
+        <div class="field" id="ccBotonTextoWrap">
+          <label for="ccBotonTexto">Texto del bot&oacute;n</label>
+          <input type="text" id="ccBotonTexto" maxlength="20" placeholder="Ir al call center">
+          <p class="field__hint" id="ccBotonHint">El bot&oacute;n lleva al n&uacute;mero configurado en Configuraci&oacute;n. M&aacute;x. 20 caracteres.</p>
+        </div>
+        <label class="cc-check">
+          <input type="checkbox" id="ccAuto">
+          <span>Usar esta como respuesta autom&aacute;tica cuando un paciente muestre inter&eacute;s</span>
+        </label>
         <div class="modal__actions">
           <button type="button" class="btn btn--ghost" id="btnCancelarCC">Cancelar</button>
           <button type="submit" class="btn btn--primary" id="btnGuardarCC">Guardar</button>
