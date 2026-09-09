@@ -7,6 +7,7 @@ import io as _io
 import json
 import random
 import re
+import secrets
 import threading
 import time
 import unicodedata
@@ -32,6 +33,8 @@ from db import (
     ROLES_USUARIO, PERMISOS_VALIDOS, PERMISOS_BASICOS, MAX_DESARROLLADORES,
     usuarios_listar, usuario_buscar, usuario_crear, usuario_actualizar, usuario_borrar,
     usuario_cambiar_clave, contar_desarrolladores,
+    usuario_por_recuperacion, usuario_set_correo_recuperacion,
+    reset_crear, reset_estado, reset_consumir,
 )
 from motor_envio import obtener_canal
 import whatsapp_service
@@ -105,7 +108,6 @@ class PlantillaIn(BaseModel):
     nombre: str
     texto: str
     clave: str | None = None
-    whatsapp_template: str | None = None
     whatsapp_template_lang: str | None = None
     whatsapp_template_categoria: str | None = None
 
@@ -162,8 +164,17 @@ class ClavePropiaIn(BaseModel):
     clave_nueva: str
 
 
-class ClaveAjenaIn(BaseModel):
+class OlvideIn(BaseModel):
+    correo: str
+
+
+class ResetIn(BaseModel):
+    token: str
     clave_nueva: str
+
+
+class CorreoRecuperacionIn(BaseModel):
+    correo: str
 
 
 SESIONES_FILE = BASE_DIR / "data" / "sesiones.json"
@@ -243,6 +254,7 @@ def sesion_actual(request: Request) -> dict:
             raise HTTPException(401, detail="Tu cuenta ya no está disponible. Inicia sesión de nuevo.")
         sesion["rol"] = u.get("rol", "usuario")
         sesion["permisos"] = permisos_efectivos(u)
+        sesion["correo_recuperacion"] = u.get("correo_recuperacion", "")
     else:
         sesion.setdefault("permisos", list(PERMISOS_VALIDOS)
                           if sesion.get("rol") in ROLES_PRIVILEGIADOS else [])
@@ -305,6 +317,7 @@ def auth_me(sesion: dict = Depends(sesion_actual)):
         "nombre": sesion.get("nombre"),
         "rol": sesion.get("rol"),
         "permisos": sesion.get("permisos") or [],
+        "correo_recuperacion": sesion.get("correo_recuperacion", ""),
     }
 
 
@@ -322,6 +335,87 @@ def cambiar_clave_propia(body: ClavePropiaIn, sesion: dict = Depends(sesion_actu
     if err:
         raise HTTPException(422, detail=err)
     usuario_cambiar_clave(correo, hashlib.sha256(body.clave_nueva.encode("utf-8")).hexdigest())
+    return {"ok": True}
+
+
+@app.put("/api/auth/correo-recuperacion")
+def cambiar_correo_recuperacion(body: CorreoRecuperacionIn, sesion: dict = Depends(sesion_actual)):
+    """La cuenta define a qué correo llegará el enlace de «Olvidé mi contraseña».
+    Para las cuentas cuyo usuario ya es un correo suele ser el mismo; admin/dev
+    (que entran con un nombre corto) lo necesitan para poder recuperar el acceso."""
+    yo = str(sesion.get("usuario", "")).strip().lower()
+    correo_rec = (body.correo or "").strip().lower()
+    if not _EMAIL_RE.match(correo_rec):
+        raise HTTPException(422, detail="Escribe un correo electrónico válido.")
+    otra = usuario_buscar(correo_rec)
+    if otra is not None and str(otra.get("usuario", "")).strip().lower() != yo:
+        raise HTTPException(409, detail="Ese correo es el usuario de otra cuenta.")
+    usuario_set_correo_recuperacion(yo, correo_rec)
+    return {"ok": True, "correo_recuperacion": correo_rec}
+
+
+def _html_correo_reset(nombre: str, enlace: str) -> str:
+    n = _html.escape(nombre or "")
+    return f"""
+    <html><body style="font-family: Arial, sans-serif; color: #24303c;">
+      <h2>Restablecer tu contraseña</h2>
+      <p>Hola {n}, recibimos una solicitud para restablecer la contraseña de tu cuenta de SNW.</p>
+      <p style="margin:24px 0;">
+        <a href="{enlace}" style="display:inline-block; background:#128c7e; color:#fff; padding:12px 22px; border-radius:8px; text-decoration:none; font-weight:bold;">Crear una contraseña nueva</a>
+      </p>
+      <p style="font-size:13px; color:#66757f;">El enlace dura <strong>2 horas</strong>. Si no fuiste tú, ignora este correo: tu contraseña no cambia.</p>
+      <p style="font-size:12px; color:#66757f;">Si el botón no funciona, copia y pega este enlace:<br>{enlace}</p>
+    </body></html>
+    """
+
+
+@app.post("/api/auth/olvide")
+def olvide_clave(body: OlvideIn):
+    """Pide un enlace de restablecimiento. Responde siempre igual (no revela si
+    la cuenta existe). El enlace llega al correo de recuperación de la cuenta."""
+    correo = (body.correo or "").strip().lower()
+    if _EMAIL_RE.match(correo):
+        cuenta = usuario_por_recuperacion(correo)
+        if cuenta:
+            destino = cuenta.get("correo_recuperacion") or ""
+            if not destino and _EMAIL_RE.match(str(cuenta.get("usuario", ""))):
+                destino = cuenta["usuario"]
+            if _EMAIL_RE.match(destino):
+                token = secrets.token_hex(32)
+                reset_crear(token, cuenta["usuario"], horas=2)
+                enlace = f"{url_base()}/reset.html?token={token}"
+                _enviar_correo(destino, "[SNW] Restablecer tu contraseña",
+                               _html_correo_reset(cuenta.get("nombre") or cuenta["usuario"], enlace))
+    return {"ok": True}
+
+
+@app.get("/api/auth/reset/{token}")
+def reset_verificar(token: str):
+    est = reset_estado(token)
+    if est.get("estado") == "ok":
+        return {"ok": True}
+    detalle = {
+        "usado": "Este enlace ya se usó. Solicita uno nuevo desde «Olvidé mi contraseña».",
+        "expirado": "El enlace expiró (dura 2 horas). Solicita uno nuevo.",
+    }.get(est.get("estado"), "El enlace no es válido.")
+    raise HTTPException(400, detail=detalle)
+
+
+@app.post("/api/auth/reset")
+def reset_aplicar(body: ResetIn):
+    est = reset_estado(body.token)
+    if est.get("estado") != "ok":
+        raise HTTPException(400, detail="El enlace no es válido o expiró. Solicita uno nuevo.")
+    err = validar_clave_segura(body.clave_nueva)
+    if err:
+        raise HTTPException(422, detail=err)
+    correo = str(est["usuario"]).strip().lower()
+    usuario_cambiar_clave(correo, hashlib.sha256(body.clave_nueva.encode("utf-8")).hexdigest())
+    reset_consumir(body.token)
+    for tk, s in list(SESIONES.items()):
+        if str(s.get("usuario", "")).strip().lower() == correo:
+            SESIONES.pop(tk, None)
+    guardar_sesiones()
     return {"ok": True}
 
 
@@ -435,31 +529,6 @@ def eliminar_usuario(usuario: str, sesion: dict = Depends(solo_admin)):
         raise HTTPException(403, detail=motivo)
     correo = str(obj.get("usuario", "")).strip().lower()
     usuario_borrar(correo)
-    for tk, s in list(SESIONES.items()):
-        if str(s.get("usuario", "")).strip().lower() == correo:
-            SESIONES.pop(tk, None)
-    guardar_sesiones()
-    return {"ok": True}
-
-
-@app.put("/api/usuarios/{usuario}/clave")
-def cambiar_clave_usuario(usuario: str, body: ClaveAjenaIn, sesion: dict = Depends(solo_admin)):
-    """Restablece la contraseña de OTRA cuenta. Un desarrollador puede hacerlo con
-    cualquiera; un administrador solo con cuentas de rol `usuario`. La cuenta
-    afectada pierde sus sesiones. Para la propia cuenta se usa PUT /api/auth/clave."""
-    obj = usuario_buscar(usuario)
-    if obj is None:
-        raise HTTPException(404, detail="Usuario no encontrado.")
-    correo = str(obj.get("usuario", "")).strip().lower()
-    if correo == str(sesion.get("usuario", "")).strip().lower():
-        raise HTTPException(400, detail="Para tu propia cuenta usa «Cambiar mi contraseña».")
-    puede, motivo = _puede_gestionar(sesion, obj)
-    if not puede:
-        raise HTTPException(403, detail=motivo)
-    err = validar_clave_segura(body.clave_nueva)
-    if err:
-        raise HTTPException(422, detail=err)
-    usuario_cambiar_clave(correo, hashlib.sha256(body.clave_nueva.encode("utf-8")).hexdigest())
     for tk, s in list(SESIONES.items()):
         if str(s.get("usuario", "")).strip().lower() == correo:
             SESIONES.pop(tk, None)
@@ -1331,8 +1400,6 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
             template_id_anterior = p.get("whatsapp_template_id")
 
             p["texto"] = body.texto
-            # El nombre del template de Meta va ligado al nombre de la plantilla
-            # (que es inmutable), así que nunca cambia al editar.
             p["whatsapp_template"] = p.get("whatsapp_template") or (slug(p.get("nombre", "")) or None)
             p["whatsapp_template_lang"] = (body.whatsapp_template_lang or "").strip() or None
             p["whatsapp_template_categoria"] = (body.whatsapp_template_categoria or "").strip() or None
@@ -1508,8 +1575,8 @@ def eliminar_plantilla_cc(plantilla_id: int, sesion: dict = Depends(exigir("call
 
 
 def leer_config(ambiente: str | None = None) -> dict:
-    # Toda la config vive en la tabla `configuracion`. Este endpoint devuelve
-    # una vista segura (sin volcar secretos como el token de Meta o la clave SMTP).
+    # Vista mínima de la config que necesitan las pantallas y el motor de envío.
+    # Los secretos y el resto de claves se ven solo en /api/configuracion/todo.
     cfg = config_all()
     ent = entorno_valido(ambiente)
     clave_numeros = "numeros_prueba_dev" if ent == "desarrollo" else "numeros_prueba_prod"
@@ -1527,17 +1594,6 @@ def leer_config(ambiente: str | None = None) -> dict:
         "base_datos": nombre_base(ent),
         "numeros_autorizados": lista(cfg.get(clave_numeros)),
         "metodo_envio": cfg.get("metodo_envio") or "simulado",
-        "url_base": (cfg.get("url_base") or "").strip(),
-        "correo_configurado": bool((cfg.get("smtp_host") or "").strip() and (cfg.get("smtp_pass") or "").strip()),
-        "wa_api": {
-            "configurada": bool(
-                (cfg.get("wa_token") or "").strip()
-                and (cfg.get("wa_phone_id") or "").strip()
-            ),
-            "waba_id": (cfg.get("wa_business_account_id") or "").strip(),
-            "template_lang": (cfg.get("wa_template_lang") or "es").strip(),
-            "version_graph": (cfg.get("wa_graph_version") or "v26.0").strip(),
-        },
         "intervalo_ms": intervalo,
     }
 
@@ -1792,6 +1848,38 @@ def _config_correo() -> dict:
     }
 
 
+def _enviar_correo(destino: str, subject: str, html: str) -> bool:
+    """Envía un correo HTML usando la configuración SMTP. Devuelve True si se
+    entregó (o si no hay SMTP y solo se registró en consola)."""
+    c = _config_correo()
+    emisor = c["emisor"]
+    if not emisor or not destino:
+        print(f"[CORREO] Sin emisor o destino para '{subject}' -> {destino!r}")
+        return False
+    host, port, user, pwd, tls = c["host"], c["port"], c["user"], c["pwd"], c["tls"]
+    if not host or not pwd:
+        print(f"[CORREO SIMULADO] Para {destino} desde {emisor}: {subject}")
+        return True
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["From"] = emisor
+        msg["To"] = destino
+        msg["Subject"] = subject
+        msg.attach(MIMEText(html, "html", "utf-8"))
+        context = ssl.create_default_context()
+        with smtplib.SMTP(host, port) as server:
+            if tls:
+                server.starttls(context=context)
+            if user and pwd:
+                server.login(user, pwd)
+            server.sendmail(emisor, destino, msg.as_string())
+        print(f"[CORREO] Enviado a {destino}: {subject}")
+        return True
+    except Exception as e:
+        log_error(f"_enviar_correo a {destino}", e)
+        return False
+
+
 def _fmt_moneda(monto: float, moneda: str) -> str:
     entero = float(monto).is_integer()
     s = (f"{monto:,.0f}" if entero else f"{monto:,.2f}").replace(",", "X").replace(".", ",").replace("X", ".")
@@ -1889,50 +1977,6 @@ def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, p
         return True
     except Exception as e:
         log_error(f"_enviar_correo_confirmacion a {destino}", e)
-        return False
-
-
-def _enviar_correo_rechazo(nombre_enviador: str, plantilla_nombre: str, total: int, comentario: str) -> bool:
-    c = _config_correo()
-    emisor, destino = c["emisor"], c["destino"]
-    if not emisor or not destino:
-        print(f"[CORREO] Emisor o destino no configurado. Rechazo -> {destino}")
-        return False
-    host, port, user, pwd, tls = c["host"], c["port"], c["user"], c["pwd"], c["tls"]
-
-    if not host or not pwd:
-        print(f"[CORREO SIMULADO] Rechazo de envío de '{nombre_enviador}' plantilla '{plantilla_nombre}' ({total} dest.): {comentario}")
-        return True
-
-    subject = f"[SNW] Envío rechazado por supervisor - {plantilla_nombre}"
-    html = f"""
-    <html><body style="font-family: Arial, sans-serif; color: #24303c;">
-      <h2 style="color:#b23b37;">Envío rechazado</h2>
-      <p>El envío de la plantilla <strong>{plantilla_nombre}</strong> a <strong>{total} personas</strong>, solicitado por <strong>{nombre_enviador}</strong>, fue <strong>rechazado</strong> por el supervisor.</p>
-      <div style="background:#fdf0f0; border-left:4px solid #b23b37; padding:14px 16px; margin:18px 0; border-radius:6px;">
-        <p style="margin:0 0 6px; font-size:12px; color:#66757f; font-weight:bold;">Comentario del supervisor:</p>
-        <p style="margin:0; white-space:pre-wrap; font-size:14px; color:#24303c;">{comentario or "(sin comentario)"}</p>
-      </div>
-      <p>Revisa el comentario y vuelve a intentarlo si corresponde.</p>
-    </body></html>
-    """
-    try:
-        msg = MIMEMultipart("alternative")
-        msg["From"] = emisor
-        msg["To"] = destino
-        msg["Subject"] = subject
-        msg.attach(MIMEText(html, "html", "utf-8"))
-        context = ssl.create_default_context()
-        with smtplib.SMTP(host, port) as server:
-            if tls:
-                server.starttls(context=context)
-            if user and pwd:
-                server.login(user, pwd)
-            server.sendmail(emisor, destino, msg.as_string())
-        print(f"[CORREO] Rechazo enviado a {destino}")
-        return True
-    except Exception as e:
-        log_error(f"_enviar_correo_rechazo a {destino}", e)
         return False
 
 

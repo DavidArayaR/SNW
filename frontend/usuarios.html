@@ -67,29 +67,6 @@
     </div>
   </div>
 
-  <div id="modalClave" class="modal" hidden>
-    <div class="modal__card" role="dialog" aria-modal="true">
-      <h3>Restablecer contrase&ntilde;a</h3>
-      <form id="formClave" novalidate>
-        <p id="claveTexto" style="margin: 0 0 14px; font-size: .9rem; line-height: 1.5;"></p>
-        <div class="field">
-          <label for="claveNueva">Contrase&ntilde;a nueva</label>
-          <input type="password" id="claveNueva" autocomplete="new-password">
-          <p class="field__hint">M&iacute;nimo 8 caracteres, con una min&uacute;scula, una may&uacute;scula y un n&uacute;mero.</p>
-        </div>
-        <div class="field">
-          <label for="claveRep">Repite la contrase&ntilde;a</label>
-          <input type="password" id="claveRep" autocomplete="new-password">
-        </div>
-        <p class="warn" id="claveMsg" hidden></p>
-        <div class="modal__actions">
-          <button type="button" class="btn btn--ghost" id="btnCancelarClave">Cancelar</button>
-          <button type="submit" class="btn btn--primary" id="btnGuardarClave">Guardar</button>
-        </div>
-      </form>
-    </div>
-  </div>
-
   <div id="toast" class="toast"></div>
 
   <script src="js/layout.js"></script>

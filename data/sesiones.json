@@ -1,17 +1,1 @@
-{
-  "42051ca07f4e473d80c96212e120072e": {
-    "usuario": "dev",
-    "rol": "desarrollador",
-    "nombre": "Desarrollador",
-    "permisos": [
-      "pacientes",
-      "mensajeria",
-      "historial",
-      "estadisticas",
-      "plantillas_editar",
-      "envio_produccion",
-      "tarifas_editar",
-      "call_center"
-    ]
-  }
-}
+{}

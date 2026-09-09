@@ -93,11 +93,11 @@ async function cargar() {
   }
 }
 
-async function crearPlantilla(nombre, texto, whatsapp_template, whatsapp_template_lang, whatsapp_template_categoria) {
+async function crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_template_categoria) {
   const res = await fetch(API_URL, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ clave: slug(nombre), nombre, texto, whatsapp_template, whatsapp_template_lang, whatsapp_template_categoria }),
+    body: JSON.stringify({ clave: slug(nombre), nombre, texto, whatsapp_template_lang, whatsapp_template_categoria }),
   });
   if (res.status === 401) { window.snwSalir(); return Promise.reject(new Error("Sesión expirada")); }
   const data = await res.json().catch(() => ({}));
@@ -105,11 +105,11 @@ async function crearPlantilla(nombre, texto, whatsapp_template, whatsapp_templat
   return data;
 }
 
-async function actualizarPlantilla(id, nombre, texto, whatsapp_template, whatsapp_template_lang, whatsapp_template_categoria) {
+async function actualizarPlantilla(id, nombre, texto, whatsapp_template_lang, whatsapp_template_categoria) {
   const res = await fetch(`${API_URL}/${id}`, {
     method: "PUT",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ nombre, texto, whatsapp_template, whatsapp_template_lang, whatsapp_template_categoria }),
+    body: JSON.stringify({ nombre, texto, whatsapp_template_lang, whatsapp_template_categoria }),
   });
   if (res.status === 401) { window.snwSalir(); return Promise.reject(new Error("Sesión expirada")); }
   const data = await res.json().catch(() => ({}));
@@ -463,11 +463,11 @@ formEl.addEventListener("submit", async (e) => {
   try {
     let fila;
     if (activaId) {
-      fila = await actualizarPlantilla(activaId, nombre, texto, whatsapp_template, whatsapp_template_lang, whatsapp_template_categoria);
+      fila = await actualizarPlantilla(activaId, nombre, texto, whatsapp_template_lang, whatsapp_template_categoria);
       const i = plantillas.findIndex((x) => x.id === activaId);
       if (i >= 0) plantillas[i] = fila;
     } else {
-      fila = await crearPlantilla(nombre, texto, whatsapp_template, whatsapp_template_lang, whatsapp_template_categoria);
+      fila = await crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_template_categoria);
       plantillas.push(fila);
     }
     setGuardando(false);

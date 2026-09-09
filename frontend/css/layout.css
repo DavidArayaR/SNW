@@ -214,9 +214,6 @@
 .app-shell.sin-sidebar .app-topbar { display: none; }
 .app-shell.sin-sidebar .app-main { margin-left: 0; }
 
-/* La cinta de aviso (demo) queda dentro de la columna de contenido */
-.app-main .cinta-demo { position: static; }
-
 /* Backdrop para móvil */
 .sidebar-backdrop {
   display: none;

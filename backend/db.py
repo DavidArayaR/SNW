@@ -134,11 +134,39 @@ def asegurar_tabla_config() -> None:
                 "  rol ENUM('usuario','administrador','desarrollador') NOT NULL DEFAULT 'usuario',"
                 "  permisos VARCHAR(500) NOT NULL DEFAULT '',"
                 "  clave_hash CHAR(64) NOT NULL,"
+                "  correo_recuperacion VARCHAR(150) NOT NULL DEFAULT '',"
                 "  creado DATETIME DEFAULT CURRENT_TIMESTAMP,"
                 "  UNIQUE KEY uq_usuario (usuario)"
                 ") CHARACTER SET utf8mb4"
             )
+            # Correo al que llega el enlace de «Olvidé mi contraseña». Para las
+            # cuentas cuyo usuario ya es un correo se copia ahí; admin/dev lo
+            # completan desde «Mi cuenta».
+            cur.execute(
+                "SELECT COUNT(*) AS n FROM information_schema.COLUMNS"
+                " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'usuarios'"
+                "   AND COLUMN_NAME = 'correo_recuperacion'"
+            )
+            if not (cur.fetchone() or {}).get("n"):
+                cur.execute("ALTER TABLE usuarios ADD COLUMN correo_recuperacion VARCHAR(150) NOT NULL DEFAULT ''")
+            # Enlaces temporales de restablecimiento de contraseña (2 h).
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS password_resets ("
+                "  token CHAR(64) PRIMARY KEY,"
+                "  usuario VARCHAR(150) NOT NULL,"
+                "  creado DATETIME DEFAULT CURRENT_TIMESTAMP,"
+                "  expira DATETIME NOT NULL,"
+                "  usado TINYINT(1) NOT NULL DEFAULT 0,"
+                "  INDEX idx_pr_usuario (usuario)"
+                ") CHARACTER SET utf8mb4"
+            )
+            cur.execute("DELETE FROM password_resets WHERE usado = 1 OR expira < DATE_SUB(NOW(), INTERVAL 7 DAY)")
             _sembrar_usuarios(cur)
+            # Si el login ya es un correo y no hay correo de recuperación, se copia.
+            cur.execute(
+                "UPDATE usuarios SET correo_recuperacion = LOWER(usuario)"
+                " WHERE correo_recuperacion = '' AND usuario LIKE '%@_%._%'"
+            )
             # Corrección manual de la respuesta del paciente: gana sobre la
             # señal automática 'pegajosa'. NULL = sin corrección.
             # `interesado`: el paciente mostró interés real ("me interesa", "quiero
@@ -211,7 +239,6 @@ def asegurar_tabla_config() -> None:
                 if not e.get("tiene_com"):
                     cur.execute("ALTER TABLE envios ADD COLUMN comentario VARCHAR(255) NULL")
 
-            # `call_center_numero` (un solo número) pasó a `call_center_numeros`
             # (uno o varios, separados por coma). Se traspasa una vez.
             cur.execute("SELECT clave, valor FROM configuracion WHERE clave IN ('call_center_numero', 'call_center_numeros')")
             cc = {r["clave"]: (r["valor"] or "") for r in cur.fetchall()}
@@ -238,8 +265,7 @@ USUARIOS_JSON = BASE_DIR / "data" / "usuarios.json"
 ROLES_USUARIO = ("usuario", "administrador", "desarrollador")
 MAX_DESARROLLADORES = 4
 
-# La página de Configuración es exclusiva del rol `desarrollador`: no es un
-# permiso asignable (ni el administrador la ve).
+# La página de Configuración es exclusiva del rol `desarrollador`:
 PERMISOS_VALIDOS = (
     "pacientes", "mensajeria", "historial", "estadisticas",
     "plantillas_editar", "envio_produccion", "tarifas_editar", "call_center",
@@ -334,14 +360,18 @@ def _fila_usuario(row: dict) -> dict:
         "rol": row.get("rol") or "usuario",
         "permisos": [p for p in (row.get("permisos") or "").split(",") if p],
         "clave_hash": row.get("clave_hash") or "",
+        "correo_recuperacion": (row.get("correo_recuperacion") or "").strip().lower(),
     }
+
+
+_USUARIO_COLS = "usuario, nombre, rol, permisos, clave_hash, correo_recuperacion"
 
 
 def usuarios_listar() -> list[dict]:
     try:
         with conectar() as conn, conn.cursor() as cur:
             cur.execute(
-                "SELECT usuario, nombre, rol, permisos, clave_hash FROM usuarios"
+                f"SELECT {_USUARIO_COLS} FROM usuarios"
                 " ORDER BY FIELD(rol,'desarrollador','administrador','usuario'), usuario"
             )
             return [_fila_usuario(r) for r in cur.fetchall()]
@@ -356,15 +386,42 @@ def usuario_buscar(correo: str) -> dict | None:
         return None
     try:
         with conectar() as conn, conn.cursor() as cur:
-            cur.execute(
-                "SELECT usuario, nombre, rol, permisos, clave_hash FROM usuarios"
-                " WHERE usuario = %s", (correo,),
-            )
+            cur.execute(f"SELECT {_USUARIO_COLS} FROM usuarios WHERE usuario = %s", (correo,))
             row = cur.fetchone()
             return _fila_usuario(row) if row else None
     except Exception as e:
         log_error("usuario_buscar", e)
         return None
+
+
+def usuario_por_recuperacion(correo: str) -> dict | None:
+    """Cuenta cuyo login ES ese correo, o que lo tiene como correo de
+    recuperación. La coincidencia exacta de login tiene prioridad."""
+    correo = (correo or "").strip().lower()
+    if not correo:
+        return None
+    try:
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_USUARIO_COLS} FROM usuarios"
+                " WHERE usuario = %s OR correo_recuperacion = %s"
+                " ORDER BY (usuario = %s) DESC LIMIT 1",
+                (correo, correo, correo),
+            )
+            row = cur.fetchone()
+            return _fila_usuario(row) if row else None
+    except Exception as e:
+        log_error("usuario_por_recuperacion", e)
+        return None
+
+
+def usuario_set_correo_recuperacion(correo: str, correo_rec: str) -> None:
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE usuarios SET correo_recuperacion = %s WHERE usuario = %s",
+            ((correo_rec or "").strip().lower(), (correo or "").strip().lower()),
+        )
+        conn.commit()
 
 
 def contar_desarrolladores(excluir: str | None = None) -> int:
@@ -424,8 +481,53 @@ def usuario_cambiar_clave(correo: str, clave_hash: str) -> None:
 
 
 def usuario_borrar(correo: str) -> None:
+    correo = (correo or "").strip().lower()
     with conectar() as conn, conn.cursor() as cur:
-        cur.execute("DELETE FROM usuarios WHERE usuario = %s", ((correo or "").strip().lower(),))
+        cur.execute("DELETE FROM usuarios WHERE usuario = %s", (correo,))
+        cur.execute("DELETE FROM password_resets WHERE usuario = %s", (correo,))
+        conn.commit()
+
+
+# --- Restablecimiento de contraseña ("Olvidé mi contraseña") ---------------
+
+def reset_crear(token: str, correo: str, horas: int = 2) -> None:
+    correo = (correo or "").strip().lower()
+    with conectar() as conn, conn.cursor() as cur:
+        # Un solo enlace activo por cuenta: anula los anteriores.
+        cur.execute("UPDATE password_resets SET usado = 1 WHERE usuario = %s AND usado = 0", (correo,))
+        cur.execute(
+            "INSERT INTO password_resets (token, usuario, expira)"
+            " VALUES (%s, %s, DATE_ADD(NOW(), INTERVAL %s HOUR))",
+            (token, correo, int(horas)),
+        )
+        conn.commit()
+
+
+def reset_estado(token: str) -> dict:
+    """{'estado': 'ok'|'no_existe'|'usado'|'expirado', 'usuario': <correo>}."""
+    try:
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT usuario, usado, (expira <= NOW()) AS venc"
+                " FROM password_resets WHERE token = %s",
+                (token,),
+            )
+            row = cur.fetchone()
+    except Exception as e:
+        log_error("reset_estado", e)
+        return {"estado": "no_existe"}
+    if not row:
+        return {"estado": "no_existe"}
+    if row.get("usado"):
+        return {"estado": "usado", "usuario": row["usuario"]}
+    if row.get("venc"):
+        return {"estado": "expirado", "usuario": row["usuario"]}
+    return {"estado": "ok", "usuario": row["usuario"]}
+
+
+def reset_consumir(token: str) -> None:
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("UPDATE password_resets SET usado = 1 WHERE token = %s", (token,))
         conn.commit()
 
 

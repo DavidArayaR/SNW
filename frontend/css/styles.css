@@ -11,18 +11,6 @@ body {
 
 button { font: inherit; cursor: pointer; }
 
-.cinta-demo {
-  position: sticky;
-  top: 0;
-  z-index: 45;
-  background: #b7791f;
-  color: #fff;
-  text-align: center;
-  padding: 7px 14px;
-  font-size: .8rem;
-  font-weight: 600;
-}
-
 /* La barra de navegación vive ahora en la sidebar — ver css/layout.css. */
 
 @media (max-width: 760px) {
@@ -175,6 +163,9 @@ button:disabled:hover { outline: none; }
 .field { margin-bottom: 18px; }
 .field label { display: block; margin-bottom: 6px; font-weight: 600; font-size: .9rem; }
 .field input[type="text"],
+.field input[type="password"],
+.field input[type="email"],
+.field input[type="number"],
 .field textarea,
 .field select {
   width: 100%;

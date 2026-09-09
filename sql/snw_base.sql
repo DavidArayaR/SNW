@@ -1,7 +1,7 @@
 -- ============================================================
 -- SNW - Base de datos única (snw_base)
 -- ============================================================
--- Infraestructura de la base de datos con 9 tablas:
+-- Infraestructura de la base de datos con 10 tablas:
 --   - pacientes_dev   : números autorizados para pruebas de desarrollo
 --   - pacientes_prod  : números autorizados (sin datos ficticios)
 --   - envios          : lotes de envío (una fila por "Iniciar envío")
@@ -11,6 +11,7 @@
 --   - tarifas_whatsapp: rate card de Meta (tarifas por mensaje, para costos)
 --   - call_center_log : respuestas enviadas a pacientes interesados + número de call center asignado
 --   - usuarios        : cuentas de la app (rol + permisos, clave SHA-256)
+--   - password_resets : enlaces temporales de "Olvidé mi contraseña" (2 h)
 --
 -- Es idempotente (IF NOT EXISTS / INSERT IGNORE): crea la estructura y
 -- siembra los 2 números autorizados y las cuentas por defecto
@@ -178,12 +179,14 @@ CREATE TABLE IF NOT EXISTS usuarios (
   rol ENUM('usuario','administrador','desarrollador') NOT NULL DEFAULT 'usuario',
   permisos VARCHAR(500) NOT NULL DEFAULT '',
   clave_hash CHAR(64) NOT NULL,
+  correo_recuperacion VARCHAR(150) NOT NULL DEFAULT '',
   creado DATETIME DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_usuario (usuario)
 ) CHARACTER SET utf8mb4;
 
 -- Cuentas por defecto (clave = SHA-256). El backend además garantiza `dev`
 -- en cada arranque si falta. Máximo 4 cuentas de rol `desarrollador`.
+-- admin/dev no tienen correo de recuperación: lo cargan desde «Mi cuenta».
 INSERT IGNORE INTO usuarios (usuario, nombre, rol, permisos, clave_hash) VALUES
   ('admin', 'Administrador', 'administrador', '',
    '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9'),
@@ -191,6 +194,16 @@ INSERT IGNORE INTO usuarios (usuario, nombre, rol, permisos, clave_hash) VALUES
    'dfa7a2273567dcd1efffb9a46308e91c20fa13c44c3441bc69cd6a7869b3f7fd'),
   ('dev', 'Desarrollador', 'desarrollador', '',
    '87274af01876341455b32d805946f272871bb42effa6604dccf28bb027afa82b');
+
+-- Enlaces temporales de "Olvidé mi contraseña" (token de 2 horas).
+CREATE TABLE IF NOT EXISTS password_resets (
+  token CHAR(64) PRIMARY KEY,
+  usuario VARCHAR(150) NOT NULL,
+  creado DATETIME DEFAULT CURRENT_TIMESTAMP,
+  expira DATETIME NOT NULL,
+  usado TINYINT(1) NOT NULL DEFAULT 0,
+  INDEX idx_pr_usuario (usuario)
+) CHARACTER SET utf8mb4;
 
 -- ------------------------------------------------------------
 -- Datos: pacientes_dev (números autorizados)

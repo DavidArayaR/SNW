@@ -33,7 +33,6 @@
 .usr-selector select:focus { border-color: var(--verde); outline: none; }
 
 .usr-detalle { padding: 12px 18px 20px; }
-.usr-lista { display: flex; flex-direction: column; gap: 14px; padding: 16px 18px 20px; }
 
 .usr-card {
   border: 1px solid var(--borde);

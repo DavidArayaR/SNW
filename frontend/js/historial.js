@@ -8,7 +8,6 @@ if (!localStorage.getItem("snw_token")) location.replace("login.html");
 
 let registros = [];
 let filtro = "";
-let filtroEstado = "todos";
 let ambienteDetalle = "produccion";
 let pacienteMsgActual = null; // { id, ambiente, interesado }
 let plantillasCC = [];        // plantillas de call center
@@ -335,7 +334,7 @@ function toast(msg, tipo = "ok") {
 
 /* ---------- Sección "Plantillas de call center" ---------- */
 
-const listaCCEl = $("#listaCC");           // null si no es admin (data-solo-admin)
+const listaCCEl = $("#listaCC");           // null sin el permiso call_center (data-perm)
 const modalCCEl = $("#modalCC");
 let ccNumeros = [];
 let ccContadores = {};

@@ -252,38 +252,6 @@
 .conf-limite__abajo input[type="number"]:focus { border-color: var(--verde); outline: none; }
 .conf-limite__abajo span { color: var(--texto-suave); font-size: .85rem; }
 
-.detalle-subtitulo {
-  margin: 16px 0 6px;
-  font-size: .78rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .05em;
-  color: var(--texto-suave);
-}
-
-.bubble-msg {
-  position: relative;
-  background: var(--chat-out);
-  border-radius: 10px;
-  border-top-left-radius: 2px;
-  padding: 11px 14px;
-  font-size: .92rem;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
-  box-shadow: 0 1px 1px rgba(0, 0, 0, .1);
-}
-
-.detalle-error {
-  margin-top: 12px;
-  padding: 11px 15px;
-  border-radius: 10px;
-  border-left: 4px solid var(--rojo);
-  background: var(--danger-bg);
-  color: var(--danger-fg);
-  font-size: .86rem;
-}
-
 .tabla-wrap {
   overflow: auto;
   max-height: 55vh;
@@ -322,14 +290,6 @@ tbody td {
 
 tbody tr { cursor: pointer; user-select: none; }
 tbody tr:hover { background: var(--hover); }
-
-.campo-mensaje {
-  max-width: 320px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--texto);
-}
 tbody tr:last-child td { border-bottom: none; }
 
 td.campo-id { color: var(--texto-suave); font-family: Consolas, monospace; }
@@ -354,7 +314,6 @@ td.campo-id { color: var(--texto-suave); font-family: Consolas, monospace; }
 .estado-pendiente { background: var(--warn-bg); color: var(--warn-fg); border: 1px solid var(--warn-bd); }
 .estado-enviado { background: var(--ok-bg); color: var(--ok-fg); border: 1px solid var(--ok-bd); }
 .estado-error { background: var(--danger-bg); color: var(--danger-fg); border: 1px solid var(--danger-bd); }
-.estado-numero_invalido { background: var(--info-bg); color: var(--info-fg); border: 1px solid var(--info-bd); }
 
 .estado-select {
   padding: 3px 10px;

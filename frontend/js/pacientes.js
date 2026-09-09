@@ -638,22 +638,6 @@ $("#btnLanzarEnvio").addEventListener("click", async () => {
   }
 });
 
-function normalizarTelefonoJs(crudo) {
-  const limpio = String(crudo ?? "").trim().replace(/[^\d+]/g, "");
-  const d = limpio.replace(/\D/g, "");
-  if (limpio.startsWith("+")) {
-    if (d.length === 11 && d.startsWith("569")) return "+" + d;
-    if (d.length === 10 && d.startsWith("56")) return "+569" + d.slice(2);
-    if (d.length === 9 && d.startsWith("9")) return "+56" + d;
-    return null;
-  }
-  if (d.length === 11 && d.startsWith("569")) return "+" + d;
-  if (d.length === 10 && d.startsWith("56")) return "+569" + d.slice(2);
-  if (d.length === 9 && d.startsWith("9")) return "+56" + d;
-  if (d.length === 8 && d.startsWith("9")) return "+569" + d;
-  return null;
-}
-
 function pintarRechazados(rechazados) {
   const ul = $("#listaRechazados");
   ul.innerHTML = "";

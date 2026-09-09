@@ -42,7 +42,7 @@ else
   else
     echo "      Primera ejecucion: cargando snw_base.sql..."
     if "$MYSQL" --default-character-set=utf8mb4 -u root -h 127.0.0.1 -P 3306 < sql/snw_base.sql >/dev/null 2>&1; then
-      echo " [OK] snw_base.sql cargado (5 tablas + 2 numeros autorizados)."
+      echo " [OK] snw_base.sql cargado (10 tablas + cuentas admin/usuario/dev + 2 numeros autorizados)."
     else
       echo " [!!] Error al cargar snw_base.sql. Revisa que MySQL este activo."
     fi

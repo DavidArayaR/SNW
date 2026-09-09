@@ -85,7 +85,20 @@
       font-size: .85rem;
     }
     .error.visible { display: block; }
+    .info {
+      display: none;
+      margin: -6px 0 14px;
+      padding: 10px 13px;
+      border-radius: 8px;
+      background: var(--ok-bg);
+      border: 1px solid var(--ok-bd);
+      color: var(--ok-fg);
+      font-size: .85rem;
+    }
+    .info.visible { display: block; }
     .nota { margin: 18px 0 0; text-align: center; color: var(--texto-suave); font-size: .76rem; line-height: 1.6; }
+    .nota a { display: inline-block; }
+    .link-olvide { display: block; margin: -8px 0 16px; text-align: right; font-size: .8rem; }
     a { color: var(--verde); }
   </style>
 </head>
@@ -101,8 +114,19 @@
       <input type="text" id="inpUsuario" autocomplete="username" required>
       <label for="inpClave">Contrase&ntilde;a</label>
       <input type="password" id="inpClave" autocomplete="current-password" required>
+      <a href="#" class="link-olvide" id="lnkOlvide">¿Olvidaste tu contrase&ntilde;a?</a>
       <p class="error" id="msgError"></p>
       <button type="submit" id="btnEntrar">Iniciar sesi&oacute;n</button>
+    </form>
+
+    <form id="formOlvide" novalidate hidden>
+      <p class="sub" style="margin-bottom: 18px;">Escribe tu correo y te enviaremos un enlace para crear una contrase&ntilde;a nueva. Dura 2 horas.</p>
+      <label for="inpOlvideCorreo">Correo electr&oacute;nico</label>
+      <input type="email" id="inpOlvideCorreo" autocomplete="email" placeholder="nombre@empresa.cl" required>
+      <p class="error" id="msgOlvideError"></p>
+      <p class="info" id="msgOlvideOk"></p>
+      <button type="submit" id="btnOlvide">Enviar enlace</button>
+      <a href="#" class="link-olvide" id="lnkVolverLogin" style="text-align: center; margin-top: 12px;">Volver a iniciar sesi&oacute;n</a>
     </form>
 
     <p class="nota">
@@ -161,6 +185,53 @@
         btn.disabled = false;
         btn.textContent = "Iniciar sesión";
       }
+    });
+
+    // ---- "¿Olvidaste tu contraseña?" ----
+    const formLogin = document.getElementById("formLogin");
+    const formOlvide = document.getElementById("formOlvide");
+    const $ = (id) => document.getElementById(id);
+
+    $("lnkOlvide").addEventListener("click", (e) => {
+      e.preventDefault();
+      formLogin.hidden = true;
+      formOlvide.hidden = false;
+      $("msgOlvideError").classList.remove("visible");
+      $("msgOlvideOk").classList.remove("visible");
+      $("inpOlvideCorreo").focus();
+    });
+    $("lnkVolverLogin").addEventListener("click", (e) => {
+      e.preventDefault();
+      formOlvide.hidden = true;
+      formLogin.hidden = false;
+    });
+
+    formOlvide.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const errO = $("msgOlvideError");
+      const okO = $("msgOlvideOk");
+      const b = $("btnOlvide");
+      errO.classList.remove("visible");
+      okO.classList.remove("visible");
+      const correo = $("inpOlvideCorreo").value.trim();
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(correo)) {
+        errO.textContent = "Escribe un correo electrónico válido.";
+        errO.classList.add("visible");
+        return;
+      }
+      b.disabled = true;
+      b.textContent = "Enviando...";
+      try {
+        await fetch("api/auth/olvide", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ correo }),
+        });
+      } catch { /* respuesta genérica igual */ }
+      okO.textContent = "Si hay una cuenta con ese correo, te enviamos un enlace para restablecer la contraseña. Revisa tu bandeja (y el spam).";
+      okO.classList.add("visible");
+      b.disabled = false;
+      b.textContent = "Enviar enlace";
     });
   </script>
 </body>

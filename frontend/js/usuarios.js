@@ -134,7 +134,6 @@ function renderDetalle() {
         (bloqueada ? `<span class="usr-card__bloqueo">${esc(u.motivo_bloqueo || "No puedes gestionar esta cuenta.")}</span>` : "") +
         `<span class="usr-card__sep"></span>` +
         (u.editable ? `<button type="button" class="btn btn--danger-ghost" data-borrar>Eliminar</button>` : "") +
-        (u.editable ? `<button type="button" class="btn btn--ghost" data-clave>Restablecer contraseña</button>` : "") +
         (u.editable ? `<button type="button" class="btn btn--primary" data-guardar>Guardar cambios</button>` : "") +
       `</div>` +
     `</div>`;
@@ -205,41 +204,6 @@ function cerrarModal() {
   borrarCorreo = null;
 }
 
-let claveCorreo = null;
-function cerrarModalClave() {
-  $("#modalClave").hidden = true;
-  $("#formClave").reset();
-  $("#claveMsg").hidden = true;
-  claveCorreo = null;
-}
-
-async function restablecerClave(e) {
-  e.preventDefault();
-  const msg = $("#claveMsg");
-  const nueva = $("#claveNueva").value;
-  const rep = $("#claveRep").value;
-  msg.hidden = true;
-  if (nueva !== rep) { msg.textContent = "Las contraseñas no coinciden."; msg.hidden = false; return; }
-  const btn = $("#btnGuardarClave");
-  btn.disabled = true;
-  try {
-    const r = await fetch("api/usuarios/" + encodeURIComponent(claveCorreo) + "/clave", {
-      method: "PUT",
-      headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ clave_nueva: nueva }),
-    });
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.detail || "No se pudo cambiar la contraseña.");
-    toast("Contraseña restablecida. Se cerraron las sesiones de esa cuenta.");
-    cerrarModalClave();
-  } catch (ex) {
-    msg.textContent = ex.message;
-    msg.hidden = false;
-  } finally {
-    btn.disabled = false;
-  }
-}
-
 selEl.addEventListener("change", () => {
   seleccion = selEl.value;
   renderDetalle();
@@ -255,25 +219,12 @@ detalleEl.addEventListener("click", (e) => {
       `Se eliminará la cuenta "${borrarCorreo}" y se cerrarán sus sesiones. Esta acción no se puede deshacer.`;
     $("#modalBorrar").hidden = false;
   }
-  if (e.target.closest("[data-clave]")) {
-    claveCorreo = card.dataset.correo;
-    $("#claveTexto").textContent = `Nueva contraseña para la cuenta "${claveCorreo}". La cuenta tendrá que volver a iniciar sesión.`;
-    $("#modalClave").hidden = false;
-    $("#claveNueva").focus();
-  }
 });
 
 $("#btnRecargar").addEventListener("click", cargar);
 $("#btnCancelarBorrar").addEventListener("click", cerrarModal);
 $("#btnConfirmarBorrar").addEventListener("click", eliminar);
 $("#modalBorrar").addEventListener("click", (e) => { if (e.target.id === "modalBorrar") cerrarModal(); });
-$("#btnCancelarClave").addEventListener("click", cerrarModalClave);
-$("#formClave").addEventListener("submit", restablecerClave);
-$("#modalClave").addEventListener("click", (e) => { if (e.target.id === "modalClave") cerrarModalClave(); });
-document.addEventListener("keydown", (e) => {
-  if (e.key !== "Escape") return;
-  cerrarModal();
-  cerrarModalClave();
-});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") cerrarModal(); });
 
 cargar();

@@ -2,7 +2,7 @@
 
 Módulo web para gestionar y enviar notificaciones de WhatsApp a pacientes. Backend en
 **Python (FastAPI)**, una única base de datos **MySQL/MariaDB** con tablas separadas para
-desarrollo y producción, plantillas y usuarios en **archivos JSON**, e integración directa
+desarrollo y producción, plantillas en un **archivo JSON**, e integración directa
 con la **WhatsApp Business Cloud API** de Meta (v26.0).
 
 ## Stack
@@ -13,9 +13,9 @@ con la **WhatsApp Business Cloud API** de Meta (v26.0).
 | Backend / API | Python + FastAPI + Uvicorn |
 | Base de datos | MySQL / MariaDB (XAMPP, PyMySQL) — una sola base, `snw_base` |
 | Plantillas | Archivo JSON (`data/plantillas.json`) |
-| Usuarios | Tabla `usuarios` en `snw_base` (rol + permisos, clave SHA-256). Sesiones en `data/sesiones.json` |
+| Usuarios | Tabla `usuarios` en `snw_base` (rol + permisos, clave SHA-256, correo de recuperación). Sesiones en `data/sesiones.json` |
 | WhatsApp | WhatsApp Business Cloud API (Meta Graph API v26.0) o motor simulado |
-| Correo | SMTP (configurable en la tabla `configuracion`) — confirmación de envíos en producción |
+| Correo | SMTP (configurable en la tabla `configuracion`) — confirmación de envíos en producción y recuperación de contraseña |
 | Configuración | Tabla `configuracion` en MySQL (todo salvo credenciales de BD, que van en `.env`) |
 
 ## Estructura
@@ -36,8 +36,9 @@ snw/
 │   └── motor_envio.py        Motor de envío intercambiable: simulado | api_oficial
 ├── frontend/
 │   ├── index.html             Landing con navegación por rol
-│   ├── login.html             Inicio de sesión
+│   ├── login.html             Inicio de sesión + «¿Olvidaste tu contraseña?»
 │   ├── registro.html          Alta pública de cuenta (correo + contraseña segura)
+│   ├── reset.html             Restablecer contraseña con el token del correo
 │   ├── mensajeria.html        Editor de plantillas, vista previa estilo WhatsApp, envío
 │   ├── pacientes.html         Base de datos de pacientes + envío masivo (permiso: pacientes)
 │   ├── historial.html         Historial de envíos (batch + detalle por paciente)
@@ -52,7 +53,7 @@ snw/
 │   └── sesiones.json          Tokens de sesión activos
 │                                (las cuentas viven en la tabla `usuarios`)
 ├── sql/
-│   └── snw_base.sql           Crea la base snw_base, sus 9 tablas y siembra los 2
+│   └── snw_base.sql           Crea la base snw_base, sus 10 tablas y siembra los 2
 │                                números autorizados y las cuentas admin/usuario/dev
 │                                (idempotente: IF NOT EXISTS / INSERT IGNORE)
 ├── backups/                   Volcados manuales (mysqldump) antes de operaciones destructivas
@@ -115,9 +116,10 @@ el `entorno` activo, que las demás pantallas leen al cargar).
 
 ## Base de datos
 
-**Una sola base MySQL, `snw_base`**, con 9 tablas (ver `sql/snw_base.sql`).
+**Una sola base MySQL, `snw_base`**, con 10 tablas (ver `sql/snw_base.sql`).
 La tabla **`usuarios`** guarda las cuentas de la app (`usuario` correo, `nombre`, `rol`,
-`permisos` CSV, `clave_hash` SHA-256). Las demás:
+`permisos` CSV, `clave_hash` SHA-256, `correo_recuperacion`) y **`password_resets`** los
+enlaces de «Olvidé mi contraseña» (token de 2 h, un solo uso). Las demás:
 
 **`pacientes_dev` / `pacientes_prod`** — mismo esquema, una tabla por entorno
 
@@ -180,6 +182,15 @@ interesado, con el `numero_call_center` que se le asignó, si fue `automatico` o
 numero_call_center`) y sirve para elegir, en la siguiente respuesta, el número menos usado.
 Se ve en el **modal «Ver registro»** de la sección *Plantillas de call center* del Historial.
 
+**`usuarios`** — cuentas de la app. `usuario` (correo o nombre corto para las semilla, único),
+`nombre`, `rol` (`usuario`/`administrador`/`desarrollador`), `permisos` (lista CSV, solo
+cuenta para el rol `usuario`), `clave_hash` (SHA-256), `correo_recuperacion` (a dónde llega
+el enlace de «Olvidé mi contraseña»; se rellena solo si el `usuario` ya es un correo).
+
+**`password_resets`** — enlaces de «Olvidé mi contraseña»: `token` (64 hex), `usuario`,
+`creado`, `expira` (2 h), `usado`. Un token activo por cuenta; al usarlo se marca `usado` y
+se cierran las sesiones de esa cuenta. Las filas viejas se limpian en cada arranque.
+
 Las tablas de pacientes comparten `log_envios`, así que el backend siempre ubica el
 "último log" de un paciente con un `LEFT JOIN` correlacionado por `paciente_id`.
 
@@ -207,8 +218,12 @@ Reglas del editor:
 |---|---|---|
 | POST | `/api/auth/registro` | Alta pública `{usuario, clave}`. `usuario` debe ser un correo válido; `clave` ≥ 8 con minúscula, mayúscula y número. Nace con rol `usuario` y permisos básicos (`mensajeria`, `historial`, `estadisticas`, `plantillas_editar`) |
 | POST | `/api/auth/login` | `{usuario, clave}` → `{token, rol, nombre, permisos}` |
-| GET | `/api/auth/me` | Rol y permisos vigentes de la sesión (el frontend lo usa para refrescarse si un admin cambió los permisos) |
-| PUT | `/api/auth/clave` | Cambiar **la propia** contraseña: `{clave_actual, clave_nueva}`. Valida la actual y la fuerza de la nueva. Disponible para cualquier cuenta (botón «Cambiar contraseña» de la barra lateral) |
+| GET | `/api/auth/me` | Rol, permisos y `correo_recuperacion` vigentes de la sesión (el frontend lo usa para refrescarse si un admin cambió los permisos) |
+| PUT | `/api/auth/clave` | Cambiar **la propia** contraseña estando dentro: `{clave_actual, clave_nueva}`. Valida la actual y la fuerza de la nueva (botón «Mi cuenta» de la barra lateral) |
+| PUT | `/api/auth/correo-recuperacion` | La cuenta define a qué correo llega el enlace de «Olvidé mi contraseña»: `{correo}`. Para cuentas cuyo usuario ya es un correo suele coincidir; `admin`/`dev` lo necesitan porque entran con nombre corto. 409 si el correo es el usuario de otra cuenta |
+| POST | `/api/auth/olvide` | **Pública.** `{correo}` → si hay una cuenta con ese correo (login o de recuperación) se le manda un enlace con un token de **2 horas** desde `correo_emisor`. Responde siempre `{ok: true}` (no revela si existe) |
+| GET | `/api/auth/reset/{token}` | **Pública.** Valida el token → 200 si sirve, 400 con el motivo si no (inexistente / usado / expirado) |
+| POST | `/api/auth/reset` | **Pública.** `{token, clave_nueva}` → cambia la contraseña, marca el token usado y cierra las sesiones de esa cuenta |
 | POST | `/api/auth/logout` | Invalida el token actual |
 
 ### Usuarios (rol `administrador` o `desarrollador`)
@@ -217,8 +232,10 @@ Reglas del editor:
 |---|---|---|
 | GET | `/api/usuarios` | Cuentas con `rol`, `permisos`, `editable`/`motivo_bloqueo` según quién pregunta, más `desarrolladores`/`max_desarrolladores` |
 | PUT | `/api/usuarios/{correo}` | `{permisos?, nombre?, rol?}`. `rol` solo lo cambia un desarrollador; promover a `desarrollador` da 409 si ya hay 4. Nadie modifica su propia cuenta; un administrador solo toca cuentas de rol `usuario` |
-| PUT | `/api/usuarios/{correo}/clave` | Restablece la contraseña de **otra** cuenta: `{clave_nueva}`. Un desarrollador puede con cualquiera; un administrador solo con cuentas de rol `usuario`. La cuenta afectada pierde sus sesiones. Para la propia se usa `PUT /api/auth/clave` |
 | DELETE | `/api/usuarios/{correo}` | Elimina la cuenta y cierra sus sesiones (mismas reglas que PUT) |
+
+**Nadie cambia la contraseña de otra cuenta.** Si alguien la olvida usa «¿Olvidaste tu
+contraseña?» en el login (`/api/auth/olvide`).
 
 ### Pacientes (permiso: `pacientes`)
 
@@ -318,7 +335,7 @@ página Historial. Al arrancar se siembra una si no hay ninguna.
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/configuracion?ambiente=` | Vista **segura** de la config para el resto de páginas — cualquier sesión (no devuelve el token de Meta ni la clave SMTP en claro) |
+| GET | `/api/configuracion?ambiente=` | Vista mínima para las pantallas y el motor de envío (`entorno`, `base_datos`, `numeros_autorizados`, `metodo_envio`, `intervalo_ms`) — cualquier sesión. Los valores completos y los secretos van por `/api/configuracion/todo` |
 | PUT | `/api/configuracion` | Guarda claves sueltas de `configuracion` sin reiniciar |
 | GET | `/api/configuracion/todo` | TODAS las claves con su **valor real** (incluye secretos) + metadata de secciones, para la página Configuración |
 | PUT | `/api/configuracion/todo` | `{cambios: {clave: valor, …}}` — valida clave conocida, enums (`entorno`, `metodo_envio`) y enteros (`intervalo_ms`, `smtp_port`, `call_center_auto_segundos`); `call_center_numeros` se normaliza a lista de solo-dígitos separada por coma; persiste con `config_set` |
@@ -514,9 +531,10 @@ propagar como error 500.
 ## Usuarios, roles y permisos
 
 Las cuentas viven en la tabla **`usuarios`** de `snw_base` (`usuario` = correo,
-`clave_hash` SHA-256, `rol`, `permisos` como lista CSV). Cualquiera se registra desde
-**`registro.html`** (correo válido + contraseña segura); la cuenta nace con rol `usuario`
-y acceso básico. Un administrador o desarrollador ajusta permisos desde **`usuarios.html`**.
+`clave_hash` SHA-256, `rol`, `permisos` como lista CSV, `correo_recuperacion`). Cualquiera
+se registra desde **`registro.html`** (correo válido + contraseña segura); la cuenta nace
+con rol `usuario` y acceso básico. Un administrador o desarrollador ajusta nombre, permisos
+y rol desde **`usuarios.html`** (una cuenta por vez, elegida en un desplegable).
 
 **Roles:**
 
@@ -538,10 +556,19 @@ El backend revalida rol y permisos desde la tabla en **cada** petición, así qu
 surte efecto de inmediato (la página se recarga sola vía `GET /api/auth/me`) y una cuenta
 eliminada pierde la sesión.
 
-**Contraseñas.** Cualquiera cambia la suya desde el botón «Cambiar contraseña» de la barra
-lateral (pide la actual). En `usuarios.html`, con «Restablecer contraseña» un desarrollador
-la cambia a cualquiera y un administrador solo a cuentas de rol `usuario`; la cuenta
-afectada tiene que volver a iniciar sesión. Toda contraseña nueva debe ser segura.
+**Contraseñas.**
+
+- Estando dentro, cada cuenta cambia la suya desde **«Mi cuenta»** (barra lateral),
+  indicando la actual. Ahí mismo fija su **correo de recuperación**.
+- Si la olvida, **«¿Olvidaste tu contraseña?»** en el login pide el correo; llega un enlace
+  (`{url_base}/reset.html?token=…`) con un token de **2 horas** al correo de recuperación de
+  la cuenta, desde `correo_emisor` (p. ej. `no-reply@somosprosalud.cl`). El enlace es de un
+  solo uso y, al usarlo, cierra las sesiones de esa cuenta.
+- Las cuentas registradas con correo lo tienen como correo de recuperación por defecto.
+  `admin` y `dev` entran con un nombre corto, así que **deben** cargar el suyo en «Mi cuenta»
+  para poder recuperar el acceso.
+- **Ningún rol (ni el desarrollador) puede cambiar la contraseña de otra cuenta.**
+- Los tokens viven en la tabla `password_resets`.
 
 **Cuenta de desarrollador:** el sistema garantiza `dev` / `dev123` (rol `desarrollador`)
 en cada arranque si no existe. **Solo puede haber 4 cuentas `desarrollador`**; al intentar
@@ -577,16 +604,20 @@ claro** de la sidebar, o con el botón flotante en la portada y el login (págin
 - **Landing** (`index.html`): sin sesión muestra la portada con los botones **Iniciar
   sesión** y **Crear cuenta**; con sesión, la sidebar y el contenido informativo. El menú
   lateral solo muestra las páginas permitidas para la cuenta.
-- **Login** (`login.html`) / **Registro** (`registro.html`): acceso y alta pública de
-  cuenta (correo + contraseña segura). Tras entrar, redirige a Pacientes (admin/dev) o
-  Mensajería según los permisos.
+- **Login** (`login.html`): acceso + «¿Olvidaste tu contraseña?» (pide el correo y envía un
+  enlace de recuperación). **Registro** (`registro.html`): alta pública de cuenta (correo +
+  contraseña segura). **Reset** (`reset.html`): pantalla de contraseña nueva a la que lleva
+  el enlace del correo. Tras entrar, redirige a Pacientes (admin/dev) o Mensajería según los permisos.
+- **«Mi cuenta»** (modal de la barra lateral, todas las páginas): cambiar la propia
+  contraseña (pide la actual) y fijar el correo de recuperación.
 - **Mensajería** (`mensajeria.html`, permiso `mensajeria`): editor de plantillas con vista
   previa estilo WhatsApp (formato `*negrita*`/`_cursiva_`/`~tachado~`), nombre y template
   de Meta permanentes, botón **Sincronizar** con Meta, y envío directo a todos los
   pendientes. Sin el permiso `plantillas_editar` el editor queda de solo lectura.
 - **Usuarios** (`usuarios.html`, rol admin/desarrollador): alta implícita por registro;
   se elige una cuenta en un desplegable y el panel de abajo muestra sus datos: nombre,
-  permisos, rol (solo el desarrollador), restablecer contraseña y eliminar. Máximo 4 desarrolladores.
+  permisos, rol (solo el desarrollador) y eliminar. Máximo 4 desarrolladores.
+  Aquí no se cambian contraseñas — cada cuenta usa «Mi cuenta» o «¿Olvidaste tu contraseña?».
 - **Pacientes** (`pacientes.html`, permiso `pacientes`): tabla con estado editable en línea,
   columna **Error** (motivo del último fallo), columna **Respuesta** con la señal de
   WhatsApp (Respondió / Se dio de baja / Sin respuesta) y su fecha, filtros por

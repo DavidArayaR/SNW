@@ -116,8 +116,8 @@
       `<ul class="nav flex-column sidebar__nav">${items}</ul>` +
       `<button type="button" class="sidebar__tema" id="btnTema" title="Cambiar entre modo claro y oscuro">` +
       `<i class="fa-solid fa-moon"></i><span>Modo oscuro</span></button>` +
-      `<button type="button" class="sidebar__salir" id="btnClavePropia" title="Cambiar mi contraseña">` +
-      `<i class="fa-solid fa-key"></i><span>Cambiar contraseña</span></button>` +
+      `<button type="button" class="sidebar__salir" id="btnClavePropia" title="Mi cuenta: contraseña y correo de recuperación">` +
+      `<i class="fa-solid fa-circle-user"></i><span>Mi cuenta</span></button>` +
       `<button type="button" class="sidebar__salir" id="btnSalir" title="Cerrar sesión">` +
       `<i class="fa-solid fa-right-from-bracket"></i><span>Cerrar sesión</span></button>`;
 
@@ -145,17 +145,28 @@
     document.getElementById("btnClavePropia").addEventListener("click", abrirModalClave);
   }
 
-  // ----- Modal "Cambiar mi contraseña" (disponible en toda la app) -----
+  // ----- Modal "Mi cuenta": correo de recuperación + contraseña -----
   let modalClave = null;
   function abrirModalClave() {
     if (!modalClave) {
       modalClave = document.createElement("div");
       modalClave.className = "modal";
-      modalClave.id = "modalClavePropia";
+      modalClave.id = "modalMiCuenta";
       modalClave.hidden = true;
       modalClave.innerHTML =
         `<div class="modal__card" role="dialog" aria-modal="true">` +
-        `<h3>Cambiar mi contraseña</h3>` +
+        `<h3>Mi cuenta</h3>` +
+
+        `<form id="formCorreoRec" novalidate style="margin-bottom:22px;">` +
+        `<div class="field"><label for="crInp">Correo de recuperación</label>` +
+        `<input type="email" id="crInp" autocomplete="email" placeholder="nombre@empresa.cl">` +
+        `<p class="field__hint">Si olvidas tu contraseña, el enlace para restablecerla llega a este correo.</p></div>` +
+        `<p class="warn" id="crMsg" hidden></p>` +
+        `<div class="modal__actions"><button type="submit" class="btn btn--ghost" id="crGuardar">Guardar correo</button></div>` +
+        `</form>` +
+
+        `<hr style="border:none;border-top:1px solid var(--borde);margin:0 0 18px;">` +
+
         `<form id="formClavePropia" novalidate>` +
         `<div class="field"><label for="clAct">Contraseña actual</label>` +
         `<input type="password" id="clAct" autocomplete="current-password"></div>` +
@@ -166,29 +177,56 @@
         `<input type="password" id="clRep" autocomplete="new-password"></div>` +
         `<p class="warn" id="clMsg" hidden></p>` +
         `<div class="modal__actions">` +
-        `<button type="button" class="btn btn--ghost" id="clCancelar">Cancelar</button>` +
-        `<button type="submit" class="btn btn--primary" id="clGuardar">Guardar</button>` +
+        `<button type="button" class="btn btn--ghost" id="clCancelar">Cerrar</button>` +
+        `<button type="submit" class="btn btn--primary" id="clGuardar">Cambiar contraseña</button>` +
         `</div></form></div>`;
       document.body.appendChild(modalClave);
 
+      const q = (s) => modalClave.querySelector(s);
       const cerrar = () => {
         modalClave.hidden = true;
-        modalClave.querySelector("#formClavePropia").reset();
-        modalClave.querySelector("#clMsg").hidden = true;
+        q("#formClavePropia").reset();
+        q("#clMsg").hidden = true;
+        q("#crMsg").hidden = true;
       };
-      modalClave.querySelector("#clCancelar").addEventListener("click", cerrar);
+      q("#clCancelar").addEventListener("click", cerrar);
       modalClave.addEventListener("click", (e) => { if (e.target === modalClave) cerrar(); });
       document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !modalClave.hidden) cerrar(); });
 
-      modalClave.querySelector("#formClavePropia").addEventListener("submit", async (e) => {
+      q("#formCorreoRec").addEventListener("submit", async (e) => {
         e.preventDefault();
-        const msg = modalClave.querySelector("#clMsg");
-        const act = modalClave.querySelector("#clAct").value;
-        const nue = modalClave.querySelector("#clNue").value;
-        const rep = modalClave.querySelector("#clRep").value;
+        const msg = q("#crMsg");
+        msg.hidden = true;
+        const correo = q("#crInp").value.trim();
+        const btn = q("#crGuardar");
+        btn.disabled = true;
+        try {
+          const r = await fetch("api/auth/correo-recuperacion", {
+            method: "PUT",
+            headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+            body: JSON.stringify({ correo }),
+          });
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(data.detail || "No se pudo guardar el correo.");
+          msg.textContent = "Correo de recuperación guardado.";
+          msg.hidden = false;
+        } catch (ex) {
+          msg.textContent = ex.message;
+          msg.hidden = false;
+        } finally {
+          btn.disabled = false;
+        }
+      });
+
+      q("#formClavePropia").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const msg = q("#clMsg");
+        const act = q("#clAct").value;
+        const nue = q("#clNue").value;
+        const rep = q("#clRep").value;
         const mostrar = (t) => { msg.textContent = t; msg.hidden = false; };
         if (nue !== rep) return mostrar("Las contraseñas nuevas no coinciden.");
-        const btn = modalClave.querySelector("#clGuardar");
+        const btn = q("#clGuardar");
         btn.disabled = true;
         try {
           const r = await fetch("api/auth/clave", {
@@ -207,18 +245,21 @@
         }
       });
     }
+    // Prefill del correo de recuperación con lo que hay en el servidor.
+    modalClave.querySelector("#crInp").value = "";
+    fetch("api/auth/me", { headers: { Authorization: "Bearer " + token } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((me) => { if (me) modalClave.querySelector("#crInp").value = me.correo_recuperacion || ""; })
+      .catch(() => {});
     modalClave.hidden = false;
-    modalClave.querySelector("#clAct").focus();
+    modalClave.querySelector("#crInp").focus();
   }
 
-  // Elementos que dependen de un permiso concreto (data-perm="call_center", ...).
+  // Elementos que dependen de un permiso concreto (data-perm="call_center", ...):
+  // se quitan del DOM para quien no lo tenga.
   document.querySelectorAll("[data-perm]").forEach((el) => {
     if (!puede(el.dataset.perm)) el.remove();
   });
-  // Elementos reservados a roles privilegiados (administrador / desarrollador).
-  if (!ES_PRIV) {
-    document.querySelectorAll("[data-solo-admin]").forEach((el) => el.remove());
-  }
 
   // ----- Control de la sidebar -----
   const shell = document.querySelector(".app-shell");
