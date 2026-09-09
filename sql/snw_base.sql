@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS pacientes_dev (
   estado ENUM('pendiente','enviado','error') NOT NULL DEFAULT 'pendiente',
   whatsapp_opt_out TINYINT(1) NOT NULL DEFAULT 0,
   respuesta_manual VARCHAR(12) DEFAULT NULL,
+  interesado TINYINT(1) NOT NULL DEFAULT 0,
   fecha_actualizacion DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
@@ -42,6 +43,7 @@ CREATE TABLE IF NOT EXISTS pacientes_prod (
   estado ENUM('pendiente','enviado','error') NOT NULL DEFAULT 'pendiente',
   whatsapp_opt_out TINYINT(1) NOT NULL DEFAULT 0,
   respuesta_manual VARCHAR(12) DEFAULT NULL,
+  interesado TINYINT(1) NOT NULL DEFAULT 0,
   fecha_actualizacion DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 

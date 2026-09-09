@@ -124,6 +124,7 @@ el `entorno` activo, que las demás pantallas leen al cargar).
 | `estado` | ENUM | `pendiente` / `enviado` / `error` |
 | `whatsapp_opt_out` | TINYINT(1) | 1 si el paciente pidió no recibir más mensajes |
 | `respuesta_manual` | VARCHAR(12) | Corrección manual de la respuesta (NULL = sin corrección); gana sobre la señal automática |
+| `interesado` | TINYINT(1) | 1 si el paciente mostró interés real (por webhook o a mano). Marcarlo revierte una baja previa |
 | `fecha_actualizacion` | DATETIME | Última actualización |
 
 **`envios`** — un registro por cada "Iniciar envío" (batch-level, sin nombres de pacientes)
@@ -202,18 +203,36 @@ Reglas del editor:
 | GET | `/api/pacientes?q=&ambiente=` | Lista con respuesta y error del último `log_envios` |
 | PUT | `/api/pacientes/{id}?ambiente=` | Cambiar `estado` (`pendiente`/`enviado`/`error`) |
 | PUT | `/api/pacientes/{id}/respuesta?ambiente=` | Ajuste manual de la respuesta (`pendiente`/`respondio`/`baja`); `baja` activa el opt-out |
+| GET | `/api/pacientes/{id}/mensajes?ambiente=` | Todos los mensajes (entrantes y salientes) del paciente, para revisar si su interés es real. Marca `interes: true` los entrantes que suenan a interés |
+| PUT | `/api/pacientes/{id}/interes?ambiente=` | `{interesado: bool}` — marca/desmarca a mano. Marcarlo **revierte una baja previa** (opt-out, corrección manual y señal 'pegajosa') |
+| POST | `/api/pacientes/{id}/call-center?ambiente=&plantilla_id=` | Envía al paciente **interesado** una plantilla de call center (texto libre, ventana de 24 h). Requiere `interesado = 1`; `plantilla_id` es obligatorio si hay más de una plantilla de call center |
 
 ### Plantillas
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/plantillas` | Lista de plantillas |
+| GET | `/api/plantillas` | Lista de plantillas (incluye las de call center; el frontend de Mensajería las filtra) |
 | POST | `/api/plantillas` | Crear `{nombre, texto, whatsapp_template_lang, whatsapp_template_categoria}` |
-| PUT | `/api/plantillas/{id}` | Actualizar `{nombre, texto, ...}` — rechaza (400) si `nombre` cambió |
-| DELETE | `/api/plantillas/{id}` | Eliminar. Borra también el template en Meta (`DELETE /{waba_id}/message_templates?name=…`); si Meta falla la plantilla local se borra igual y la respuesta trae `meta_advertencia` |
+| PUT | `/api/plantillas/{id}` | Actualizar `{nombre, texto, ...}` — rechaza (400) si `nombre` cambió o si es una plantilla de call center |
+| DELETE | `/api/plantillas/{id}` | Eliminar. Borra también el template en Meta (`DELETE /{waba_id}/message_templates?name=…`); si Meta falla la plantilla local se borra igual y la respuesta trae `meta_advertencia`. Rechaza (400) las de call center |
 | GET | `/api/plantillas/{id}/estado-meta` | Consulta en Meta el estado real de un template |
 | POST | `/api/plantillas/estado-meta/actualizar` | Refresca el estado de todas las plantillas con template |
 | POST | `/api/plantillas/sincronizar-meta` | Lee los templates que existen en Meta: actualiza estado/id de los conocidos e **importa como plantilla nueva** los que falten (no crea/edita nada en Meta, solo lee) |
+
+#### Plantillas de call center
+
+Plantillas normales con `especial: "call_center"` en `plantillas.json`: mensajes con el
+link al chat del call center que se envían **solo a pacientes interesados** desde el
+Historial. **No** tienen template de Meta (van como texto libre) ni entran en los envíos
+masivos (`iniciar_envio` las rechaza). Se gestionan desde la sección **"Plantillas de call
+center"** al final de la página Historial. Al arrancar se siembra una si no hay ninguna.
+
+| Método | Endpoint | Descripción |
+|---|---|---|
+| GET | `/api/plantillas/call-center` | Lista las plantillas de call center |
+| POST | `/api/plantillas/call-center` | Crear `{nombre, texto}` |
+| PUT | `/api/plantillas/call-center/{id}` | Actualizar `{nombre, texto}` (el nombre sí se puede cambiar) |
+| DELETE | `/api/plantillas/call-center/{id}` | Eliminar |
 
 ### Envíos
 
@@ -336,6 +355,19 @@ recibir`, `no molestar`, `borrame`…) y el botón nativo de Meta en templates d
 (`Detener promociones` / `Stop promotions`, incluido su `payload`). Meta no manda un evento
 explícito de baja.
 
+**Mensajes de interés:** el texto literal de cada respuesta del paciente se guarda en
+`log_envios.mensaje`. En el **detalle de un envío del Historial** aparece bajo la respuesta
+de cada paciente, y se resalta **en verde** cuando el mensaje muestra intención positiva
+(`me interesa`, `sí`, `quiero agendar`, `confirmo`…). La detección es `es_mensaje_interes`
+en `whatsapp_service.py`; una baja nunca cuenta como interés.
+
+Cuando el webhook detecta interés marca `pacientes.interesado = 1` y **revierte cualquier
+baja previa** (pone `whatsapp_opt_out = 0` y convierte las filas `respuesta = 'baja'` del
+paciente a `'respondio'`). Así, si el paciente escribió "quiero darme de baja" y más tarde
+"en realidad me interesa", vuelve a quedar contactable. Desde el **detalle del Historial**
+(botón **Ver mensajes** en cada paciente) un admin ve el hilo completo, puede marcar/
+desmarcar `interesado` a mano y, si está interesado, enviarle el mensaje de call center.
+
 **Ajuste manual:** en Pacientes, hacer click en el badge de la columna **Respuesta** abre
 un selector para marcar a mano `respondió` / `se dio de baja` / etc. — útil si el webhook
 no llegó o el paciente avisó por otro canal. `PUT /api/pacientes/{id}/respuesta` (solo
@@ -352,6 +384,9 @@ La "respuesta efectiva" de un paciente se calcula con esta prioridad:
 3. **señal automática 'pegajosa'**: la más fuerte que haya tenido alguna vez
    (`baja` > `respondió`); un envío posterior no la borra
 4. `pendiente`
+
+Un mensaje de **interés** posterior a una baja rompe la prioridad 1 y 3: limpia el opt-out
+y reescribe las filas `baja` del paciente, de modo que la respuesta efectiva pasa a `respondió`.
 
 Se calcula igual en:
 

@@ -97,7 +97,7 @@ async function cargar() {
       estado: p.estado || "pendiente",
       info_extra: p.info_extra || "",
     }));
-    plantillas = await rt.json();
+    plantillas = (await rt.json()).filter((p) => !p.especial);
     config = await rc.json();
 
     $("#nombreBd").textContent = config.base_datos ?? "";

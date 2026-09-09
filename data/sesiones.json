@@ -435,10 +435,6 @@
     "rol": "administrador",
     "nombre": "Administrador"
   },
-  "0c6b40f4758749d3990d3a0abf641e77": {
-    "rol": "administrador",
-    "nombre": "Administrador"
-  },
   "cf86439544ac44c39ac8010b15e93b8f": {
     "rol": "administrador",
     "nombre": "Administrador"
@@ -900,6 +896,74 @@
     "nombre": "Administrador"
   },
   "ee7fe59e3aa84b49988ee40e7a53e67f": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "fcc0faf3189c426ea469a4e677dbf409": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "0e06bdc15a1d42db91059a1f8c608c6a": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "2afc1a71e86a421088ac81415a53344d": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "cef9a1e459254a6faedfede4439ce5d1": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "16bf26362301408a9845e1a3e557e765": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "a5c412105f954e968cb214acf22ef611": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "21246e4968df4386993f31bdebbe8d04": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "fcbcc77f26284170b0302bd347fdeca6": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "d67ee6be82264dd292393f8f97202735": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "b2df43e30c214910a3a88b0beb58ef64": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "87fd4581396f45318f62d338098717b2": {
+    "rol": "usuario",
+    "nombre": "Usuario Final"
+  },
+  "23e0444e4c1843f3b282b08e98abb5b0": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "8df6c71df1a440f793a37d673ecb48dd": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "31844ec0e8cd42f6ac6e5b6a49331f7c": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "f25a664654864bc19765f3f35e4d31dd": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "084454ff7dff4745a4133523b1c6a8c2": {
+    "rol": "administrador",
+    "nombre": "Administrador"
+  },
+  "6e419818bcb34f0cb9a804a443936181": {
     "rol": "administrador",
     "nombre": "Administrador"
   }

@@ -100,6 +100,8 @@ def asegurar_tabla_config() -> None:
             )
             # Corrección manual de la respuesta del paciente: gana sobre la
             # señal automática 'pegajosa'. NULL = sin corrección.
+            # `interesado`: el paciente mostró interés real ("me interesa", "quiero
+            # agendar"…). Se marca solo por webhook o a mano; sobreescribe una baja.
             for tp in ("pacientes_dev", "pacientes_prod"):
                 cur.execute(
                     "SELECT"
@@ -107,8 +109,11 @@ def asegurar_tabla_config() -> None:
                     "     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s) AS tabla,"
                     "  (SELECT COUNT(*) FROM information_schema.COLUMNS"
                     "     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s"
-                    "       AND COLUMN_NAME = 'respuesta_manual') AS col",
-                    (tp, tp),
+                    "       AND COLUMN_NAME = 'respuesta_manual') AS col,"
+                    "  (SELECT COUNT(*) FROM information_schema.COLUMNS"
+                    "     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s"
+                    "       AND COLUMN_NAME = 'interesado') AS col_int",
+                    (tp, tp, tp),
                 )
                 fila = cur.fetchone() or {}
                 if not fila.get("tabla"):
@@ -125,6 +130,8 @@ def asegurar_tabla_config() -> None:
                         " WHERE EXISTS (SELECT 1 FROM log_envios le2"
                         "  WHERE le2.paciente_id = p.id AND le2.plantilla_clave = 'ajuste_manual')"
                     )
+                if not fila.get("col_int"):
+                    cur.execute(f"ALTER TABLE {tp} ADD COLUMN interesado TINYINT(1) NOT NULL DEFAULT 0")
                 cur.execute(f"UPDATE {tp} SET respuesta_manual = 'respondio' WHERE respuesta_manual = 'click'")
 
             # El tipo de respuesta 'click' se eliminó: quita el valor del ENUM

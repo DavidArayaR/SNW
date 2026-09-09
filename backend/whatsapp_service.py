@@ -51,6 +51,45 @@ BAJA_FRASES = (
     "cancelar suscripcion", "cancelar suscripción",
 )
 
+# Mensajes del paciente que muestran interés / intención positiva. Se comparan
+# igual que las de baja (texto en minúsculas, sin signos). Si el mensaje también
+# encaja como baja, gana la baja.
+INTERES_EXACTAS = (
+    "si", "sí", "sip", "ok", "oka", "okey", "okok", "dale", "listo", "bueno",
+    "claro", "dale gracias", "confirmo", "confirmar", "confirmado", "acepto",
+    "me interesa", "interesa", "interesado", "interesada", "quiero", "perfecto",
+    "correcto", "afirmativo", "por supuesto", "obvio", "de una",
+)
+INTERES_FRASES = (
+    "me interesa", "si me interesa", "sí me interesa", "me interesaria",
+    "me interesaría", "estoy interesad", "si estoy interesad", "sí estoy interesad",
+    "me gustaria", "me gustaría", "quiero saber mas", "quiero saber más",
+    "mas informacion", "más información", "mas info", "más info",
+    "quiero agendar", "quiero reservar", "quiero una hora", "quiero la hora",
+    "necesito una hora", "necesito hora", "puedo agendar", "como agendo",
+    "cómo agendo", "donde agendo", "dónde agendo", "quiero confirmar",
+    "confirmo mi", "confirmo la", "confirmo asistencia", "confirmo la hora",
+    "voy a ir", "si asistire", "si voy", "sí voy", "cuando puedo",
+    "cuándo puedo", "me sirve", "si me sirve", "de acuerdo", "esta bien",
+    "está bien", "si quiero", "sí quiero", "si porfavor", "si por favor",
+    "sí por favor", "quiero mas informacion", "quiero más información",
+)
+
+
+def es_mensaje_interes(texto: str) -> bool:
+    """True si el mensaje del paciente muestra interés ('me interesa', 'sí',
+    'quiero agendar'…). Una baja NUNCA cuenta como interés."""
+    t = re.sub(r"[^\wáéíóúñ\s]", " ", (texto or "").lower())
+    t = re.sub(r"\s+", " ", t).strip()
+    if not t:
+        return False
+    if t in BAJA_EXACTAS or any(f in t for f in BAJA_FRASES):
+        return False
+    if t in INTERES_EXACTAS:
+        return True
+    return any(f in t for f in INTERES_FRASES)
+
+
 # Estados de entrega que Meta reporta por webhook.
 ESTADO_WHATSAPP = {"sent", "delivered", "read", "failed"}
 
@@ -599,10 +638,19 @@ class WhatsAppService:
                 extra = br.get("id", "") or br.get("description", "")
             if not texto and not extra:
                 continue
-            info = self._registrar_respuesta(telefono, texto or extra, mensaje.get("timestamp"))
+            cuerpo = texto or extra
+            info = self._registrar_respuesta(telefono, cuerpo, mensaje.get("timestamp"))
             acciones.append(f"respuesta_{info}")
 
-            if self._es_baja(texto) or self._es_baja(extra):
+            interes = es_mensaje_interes(cuerpo)
+            baja = self._es_baja(texto) or self._es_baja(extra)
+
+            if interes:
+                # El interés manda: si el paciente se había dado de baja y ahora
+                # dice que le interesa, se revierte la baja.
+                self._registrar_interes(telefono)
+                acciones.append("interes")
+            elif baja:
                 self._registrar_baja(telefono)
                 acciones.append("baja")
         return acciones
@@ -725,6 +773,34 @@ class WhatsAppService:
                 conn.commit()
         except Exception as e:
             log_error(f"_registrar_baja({telefono})", e)
+
+    def _registrar_interes(self, telefono: str) -> None:
+        """Marca al paciente como interesado y revierte cualquier baja previa
+        (opt-out, corrección manual y señal 'pegajosa' de baja en el historial)."""
+        match = _TEL_MATCH.format(col="telefono")
+        try:
+            with conectar() as conn, conn.cursor() as cur:
+                pacientes = self._pacientes_con_tel(cur, telefono)
+                if not pacientes:
+                    return
+                for p in pacientes:
+                    for sql in (
+                        f"UPDATE {p['tabla']} SET interesado = 1 WHERE {match}",
+                        f"UPDATE {p['tabla']} SET whatsapp_opt_out = 0 WHERE {match}",
+                    ):
+                        try:
+                            cur.execute(sql, (telefono,))
+                        except Exception:
+                            pass  # esquema sin esa columna
+                    # Anula la señal 'pegajosa' de baja del historial del paciente.
+                    cur.execute(
+                        "UPDATE log_envios SET respuesta = 'respondio'"
+                        " WHERE paciente_id = %s AND respuesta = 'baja'",
+                        (p["id"],),
+                    )
+                conn.commit()
+        except Exception as e:
+            log_error(f"_registrar_interes({telefono})", e)
 
     def _actualizar_estado(self, message_id: str, estado: str, detalle_error: str | None = None) -> None:
         for ambiente in ("desarrollo", "produccion"):

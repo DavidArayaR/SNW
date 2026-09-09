@@ -62,6 +62,18 @@
       </div>
     </section>
 
+    <section class="panel" id="panelCallCenter" data-solo-admin>
+      <div class="panel__head">
+        <h2>Plantillas de call center</h2>
+        <button id="btnNuevaCC" class="btn btn--primary" type="button">+ Nueva</button>
+      </div>
+      <p class="field__hint" style="margin: 12px 18px 0;">
+        Mensajes con el link al chat del call center. Se env&iacute;an solo a pacientes marcados como
+        interesados (bot&oacute;n «Ver mensajes» en el detalle de un env&iacute;o). No se usan en env&iacute;os masivos.
+      </p>
+      <div id="listaCC" class="cc-lista"></div>
+    </section>
+
       </main>
     </div>
   </div>
@@ -84,6 +96,53 @@
       <div class="modal__actions">
         <button type="button" class="btn btn--primary" id="btnCerrarDetalle">Cerrar</button>
       </div>
+    </div>
+  </div>
+
+  <div id="modalMensajes" class="modal" hidden>
+    <div class="modal__card modal__card--detalle" role="dialog" aria-modal="true">
+      <h3 id="mensajesTitulo">Mensajes del paciente</h3>
+      <div id="msgPacienteCab" class="msg-cab"></div>
+      <div id="msgHilo" class="msg-hilo"></div>
+      <div class="msg-acciones" data-solo-admin>
+        <label class="msg-interes">
+          <input type="checkbox" id="chkInteresado">
+          <span>Marcar como interesado</span>
+        </label>
+        <div class="msg-cc-envio">
+          <select id="selCC" hidden></select>
+          <button type="button" class="btn btn--primary" id="btnEnviarCallCenter" disabled>
+            Enviar mensaje de call center
+          </button>
+        </div>
+      </div>
+      <div class="modal__actions">
+        <button type="button" class="btn btn--ghost" id="btnCerrarMensajes">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalCC" class="modal" hidden>
+    <div class="modal__card" role="dialog" aria-modal="true">
+      <h3 id="ccTitulo">Nueva plantilla de call center</h3>
+      <form id="formCC" novalidate>
+        <div class="field">
+          <label for="ccNombre">Nombre</label>
+          <input type="text" id="ccNombre" maxlength="80" autocomplete="off" placeholder="Ej: Derivaci&oacute;n a call center">
+        </div>
+        <div class="field">
+          <label for="ccTexto">Mensaje</label>
+          <textarea id="ccTexto" rows="5" placeholder="Incluye el enlace al chat, p. ej. https://wa.me/56900000000"></textarea>
+          <div class="field__foot">
+            <p class="field__hint">Puedes usar <code>{nombre}</code>, <code>{apellido}</code>, <code>{info_extra}</code>.</p>
+            <span id="ccContador" class="char-count">0 / 1024</span>
+          </div>
+        </div>
+        <div class="modal__actions">
+          <button type="button" class="btn btn--ghost" id="btnCancelarCC">Cancelar</button>
+          <button type="submit" class="btn btn--primary" id="btnGuardarCC">Guardar</button>
+        </div>
+      </form>
     </div>
   </div>
 

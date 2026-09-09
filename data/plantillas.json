@@ -40,5 +40,13 @@
     "whatsapp_template_rejected_reason": "NONE",
     "whatsapp_template_error": null,
     "actualizada": 1788545013118
+  },
+  {
+    "id": 5,
+    "clave": "call_center",
+    "nombre": "Mensaje para paciente interesado (call center)",
+    "texto": "¡Hola {nombre}! Gracias por tu interés. Puedes hablar directamente con nuestro equipo de atención en este enlace: https://wa.me/56900000000",
+    "especial": "call_center",
+    "actualizada": 1788963149280
   }
 ]

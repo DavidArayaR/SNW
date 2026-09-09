@@ -29,7 +29,7 @@ from db import (
     CONFIG_DEFAULTS,
 )
 from motor_envio import obtener_canal
-from whatsapp_service import WhatsAppService
+from whatsapp_service import WhatsAppService, es_mensaje_interes
 from whatsapp_webhook import router as whatsapp_router
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -83,6 +83,15 @@ async def sin_cache(request, call_next):
 
 
 MAX_TEXTO_PLANTILLA = 1024  # máximo de caracteres del cuerpo del mensaje (límite de Meta)
+
+# Plantilla reservada: el mensaje que se envía a un paciente interesado con el
+# link al chat del call center. NO se puede usar en envíos masivos ni borrar;
+# solo se edita su texto (para cambiar el enlace).
+CALL_CENTER_CLAVE = "call_center"
+CALL_CENTER_TEXTO_DEFAULT = (
+    "¡Hola {nombre}! Gracias por tu interés. Puedes hablar directamente con "
+    "nuestro equipo de atención en este enlace: https://wa.me/56900000000"
+)
 
 
 class PlantillaIn(BaseModel):
@@ -232,6 +241,29 @@ def escribir_plantillas(datos: list) -> None:
     )
 
 
+def plantillas_call_center() -> list[dict]:
+    return [p for p in leer_plantillas() if p.get("especial") == CALL_CENTER_CLAVE]
+
+
+def _asegurar_plantilla_call_center() -> None:
+    """Crea una plantilla de call center inicial si no hay ninguna."""
+    plantillas = leer_plantillas()
+    if any(p.get("especial") == CALL_CENTER_CLAVE for p in plantillas):
+        return
+    plantillas.append({
+        "id": max((p.get("id", 0) for p in plantillas), default=0) + 1,
+        "clave": CALL_CENTER_CLAVE,
+        "nombre": "Mensaje para paciente interesado (call center)",
+        "texto": CALL_CENTER_TEXTO_DEFAULT,
+        "especial": CALL_CENTER_CLAVE,
+        "actualizada": int(time.time() * 1000),
+    })
+    escribir_plantillas(plantillas)
+
+
+_asegurar_plantilla_call_center()
+
+
 def slug(texto: str) -> str:
     t = unicodedata.normalize("NFD", texto.strip().lower())
     t = "".join(c for c in t if unicodedata.category(c) != "Mn")
@@ -309,6 +341,10 @@ def expr_select_pacientes(ambiente: str) -> str:
         exprs.append("p.whatsapp_opt_out")
     else:
         exprs.append("0 AS whatsapp_opt_out")
+    if "interesado" in cols:
+        exprs.append("COALESCE(p.interesado, 0) AS interesado")
+    else:
+        exprs.append("0 AS interesado")
     exprs.append("l.id AS ultimo_log_id")
     exprs.append("l.estado_envio AS ultimo_estado_envio")
     exprs.append("l.descripcion_error AS ultimo_error")
@@ -437,6 +473,161 @@ def actualizar_respuesta_paciente(paciente_id: int, body: RespuestaIn,
     fr = fila.get("ultima_respuesta_fecha")
     fila["ultima_respuesta_fecha"] = fr.strftime("%d-%m-%Y %H:%M") if fr else None
     return fila
+
+
+@app.get("/api/pacientes/{paciente_id}/mensajes")
+def mensajes_paciente(paciente_id: int, ambiente: str = Query("produccion"),
+                      sesion: dict = Depends(solo_admin)):
+    """Todos los mensajes (entrantes y salientes) de un paciente, para revisar
+    a mano si su interés es real. Los entrantes se guardan tal cual los escribió."""
+    t = tabla_pacientes(ambiente)
+    cols = columnas_tabla(t, ambiente)
+    tiene_opt = "whatsapp_opt_out" in cols
+    tiene_int = "interesado" in cols
+    re_expr = expr_respuesta_efectiva("p", tiene_opt, "respuesta_manual" in cols)
+    with conectar(ambiente) as conn, conn.cursor() as cur:
+        cur.execute(
+            f"SELECT p.id, p.nombre, p.apellido, p.telefono,"
+            f" {'p.whatsapp_opt_out' if tiene_opt else '0'} AS whatsapp_opt_out,"
+            f" {'COALESCE(p.interesado, 0)' if tiene_int else '0'} AS interesado,"
+            f" {re_expr} AS respuesta"
+            f" FROM {t} p WHERE p.id = %s",
+            (paciente_id,),
+        )
+        pac = cur.fetchone()
+        if not pac:
+            raise HTTPException(404, detail="Paciente no encontrado")
+        cur.execute(
+            "SELECT id, fecha_hora, mensaje, plantilla_clave, estado_envio, descripcion_error"
+            " FROM log_envios WHERE paciente_id = %s"
+            "   AND ((mensaje IS NOT NULL AND mensaje <> '') OR plantilla_clave = 'respuesta')"
+            "   AND COALESCE(plantilla_clave, '') <> 'ajuste_manual'"
+            " ORDER BY id",
+            (paciente_id,),
+        )
+        filas = cur.fetchall()
+    pac["interesado"] = bool(pac.get("interesado"))
+    pac["whatsapp_opt_out"] = bool(pac.get("whatsapp_opt_out"))
+    mensajes = []
+    for f in filas:
+        entrante = (f.get("plantilla_clave") or "") == "respuesta"
+        txt = (f.get("mensaje") or "").strip()
+        mensajes.append({
+            "id": f["id"],
+            "fecha": f["fecha_hora"].strftime("%d-%m-%Y %H:%M"),
+            "direccion": "entrante" if entrante else "saliente",
+            "texto": txt,
+            "plantilla": None if entrante else (f.get("plantilla_clave") or None),
+            "estado": f.get("estado_envio"),
+            "error": f.get("descripcion_error"),
+            "interes": entrante and es_mensaje_interes(txt),
+        })
+    return {"paciente": pac, "mensajes": mensajes}
+
+
+class InteresIn(BaseModel):
+    interesado: bool
+
+
+@app.put("/api/pacientes/{paciente_id}/interes")
+def marcar_interes(paciente_id: int, body: InteresIn,
+                   ambiente: str = Query("produccion"),
+                   sesion: dict = Depends(solo_admin)):
+    """Marca/desmarca a mano a un paciente como interesado. Marcarlo sobreescribe
+    cualquier baja previa (opt-out, corrección manual y señal 'pegajosa')."""
+    t = tabla_pacientes(ambiente)
+    cols = columnas_tabla(t, ambiente)
+    if "interesado" not in cols:
+        raise HTTPException(400, detail="La base no tiene la columna 'interesado'")
+    with conectar(ambiente) as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT id FROM {t} WHERE id = %s", (paciente_id,))
+        if not cur.fetchone():
+            raise HTTPException(404, detail="Paciente no encontrado")
+        cur.execute(f"UPDATE {t} SET interesado = %s WHERE id = %s",
+                    (1 if body.interesado else 0, paciente_id))
+        if body.interesado:
+            if "whatsapp_opt_out" in cols:
+                cur.execute(f"UPDATE {t} SET whatsapp_opt_out = 0 WHERE id = %s", (paciente_id,))
+            if "respuesta_manual" in cols:
+                cur.execute(f"UPDATE {t} SET respuesta_manual = NULL WHERE id = %s", (paciente_id,))
+            cur.execute(
+                "UPDATE log_envios SET respuesta = 'respondio'"
+                " WHERE paciente_id = %s AND respuesta = 'baja'",
+                (paciente_id,),
+            )
+        conn.commit()
+        cur.execute(
+            "SELECT " + expr_select_pacientes(ambiente) + from_pacientes(ambiente) + " WHERE p.id = %s",
+            (paciente_id,),
+        )
+        fila = cur.fetchone()
+    fecha = fila.pop("fecha_actualizacion", None)
+    fila["actualizado"] = fecha.strftime("%d-%m-%Y %H:%M") if fecha else "—"
+    fr = fila.get("ultima_respuesta_fecha")
+    fila["ultima_respuesta_fecha"] = fr.strftime("%d-%m-%Y %H:%M") if fr else None
+    return fila
+
+
+@app.post("/api/pacientes/{paciente_id}/call-center")
+def enviar_call_center(paciente_id: int, ambiente: str = Query("produccion"),
+                       plantilla_id: int | None = Query(None),
+                       sesion: dict = Depends(solo_admin)):
+    """Envía a un paciente interesado una plantilla de call center (texto libre,
+    válido dentro de la ventana de 24 h de WhatsApp). Si hay varias plantillas
+    hay que indicar `plantilla_id`."""
+    t = tabla_pacientes(ambiente)
+    cols = columnas_tabla(t, ambiente)
+    with conectar(ambiente) as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT * FROM {t} WHERE id = %s", (paciente_id,))
+        pac = cur.fetchone()
+    if not pac:
+        raise HTTPException(404, detail="Paciente no encontrado")
+    if "interesado" in cols and not pac.get("interesado"):
+        raise HTTPException(400, detail="El paciente no está marcado como interesado")
+
+    ccs = plantillas_call_center()
+    if not ccs:
+        raise HTTPException(400, detail="No hay ninguna plantilla de call center configurada")
+    if plantilla_id is not None:
+        plantilla = next((p for p in ccs if p["id"] == plantilla_id), None)
+        if plantilla is None:
+            raise HTTPException(404, detail="Plantilla de call center no encontrada")
+    elif len(ccs) == 1:
+        plantilla = ccs[0]
+    else:
+        raise HTTPException(400, detail="Hay varias plantillas de call center: elige una")
+
+    telefono = normalizar_telefono((pac.get("telefono") or "").strip())
+    if telefono is None:
+        raise HTTPException(400, detail="El teléfono del paciente no es válido")
+
+    cfg = leer_config(ambiente)
+    if entorno_valido(ambiente) == "desarrollo" and telefono not in set(cfg.get("numeros_autorizados", [])):
+        raise HTTPException(400, detail="El número no está autorizado en la base de desarrollo")
+
+    nombre_completo = " ".join(x for x in [pac.get("nombre"), pac.get("apellido")] if x)
+    texto = renderizar_mensaje(plantilla.get("texto", ""), pac)
+    # Se fuerza texto libre: se quita cualquier dato de template de Meta.
+    datos_plantilla = {k: v for k, v in plantilla.items() if not str(k).startswith("whatsapp_template")}
+
+    canal = obtener_canal(cfg)
+    try:
+        resultado = canal.enviar(telefono, texto, plantilla=datos_plantilla)
+    except Exception as e:
+        log_error(f"enviar_call_center({paciente_id})", e)
+        resultado = (False, None, f"Error inesperado: {e}")
+    if len(resultado) == 3:
+        ok, message_id, error = resultado
+    else:
+        ok, error = resultado
+        message_id = None
+
+    registrar_historial(paciente_id, nombre_completo, telefono, CALL_CENTER_CLAVE, texto,
+                        "enviado" if ok else "error", error, ambiente=ambiente,
+                        whatsapp_message_id=message_id)
+    if not ok:
+        raise HTTPException(502, detail=error or "No se pudo enviar el mensaje")
+    return {"ok": True, "telefono": telefono}
 
 
 def _registrar_template_meta(p: dict, nombre_anterior: str | None = None,
@@ -660,7 +851,7 @@ def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(sesion_actual)):
     plantillas = leer_plantillas()
     clave = slug(body.clave or body.nombre)
 
-    if any(p["clave"] == clave for p in plantillas):
+    if clave == CALL_CENTER_CLAVE or any(p["clave"] == clave for p in plantillas):
         raise HTTPException(409, detail="Ya existe una plantilla con esa clave")
 
     nueva = {
@@ -691,6 +882,13 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
     plantillas = leer_plantillas()
     for p in plantillas:
         if p["id"] == plantilla_id:
+            # Las plantillas de call center se gestionan desde el Historial
+            # (endpoints /api/plantillas/call-center), no desde aquí.
+            if p.get("especial"):
+                raise HTTPException(
+                    400,
+                    detail="Las plantillas de call center se editan desde la sección del Historial.",
+                )
             # El nombre es permanente: una vez creada la plantilla no se puede
             # cambiar (solo eliminándola). La clave interna se deriva del nombre
             # al crear y quedaría desincronizada si se editara.
@@ -724,6 +922,11 @@ def eliminar_plantilla(plantilla_id: int, sesion: dict = Depends(sesion_actual))
     objetivo = next((p for p in plantillas if p["id"] == plantilla_id), None)
     if objetivo is None:
         raise HTTPException(404, detail="Plantilla no encontrada")
+    if objetivo.get("especial"):
+        raise HTTPException(
+            400,
+            detail="Las plantillas de call center se eliminan desde la sección del Historial.",
+        )
 
     # Borra también el template en Meta. Si Meta falla, se avisa pero la
     # plantilla local se elimina igual (no dejamos algo a medias en el sistema).
@@ -745,6 +948,74 @@ def eliminar_plantilla(plantilla_id: int, sesion: dict = Depends(sesion_actual))
 
     escribir_plantillas([p for p in plantillas if p["id"] != plantilla_id])
     return {"ok": True, "meta_borrado": borrado_meta, "meta_advertencia": aviso_meta}
+
+
+# --- Plantillas de call center (se gestionan desde el Historial) ---------------
+# Son plantillas normales con especial = 'call_center': se editan con nombre y
+# texto libres, no tienen template de Meta y no entran en los envíos masivos.
+
+class PlantillaCCIn(BaseModel):
+    nombre: str
+    texto: str
+
+
+def _valida_texto_cc(nombre: str, texto: str) -> None:
+    if not nombre.strip() or not texto.strip():
+        raise HTTPException(400, detail="Nombre y mensaje son obligatorios")
+    if len(texto) > MAX_TEXTO_PLANTILLA:
+        raise HTTPException(400, detail=f"El mensaje supera el limite de {MAX_TEXTO_PLANTILLA} caracteres")
+
+
+@app.get("/api/plantillas/call-center")
+def listar_plantillas_cc(sesion: dict = Depends(solo_admin)):
+    return sorted(plantillas_call_center(), key=lambda p: p.get("actualizada", 0), reverse=True)
+
+
+@app.post("/api/plantillas/call-center", status_code=201)
+def crear_plantilla_cc(body: PlantillaCCIn, sesion: dict = Depends(solo_admin)):
+    _valida_texto_cc(body.nombre, body.texto)
+    plantillas = leer_plantillas()
+    claves = {p["clave"] for p in plantillas}
+    base = slug(body.nombre) or CALL_CENTER_CLAVE
+    clave = base if base not in claves else _clave_libre(base, claves)
+    nueva = {
+        "id": max((p.get("id", 0) for p in plantillas), default=0) + 1,
+        "clave": clave,
+        "nombre": body.nombre.strip(),
+        "texto": body.texto,
+        "especial": CALL_CENTER_CLAVE,
+        "actualizada": int(time.time() * 1000),
+    }
+    plantillas.append(nueva)
+    escribir_plantillas(plantillas)
+    return nueva
+
+
+@app.put("/api/plantillas/call-center/{plantilla_id}")
+def actualizar_plantilla_cc(plantilla_id: int, body: PlantillaCCIn, sesion: dict = Depends(solo_admin)):
+    _valida_texto_cc(body.nombre, body.texto)
+    plantillas = leer_plantillas()
+    for p in plantillas:
+        if p["id"] == plantilla_id and p.get("especial") == CALL_CENTER_CLAVE:
+            p["nombre"] = body.nombre.strip()
+            p["texto"] = body.texto
+            p["actualizada"] = int(time.time() * 1000)
+            escribir_plantillas(plantillas)
+            return p
+    raise HTTPException(404, detail="Plantilla de call center no encontrada")
+
+
+@app.delete("/api/plantillas/call-center/{plantilla_id}")
+def eliminar_plantilla_cc(plantilla_id: int, sesion: dict = Depends(solo_admin)):
+    plantillas = leer_plantillas()
+    objetivo = next(
+        (p for p in plantillas if p["id"] == plantilla_id and p.get("especial") == CALL_CENTER_CLAVE),
+        None,
+    )
+    if objetivo is None:
+        raise HTTPException(404, detail="Plantilla de call center no encontrada")
+    escribir_plantillas([p for p in plantillas if p["id"] != plantilla_id])
+    return {"ok": True}
 
 
 def leer_config(ambiente: str | None = None) -> dict:
@@ -1359,6 +1630,11 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
     plantilla = next((p for p in leer_plantillas() if p["id"] == body.plantilla_id), None)
     if plantilla is None:
         raise HTTPException(404, detail="Plantilla no encontrada")
+    if plantilla.get("especial"):
+        raise HTTPException(
+            400,
+            detail="Esta plantilla solo se puede enviar a un paciente interesado, desde el Historial.",
+        )
 
     with conectar(amb) as conn, conn.cursor() as cur:
         t = tabla_pacientes(amb)
@@ -1761,10 +2037,17 @@ def detalle_historial(envio_id: int, ambiente: str = Query("produccion"),
     # se dio de baja / sin respuesta), no el valor congelado en la fila de envío.
     t = tabla_pacientes(ambiente)
     tiene_opt = columna_existe(t, "whatsapp_opt_out", ambiente)
+    tiene_int = columna_existe(t, "interesado", ambiente)
     re_expr = expr_respuesta_efectiva("pac", tiene_opt, columna_existe(t, "respuesta_manual", ambiente))
+    int_expr = "COALESCE(pac.interesado, 0)" if tiene_int else "0"
     sql = (
-        "SELECT le.id, le.nombre_paciente, le.numero_telefono, le.estado_envio,"
+        "SELECT le.id, le.paciente_id, le.nombre_paciente, le.numero_telefono, le.estado_envio,"
         " le.descripcion_error, le.fecha_hora,"
+        "  (SELECT r.mensaje FROM log_envios r"
+        "     WHERE r.paciente_id = le.paciente_id AND r.plantilla_clave = 'respuesta'"
+        "       AND r.fecha_hora >= le.fecha_hora"
+        "     ORDER BY r.id DESC LIMIT 1) AS mensaje_respuesta,"
+        f" {int_expr} AS interesado,"
         f" (CASE WHEN pac.id IS NOT NULL THEN {re_expr}"
         "        ELSE COALESCE(le.respuesta, 'pendiente') END) AS respuesta"
         f" FROM log_envios le LEFT JOIN {t} pac ON pac.id = le.paciente_id"
@@ -1775,6 +2058,10 @@ def detalle_historial(envio_id: int, ambiente: str = Query("produccion"),
         filas = cur.fetchall()
     for f in filas:
         f["fecha"] = f.pop("fecha_hora").strftime("%d-%m-%Y %H:%M")
+        f["interesado"] = bool(f.get("interesado"))
+        msg = (f.get("mensaje_respuesta") or "").strip()
+        f["mensaje_respuesta"] = msg
+        f["respuesta_interes"] = bool(msg) and es_mensaje_interes(msg)
     return filas
 
 

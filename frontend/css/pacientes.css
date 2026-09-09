@@ -439,9 +439,126 @@ td.campo-id { color: var(--texto-suave); font-family: Consolas, monospace; }
 }
 .hist-rechazo-detalle span { font-weight: 400; color: var(--texto); }
 
+/* Mensaje literal del paciente bajo su respuesta, en el detalle del historial.
+   Verde cuando el texto muestra interés ("me interesa", "sí", "quiero agendar"). */
+.hist-msg {
+  margin-top: 5px;
+  font-size: .8rem;
+  line-height: 1.4;
+  color: var(--suave, #66757f);
+  max-width: 360px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.hist-msg--interes {
+  color: #1e7d4d;
+  font-weight: 600;
+  background: #e5f6ec;
+  border: 1px solid #bfe5cf;
+  border-radius: 8px;
+  padding: 5px 9px;
+}
+
 .btn--sm { padding: 4px 10px; font-size: .78rem; border-radius: 6px; }
 
 #tablaHistorial tbody tr { cursor: pointer; }
+
+/* Etiqueta "interesado" y botón "Ver mensajes" en el detalle del historial */
+.hist-tag-interes {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: .68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  color: #1e7d4d;
+  background: #e5f6ec;
+  border: 1px solid #bfe5cf;
+}
+.hist-ver-msgs { margin-top: 6px; }
+
+/* Modal "Mensajes del paciente" */
+.msg-cab {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 2px 0 12px;
+  font-size: .85rem;
+  color: var(--suave, #66757f);
+}
+.msg-cab__estado { font-weight: 700; color: var(--texto); }
+.msg-hilo {
+  max-height: 46vh;
+  overflow-y: auto;
+  padding: 12px;
+  background: #f0f2f5;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.msg-vacio { text-align: center; color: var(--suave, #66757f); font-size: .88rem; margin: 18px 0; }
+.msg-burbuja {
+  max-width: 78%;
+  padding: 8px 11px;
+  border-radius: 12px;
+  font-size: .86rem;
+  line-height: 1.4;
+}
+.msg-burbuja--entrante { align-self: flex-start; background: #fff; border: 1px solid #e3e7ea; }
+.msg-burbuja--saliente { align-self: flex-end; background: #d9fdd3; border: 1px solid #bfeeb5; }
+.msg-burbuja--interes { border-color: #1e7d4d; box-shadow: 0 0 0 1px #1e7d4d inset; }
+.msg-texto { white-space: pre-wrap; word-break: break-word; }
+.msg-meta { margin-top: 4px; font-size: .7rem; color: #7a8a91; }
+.msg-acciones {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+}
+.msg-interes { display: inline-flex; align-items: center; gap: 8px; font-size: .88rem; cursor: pointer; }
+.msg-interes input { width: 16px; height: 16px; accent-color: var(--verde); }
+.msg-cc-envio { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.msg-cc-envio select {
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: .85rem;
+  max-width: 200px;
+}
+
+/* Sección "Plantillas de call center" en el Historial */
+.cc-lista { padding: 14px 18px 20px; display: flex; flex-direction: column; gap: 10px; }
+.cc-vacio { color: var(--suave, #66757f); font-size: .88rem; margin: 6px 0; }
+.cc-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+  background: #fafbfc;
+}
+.cc-item__txt { min-width: 0; }
+.cc-item__txt strong { display: block; font-size: .92rem; }
+.cc-item__txt span {
+  display: block;
+  margin-top: 2px;
+  font-size: .8rem;
+  color: var(--suave, #66757f);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 46ch;
+}
+.cc-item__acc { display: flex; gap: 8px; flex-shrink: 0; }
 
 .respuesta-badge {
   display: inline-block;

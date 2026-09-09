@@ -64,8 +64,10 @@ async function cargar() {
       const res = await fetch(API_URL, { headers: authHeaders(), cache: "no-store" });
       if (res.status === 401) { window.snwSalir(); return; }
       if (!res.ok) throw new Error(res.status);
-      plantillas = await res.json();
-      if (!Array.isArray(plantillas)) throw new Error("formato inválido");
+      const datos = await res.json();
+      if (!Array.isArray(datos)) throw new Error("formato inválido");
+      // Las plantillas de call center se gestionan desde el Historial.
+      plantillas = datos.filter((p) => !p.especial);
       renderLista(buscadorEl.value);
       if (activaId === null) seleccionarDefault();
       return;
