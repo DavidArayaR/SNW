@@ -209,8 +209,12 @@ Reglas del editor:
   eliminarla y crear otra). Evita romper la `clave` interna, que se deriva del nombre.
 - **El nombre del template de Meta se genera solo**: es siempre el `slug` del nombre de
   la plantilla (minúsculas, números y `_`), el campo no es editable a mano.
-- Idioma y categoría del template quedan bloqueados una vez que la plantilla ya tiene un
-  template registrado en Meta (no se pueden cambiar sin crear uno nuevo).
+- **La categoría es obligatoria**: una plantilla nueva empieza sin categoría seleccionada y
+  no se puede guardar (400 en cliente y servidor) hasta elegir `UTILITY`, `MARKETING` o
+  `AUTHENTICATION`.
+- Idioma y categoría del template quedan bloqueados una vez que la plantilla tiene un
+  template **registrado** en Meta (`whatsapp_template_id`); mientras el registro no haya
+  prosperado se pueden seguir corrigiendo.
 
 ## API
 
@@ -255,8 +259,8 @@ contraseña?» en el login (`/api/auth/olvide`).
 | Método | Endpoint | Descripción |
 |---|---|---|
 | GET | `/api/plantillas` | Lista de plantillas (incluye las de call center; el frontend de Mensajería las filtra) |
-| POST | `/api/plantillas` | Crear `{nombre, texto, whatsapp_template_lang, whatsapp_template_categoria}` |
-| PUT | `/api/plantillas/{id}` | Actualizar `{nombre, texto, ...}` — rechaza (400) si `nombre` cambió o si es una plantilla de call center |
+| POST | `/api/plantillas` | Crear `{nombre, texto, whatsapp_template_lang, whatsapp_template_categoria}`. `whatsapp_template_categoria` es obligatoria (`UTILITY` / `MARKETING` / `AUTHENTICATION`); sin ella → 400 |
+| PUT | `/api/plantillas/{id}` | Actualizar `{nombre, texto, ...}` — rechaza (400) si `nombre` cambió, si falta `whatsapp_template_categoria` o si es una plantilla de call center |
 | DELETE | `/api/plantillas/{id}` | Eliminar. Borra también el template en Meta (`DELETE /{waba_id}/message_templates?name=…`); si Meta falla la plantilla local se borra igual y la respuesta trae `meta_advertencia`. Rechaza (400) las de call center |
 | GET | `/api/plantillas/{id}/estado-meta` | Consulta en Meta el estado real de un template |
 | POST | `/api/plantillas/estado-meta/actualizar` | Refresca el estado de todas las plantillas con template |

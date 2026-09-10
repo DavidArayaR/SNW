@@ -25,7 +25,7 @@ const btnSincronizarMeta = $("#btnSincronizarMeta");
 
 const valTemplate = () => (hayTemplateMeta ? inpTemplate.value : "");
 const valTemplateLang = () => (hayTemplateMeta ? inpTemplateLang.value : "es");
-const valTemplateCategoria = () => (hayTemplateMeta ? inpTemplateCategoria.value : "UTILITY");
+const valTemplateCategoria = () => (hayTemplateMeta ? inpTemplateCategoria.value : "");
 const contadorEl = $("#contador");
 const avisoComodines = $("#avisoComodines");
 const avisoNombrePermanente = $("#avisoNombrePermanente");
@@ -304,7 +304,10 @@ function actualizarBloqueoCampos() {
 
   if (!hayTemplateMeta) return;
   const p = activaId ? plantillas.find((x) => x.id === activaId) : null;
-  const yaTieneTemplate = !!(p && p.whatsapp_template);
+  // «Ya registrado en Meta»: solo si el template existe realmente allá
+  // (whatsapp_template_id). Mientras no se haya podido registrar, el idioma y
+  // la categoría se pueden seguir corrigiendo.
+  const yaTieneTemplate = !!(p && p.whatsapp_template_id);
   // El nombre del template SIEMPRE está bloqueado (se genera desde el nombre).
   inpTemplate.disabled = true;
   inpTemplateLang.disabled = yaTieneTemplate;
@@ -335,14 +338,14 @@ function abrir(id) {
   inpMensaje.value = p.texto;
   if (hayTemplateMeta) {
     inpTemplateLang.value = p.whatsapp_template_lang || "es";
-    inpTemplateCategoria.value = p.whatsapp_template_categoria || "UTILITY";
+    inpTemplateCategoria.value = p.whatsapp_template_categoria || "";
   }
   renderEstadoMeta(p);
   btnEliminar.hidden = !PUEDE_EDITAR_PLANTILLAS;
   if (btnEnviarActual) btnEnviarActual.hidden = false;
   inpNombre.classList.remove("invalido");
   inpMensaje.classList.remove("invalido");
-  if (hayTemplateMeta) inpTemplate.classList.remove("invalido");
+  if (hayTemplateMeta) { inpTemplate.classList.remove("invalido"); inpTemplateCategoria.classList.remove("invalido"); }
   actualizarBloqueoCampos();
   refrescarEditor();
   marcarSnapshot();
@@ -358,14 +361,14 @@ function modoNueva() {
   inpMensaje.value = "";
   if (hayTemplateMeta) {
     inpTemplateLang.value = "es";
-    inpTemplateCategoria.value = "UTILITY";
+    inpTemplateCategoria.value = "";
   }
   if (bloqueEstadoMeta) bloqueEstadoMeta.hidden = true;
   btnEliminar.hidden = true;
   if (btnEnviarActual) btnEnviarActual.hidden = true;
   inpNombre.classList.remove("invalido");
   inpMensaje.classList.remove("invalido");
-  if (hayTemplateMeta) inpTemplate.classList.remove("invalido");
+  if (hayTemplateMeta) { inpTemplate.classList.remove("invalido"); inpTemplateCategoria.classList.remove("invalido"); }
   actualizarBloqueoCampos();
   refrescarEditor();
   marcarSnapshot();
@@ -412,7 +415,7 @@ formEl.addEventListener("submit", async (e) => {
   const texto = inpMensaje.value.trim();
   const whatsapp_template = valTemplate().trim();
   const whatsapp_template_lang = valTemplateLang() || "es";
-  const whatsapp_template_categoria = valTemplateCategoria() || "UTILITY";
+  const whatsapp_template_categoria = valTemplateCategoria().trim();
 
   inpNombre.classList.toggle("invalido", !nombre);
   inpMensaje.classList.toggle("invalido", !texto);
@@ -430,6 +433,10 @@ formEl.addEventListener("submit", async (e) => {
       `El mensaje tiene ${inpMensaje.value.length} caracteres y el máximo es ${MAX_MENSAJE}. Acórtalo para poder guardar.`,
       "error"
     );
+  }
+  if (hayTemplateMeta && !whatsapp_template_categoria) {
+    inpTemplateCategoria.classList.add("invalido");
+    return toast("Selecciona la categoría del template (Utility, Marketing o Authentication) para poder guardar la plantilla.", "error");
   }
   if (hayTemplateMeta && !/^[a-z0-9_]+$/.test(whatsapp_template)) {
     return toast("El nombre de la plantilla debe tener al menos una letra o número (se usa para el template de Meta).", "error");
@@ -543,6 +550,9 @@ inpNombre.addEventListener("input", () => {
   if (hayTemplateMeta) inpTemplate.classList.remove("invalido");
 });
 inpMensaje.addEventListener("input", refrescarEditor);
+if (hayTemplateMeta) {
+  inpTemplateCategoria.addEventListener("change", () => inpTemplateCategoria.classList.remove("invalido"));
+}
 buscadorEl.addEventListener("input", () => renderLista(buscadorEl.value));
 $("#btnNueva")?.addEventListener("click", intentarNueva);
 $("#btnNuevaEmpty")?.addEventListener("click", intentarNueva);

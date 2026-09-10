@@ -181,7 +181,7 @@ button:disabled:hover { outline: none; }
 .field input:focus,
 .field textarea:focus,
 .field select:focus { border-color: var(--verde); outline: none; }
-.field input.invalido, .field textarea.invalido { border-color: var(--rojo); }
+.field input.invalido, .field textarea.invalido, .field select.invalido { border-color: var(--rojo); }
 .field input:disabled,
 .field textarea:disabled,
 .field select:disabled {

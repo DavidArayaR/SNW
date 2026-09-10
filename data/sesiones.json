@@ -211,7 +211,7 @@
     ],
     "correo_recuperacion": ""
   },
-  "899fe24209fe4c14a06d93815d04e891": {
+  "47caf16395fa426591e870ddbe83f6eb": {
     "usuario": "dev",
     "rol": "desarrollador",
     "nombre": "Desarrollador",
@@ -228,7 +228,65 @@
     ],
     "correo_recuperacion": ""
   },
-  "47caf16395fa426591e870ddbe83f6eb": {
+  "70f8baccaa01440c8fe1cc060582c918": {
+    "usuario": "admin",
+    "rol": "administrador",
+    "nombre": "Administrador",
+    "permisos": [
+      "pacientes",
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar",
+      "envio_produccion",
+      "tarifas_editar",
+      "call_center",
+      "call_center_registro"
+    ],
+    "correo_recuperacion": ""
+  },
+  "24a5c15a29ed440bab4ad8e61ca29585": {
+    "usuario": "usuario",
+    "rol": "usuario",
+    "nombre": "Usuario Final",
+    "permisos": [
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar"
+    ],
+    "correo_recuperacion": ""
+  },
+  "274ab7d23f154268bb8f47ad564d1c89": {
+    "usuario": "usuario",
+    "rol": "usuario",
+    "nombre": "Usuario Final",
+    "permisos": [
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar"
+    ],
+    "correo_recuperacion": ""
+  },
+  "b1549acee544438aa1a5a94584abd777": {
+    "usuario": "admin",
+    "rol": "administrador",
+    "nombre": "Administrador",
+    "permisos": [
+      "pacientes",
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar",
+      "envio_produccion",
+      "tarifas_editar",
+      "call_center",
+      "call_center_registro"
+    ],
+    "correo_recuperacion": ""
+  },
+  "c4e5a3c333154d06b49b7e3ae4787660": {
     "usuario": "dev",
     "rol": "desarrollador",
     "nombre": "Desarrollador",
@@ -244,10 +302,117 @@
       "call_center_registro"
     ]
   },
-  "70f8baccaa01440c8fe1cc060582c918": {
+  "43a339ab517341d1a55c1f283f88de63": {
+    "usuario": "usuario",
+    "rol": "usuario",
+    "nombre": "Usuario Final",
+    "permisos": [
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar"
+    ],
+    "correo_recuperacion": ""
+  },
+  "7b25c3e248fb499fa20520e06c9cd785": {
     "usuario": "admin",
     "rol": "administrador",
     "nombre": "Administrador",
+    "permisos": [
+      "pacientes",
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar",
+      "envio_produccion",
+      "tarifas_editar",
+      "call_center",
+      "call_center_registro"
+    ],
+    "correo_recuperacion": ""
+  },
+  "d1a43868506449aab2f68c303b2386b6": {
+    "usuario": "dev",
+    "rol": "desarrollador",
+    "nombre": "Desarrollador",
+    "permisos": [
+      "pacientes",
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar",
+      "envio_produccion",
+      "tarifas_editar",
+      "call_center",
+      "call_center_registro"
+    ],
+    "correo_recuperacion": ""
+  },
+  "bb63bc6ad8744c9180ea4254fd54dd2c": {
+    "usuario": "usuario",
+    "rol": "usuario",
+    "nombre": "Usuario Final",
+    "permisos": [
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar"
+    ]
+  },
+  "92e490d76b25420c902c26c508c0fdc8": {
+    "usuario": "dev",
+    "rol": "desarrollador",
+    "nombre": "Desarrollador",
+    "permisos": [
+      "pacientes",
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar",
+      "envio_produccion",
+      "tarifas_editar",
+      "call_center",
+      "call_center_registro"
+    ],
+    "correo_recuperacion": ""
+  },
+  "7c2195339e1b49868b3ba2c8bb5fefd7": {
+    "usuario": "dev",
+    "rol": "desarrollador",
+    "nombre": "Desarrollador",
+    "permisos": [
+      "pacientes",
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar",
+      "envio_produccion",
+      "tarifas_editar",
+      "call_center",
+      "call_center_registro"
+    ],
+    "correo_recuperacion": ""
+  },
+  "756f052120f8449ca591308eb5401512": {
+    "usuario": "dev",
+    "rol": "desarrollador",
+    "nombre": "Desarrollador",
+    "permisos": [
+      "pacientes",
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar",
+      "envio_produccion",
+      "tarifas_editar",
+      "call_center",
+      "call_center_registro"
+    ]
+  },
+  "52958035dae64e62bcda239650303b4f": {
+    "usuario": "dev",
+    "rol": "desarrollador",
+    "nombre": "Desarrollador",
     "permisos": [
       "pacientes",
       "mensajeria",

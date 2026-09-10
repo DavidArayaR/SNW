@@ -93,6 +93,20 @@ async def sin_cache(request, call_next):
 
 
 MAX_TEXTO_PLANTILLA = 1024  # máximo de caracteres del cuerpo del mensaje (límite de Meta)
+CATEGORIAS_TEMPLATE = ("UTILITY", "MARKETING", "AUTHENTICATION")  # categorías válidas de Meta
+
+
+def _validar_categoria_template(valor: str | None) -> str:
+    """La categoría del template es obligatoria para guardar una plantilla: sin
+    ella no se puede registrar en Meta. Devuelve la categoría en mayúsculas."""
+    cat = (valor or "").strip().upper()
+    if cat not in CATEGORIAS_TEMPLATE:
+        raise HTTPException(
+            400,
+            detail="Selecciona la categoría del template (Utility, Marketing o "
+                   "Authentication) para poder guardar la plantilla.",
+        )
+    return cat
 
 # Plantillas de call center: el mensaje que se envía a un paciente interesado.
 # El número al que lleva el botón se pide en cada respuesta a `call_center_url`
@@ -1200,11 +1214,19 @@ def _registrar_template_meta(p: dict, nombre_anterior: str | None = None,
     No rompe el flujo si Meta falla: el error queda guardado en la plantilla."""
     nombre_template = (p.get("whatsapp_template") or "").strip() or slug(p.get("nombre", ""))
     lang = (p.get("whatsapp_template_lang") or "").strip() or "es"
-    categoria = (p.get("whatsapp_template_categoria") or "").strip() or "UTILITY"
+    categoria = (p.get("whatsapp_template_categoria") or "").strip()
 
     p["whatsapp_template"] = nombre_template
     p["whatsapp_template_lang"] = lang
     p["whatsapp_template_categoria"] = categoria
+
+    # Salvaguarda: los endpoints de crear/editar ya exigen categoría, pero si
+    # llegara sin ella no se intenta registrar en Meta.
+    if not categoria:
+        p["whatsapp_template_id"] = None
+        p["whatsapp_template_status"] = None
+        p["whatsapp_template_error"] = None
+        return p
 
     # Solo reutilizamos el template_id conocido si el nombre y el idioma no
     # cambiaron; si cambiaron, es un template distinto y hay que crearlo.
@@ -1402,6 +1424,7 @@ def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(exigir("plantillas
         raise HTTPException(400, detail="Nombre y mensaje son obligatorios")
     if len(body.texto) > MAX_TEXTO_PLANTILLA:
         raise HTTPException(400, detail=f"El mensaje supera el limite de {MAX_TEXTO_PLANTILLA} caracteres")
+    categoria = _validar_categoria_template(body.whatsapp_template_categoria)
 
     plantillas = leer_plantillas()
     clave = slug(body.clave or body.nombre)
@@ -1418,7 +1441,7 @@ def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(exigir("plantillas
         # plantilla (no se acepta uno arbitrario desde el cliente).
         "whatsapp_template": slug(body.nombre) or None,
         "whatsapp_template_lang": (body.whatsapp_template_lang or "").strip() or None,
-        "whatsapp_template_categoria": (body.whatsapp_template_categoria or "").strip() or None,
+        "whatsapp_template_categoria": categoria,
         "actualizada": int(time.time() * 1000),
     }
     nueva = _registrar_template_meta(nueva)
@@ -1444,6 +1467,8 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
                     400,
                     detail="Las plantillas de call center se editan desde la sección del Historial.",
                 )
+            # La categoría del template es obligatoria para poder guardar.
+            categoria = _validar_categoria_template(body.whatsapp_template_categoria)
             # El nombre es permanente: una vez creada la plantilla no se puede
             # cambiar (solo eliminándola). La clave interna se deriva del nombre
             # al crear y quedaría desincronizada si se editara.
@@ -1460,7 +1485,7 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
             p["texto"] = body.texto
             p["whatsapp_template"] = p.get("whatsapp_template") or (slug(p.get("nombre", "")) or None)
             p["whatsapp_template_lang"] = (body.whatsapp_template_lang or "").strip() or None
-            p["whatsapp_template_categoria"] = (body.whatsapp_template_categoria or "").strip() or None
+            p["whatsapp_template_categoria"] = categoria
             p["actualizada"] = int(time.time() * 1000)
             p = _registrar_template_meta(p, nombre_template_anterior, lang_anterior, template_id_anterior)
             escribir_plantillas(plantillas)

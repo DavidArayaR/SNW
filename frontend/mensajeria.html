@@ -111,10 +111,12 @@
         <div class="field">
           <label for="inpTemplateCategoria">Categoría del template</label>
           <select id="inpTemplateCategoria">
+            <option value="" selected>Selecciona una categoría</option>
             <option value="UTILITY">Utility (transaccional)</option>
             <option value="MARKETING">Marketing</option>
             <option value="AUTHENTICATION">Authentication (códigos OTP)</option>
           </select>
+          <p class="field__hint">Obligatoria: elige la categoría correcta del template (Utility, Marketing o Authentication) para poder guardar la plantilla. No se puede cambiar una vez que Meta lo aprueba.</p>
         </div>
 
         <div class="field" id="bloqueEstadoMeta" hidden>
