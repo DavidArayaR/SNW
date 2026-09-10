@@ -41,12 +41,22 @@ CONFIG_DEFAULTS = {
     "numeros_prueba_prod": "",
     "intervalo_ms": "1000",
     "url_base": "",
-    # Call center: uno o varios números (solo dígitos, con código de país,
-    # separados por coma) a los que lleva el botón de las plantillas de call
-    # center, y segundos de espera antes del envío automático cuando un paciente
-    # muestra interés (0 = desactivado).
+    # Call center: el número al que lleva el botón de las plantillas de call
+    # center se pide en cada respuesta a `call_center_url` (un servicio que
+    # devuelve un número —solo dígitos, con código de país— y ya reparte la
+    # carga). `call_center_numeros` es un respaldo manual (uno o varios,
+    # separados por coma) por si la URL no responde.
+    # `call_center_auto_segundos`: espera antes del envío automático cuando un
+    # paciente muestra interés (0 = desactivado).
+    # `call_center_boton_mensaje` / `..._oferta`: texto que se autocompleta en el
+    # chat del call center al pulsar el botón. Se usa el de «oferta» cuando la
+    # última plantilla enviada al paciente mencionaba un descuento o precio
+    # especial; si no, el genérico.
+    "call_center_url": "https://saludmentalparatodos.cl/telefonosmpt.php",
     "call_center_numeros": "",
     "call_center_auto_segundos": "10",
+    "call_center_boton_mensaje": "Hola, estoy interesado/a en la información que me enviaron.",
+    "call_center_boton_mensaje_oferta": "Hola, estoy interesado/a en la oferta que me enviaron.",
     # Correo (confirmación de envíos en producción)
     "smtp_host": "",
     "smtp_port": "587",
@@ -266,9 +276,13 @@ ROLES_USUARIO = ("usuario", "administrador", "desarrollador")
 MAX_DESARROLLADORES = 4
 
 # La página de Configuración es exclusiva del rol `desarrollador`:
+#   - call_center:           gestionar las plantillas de call center y enviarlas a mano.
+#   - call_center_registro:  ver el registro de respuestas de call center (número
+#                            asignado, paciente) en la página de Historial.
 PERMISOS_VALIDOS = (
     "pacientes", "mensajeria", "historial", "estadisticas",
-    "plantillas_editar", "envio_produccion", "tarifas_editar", "call_center",
+    "plantillas_editar", "envio_produccion", "tarifas_editar",
+    "call_center", "call_center_registro",
 )
 PERMISOS_BASICOS = ["mensajeria", "historial", "estadisticas", "plantillas_editar"]
 

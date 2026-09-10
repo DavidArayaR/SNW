@@ -22,9 +22,10 @@ const PERM_LABEL = {
   envio_produccion: "Enviar en producción sin confirmación",
   tarifas_editar: "Administrar tarifas y costos",
   call_center: "Plantillas de call center",
+  call_center_registro: "Ver registro de respuestas de call center",
 };
 const PERM_PAGINAS = ["pacientes", "mensajeria", "historial", "estadisticas"];
-const PERM_ACCIONES = ["plantillas_editar", "envio_produccion", "tarifas_editar", "call_center"];
+const PERM_ACCIONES = ["plantillas_editar", "envio_produccion", "tarifas_editar", "call_center", "call_center_registro"];
 const PERMISOS_BASICOS = ["mensajeria", "historial", "estadisticas", "plantillas_editar"];
 const ROL_LABEL = { usuario: "Usuario", administrador: "Administrador", desarrollador: "Desarrollador" };
 const ROLES_TOTALES = ["administrador", "desarrollador"];

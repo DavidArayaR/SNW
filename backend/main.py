@@ -94,9 +94,9 @@ async def sin_cache(request, call_next):
 MAX_TEXTO_PLANTILLA = 1024  # máximo de caracteres del cuerpo del mensaje (límite de Meta)
 
 # Plantillas de call center: el mensaje que se envía a un paciente interesado.
-# El número/enlace del call center es global y se configura en la página de
-# Configuración (clave `call_center_numeros`, uno o varios); estas plantillas
-# solo definen el texto, el botón y cuál se usa para el envío automático.
+# El número al que lleva el botón se pide en cada respuesta a `call_center_url`
+# (con respaldo manual en `call_center_numeros`), ambas en Configuración; estas
+# plantillas solo definen el texto, el botón y cuál se usa para el envío automático.
 CALL_CENTER_CLAVE = "call_center"
 CALL_CENTER_TEXTO_DEFAULT = (
     "¡Hola {nombre}! Gracias por tu interés. Nuestro equipo de atención te "
@@ -886,8 +886,9 @@ def marcar_interes(paciente_id: int, body: InteresIn,
 
 
 def _call_center_numeros() -> list[str]:
-    """Números del call center configurados (solo dígitos), en orden. Pueden
-    ser varios, separados por coma, en la clave `call_center_numeros`."""
+    """Respaldo manual de números del call center (solo dígitos), en orden.
+    Se usa solo si `call_center_url` no responde. Uno o varios, separados por
+    coma, en la clave `call_center_numeros`."""
     crudo = config_get("call_center_numeros", "") or ""
     out = []
     for parte in crudo.split(","):
@@ -897,20 +898,38 @@ def _call_center_numeros() -> list[str]:
     return out
 
 
+def _numero_call_center_desde_url() -> str:
+    """Pide un número al servicio configurado en `call_center_url`. Ese servicio
+    devuelve un único número (solo dígitos, con código de país) y ya reparte la
+    carga por su cuenta. Devuelve '' si no hay URL o la respuesta no sirve."""
+    url = (config_get("call_center_url", "") or "").strip()
+    if not url:
+        return ""
+    try:
+        with httpx.Client(timeout=8, follow_redirects=True) as c:
+            r = c.get(url)
+        r.raise_for_status()
+        n = re.sub(r"\D", "", r.text or "")
+        # Un móvil chileno con código de país son 11 dígitos; damos margen.
+        return n if 8 <= len(n) <= 15 else ""
+    except Exception as e:
+        log_error(f"_numero_call_center_desde_url({url})", e)
+        return ""
+
+
 def _contadores_call_center() -> dict:
-    """{numero: nº de respuestas enviadas con ese número}, solo para los números
-    configurados actualmente (según call_center_log, envíos con éxito)."""
-    usos = {n: 0 for n in _call_center_numeros()}
-    if not usos:
-        return usos
+    """{numero: nº de respuestas enviadas con ese número} según call_center_log
+    (envíos con éxito). Como los números los entrega un servicio externo, se
+    listan todos los que hayan aparecido en el registro."""
+    usos = {}
     try:
         with conectar() as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT numero_call_center AS n, COUNT(*) AS c FROM call_center_log"
-                "  WHERE estado = 'enviado' GROUP BY numero_call_center"
+                "  WHERE estado = 'enviado' GROUP BY numero_call_center ORDER BY c DESC, n"
             )
             for row in cur.fetchall():
-                if row["n"] in usos:
+                if row["n"]:
                     usos[row["n"]] = int(row["c"] or 0)
     except Exception as e:
         log_error("_contadores_call_center", e)
@@ -918,17 +937,20 @@ def _contadores_call_center() -> dict:
 
 
 def _elegir_numero_call_center() -> str:
-    """Elige el número del call center para la próxima respuesta: el que menos
-    veces se ha usado (según call_center_log). Si varios empatan en el mínimo, 
-    incluido el caso de todos en 0, se elige uno al azar entre ellos."""
+    """Número del call center para la próxima respuesta. Primero se lo pide al
+    servicio de `call_center_url` (que ya reparte la carga); si no responde, usa
+    el respaldo manual `call_center_numeros` (el que menos se ha usado)."""
+    n = _numero_call_center_desde_url()
+    if n:
+        return n
     nums = _call_center_numeros()
     if not nums:
         return ""
     if len(nums) == 1:
         return nums[0]
     usos = _contadores_call_center()
-    minimo = min(usos.values())
-    return random.choice([n for n in nums if usos.get(n, 0) == minimo])
+    minimo = min((usos.get(x, 0) for x in nums), default=0)
+    return random.choice([x for x in nums if usos.get(x, 0) == minimo])
 
 
 def _registrar_call_center_log(paciente_id, nombre, numero_paciente, numero_cc,
@@ -947,19 +969,62 @@ def _registrar_call_center_log(paciente_id, nombre, numero_paciente, numero_cc,
         log_error("_registrar_call_center_log", e)
 
 
-def _cc_datos_envio(plantilla: dict, pac: dict) -> tuple[str, dict, str]:
+# Palabras que, si aparecen en la última plantilla enviada al paciente, hacen
+# que el botón del call center autocomplete el mensaje de «oferta» en vez del
+# genérico.
+_CC_PALABRAS_OFERTA = re.compile(
+    r"descuento|oferta|promoci[oó]n|precio\s+(?:especial|preferencial|rebajado)|"
+    r"rebaja|liquidaci[oó]n|beca|arancel\s+especial|2\s*x\s*1|\d+\s*%|por\s+ciento|gratis|"
+    r"sin\s+costo",
+    re.IGNORECASE,
+)
+
+
+def _mensaje_boton_call_center(paciente_id, ambiente: str) -> str:
+    """Texto que se autocompleta en el chat del call center cuando el paciente
+    pulsa el botón. Depende de la última plantilla normal que se le envió: si
+    mencionaba un descuento o un precio especial, usa el mensaje de «oferta»."""
+    generico = (config_get("call_center_boton_mensaje", "") or "").strip()
+    oferta = (config_get("call_center_boton_mensaje_oferta", "") or "").strip() or generico
+    if not generico and not oferta:
+        return ""
+    if paciente_id is None:
+        return generico
+    try:
+        with conectar(ambiente) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT mensaje FROM log_envios WHERE paciente_id = %s"
+                "  AND estado_envio = 'enviado'"
+                "  AND COALESCE(plantilla_clave, '') NOT IN (%s, 'respuesta', 'ajuste_manual')"
+                " ORDER BY id DESC LIMIT 1",
+                (paciente_id, CALL_CENTER_CLAVE),
+            )
+            fila = cur.fetchone()
+    except Exception as e:
+        log_error(f"_mensaje_boton_call_center({paciente_id}, {ambiente})", e)
+        return generico
+    texto_origen = (fila or {}).get("mensaje") or ""
+    return oferta if _CC_PALABRAS_OFERTA.search(texto_origen) else generico
+
+
+def _cc_datos_envio(plantilla: dict, pac: dict, ambiente: str) -> tuple[str, dict, str]:
     """Devuelve (texto renderizado, datos_plantilla, numero_asignado). Añade el
     botón que abre el chat del call center si la plantilla lo pide y hay al
-    menos un número configurado; el número se elige por menor uso."""
+    menos un número configurado; el número se elige por menor uso. El botón lleva
+    un mensaje autocompletado según lo que decía la última plantilla enviada."""
     texto = renderizar_mensaje(plantilla.get("texto", ""), pac)
     datos = {"texto": texto}
     numero = ""
     if plantilla.get("cc_boton"):
         numero = _elegir_numero_call_center()
         if numero:
+            url = f"https://wa.me/{numero}"
+            prefijo = _mensaje_boton_call_center(pac.get("id"), ambiente)
+            if prefijo:
+                url += "?text=" + urllib.parse.quote(prefijo, safe="")
             datos["cta"] = {
                 "texto": (plantilla.get("cc_boton_texto") or "Ir al call center")[:20],
-                "url": f"https://wa.me/{numero}",
+                "url": url,
             }
     return texto, datos, numero
 
@@ -976,7 +1041,7 @@ def _despachar_call_center(pac: dict, ambiente: str, plantilla: dict, automatico
         return {"ok": False, "error": "El número no está autorizado en la base de desarrollo", "telefono": telefono}
 
     nombre = " ".join(x for x in [pac.get("nombre"), pac.get("apellido")] if x)
-    texto, datos_plantilla, numero_cc = _cc_datos_envio(plantilla, pac)
+    texto, datos_plantilla, numero_cc = _cc_datos_envio(plantilla, pac, ambiente)
 
     canal = obtener_canal(cfg)
     try:
@@ -1485,16 +1550,17 @@ def listar_plantillas_cc(sesion: dict = Depends(exigir("call_center"))):
         segundos = 10
     return {
         "plantillas": ccs,
-        "numeros_call_center": _call_center_numeros(),
-        "contadores": _contadores_call_center(),
+        "call_center_url": (config_get("call_center_url", "") or "").strip(),
+        "numeros_respaldo": _call_center_numeros(),
         "auto_segundos": segundos,
     }
 
 
 @app.get("/api/call-center/log")
-def obtener_call_center_log(sesion: dict = Depends(exigir("call_center"))):
+def obtener_call_center_log(sesion: dict = Depends(exigir("call_center_registro"))):
     """Últimas respuestas enviadas a pacientes interesados, con el número de
-    call center asignado a cada una, y el contador de usos por número."""
+    call center asignado a cada una, y el contador de usos por número.
+    Permiso propio: `call_center_registro` (admin/dev lo tienen de forma implícita)."""
     entradas = []
     try:
         with conectar() as conn, conn.cursor() as cur:
@@ -1730,14 +1796,24 @@ _CONFIG_SECCIONES = [
     {
         "id": "call_center", "titulo": "Call center", "icono": "fa-headset",
         "campos": [
-            {"clave": "call_center_numeros", "etiqueta": "Números del call center", "tipo": "text",
+            {"clave": "call_center_url", "etiqueta": "URL de teléfonos del call center", "tipo": "text",
+             "ayuda": "Servicio que devuelve un número de call center (solo dígitos, con "
+                      "código de país). Se consulta en cada respuesta y ese servicio ya "
+                      "reparte la carga entre los teléfonos. Es el número al que lleva el "
+                      "botón de las plantillas de call center."},
+            {"clave": "call_center_numeros", "etiqueta": "Números de respaldo (manual)", "tipo": "text",
              "ayuda": "Uno o varios, separados por coma, con código de país y sin «+». "
-                      "Ej: 56912345678, 56987654321. Es el número al que lleva el botón de "
-                      "las plantillas de call center. Si hay varios, se van repartiendo (una "
-                      "respuesta usa un solo número, la siguiente el próximo, y así)."},
+                      "Ej: 56912345678, 56987654321. Solo se usan si la URL de números no "
+                      "responde; si hay varios se elige el menos usado."},
             {"clave": "call_center_auto_segundos", "etiqueta": "Envío automático · segundos de espera", "tipo": "number",
              "ayuda": "Cuando un paciente responde que le interesa, se le manda la plantilla de call "
                       "center automáticamente tras estos segundos. 0 = desactivado."},
+            {"clave": "call_center_boton_mensaje", "etiqueta": "Mensaje del botón (genérico)", "tipo": "text",
+             "ayuda": "Texto que se autocompleta en el chat del call center cuando el paciente pulsa "
+                      "el botón. Déjalo vacío para no autocompletar nada."},
+            {"clave": "call_center_boton_mensaje_oferta", "etiqueta": "Mensaje del botón (oferta / precio especial)", "tipo": "text",
+             "ayuda": "Se usa en lugar del genérico cuando la última plantilla enviada al paciente "
+                      "mencionaba un descuento, una oferta o un precio especial."},
         ],
     },
 ]
@@ -1908,7 +1984,7 @@ def _costo_estimado_por_clave(clave: str, total: int) -> dict | None:
 
 
 def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, plantilla_texto: str,
-                                ambiente: str, plantilla_clave: str = "") -> bool:
+                                ambiente: str, plantilla_clave: str = "", solicitante: str = "") -> bool:
     c = _config_correo()
     emisor, destino = c["emisor"], c["destino"]
     base = url_base()
@@ -1919,15 +1995,16 @@ def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, p
 
     costo = _costo_estimado_por_clave(plantilla_clave, total)
     costo_txt = _fmt_moneda(costo["costo"], costo["moneda"]) if costo else "no disponible"
+    quien = solicitante.strip() or "usuario desconocido"
 
     if not host or not pwd:
         # Modo simulado: logear URL para pruebas sin SMTP real
-        print(f"[CORREO SIMULADO] Para {destino} desde {emisor}: confirmar {base}/api/notificaciones/confirmar/{token} | rechazar {base}/api/notificaciones/rechazar/{token} - {total} personas, plantilla '{plantilla_nombre}', base {ambiente}, costo aprox. {costo_txt}")
+        print(f"[CORREO SIMULADO] Para {destino} desde {emisor}: solicitado por {quien} - confirmar {base}/api/notificaciones/confirmar/{token} | rechazar {base}/api/notificaciones/rechazar/{token} - {total} personas, plantilla '{plantilla_nombre}', base {ambiente}, costo aprox. {costo_txt}")
         return True
 
     confirm_url = f"{base}/api/notificaciones/confirmar/{token}"
     reject_url = f"{base}/api/notificaciones/rechazar/{token}"
-    subject = f"[SNW] Confirmar envío masivo - {total} destinatarios (~{costo_txt})"
+    subject = f"[SNW] {quien} pide confirmar un envío masivo - {total} destinatarios (~{costo_txt})"
 
     if costo:
         bloque_costo = f"""
@@ -1945,7 +2022,7 @@ def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, p
     html = f"""
     <html><body style="font-family: Arial, sans-serif; color: #24303c;">
       <h2>Solicitud de envío masivo</h2>
-      <p>Se ha solicitado enviar la plantilla <strong>{plantilla_nombre}</strong> a <strong>{total} personas</strong> desde la base de datos <strong>{ambiente}</strong>.</p>
+      <p><strong>{quien}</strong> solicitó enviar la plantilla <strong>{plantilla_nombre}</strong> a <strong>{total} personas</strong> desde la base de datos <strong>{ambiente}</strong>.</p>
       {bloque_costo}
       <div style="background:#f5f7f8; border-left:4px solid #128c7e; padding:14px 16px; margin:18px 0; border-radius:6px;">
         <p style="margin:0 0 6px; font-size:12px; color:#66757f; font-weight:bold;">Mensaje a enviar:</p>
@@ -2312,8 +2389,14 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
                 registrar_historial(r.get("id"), r.get("nombre"), r.get("telefono"),
                                     plantilla["clave"], "", "numero_invalido",
                                     r.get("motivo"), ambiente=amb, envio_id=envio_id)
+        nombre_sol = (sesion.get("nombre") or "").strip()
+        correo_sol = (sesion.get("usuario") or "").strip()
+        if nombre_sol and correo_sol and nombre_sol.lower() != correo_sol.lower():
+            solicitante = f"{nombre_sol} ({correo_sol})"
+        else:
+            solicitante = nombre_sol or correo_sol or "usuario desconocido"
         _enviar_correo_confirmacion(token, len(destinatarios), plantilla["nombre"], plantilla["texto"],
-                                    amb, plantilla["clave"])
+                                    amb, plantilla["clave"], solicitante)
         return {"requiere_confirmacion": True, "solicitud_id": token, "total": len(destinatarios),
                 "ambiente": amb, "rechazados": rechazados,
                 "confirm_url": f"{url_base()}/api/notificaciones/confirmar/{token}"}

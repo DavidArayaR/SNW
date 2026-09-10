@@ -543,10 +543,10 @@ td.campo-id { color: var(--texto-suave); font-family: Consolas, monospace; }
   cursor: pointer;
 }
 .cc-check input { width: 16px; height: 16px; margin-top: 2px; accent-color: var(--verde); flex-shrink: 0; }
-.cc-uso { color: var(--ok-fg); font-weight: 600; }
-#modalCCLog .modal__card { max-width: 760px; }
-#modalCCLog th, #modalCCLog td { padding: 9px 12px; }
-#modalCCLog .campo-tel { font-size: .82rem; }
+#panelCCRegistro .tabla-wrap { max-height: 420px; }
+#panelCCRegistro th, #panelCCRegistro td { padding: 9px 16px; }
+#panelCCRegistro .campo-tel { font-size: .82rem; }
+#panelCCRegistro tbody tr { cursor: default; user-select: text; }
 #modalCC .modal__card { max-width: 460px; max-height: 92vh; overflow-y: auto; }
 
 .respuesta-badge {

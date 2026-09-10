@@ -1,1 +1,58 @@
-{}
+{
+  "4248d636d9bc4cbcab543e0cd2fa9efe": {
+    "usuario": "admin",
+    "rol": "administrador",
+    "nombre": "Administrador",
+    "permisos": [
+      "pacientes",
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar",
+      "envio_produccion",
+      "tarifas_editar",
+      "call_center",
+      "call_center_registro"
+    ],
+    "correo_recuperacion": ""
+  },
+  "7338da1cee8a4a4b9b513e993e32ed1a": {
+    "usuario": "usuario",
+    "rol": "usuario",
+    "nombre": "Usuario Final",
+    "permisos": [
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar"
+    ],
+    "correo_recuperacion": ""
+  },
+  "cbce72b62eac41ccacb9bfd04028ccfe": {
+    "usuario": "dav.araya@duocuc.cl",
+    "rol": "usuario",
+    "nombre": "dav.araya",
+    "permisos": [
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar"
+    ]
+  },
+  "8ee566f077af44cd94c0a96fc15a6bff": {
+    "usuario": "dev",
+    "rol": "desarrollador",
+    "nombre": "Desarrollador",
+    "permisos": [
+      "pacientes",
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar",
+      "envio_produccion",
+      "tarifas_editar",
+      "call_center",
+      "call_center_registro"
+    ]
+  }
+}

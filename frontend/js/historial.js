@@ -307,6 +307,7 @@ if (btnEnviarCC) {
       if (!r.ok) throw new Error(data.detail || "No se pudo enviar");
       toast("Mensaje de call center enviado.", "ok");
       abrirMensajes(pacienteMsgActual.id); // recargar el hilo con el mensaje recién enviado
+      cargarLogCC();                        // reflejar el nuevo registro si el panel está visible
     } catch (err) {
       toast(`Error al enviar: ${err.message}`, "error");
       btnEnviarCC.disabled = false;
@@ -336,8 +337,8 @@ function toast(msg, tipo = "ok") {
 
 const listaCCEl = $("#listaCC");           // null sin el permiso call_center (data-perm)
 const modalCCEl = $("#modalCC");
-let ccNumeros = [];
-let ccContadores = {};
+let ccUrl = "";
+let ccNumerosRespaldo = [];
 let ccAutoSegundos = 10;
 
 async function cargarCC() {
@@ -349,8 +350,8 @@ async function cargarCC() {
     if (!r.ok) throw new Error();
     const data = await r.json();
     plantillasCC = data.plantillas || [];
-    ccNumeros = data.numeros_call_center || [];
-    ccContadores = data.contadores || {};
+    ccUrl = data.call_center_url || "";
+    ccNumerosRespaldo = data.numeros_respaldo || [];
     ccAutoSegundos = data.auto_segundos ?? 10;
     renderCC();
   } catch {
@@ -358,22 +359,25 @@ async function cargarCC() {
   }
 }
 
+function ccTieneNumero() {
+  return !!ccUrl || ccNumerosRespaldo.length > 0;
+}
+
 function renderCC() {
   if (!listaCCEl) return;
   const aviso = $("#ccAviso");
   if (aviso) {
-    if (!ccNumeros.length) {
-      aviso.innerHTML = "⚠ No hay ningún número de call center configurado: el botón no se añadirá. Configúralo en Configuración.";
+    const cab = ccAutoSegundos > 0
+      ? `Envío automático activado: se manda ${ccAutoSegundos} s después de detectar interés.`
+      : "Envío automático desactivado (Configuración).";
+    if (!ccTieneNumero()) {
+      aviso.innerHTML = "⚠ No hay servicio de teléfonos del call center ni números de respaldo: el botón no se añadirá. Configúralo en Configuración.";
       aviso.style.color = "var(--warn-fg)";
     } else {
-      const nums = ccNumeros
-        .map((n) => `+${n} <span class="cc-uso">(${ccContadores[n] ?? 0} ${(ccContadores[n] ?? 0) === 1 ? "envío" : "envíos"})</span>`)
-        .join(", ");
-      const rep = ccNumeros.length > 1 ? " · cada respuesta usa el número menos usado" : "";
-      const cab = ccAutoSegundos > 0
-        ? `Envío automático activado: se manda ${ccAutoSegundos} s después de detectar interés.`
-        : "Envío automático desactivado (Configuración).";
-      aviso.innerHTML = `${cab} Número${ccNumeros.length > 1 ? "s" : ""}: ${nums}${rep}.`;
+      const fuente = ccUrl
+        ? "El número lo entrega el servicio configurado en Configuración (reparte la carga por su cuenta)."
+        : `El botón lleva a uno de los números de respaldo (${ccNumerosRespaldo.map((n) => "+" + n).join(", ")}).`;
+      aviso.innerHTML = `${cab} ${fuente}`;
       aviso.style.color = "var(--texto-suave)";
     }
   }
@@ -417,13 +421,12 @@ function sincronizarBotonCC() {
   const on = $("#ccBoton").checked;
   $("#ccBotonTextoWrap").hidden = !on;
   const hint = $("#ccBotonHint");
-  if (hint && on && !ccNumeros.length) {
-    hint.textContent = "Falta configurar el número del call center en Configuración; hasta entonces el botón no se enviará.";
+  if (!hint) return;
+  if (on && !ccTieneNumero()) {
+    hint.textContent = "Falta configurar el servicio de teléfonos del call center en Configuración; hasta entonces el botón no se enviará.";
     hint.style.color = "var(--warn-fg)";
-  } else if (hint) {
-    hint.textContent = ccNumeros.length > 1
-      ? "El botón lleva a uno de los números configurados en Configuración (se reparten). Máx. 20 caracteres."
-      : "El botón lleva al número configurado en Configuración. Máx. 20 caracteres.";
+  } else {
+    hint.textContent = "El botón lleva al número que entrega el servicio del call center (Configuración). Máx. 20 caracteres.";
     hint.style.color = "var(--texto-suave)";
   }
 }
@@ -443,7 +446,6 @@ if (listaCCEl) {
     if (bo) borrarCC(Number(bo.dataset.ccBorrar));
   });
   $("#btnNuevaCC").addEventListener("click", () => abrirEditorCC(null));
-  $("#btnVerLogCC").addEventListener("click", abrirLogCC);
   $("#ccTexto").addEventListener("input", actualizarContadorCC);
   $("#ccBoton").addEventListener("change", sincronizarBotonCC);
   $("#btnCancelarCC").addEventListener("click", () => (modalCCEl.hidden = true));
@@ -497,13 +499,15 @@ async function borrarCC(id) {
   }
 }
 
-async function abrirLogCC() {
-  const modal = $("#modalCCLog");
+/* ---------- Panel "Registro de respuestas de call center" ---------- */
+/* null si no se tiene el permiso `call_center_registro` (data-perm en el HTML) */
+const panelCCLogEl = $("#panelCCRegistro");
+
+async function cargarLogCC() {
+  if (!panelCCLogEl) return;
   const body = $("#ccLogBody");
   const cont = $("#ccLogContadores");
-  if (!modal) return;
   body.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--texto-suave);">Cargando…</td></tr>`;
-  modal.hidden = false;
   try {
     const r = await fetch("api/call-center/log", { headers: authHeaders(), cache: "no-store" });
     if (r.status === 401) { window.snwSalir(); return; }
@@ -512,7 +516,7 @@ async function abrirLogCC() {
     const c = data.contadores || {};
     cont.innerHTML = Object.keys(c).length
       ? "Usos por número: " + Object.entries(c).map(([n, u]) => `<strong>+${escaparHtml(n)}</strong> ${u}`).join(" · ")
-      : "Sin números configurados.";
+      : "Todavía no se ha usado ningún número.";
     const filas = data.entradas || [];
     body.innerHTML = filas.length
       ? filas.map((f) => {
@@ -533,11 +537,10 @@ async function abrirLogCC() {
   }
 }
 
-const modalCCLogEl = $("#modalCCLog");
-if (modalCCLogEl) {
-  $("#btnCerrarLogCC").addEventListener("click", () => (modalCCLogEl.hidden = true));
-  modalCCLogEl.addEventListener("click", (e) => { if (e.target === modalCCLogEl) modalCCLogEl.hidden = true; });
+if (panelCCLogEl) {
+  $("#btnActualizarCCLog").addEventListener("click", cargarLogCC);
 }
 
 cargar();
 cargarCC();
+cargarLogCC();

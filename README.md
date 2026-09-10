@@ -110,7 +110,7 @@ el `entorno` activo, que las demás pantallas leen al cargar).
 | Grupo | Claves |
 |---|---|
 | App / envío | `entorno` (`desarrollo`/`produccion`), `metodo_envio` (`simulado`/`api_oficial`), `numeros_prueba_dev`, `numeros_prueba_prod`, `intervalo_ms`, `url_base` |
-| Call center | `call_center_numeros` (uno o varios números, solo dígitos, separados por coma, a los que lleva el botón CTA), `call_center_auto_segundos` (espera antes del envío automático tras detectar interés; 0 = desactivado) |
+| Call center | `call_center_url` (servicio que devuelve un número de call center; se consulta en cada respuesta y ese servicio reparte la carga), `call_center_numeros` (respaldo manual, uno o varios separados por coma, solo si la URL no responde), `call_center_auto_segundos` (espera antes del envío automático tras detectar interés; 0 = desactivado), `call_center_boton_mensaje` / `call_center_boton_mensaje_oferta` (texto que autocompleta el botón; el de oferta se usa si la última plantilla enviada mencionaba un descuento o precio especial) |
 | Correo | `smtp_host`, `smtp_port`, `smtp_user`, `smtp_pass`, `smtp_tls`, `correo_emisor`, `correo_destino` |
 | WhatsApp / Meta | `wa_token`, `wa_phone_id`, `wa_business_account_id`, `wa_verify_token`, `wa_template_nombre`, `wa_template_lang`, `wa_webhook_path`, `wa_graph_version` (por defecto `v26.0`), `wa_moneda` (moneda de facturación de la cuenta, se autodetecta desde Meta al actualizar tarifas — por defecto `USD`) |
 
@@ -177,10 +177,10 @@ día / mes / año aplicando a cada mensaje enviado la tarifa vigente en su fecha
 categoría de su plantilla.
 
 **`call_center_log`** — una fila por cada respuesta de call center enviada a un paciente
-interesado, con el `numero_call_center` que se le asignó, si fue `automatico` o manual y el
-`estado` (`enviado`/`error`). El contador de usos por número sale de aquí (`GROUP BY
-numero_call_center`) y sirve para elegir, en la siguiente respuesta, el número menos usado.
-Se ve en el **modal «Ver registro»** de la sección *Plantillas de call center* del Historial.
+interesado, con el `numero_call_center` que le asignó el servicio de `call_center_url`, si
+fue `automatico` o manual y el `estado` (`enviado`/`error`). El contador de usos por número
+sale de aquí (`GROUP BY numero_call_center`). Se ve en el panel **«Registro de respuestas de
+call center»** del Historial (permiso `call_center_registro`).
 
 **`usuarios`** — cuentas de la app. `usuario` (correo o nombre corto para las semilla, único),
 `nombre`, `rol` (`usuario`/`administrador`/`desarrollador`), `permisos` (lista CSV, solo
@@ -277,19 +277,27 @@ página Historial. Al arrancar se siembra una si no hay ninguna.
   guard por número mientras hay un envío programado). También se puede mandar a mano desde
   «Ver mensajes».
 - **Botón:** cada plantilla puede incluir (`cc_boton`) un botón CTA que abre el chat del
-  call center (`https://wa.me/<número>`, mensaje interactivo `cta_url`). Los **números son
-  globales** y se configuran en **Configuración → Call center** (`call_center_numeros`, uno o
-  varios separados por coma), no por plantilla. Si hay uno, se usa ese; si hay varios, cada
-  respuesta toma **el número menos usado** según `call_center_log` (empates y todos-en-cero →
-  uno al azar entre los mínimos). El texto del botón (`cc_boton_texto`) sí es por plantilla
-  (máx. 20 car.).
+  call center (`https://wa.me/<número>`, mensaje interactivo `cta_url`). El número **no** se
+  guarda en la plantilla: en cada respuesta se le pide a **`call_center_url`** (configurado
+  en **Configuración → Call center**), un servicio que devuelve un número —solo dígitos, con
+  código de país— y ya reparte la carga entre los teléfonos por su cuenta. Si esa URL no
+  responde, se usa el respaldo manual `call_center_numeros` (el menos usado según
+  `call_center_log`). El texto del botón (`cc_boton_texto`) sí es por plantilla (máx. 20 car.).
+  El botón autocompleta un mensaje en el chat (`?text=`): `call_center_boton_mensaje_oferta`
+  si la última plantilla enviada al paciente mencionaba un descuento / oferta / precio
+  especial (detección por palabras clave sobre `log_envios.mensaje`), o
+  `call_center_boton_mensaje` en cualquier otro caso (ambos en **Configuración → Call center**;
+  vacíos = sin autocompletar).
 - **Registro:** cada envío (auto o manual) queda en `call_center_log` con el número asignado.
-  Se consulta con `GET /api/call-center/log` y se ve en el modal **«Ver registro»**.
+  El panel **«Registro de respuestas de call center»** del Historial (permiso propio
+  `call_center_registro`, debajo de las plantillas de call center) lo muestra: fecha, nombre
+  y número del paciente, número de call center, origen y estado, más los usos por número.
+  Admin y desarrollador lo ven por defecto; a un `usuario` se le puede asignar ese permiso.
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/plantillas/call-center` | `{plantillas, numeros_call_center, contadores, auto_segundos}`. Cada plantilla trae `cc_boton`, `cc_boton_texto`, `cc_auto`, `es_auto_efectiva` |
-| GET | `/api/call-center/log` | `{entradas, contadores}` — últimas 200 respuestas de call center + usos por número |
+| GET | `/api/plantillas/call-center` | `{plantillas, call_center_url, numeros_respaldo, auto_segundos}`. Cada plantilla trae `cc_boton`, `cc_boton_texto`, `cc_auto`, `es_auto_efectiva` |
+| GET | `/api/call-center/log` | (permiso `call_center_registro`) `{entradas, contadores}` — últimas 200 respuestas de call center + usos por número. Es el panel *Registro de respuestas de call center* del Historial |
 | POST | `/api/plantillas/call-center` | Crear `{nombre, texto, boton, boton_texto, auto}` |
 | PUT | `/api/plantillas/call-center/{id}` | Actualizar `{nombre, texto, boton, boton_texto, auto}` (marcar `auto` desmarca las demás) |
 | DELETE | `/api/plantillas/call-center/{id}` | Eliminar |
@@ -338,7 +346,7 @@ página Historial. Al arrancar se siembra una si no hay ninguna.
 | GET | `/api/configuracion?ambiente=` | Vista mínima para las pantallas y el motor de envío (`entorno`, `base_datos`, `numeros_autorizados`, `metodo_envio`, `intervalo_ms`) — cualquier sesión. Los valores completos y los secretos van por `/api/configuracion/todo` |
 | PUT | `/api/configuracion` | Guarda claves sueltas de `configuracion` sin reiniciar |
 | GET | `/api/configuracion/todo` | TODAS las claves con su **valor real** (incluye secretos) + metadata de secciones, para la página Configuración |
-| PUT | `/api/configuracion/todo` | `{cambios: {clave: valor, …}}` — valida clave conocida, enums (`entorno`, `metodo_envio`) y enteros (`intervalo_ms`, `smtp_port`, `call_center_auto_segundos`); `call_center_numeros` se normaliza a lista de solo-dígitos separada por coma; persiste con `config_set` |
+| PUT | `/api/configuracion/todo` | `{cambios: {clave: valor, …}}` — valida clave conocida, enums (`entorno`, `metodo_envio`) y enteros (`intervalo_ms`, `smtp_port`, `call_center_auto_segundos`); `call_center_numeros` (respaldo) se normaliza a lista de solo-dígitos separada por coma; persiste con `config_set` |
 
 ### Webhook de WhatsApp (Meta)
 
@@ -514,7 +522,8 @@ propagar como error 500.
   correo de confirmación al supervisor con el **costo aproximado del envío en grande y rojo**
   (nº de mensajes × tarifa vigente de Meta para la categoría de la plantilla, **total
   redondeado hacia arriba**) y botones **Confirmar** y **Rechazar** (con comentario); el
-  envío no arranca hasta que se confirma. Un envío rechazado queda en el **Historial**
+  envío no arranca hasta que se confirma. El asunto y el cuerpo del correo indican el
+  nombre y el correo de la cuenta que solicitó el envío. Un envío rechazado queda en el **Historial**
   con estado `rechazado` y el comentario del supervisor (ya no se borra). Con el permiso
   `envio_produccion` (implícito para admin/dev) el envío en producción sale directo, sin correo.
 - **Desarrollo**: envío directo, restringido a los números de `numeros_prueba_dev`;
@@ -547,7 +556,7 @@ y rol desde **`usuarios.html`** (una cuenta por vez, elegida en un desplegable).
 **Permisos** (campo `permisos` de la tabla; los roles privilegiados los tienen todos de forma implícita):
 
 - Páginas: `pacientes`, `mensajeria`, `historial`, `estadisticas`
-- Acciones: `plantillas_editar`, `envio_produccion` (enviar en producción sin confirmación del supervisor), `tarifas_editar`, `call_center`
+- Acciones: `plantillas_editar`, `envio_produccion` (enviar en producción sin confirmación del supervisor), `tarifas_editar`, `call_center` (gestionar plantillas de call center), `call_center_registro` (ver el registro de respuestas de call center en el Historial)
 
 **Configuración** no es un permiso asignable: la página y sus endpoints son exclusivos del
 rol `desarrollador` (dependencia `solo_dev` en el backend).
