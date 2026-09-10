@@ -38,6 +38,7 @@ from db import (
 )
 from motor_envio import obtener_canal
 import whatsapp_service
+from wa_rate_limit import gobernador as wa_gobernador
 from whatsapp_service import WhatsAppService, es_mensaje_interes
 from whatsapp_webhook import router as whatsapp_router
 
@@ -637,10 +638,6 @@ def expr_select_pacientes(ambiente: str) -> str:
         exprs.append("COALESCE(NULLIF(p.estado, ''), 'pendiente') AS estado")
     else:
         exprs.append("'pendiente' AS estado")
-    if "info_extra" in cols:
-        exprs.append("COALESCE(p.info_extra, '') AS info_extra")
-    else:
-        exprs.append("'' AS info_extra")
     if "fecha_actualizacion" in cols:
         exprs.append("p.fecha_actualizacion")
     else:
@@ -681,12 +678,8 @@ def listar_pacientes(q: str | None = Query(None), ambiente: str = Query("producc
     args: list = []
     if q and q.strip():
         like = f"%{q.strip()}%"
-        if columna_existe(tabla_pacientes(ambiente), "info_extra", ambiente):
-            sql += " WHERE p.nombre LIKE %s OR p.telefono LIKE %s OR p.info_extra LIKE %s"
-            args = [like, like, like]
-        else:
-            sql += " WHERE p.nombre LIKE %s OR p.telefono LIKE %s"
-            args = [like, like]
+        sql += " WHERE p.nombre LIKE %s OR p.telefono LIKE %s"
+        args = [like, like]
     sql += " ORDER BY p.id"
 
     with conectar(ambiente) as conn, conn.cursor() as cur:
@@ -1742,7 +1735,13 @@ _CONFIG_SECCIONES = [
             {"clave": "metodo_envio", "etiqueta": "Método de envío", "tipo": "select",
              "opciones": ["simulado", "api_oficial"],
              "ayuda": "«simulado» no manda nada real; «api_oficial» usa la WhatsApp Cloud API de Meta."},
-            {"clave": "intervalo_ms", "etiqueta": "Intervalo entre mensajes (ms)", "tipo": "number"},
+            {"clave": "intervalo_ms", "etiqueta": "Intervalo entre mensajes (ms)", "tipo": "number",
+             "ayuda": "Pausa entre cada mensaje de un envío masivo. No es para los rate limits de "
+                      "Meta (de eso se encarga «Throughput»): sirve para espaciar el envío y cuidar "
+                      "la calificación de calidad del número, y para tener margen de pausar/cancelar. "
+                      "1000 (1 msg/s) está bien para tandas normales; bajarlo (100–250) si se necesita "
+                      "más velocidad —el throughput lo limita igual— o subirlo para ir más suave. "
+                      "0 = tan rápido como permita el throughput."},
             {"clave": "numeros_prueba_dev", "etiqueta": "Números de prueba · desarrollo", "tipo": "text",
              "ayuda": "Separados por coma. En entorno de desarrollo solo se envía a estos."},
             {"clave": "numeros_prueba_prod", "etiqueta": "Números de prueba · producción", "tipo": "text",
@@ -1791,6 +1790,27 @@ _CONFIG_SECCIONES = [
              "ayuda": "Ej: v26.0"},
             {"clave": "wa_moneda", "etiqueta": "Moneda de facturación", "tipo": "text",
              "ayuda": "Se autodetecta al pulsar «Actualizar tarifas» en Estadísticas. Ej: CLP, USD."},
+            {"clave": "wa_rate_limit_activo", "etiqueta": "Frenar envíos al acercarse al límite de Meta", "tipo": "bool",
+             "ayuda": "Lee el consumo de cuota que Meta informa en cada respuesta y espera antes de "
+                      "seguir enviando. Un error 429 de Meta se respeta aunque esto esté apagado."},
+            {"clave": "wa_rate_limit_umbral_pct", "etiqueta": "Umbral de cuota para empezar a esperar (%)", "tipo": "number",
+             "ayuda": "Por debajo de este porcentaje de uso no se añade ninguna espera. Ej: 80."},
+            {"clave": "wa_rate_limit_pausa_max_s", "etiqueta": "Espera máxima entre mensajes (s)", "tipo": "number",
+             "ayuda": "Espera que se aplica cuando la cuota llega al 100 %. Entre el umbral y el 100 % "
+                      "se interpola."},
+            {"clave": "wa_rate_limit_espera_defecto_s", "etiqueta": "Espera tras un 429 sin dato (s)", "tipo": "number",
+             "ayuda": "Cuando Meta responde «límite alcanzado» pero no dice cuánto falta para "
+                      "recuperar el acceso."},
+            {"clave": "wa_rate_limit_reintentos", "etiqueta": "Reintentos por llamada tras un 429", "tipo": "number",
+             "ayuda": "Cuántas veces se reintenta una misma llamada (esperando lo que indique Meta) "
+                      "antes de darla por fallida."},
+            {"clave": "wa_throughput_mps", "etiqueta": "Throughput · mensajes por segundo", "tipo": "number",
+             "ayuda": "Ritmo máximo de salida hacia Meta (que permite 80/s por número, contando "
+                      "entrantes y salientes). Conviene dejar margen. 0 = sin límite de ritmo."},
+            {"clave": "wa_messaging_limit_24h", "etiqueta": "Messaging limit · usuarios únicos / 24 h", "tipo": "number",
+             "ayuda": "Límite de Meta: usuarios únicos a los que el negocio puede escribir en una "
+                      "ventana móvil de 24 h (250, 1000, 2000, 10000, 100000). Al alcanzarlo se bloquean "
+                      "los envíos masivos en producción. 0 = ilimitado (sin control)."},
         ],
     },
     {
@@ -1847,16 +1867,22 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
         v = "" if valor is None else str(valor).strip()
         if clave in _CONFIG_ENUM and v not in _CONFIG_ENUM[clave]:
             raise HTTPException(400, detail=f"«{clave}»: usa uno de {', '.join(_CONFIG_ENUM[clave])}")
-        if clave in ("intervalo_ms", "smtp_port", "call_center_auto_segundos"):
+        if clave in ("intervalo_ms", "smtp_port", "call_center_auto_segundos",
+                     "wa_rate_limit_umbral_pct", "wa_rate_limit_pausa_max_s",
+                     "wa_rate_limit_espera_defecto_s", "wa_rate_limit_reintentos",
+                     "wa_throughput_mps", "wa_messaging_limit_24h"):
             try:
                 n = int(v or "0")
             except ValueError:
                 raise HTTPException(400, detail=f"«{clave}» debe ser un número entero")
-            v = str(max(1 if clave == "smtp_port" else 0, n))
+            minimo = 1 if clave == "smtp_port" else 0
+            if clave == "wa_rate_limit_umbral_pct":
+                n = min(100, n)
+            v = str(max(minimo, n))
         if clave == "call_center_numeros":
             partes = [re.sub(r"\D", "", p) for p in v.split(",")]
             v = ", ".join(dict.fromkeys(p for p in partes if p))
-        if clave == "smtp_tls":
+        if clave in ("smtp_tls", "wa_rate_limit_activo"):
             v = "true" if v.lower() in ("true", "1", "on", "si", "sí") else "false"
         cambios[clave] = v
 
@@ -1895,6 +1921,65 @@ def probar_api_wa(body: PruebaWAIn, sesion: dict = Depends(solo_dev)):
         ok, error = resultado
         message_id = None
     return {"ok": ok, "telefono": telefono, "error": error, "message_id": message_id}
+
+
+@app.get("/api/whatsapp/rate-limit")
+def estado_rate_limit(sesion: dict = Depends(solo_dev)):
+    """Consumo de cuota de la Graph API visto en la última respuesta de Meta y
+    la espera que el sistema está aplicando (si la hay)."""
+    return wa_gobernador.estado()
+
+
+# Plantillas cuyos envíos NO cuentan para el messaging limit de Meta: respuestas
+# dentro de la ventana de 24 h (no son "iniciados por el negocio").
+_CLAVES_NO_CUENTAN_LIMITE = ("call_center", "respuesta", "ajuste_manual")
+
+
+def _limite_mensajeria_tier() -> int:
+    try:
+        return max(0, int(config_get("wa_messaging_limit_24h", "0") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _uso_mensajeria_24h() -> int:
+    """Usuarios ÚNICOS a los que el negocio escribió (mensajes iniciados por el
+    negocio) en las últimas 24 h. Es lo que Meta cuenta para el messaging limit.
+    `log_envios` es una tabla compartida, así que el conteo no depende del entorno."""
+    marcadores = ", ".join(["%s"] * len(_CLAVES_NO_CUENTAN_LIMITE))
+    try:
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(DISTINCT REPLACE(REPLACE(numero_telefono, '+', ''), ' ', '')) AS n"
+                "  FROM log_envios"
+                " WHERE estado_envio = 'enviado'"
+                "   AND fecha_hora >= (NOW() - INTERVAL 24 HOUR)"
+                "   AND COALESCE(plantilla_clave, '') NOT IN (" + marcadores + ")",
+                _CLAVES_NO_CUENTAN_LIMITE,
+            )
+            fila = cur.fetchone() or {}
+            return int(fila.get("n") or 0)
+    except Exception as e:
+        log_error("_uso_mensajeria_24h", e)
+        return 0
+
+
+def _estado_limite_mensajeria() -> dict:
+    tier = _limite_mensajeria_tier()
+    usados = _uso_mensajeria_24h()
+    return {
+        "tier": tier,
+        "usados_24h": usados,
+        "disponibles": (max(0, tier - usados) if tier else None),
+        "ventana_horas": 24,
+    }
+
+
+@app.get("/api/whatsapp/messaging-limit")
+def estado_messaging_limit(sesion: dict = Depends(solo_admin)):
+    """Cuántos usuarios únicos se contactaron en las últimas 24 h frente al
+    límite de mensajería configurado (Meta: 250 / 1K / 10K / 100K / ilimitado)."""
+    return _estado_limite_mensajeria()
 
 
 JOBS: dict = {}
@@ -2061,7 +2146,6 @@ def renderizar_mensaje(texto: str, paciente: dict) -> str:
     reemplazos = {
         "{nombre}": paciente.get("nombre") or "",
         "{apellido}": paciente.get("apellido") or "",
-        "{info_extra}": paciente.get("info_extra") or "",
     }
     for clave, valor in reemplazos.items():
         texto = texto.replace(clave, valor)
@@ -2196,6 +2280,21 @@ def _procesar_job(job_id: str) -> None:
             actualizar_envio_batch(envio_id, amb, enviados=job["enviados"], fallidos=job["fallidos"], estado="cancelado")
             break
         job["actual"] = d["nombre"]
+
+        # Rate limits de Meta: si la cuota de la Graph API está alta (o Meta ya
+        # nos frenó), esperar aquí —en tramos, para poder cancelar— y dejar el
+        # motivo visible en el progreso, en vez de disparar errores 429.
+        if canal.nombre == "api_oficial":
+            espera_rl = wa_gobernador.pausa_antes_de_enviar()
+            if espera_rl >= 1:
+                job["estado"] = "en_proceso"
+                job["detalle"] = (f"Esperando por el límite de la API de Meta "
+                                  f"(~{int(espera_rl)} s)")
+                fin = time.time() + espera_rl
+                while time.time() < fin and not job.get("cancelado"):
+                    time.sleep(min(1.0, max(0.0, fin - time.time())))
+                job["detalle"] = ""
+
         try:
             resultado = canal.enviar(d["telefono"], d["mensaje"], plantilla=plantilla_datos, variables=d.get("variables"))
             # Unificar: (ok, message_id, error) o (ok, error) según el motor
@@ -2337,7 +2436,6 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
             "variables": {
                 "nombre": p.get("nombre") or "",
                 "apellido": p.get("apellido") or "",
-                "info_extra": p.get("info_extra") or "",
             },
         })
 
@@ -2362,6 +2460,26 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
                                         r.get("motivo"), ambiente=amb, envio_id=envio_id)
         return {"iniciado": False, "total": 0, "rechazados": rechazados,
                 "requiere_confirmacion": False, "envio_id": envio_id}
+
+    # Messaging limit de Meta: usuarios ÚNICOS contactados (mensajes iniciados
+    # por el negocio) en una ventana móvil de 24 h. Si ya se alcanzó, no se deja
+    # iniciar otro envío en producción; si el lote lo va a superar, se avisa.
+    aviso_limite = None
+    if amb == "produccion" and config_get("metodo_envio", "").strip() == "api_oficial":
+        tier = _limite_mensajeria_tier()
+        if tier:
+            usados = _uso_mensajeria_24h()
+            if usados >= tier:
+                raise HTTPException(429, detail=(
+                    f"Límite de mensajería de WhatsApp alcanzado: en las últimas 24 h ya se "
+                    f"contactó a {usados} usuarios únicos (límite {tier}). Espera a que avance "
+                    f"la ventana de 24 h o sube el límite en Configuración."))
+            if usados + len(destinatarios) > tier:
+                sobran = usados + len(destinatarios) - tier
+                aviso_limite = (
+                    f"Este envío llega a {usados + len(destinatarios)} usuarios únicos en 24 h y el "
+                    f"límite de WhatsApp es {tier}: Meta podría rechazar los últimos ~{sobran} "
+                    f"hasta que avance la ventana.")
 
     # En producción se requiere confirmación por correo del supervisor, salvo
     # que la cuenta tenga el permiso de envío directo en producción.
@@ -2398,7 +2516,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         _enviar_correo_confirmacion(token, len(destinatarios), plantilla["nombre"], plantilla["texto"],
                                     amb, plantilla["clave"], solicitante)
         return {"requiere_confirmacion": True, "solicitud_id": token, "total": len(destinatarios),
-                "ambiente": amb, "rechazados": rechazados,
+                "ambiente": amb, "rechazados": rechazados, "aviso_limite_mensajeria": aviso_limite,
                 "confirm_url": f"{url_base()}/api/notificaciones/confirmar/{token}"}
 
     envio_id = crear_envio_batch(nombre_base(amb), plantilla["clave"], plantilla["nombre"],
@@ -2428,7 +2546,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
 
     background_tasks.add_task(procesar_job, job_id)
     return {"requiere_confirmacion": False, "iniciado": True, "job_id": job_id, "total": len(destinatarios),
-            "ambiente": amb, "rechazados": rechazados}
+            "ambiente": amb, "rechazados": rechazados, "aviso_limite_mensajeria": aviso_limite}
 
 
 @app.get("/api/notificaciones/solicitud/{token}")

@@ -16,6 +16,9 @@ import re
 import httpx
 
 from db import conectar, config_get, log_error, tabla_pacientes
+from wa_rate_limit import (
+    gobernador, es_error_throttle, clasificar_error, reintentos_throttle, TOPE_ESPERA_S,
+)
 
 # Versión de la Graph API de Meta. Configurable en la tabla `configuracion`
 # (clave `wa_graph_version`); si no está, se usa este valor por defecto.
@@ -172,18 +175,62 @@ class WhatsAppApiClient:
             "Content-Type": "application/json",
         }
 
+    async def _peticion(self, metodo: str, url: str, *, json: dict | None = None,
+                        params: dict | None = None, throughput: bool = False) -> dict:
+        """Hace una llamada a la Graph API respetando los límites de Meta.
+
+        - Antes de cada llamada espera lo que sugiera el gobernador (consumo de
+          cuota que Meta reportó en las cabeceras anteriores) y, si `throughput`,
+          también un turno para no pasarse de `wa_throughput_mps` msg/s.
+        - Ante un throttle GLOBAL (HTTP 429 / códigos 4, 17, 32, 613, 80007,
+          80008, 130429, 131048, 131057, 368) espera el tiempo de recuperación
+          que indica Meta y reintenta hasta `wa_rate_limit_reintentos` veces.
+        - Ante un límite POR DESTINATARIO (131056, 131049, 130497) no reintenta
+          ni frena al resto: falla solo ese mensaje.
+        """
+        reintentos = reintentos_throttle()
+        async with httpx.AsyncClient(timeout=30) as cliente:
+            for intento in range(reintentos + 1):
+                espera = gobernador.pausa_antes_de_enviar()
+                if espera > 0:
+                    await asyncio.sleep(min(espera, TOPE_ESPERA_S))
+                if throughput:
+                    turno = gobernador.reservar_turno_throughput()
+                    if turno > 0:
+                        await asyncio.sleep(turno)
+                resp = await cliente.request(metodo, url, json=json, params=params,
+                                             headers=self._headers())
+                gobernador.registrar_respuesta(resp.headers)
+                if resp.status_code in (200, 201):
+                    return resp.json()
+
+                err = {}
+                try:
+                    err = resp.json().get("error", {}) or {}
+                except Exception:
+                    pass
+                tipo_limite = clasificar_error(resp.status_code, err.get("code"),
+                                               err.get("error_subcode"))
+                if tipo_limite == "global":
+                    segundos = gobernador.registrar_error(
+                        err.get("code"), err.get("error_subcode"),
+                        resp.headers, resp.headers.get("retry-after"))
+                    if intento < reintentos:
+                        log_error(f"Meta rate limit ({metodo} {url}, código {err.get('code')}): "
+                                  f"espera {int(segundos)} s y reintenta ({intento + 1}/{reintentos})")
+                        await asyncio.sleep(min(segundos, TOPE_ESPERA_S))
+                        continue
+                return self._procesar_respuesta(resp)   # levanta ErrorWhatsApp
+        return self._procesar_respuesta(resp)
+
     async def enviar(self, payload: dict) -> dict:
         url = f"{graph_url()}/{self.phone_number_id}/messages"
-        async with httpx.AsyncClient(timeout=30) as cliente:
-            resp = await cliente.post(url, json=payload, headers=self._headers())
-        return self._procesar_respuesta(resp)
+        return await self._peticion("POST", url, json=payload, throughput=True)
 
     async def crear_template(self, waba_id: str, payload: dict) -> dict:
         """Crea un template de mensaje en Meta (POST /{waba_id}/message_templates)."""
         url = f"{graph_url()}/{waba_id}/message_templates"
-        async with httpx.AsyncClient(timeout=30) as cliente:
-            resp = await cliente.post(url, json=payload, headers=self._headers())
-        return self._procesar_respuesta(resp)
+        return await self._peticion("POST", url, json=payload)
 
     async def editar_template(self, template_id: str, payload: dict) -> dict:
         """Edita un template EXISTENTE en Meta (POST /{template_id}).
@@ -193,42 +240,32 @@ class WhatsAppApiClient:
         'language': esos dos campos son inmutables una vez creado el template.
         """
         url = f"{graph_url()}/{template_id}"
-        async with httpx.AsyncClient(timeout=30) as cliente:
-            resp = await cliente.post(url, json=payload, headers=self._headers())
-        return self._procesar_respuesta(resp)
+        return await self._peticion("POST", url, json=payload)
 
     async def obtener_template(self, template_id: str) -> dict:
         """Obtiene los datos actuales de un template por su propio ID."""
         url = f"{graph_url()}/{template_id}"
-        async with httpx.AsyncClient(timeout=30) as cliente:
-            resp = await cliente.get(
-                url, params={"fields": "category,status,name,language"}, headers=self._headers()
-            )
-        return self._procesar_respuesta(resp)
+        return await self._peticion("GET", url, params={"fields": "category,status,name,language"})
 
     async def listar_templates(self, waba_id: str) -> dict:
         """Lista los templates de mensaje de la WABA, con paginación."""
         url = f"{graph_url()}/{waba_id}/message_templates"
-        params = {
+        params: dict | None = {
             "fields": "id,name,language,status,category,components,rejected_reason",
             "limit": 100,
         }
         templates: list = []
-        async with httpx.AsyncClient(timeout=30) as cliente:
-            while url:
-                resp = await cliente.get(url, params=params, headers=self._headers())
-                data = self._procesar_respuesta(resp)
-                templates += data.get("data", [])
-                url = (data.get("paging") or {}).get("next")
-                params = None  # la URL "next" ya trae todos los query params
+        while url:
+            data = await self._peticion("GET", url, params=params)
+            templates += data.get("data", [])
+            url = (data.get("paging") or {}).get("next")
+            params = None  # la URL "next" ya trae todos los query params
         return {"data": templates}
 
     async def buscar_template(self, waba_id: str, nombre: str) -> dict:
         """Busca un template por nombre (puede devolver varias variantes de idioma)."""
         url = f"{graph_url()}/{waba_id}/message_templates"
-        async with httpx.AsyncClient(timeout=30) as cliente:
-            resp = await cliente.get(url, params={"name": nombre}, headers=self._headers())
-        return self._procesar_respuesta(resp)
+        return await self._peticion("GET", url, params={"name": nombre})
 
     async def eliminar_template(self, waba_id: str, nombre: str,
                                 template_id: str | None = None) -> dict:
@@ -241,14 +278,13 @@ class WhatsAppApiClient:
         if template_id:
             params["hsm_id"] = template_id
         url = f"{graph_url()}/{waba_id}/message_templates"
-        async with httpx.AsyncClient(timeout=30) as cliente:
-            resp = await cliente.request("DELETE", url, params=params, headers=self._headers())
-        return self._procesar_respuesta(resp)
+        return await self._peticion("DELETE", url, params=params)
 
     def _procesar_respuesta(self, resp) -> dict:
         if resp.status_code in (200, 201):
             return resp.json()
         detalle = ""
+        subcodigo = None
         try:
             err = resp.json().get("error", {})
             detalle = (err.get("error_user_msg")
@@ -256,6 +292,7 @@ class WhatsAppApiClient:
                        or err.get("message")
                        or json_short(resp.text))
             codigo_msg = err.get("code", resp.status_code)
+            subcodigo = err.get("error_subcode")
             tipo = err.get("type", "permanent")
         except Exception as e:
             log_error(f"_procesar_respuesta: no se pudo parsear el error de Meta (HTTP {resp.status_code})", e)
@@ -263,8 +300,10 @@ class WhatsAppApiClient:
             codigo_msg = resp.status_code
             tipo = "permanent"
             detalle = json_short(resp.text)
-        # Códigos 4xx con "temporales" se tratan como transitorios.
-        es_temporal = tipo.lower() == "transient" or resp.status_code in (429, 5)
+        # Códigos 4xx con "temporales" y los de rate limit se tratan como transitorios.
+        es_temporal = (tipo.lower() == "transient"
+                       or resp.status_code in (429, 5)
+                       or es_error_throttle(resp.status_code, codigo_msg, subcodigo))
         raise ErrorWhatsApp(codigo_msg, "transient" if es_temporal else "permanent", detalle)
 
 
@@ -305,11 +344,10 @@ class WhatsAppService:
     COMODINES = {
         "nombre": "David",
         "apellido": "Araya",
-        "info_extra": "su cita programada",
     }
 
     def convertir_texto_meta(self, texto: str) -> tuple[str, list[str]]:
-        """Convierte los comodines {nombre}/{apellido}/{info_extra} del sistema
+        """Convierte los comodines {nombre}/{apellido} del sistema
         a placeholders secuenciales de Meta ({{1}}, {{2}}, ...) y devuelve el
         texto convertido junto con los valores de ejemplo en ese orden."""
         orden: list[str] = []
@@ -582,12 +620,12 @@ class WhatsAppService:
         return payload, "template"
 
     def extraer_orden_comodines(self, texto: str) -> list[str]:
-        """Devuelve el orden de aparición de los comodines {nombre}/{apellido}/{info_extra}
+        """Devuelve el orden de aparición de los comodines {nombre}/{apellido}
         en el texto, para construir los parámetros del template en el orden correcto."""
         orden: list[str] = []
         for m in re.finditer(r"\{([a-z_]+)\}", texto or ""):
             clave = m.group(1)
-            if clave in ("nombre", "apellido", "info_extra") and clave not in orden:
+            if clave in ("nombre", "apellido") and clave not in orden:
                 orden.append(clave)
         return orden
 

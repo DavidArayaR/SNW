@@ -44,7 +44,6 @@ const toastEl = $("#toast");
 const DATOS_EJEMPLO = {
   nombre: "David",
   apellido: "Araya",
-  info_extra: "su cita es el lunes 31-08-2026 a las 10:30 en Consulta Nº 4",
 };
 
 if (!localStorage.getItem("snw_token")) location.replace("login.html");
@@ -217,7 +216,7 @@ function actualizarContador() {
 function validarComodines() {
   const desconocidos = [...inpMensaje.value.matchAll(/\{([^{}]+)\}/g)]
     .map((m) => m[1].trim())
-    .filter((t) => !["nombre", "apellido", "info_extra"].includes(t));
+    .filter((t) => !["nombre", "apellido"].includes(t));
 
   if (desconocidos.length) {
     const unicos = [...new Set(desconocidos)].map((t) => `{${t}}`).join(", ");
@@ -909,6 +908,10 @@ $("#btnLanzarConf").addEventListener("click", async () => {
     if (!res.ok) throw new Error(data.detail ?? `Error ${res.status}`);
 
     pintarRechazadosConf(data.rechazados ?? []);
+
+    if (data.aviso_limite_mensajeria) {
+      toast(data.aviso_limite_mensajeria, "error");
+    }
 
     if (data.requiere_confirmacion) {
       modalConf.hidden = true;

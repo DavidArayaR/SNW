@@ -104,7 +104,6 @@ async function cargar() {
     pacientes = (await rp.json()).map((p) => ({
       ...p,
       estado: p.estado || "pendiente",
-      info_extra: p.info_extra || "",
     }));
     plantillas = (await rt.json()).filter((p) => !p.especial);
     config = await rc.json();
@@ -125,7 +124,7 @@ function render() {
       (filtroEstado === "todos" || p.estado === filtroEstado) &&
       (filtroRespuesta === "todas" || resp(p) === filtroRespuesta) &&
       (!q ||
-        [p.nombre, p.apellido, p.telefono, p.info_extra]
+        [p.nombre, p.apellido, p.telefono]
           .filter(Boolean)
           .some((v) => v.toLowerCase().includes(q)))
   );
@@ -175,7 +174,6 @@ function render() {
         `</select>` +
         subResp +
       `</td>` +
-      `<td class="campo-info">${escaparHtml(p.info_extra ?? "—")}</td>` +
       `<td class="campo-fecha">${escaparHtml(p.actualizado)}</td>`;
     const chk = tr.querySelector('input[type="checkbox"]');
     chk.addEventListener("change", (e) => {
@@ -248,7 +246,7 @@ function idsSeleccionables() {
           (p.respuesta || "pendiente") !== "baja" &&
           !p.whatsapp_opt_out &&
           (!q ||
-            [p.nombre, p.apellido, p.telefono, p.info_extra]
+            [p.nombre, p.apellido, p.telefono]
               .filter(Boolean)
               .some((v) => v.toLowerCase().includes(q)))
       )

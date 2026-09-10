@@ -75,6 +75,26 @@ CONFIG_DEFAULTS = {
     "wa_webhook_path": "/api/whatsapp/webhook",
     "wa_graph_version": "v26.0",
     "wa_moneda": "USD",
+    # Rate limits de la Graph API de Meta. El sistema lee las cabeceras de uso de
+    # cuota (`X-App-Usage` / `X-Business-Use-Case-Usage`) y frena los envíos antes
+    # de chocar con el límite; ante un 429 espera el tiempo que indica Meta.
+    #   wa_rate_limit_activo         : frenado proactivo on/off (el 429 se respeta igual).
+    #   wa_rate_limit_umbral_pct     : a partir de este % de cuota se empieza a esperar.
+    #   wa_rate_limit_pausa_max_s    : espera máxima entre mensajes al 100% de cuota.
+    #   wa_rate_limit_espera_defecto_s: espera tras un 429 sin dato de recuperación.
+    #   wa_rate_limit_reintentos     : reintentos de una misma llamada tras un 429.
+    "wa_rate_limit_activo": "true",
+    "wa_rate_limit_umbral_pct": "80",
+    "wa_rate_limit_pausa_max_s": "30",
+    "wa_rate_limit_espera_defecto_s": "60",
+    "wa_rate_limit_reintentos": "3",
+    # Throughput de la Cloud API (msg/s por número; Meta permite 80 por defecto,
+    # cuenta entrantes + salientes). Se deja margen. 0 = sin límite de ritmo.
+    "wa_throughput_mps": "10",
+    # Messaging limit: usuarios ÚNICOS a los que se puede escribir (mensajes
+    # iniciados por el negocio) en 24 h. Tiers de Meta: 250 / 2000 / 10000 /
+    # 100000 / ilimitado. 0 = sin control. Ajústalo al tier real de la cuenta.
+    "wa_messaging_limit_24h": "2000",
 }
 
 _config_cache: dict | None = None

@@ -32,6 +32,8 @@ snw/
 │   │                          log_error() (todo error queda en consola)
 │   ├── whatsapp_service.py   Cliente Graph API + WhatsAppService (envío, templates,
 │   │                          webhook handler) — capa de integración con Meta
+│   ├── wa_rate_limit.py      Gobernador de límites de Meta: cuota de la Graph API,
+│   │                          throughput (msg/s) y clasificación de errores de límite
 │   ├── whatsapp_webhook.py   Router del webhook (verificación GET + recepción POST)
 │   └── motor_envio.py        Motor de envío intercambiable: simulado | api_oficial
 ├── frontend/
@@ -113,6 +115,7 @@ el `entorno` activo, que las demás pantallas leen al cargar).
 | Call center | `call_center_url` (servicio que devuelve un número de call center; se consulta en cada respuesta y ese servicio reparte la carga), `call_center_numeros` (respaldo manual, uno o varios separados por coma, solo si la URL no responde), `call_center_auto_segundos` (espera antes del envío automático tras detectar interés; 0 = desactivado), `call_center_boton_mensaje` / `call_center_boton_mensaje_oferta` (texto que autocompleta el botón; el de oferta se usa si la última plantilla enviada mencionaba un descuento o precio especial) |
 | Correo | `smtp_host`, `smtp_port`, `smtp_user`, `smtp_pass`, `smtp_tls`, `correo_emisor`, `correo_destino` |
 | WhatsApp / Meta | `wa_token`, `wa_phone_id`, `wa_business_account_id`, `wa_verify_token`, `wa_template_nombre`, `wa_template_lang`, `wa_webhook_path`, `wa_graph_version` (por defecto `v26.0`), `wa_moneda` (moneda de facturación de la cuenta, se autodetecta desde Meta al actualizar tarifas — por defecto `USD`) |
+| Límites de envío Meta | `wa_rate_limit_activo` (frenado proactivo on/off), `wa_rate_limit_umbral_pct` (% de cuota a partir del cual se espera, 80), `wa_rate_limit_pausa_max_s` (espera entre mensajes al 100 % de cuota, 30), `wa_rate_limit_espera_defecto_s` (espera tras un 429 sin dato, 60), `wa_rate_limit_reintentos` (reintentos de una llamada tras un 429, 3), `wa_throughput_mps` (ritmo máximo de salida hacia Meta, msg/s; 0 = sin límite; 10), `wa_messaging_limit_24h` (usuarios únicos que se pueden contactar en 24 h antes de bloquear el envío masivo; 0 = ilimitado; 250) |
 
 ## Base de datos
 
@@ -128,7 +131,6 @@ enlaces de «Olvidé mi contraseña» (token de 2 h, un solo uso). Las demás:
 | `id` | INT PK | Identificador |
 | `nombre`, `apellido` | VARCHAR | Nombre del paciente |
 | `telefono` | VARCHAR(20) | Formato `+569XXXXXXXXX` |
-| `info_extra` | VARCHAR(255) | Dato libre para el comodín `{info_extra}` |
 | `estado` | ENUM | `pendiente` / `enviado` / `error` |
 | `whatsapp_opt_out` | TINYINT(1) | 1 si el paciente pidió no recibir más mensajes |
 | `respuesta_manual` | VARCHAR(12) | Corrección manual de la respuesta (NULL = sin corrección); gana sobre la señal automática |
@@ -197,7 +199,7 @@ Las tablas de pacientes comparten `log_envios`, así que el backend siempre ubic
 ## Plantillas de mensajes
 
 Viven en `data/plantillas.json` (no en MySQL). Cada plantilla tiene comodines
-`{nombre}`, `{apellido}`, `{info_extra}` que se reemplazan al enviar, y la vista previa en
+`{nombre}` y `{apellido}` que se reemplazan al enviar, y la vista previa en
 **Mensajería** interpreta además el formato de WhatsApp: `*negrita*`, `_cursiva_`,
 `~tachado~` y `` ```monoespaciado``` ``.
 
@@ -346,7 +348,9 @@ página Historial. Al arrancar se siembra una si no hay ninguna.
 | GET | `/api/configuracion?ambiente=` | Vista mínima para las pantallas y el motor de envío (`entorno`, `base_datos`, `numeros_autorizados`, `metodo_envio`, `intervalo_ms`) — cualquier sesión. Los valores completos y los secretos van por `/api/configuracion/todo` |
 | PUT | `/api/configuracion` | Guarda claves sueltas de `configuracion` sin reiniciar |
 | GET | `/api/configuracion/todo` | TODAS las claves con su **valor real** (incluye secretos) + metadata de secciones, para la página Configuración |
-| PUT | `/api/configuracion/todo` | `{cambios: {clave: valor, …}}` — valida clave conocida, enums (`entorno`, `metodo_envio`) y enteros (`intervalo_ms`, `smtp_port`, `call_center_auto_segundos`); `call_center_numeros` (respaldo) se normaliza a lista de solo-dígitos separada por coma; persiste con `config_set` |
+| PUT | `/api/configuracion/todo` | `{cambios: {clave: valor, …}}` — valida clave conocida, enums (`entorno`, `metodo_envio`) y enteros (`intervalo_ms`, `smtp_port`, `call_center_auto_segundos`, `wa_rate_limit_*`, `wa_throughput_mps`, `wa_messaging_limit_24h`); `call_center_numeros` (respaldo) se normaliza a lista de solo-dígitos separada por coma; persiste con `config_set` |
+| GET | `/api/whatsapp/rate-limit` | (solo `desarrollador`) Consumo de cuota de la Graph API visto en la última respuesta de Meta y la espera que el sistema aplica: `{activo, uso_pct, bloqueado, bloqueado_segundos, pausa_sugerida_s, throughput_mps, ultimo_motivo, cabecera_hace_s}` |
+| GET | `/api/whatsapp/messaging-limit` | (admin / dev) `{tier, usados_24h, disponibles, ventana_horas}` — usuarios únicos contactados (mensajes iniciados por el negocio) en las últimas 24 h frente al `wa_messaging_limit_24h` |
 
 ### Webhook de WhatsApp (Meta)
 
@@ -382,6 +386,47 @@ leyendo los templates existentes en Meta (solo `GET`, nunca crea/edita) y:
 - **importa como plantilla nueva** cualquier template que exista en Meta y no tenga
   todavía una plantilla local asociada (el texto se extrae del componente `BODY`; los
   `{{1}}`, `{{2}}` quedan tal cual porque no se sabe a qué comodín corresponden).
+
+### Límites de envío de Meta
+
+`backend/wa_rate_limit.py` es un gobernador en memoria que cubre las tres capas de límites
+de Meta. Toda llamada a la Graph API pasa por `WhatsAppApiClient._peticion`.
+
+**1 · [Rate limits de la Graph API](https://developers.facebook.com/docs/graph-api/overview/rate-limiting/)**
+— antes de cada llamada espera lo que sugiera el gobernador, que lee de cada respuesta las
+cabeceras `X-App-Usage` y `X-Business-Use-Case-Usage` (`call_count`, `total_cputime`,
+`total_time`) y se queda con el % de cuota más alto. Por debajo de `wa_rate_limit_umbral_pct`
+(80 %) no espera; entre el umbral y el 100 % interpola hasta `wa_rate_limit_pausa_max_s`
+(30 s). *(La Cloud API no manda estas cabeceras en `/messages`; sí en plantillas / management.)*
+
+**2 · [Throughput de la Cloud API](https://developers.facebook.com/documentation/business-messaging/whatsapp/throughput)**
+— 80 msg/s por número (entrantes + salientes). Antes de cada `POST /messages` se reserva un
+turno para no pasar de `wa_throughput_mps` (10; `0` lo desactiva); varios hilos enviando a la
+vez se turnan. Si aun así Meta devuelve `130429`, backoff como en el punto 3.
+
+**3 · Errores de límite** — se clasifican en dos:
+
+- **Global** (`429`, `4`, `17`, `32`, `613`, `80007`, `80008`, `130429`, `131048`, `131057`,
+  `368`, subcódigo `2446079`): se respeta `estimated_time_to_regain_access` (minutos) o el
+  `Retry-After`; si no hay dato, `wa_rate_limit_espera_defecto_s` (60 s) o el mínimo por
+  código (throughput 2 s, upgrade 60 s, spam 900 s), tope 15 min. Bloquea **todas** las
+  llamadas hasta esa hora y reintenta la misma llamada hasta `wa_rate_limit_reintentos` (3).
+- **Por destinatario** (`131056` pair rate limit, `131049` / `130497` frecuencia por
+  usuario): **no** frena al resto ni reintenta; falla solo ese mensaje (queda `error` en el
+  historial y se puede reenviar en otra tanda).
+
+**4 · [Messaging limit](https://developers.facebook.com/documentation/business-messaging/whatsapp/messaging-limits)**
+— usuarios únicos a los que el negocio puede escribir en una ventana móvil de 24 h
+(250 / 1K / 10K / 100K). Antes de un envío masivo en producción, `iniciar_envio` cuenta los
+teléfonos únicos con envío iniciado por el negocio en `log_envios` de las últimas 24 h: si ya
+se alcanzó `wa_messaging_limit_24h` responde **429**; si el lote lo va a superar, el envío
+sale igual pero con un aviso (`aviso_limite_mensajeria`).
+
+En el envío masivo (`_procesar_job`), si hay que esperar ≥ 1 s el job muestra «Esperando por
+el límite de la API de Meta (~N s)» y la espera es cancelable. `GET /api/whatsapp/rate-limit`
+(dev) y `GET /api/whatsapp/messaging-limit` (admin/dev) muestran el estado.
+`wa_rate_limit_activo` apaga solo el frenado **proactivo** por cuota; el backoff ante un
+error de límite y el throughput se aplican siempre.
 
 ### Ruteo del webhook
 

@@ -30,7 +30,6 @@ CREATE TABLE IF NOT EXISTS pacientes_dev (
   nombre VARCHAR(150) NOT NULL,
   apellido VARCHAR(150) NOT NULL DEFAULT '',
   telefono VARCHAR(20) NOT NULL,
-  info_extra VARCHAR(255) DEFAULT NULL,
   estado ENUM('pendiente','enviado','error') NOT NULL DEFAULT 'pendiente',
   whatsapp_opt_out TINYINT(1) NOT NULL DEFAULT 0,
   respuesta_manual VARCHAR(12) DEFAULT NULL,
@@ -43,7 +42,6 @@ CREATE TABLE IF NOT EXISTS pacientes_prod (
   nombre VARCHAR(150) NOT NULL,
   apellido VARCHAR(150) NOT NULL DEFAULT '',
   telefono VARCHAR(20) NOT NULL,
-  info_extra VARCHAR(255) DEFAULT NULL,
   estado ENUM('pendiente','enviado','error') NOT NULL DEFAULT 'pendiente',
   whatsapp_opt_out TINYINT(1) NOT NULL DEFAULT 0,
   respuesta_manual VARCHAR(12) DEFAULT NULL,
@@ -132,8 +130,16 @@ INSERT IGNORE INTO configuracion (clave, valor) VALUES
   ('wa_template_lang', 'es'),
   ('wa_webhook_path', '/api/whatsapp/webhook'),
   ('wa_graph_version', 'v26.0'),
-  ('wa_moneda', 'USD');
-
+  ('wa_moneda', 'USD'),
+  -- Límites de envío de Meta (Graph API rate limits, throughput y messaging limit)
+  ('wa_rate_limit_activo', 'true'),
+  ('wa_rate_limit_umbral_pct', '80'),
+  ('wa_rate_limit_pausa_max_s', '30'),
+  ('wa_rate_limit_espera_defecto_s', '60'),
+  ('wa_rate_limit_reintentos', '3'),
+  ('wa_throughput_mps', '10'),
+  ('wa_messaging_limit_24h', '2000');
+  
 -- Rate card de WhatsApp: tarifas por mensaje (USD) descargadas de la página
 -- de precios de Meta. Cada rate card distinto se guarda una vez (uq_hash).
 CREATE TABLE IF NOT EXISTS tarifas_whatsapp (
@@ -211,13 +217,13 @@ CREATE TABLE IF NOT EXISTS password_resets (
 -- ------------------------------------------------------------
 -- Datos: pacientes_dev (números autorizados)
 -- ------------------------------------------------------------
-INSERT IGNORE INTO pacientes_dev (id, nombre, apellido, telefono, info_extra, estado) VALUES
-(1, 'David', 'Araya', '+56993921740', 'Control mensual', 'pendiente'),
-(2, 'Sergio', 'Madariaga', '+56941508435', 'Atención anual programada', 'pendiente');
+INSERT IGNORE INTO pacientes_dev (id, nombre, apellido, telefono, estado) VALUES
+(1, 'David', 'Araya', '+56993921740', 'pendiente'),
+(2, 'Sergio', 'Madariaga', '+56941508435', 'pendiente');
 
 -- ------------------------------------------------------------
 -- Datos: pacientes_prod (solo números autorizados)
 -- ------------------------------------------------------------
-INSERT IGNORE INTO pacientes_prod (id, nombre, apellido, telefono, info_extra, estado) VALUES
-(1, 'David', 'Araya', '+56993921740', 'Control mensual', 'pendiente'),
-(2, 'Sergio', 'Madariaga', '+56941508435', 'Atención anual programada', 'pendiente');
+INSERT IGNORE INTO pacientes_prod (id, nombre, apellido, telefono, estado) VALUES
+(1, 'David', 'Araya', '+56993921740', 'pendiente'),
+(2, 'Sergio', 'Madariaga', '+56941508435', 'pendiente');
