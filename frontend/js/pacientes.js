@@ -109,6 +109,11 @@ async function cargar() {
     config = await rc.json();
 
     $("#nombreBd").textContent = config.base_datos ?? "";
+    const tituloEl = $("#tituloPacientes");
+    if (tituloEl) {
+      const entornoLabel = config.entorno === "produccion" ? "producción" : "desarrollo";
+      tituloEl.textContent = `Pacientes ${entornoLabel}`;
+    }
 
     render();
   } catch {

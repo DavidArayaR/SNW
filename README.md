@@ -111,10 +111,10 @@ el `entorno` activo, que las demás pantallas leen al cargar).
 
 | Grupo | Claves |
 |---|---|
-| App / envío | `entorno` (`desarrollo`/`produccion`), `metodo_envio` (`simulado`/`api_oficial`), `numeros_prueba_dev`, `numeros_prueba_prod`, `intervalo_ms`, `url_base` |
+| App / envío | `entorno` (`desarrollo`/`produccion`), `metodo_envio` (`simulado`/`api_oficial`), `numeros_prueba_dev`, `numeros_prueba_prod`, `intervalo_ms`, `sesion_expira_horas` (horas de inactividad antes de cerrar una sesión sola; 0 = no expiran; por defecto 5), `url_base` |
 | Call center | `call_center_url` (servicio que devuelve un número de call center; se consulta en cada respuesta y ese servicio reparte la carga), `call_center_numeros` (respaldo manual, uno o varios separados por coma, solo si la URL no responde), `call_center_auto_segundos` (espera antes del envío automático tras detectar interés; 0 = desactivado), `call_center_boton_mensaje` / `call_center_boton_mensaje_oferta` (texto que autocompleta el botón; el de oferta se usa si la última plantilla enviada mencionaba un descuento o precio especial) |
 | Correo | `smtp_host`, `smtp_port`, `smtp_user`, `smtp_pass`, `smtp_tls`, `correo_emisor`, `correo_destino` |
-| WhatsApp / Meta | `wa_token`, `wa_phone_id`, `wa_business_account_id`, `wa_verify_token`, `wa_template_nombre`, `wa_template_lang`, `wa_webhook_path`, `wa_graph_version` (por defecto `v26.0`), `wa_moneda` (moneda de facturación de la cuenta, se autodetecta desde Meta al actualizar tarifas — por defecto `USD`) |
+| WhatsApp / Meta | `wa_token`, `wa_phone_id`, `wa_business_account_id`, `wa_verify_token`, `wa_template_nombre`, `wa_template_lang`, `wa_webhook_path`, `wa_graph_version` (por defecto `v26.0`), `wa_moneda` (moneda de facturación de la cuenta, se autodetecta desde Meta al actualizar tarifas — por defecto `USD`), `plantillas_revision_minutos` (cada cuántos minutos se revisa sola en Meta el estado de las plantillas pendientes; 0 = desactivado; por defecto 2) |
 | Límites de envío Meta | `wa_rate_limit_activo` (frenado proactivo on/off), `wa_rate_limit_umbral_pct` (% de cuota a partir del cual se espera, 80), `wa_rate_limit_pausa_max_s` (espera entre mensajes al 100 % de cuota, 30), `wa_rate_limit_espera_defecto_s` (espera tras un 429 sin dato, 60), `wa_rate_limit_reintentos` (reintentos de una llamada tras un 429, 3), `wa_throughput_mps` (ritmo máximo de salida hacia Meta, msg/s; 0 = sin límite; 10), `wa_messaging_limit_24h` (usuarios únicos que se pueden contactar en 24 h antes de bloquear el envío masivo; 0 = ilimitado; 250) |
 
 ## Base de datos
@@ -207,14 +207,41 @@ Reglas del editor:
 
 - **El nombre de la plantilla es permanente**: una vez creada no se puede editar (solo
   eliminarla y crear otra). Evita romper la `clave` interna, que se deriva del nombre.
-- **El nombre del template de Meta se genera solo**: es siempre el `slug` del nombre de
-  la plantilla (minúsculas, números y `_`), el campo no es editable a mano.
-- **La categoría es obligatoria**: una plantilla nueva empieza sin categoría seleccionada y
-  no se puede guardar (400 en cliente y servidor) hasta elegir `UTILITY`, `MARKETING` o
-  `AUTHENTICATION`.
+- **El nombre del template de Meta se genera solo** (el `slug` del nombre de la plantilla:
+  minúsculas, números y `_`) **y la categoría es siempre `MARKETING`**: ninguno de los dos
+  se le pide al usuario — el único campo de template visible es el **idioma**. Ambos se
+  siguen guardando y enviándose a Meta igual que antes, solo que por detrás.
 - Idioma y categoría del template quedan bloqueados una vez que la plantilla tiene un
   template **registrado** en Meta (`whatsapp_template_id`); mientras el registro no haya
   prosperado se pueden seguir corrigiendo.
+- **Solo una plantilla `APPROVED` en Meta se puede usar para enviar mensajes.** En la lista
+  de Mensajería aparecen agrupadas en tres categorías con franja de color: **«Plantillas
+  aprobadas por Meta»**, **«Plantillas rechazadas por Meta»** y **«Plantillas pendientes de
+  aprobación por Meta»** (esta última: recién creadas sin revisar todavía, o en estado
+  `PENDING`).
+  - **Aprobada**: todo disponible, como siempre.
+  - **Rechazada**: se puede editar y guardar (para corregirla y volver a mandarla a
+    revisión) o eliminar, pero **no** enviar.
+  - **Pendiente de revisión**: de solo lectura — no se puede editar, guardar, eliminar ni
+    enviar; no aparece ningún botón de acción, solo el aviso del estado. Así no se toca algo
+    que Meta está evaluando en ese momento.
+
+  Esto se valida también en el servidor (`PUT`/`DELETE /api/plantillas/{id}` devuelven 400
+  si el estado no es `APPROVED` ni `REJECTED`; `POST /api/notificaciones/enviar` devuelve 400
+  si no es `APPROVED`), así que no se puede saltar desde la API.
+- **La aprobación (o el rechazo) se detecta sola, sin que nadie tenga que consultarla a
+  mano**: un cron en el backend (`_revisar_plantillas_pendientes`, cada
+  `plantillas_revision_minutos` — por defecto **2**, `0` lo desactiva) revisa en Meta las
+  plantillas que todavía no están `APPROVED` (incluye las `REJECTED`, por si se reenvían a
+  revisión) y actualiza su estado. Al arrancar el servidor el primer chequeo sale a los
+  **20 s**, no espera el intervalo completo. La pantalla de Mensajería, a su vez, refresca
+  la lista sola cada 30 s mientras está abierta y avisa con un **toast** apenas detecta el
+  cambio: «✨ … fue aprobada por Meta» o «⚠️ … fue rechazada por Meta». Durante los
+  **10 minutos** siguientes a una aprobación esa plantilla muestra además un aviso
+  «✨ Aprobada recientemente» (en la lista y en el editor); después se deja de mostrar solo
+  (no hay que borrar nada, es por tiempo: `whatsapp_template_aprobada_en`). El botón manual
+  «Consultar estado» se quitó por quedar redundante; «Actualizar estados» / «Sincronizar»
+  siguen disponibles para forzar un refresco o traer templates nuevos desde Meta.
 
 ## API
 
@@ -260,8 +287,8 @@ contraseña?» en el login (`/api/auth/olvide`).
 |---|---|---|
 | GET | `/api/plantillas` | Lista de plantillas (incluye las de call center; el frontend de Mensajería las filtra) |
 | POST | `/api/plantillas` | Crear `{nombre, texto, whatsapp_template_lang, whatsapp_template_categoria}`. `whatsapp_template_categoria` es obligatoria (`UTILITY` / `MARKETING` / `AUTHENTICATION`); sin ella → 400 |
-| PUT | `/api/plantillas/{id}` | Actualizar `{nombre, texto, ...}` — rechaza (400) si `nombre` cambió, si falta `whatsapp_template_categoria` o si es una plantilla de call center |
-| DELETE | `/api/plantillas/{id}` | Eliminar. Borra también el template en Meta (`DELETE /{waba_id}/message_templates?name=…`); si Meta falla la plantilla local se borra igual y la respuesta trae `meta_advertencia`. Rechaza (400) las de call center |
+| PUT | `/api/plantillas/{id}` | Actualizar `{nombre, texto, ...}` — rechaza (400) si `nombre` cambió, si falta `whatsapp_template_categoria`, si es una plantilla de call center, o si el estado en Meta no es `APPROVED` ni `REJECTED` (pendiente de revisión) |
+| DELETE | `/api/plantillas/{id}` | Eliminar. Borra también el template en Meta (`DELETE /{waba_id}/message_templates?name=…`); si Meta falla la plantilla local se borra igual y la respuesta trae `meta_advertencia`. Rechaza (400) las de call center o las que no estén `APPROVED` ni `REJECTED` en Meta |
 | GET | `/api/plantillas/{id}/estado-meta` | Consulta en Meta el estado real de un template |
 | POST | `/api/plantillas/estado-meta/actualizar` | Refresca el estado de todas las plantillas con template |
 | POST | `/api/plantillas/sincronizar-meta` | Lee los templates que existen en Meta: actualiza estado/id de los conocidos e **importa como plantilla nueva** los que falten (no crea/edita nada en Meta, solo lee) |
@@ -312,7 +339,7 @@ página Historial. Al arrancar se siembra una si no hay ninguna.
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| POST | `/api/notificaciones/enviar` | Inicia el envío `{pacientes: [ids] \| null, plantilla_id, ambiente, limite?}`. `pacientes: null` = todos los elegibles (usado desde Mensajería). `limite` (solo producción) recorta cuántos pendientes entran en esta tanda; el resto quedan pendientes |
+| POST | `/api/notificaciones/enviar` | Inicia el envío `{pacientes: [ids] \| null, plantilla_id, ambiente, limite?}`. `pacientes: null` = todos los elegibles (usado desde Mensajería). `limite` (solo producción) recorta cuántos pendientes entran en esta tanda; el resto quedan pendientes. Rechaza (400) si la plantilla no está `APPROVED` en Meta |
 | POST | `/api/notificaciones/destinatarios` | Cuenta pacientes totales/pendientes de un ambiente |
 | GET | `/api/notificaciones/jobs/{job_id}` | Progreso en vivo del envío en curso |
 | POST | `/api/notificaciones/jobs/{job_id}/pausa` \| `/reanudar` \| `/cancelar` | Control del job en curso |
@@ -641,7 +668,16 @@ promover una quinta el backend responde 409.
 `sql/snw_base.sql` crea la tabla y siembra estas tres cuentas. Si al primer arranque
 existía un `data/usuarios.json` antiguo, el backend lo importa a la tabla y lo archiva como
 `usuarios.json.migrado`. Las sesiones activas siguen en `data/sesiones.json`
-(token → `{usuario, rol, nombre, permisos}`, sin expiración automática).
+(token → `{usuario, rol, nombre, permisos, creada, actividad}`).
+
+**Expiración por inactividad:** una sesión se cierra sola si pasan `sesion_expira_horas`
+(config; por defecto **5**) sin que esa cuenta haga ninguna petición autenticada; cualquier
+acción en la app renueva el plazo (`sesion_actual` en `main.py` actualiza `actividad` en cada
+petición). `0` desactiva la expiración. Al arrancar, `_purgar_sesiones_expiradas()` descarta
+las que ya estaban vencidas; las sesiones guardadas de antes de esta función (sin `actividad`)
+no se cierran de golpe, el plazo arranca a contar desde ese momento. El respaldo en disco de
+`actividad` se actualiza como mucho una vez por minuto por sesión (no en cada petición), para
+no escribir el archivo constantemente durante un uso activo.
 
 ## Pantallas
 

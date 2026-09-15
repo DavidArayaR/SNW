@@ -107,6 +107,7 @@ INSERT IGNORE INTO configuracion (clave, valor) VALUES
   ('numeros_prueba_dev', ''),
   ('numeros_prueba_prod', ''),
   ('intervalo_ms', '1000'),
+  ('sesion_expira_horas', '5'),
   ('url_base', ''),
   ('call_center_url', 'https://saludmentalparatodos.cl/telefonosmpt.php'),
   ('call_center_numeros', ''),
@@ -131,6 +132,7 @@ INSERT IGNORE INTO configuracion (clave, valor) VALUES
   ('wa_webhook_path', '/api/whatsapp/webhook'),
   ('wa_graph_version', 'v26.0'),
   ('wa_moneda', 'USD'),
+  ('plantillas_revision_minutos', '2'),
   -- Límites de envío de Meta (Graph API rate limits, throughput y messaging limit)
   ('wa_rate_limit_activo', 'true'),
   ('wa_rate_limit_umbral_pct', '80'),

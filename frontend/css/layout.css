@@ -136,8 +136,9 @@
   top: 0;
   z-index: 1030;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 8px 12px;
   min-height: var(--topbar-alto);
   padding: 8px 20px;
   background: var(--panel);
@@ -147,19 +148,35 @@
   font-size: 1rem;
   font-weight: 700;
   color: var(--texto);
+  /* Nunca se corta: si no entra, el resto de la barra pasa a la línea
+     siguiente (flex-wrap) antes que recortar el título. */
+  white-space: nowrap;
 }
-.app-topbar__sep { flex: 1; }
+.app-topbar__sep { flex: 1 1 0%; min-width: 0; }
 
-/* Indicadores de contexto (ambiente / base de datos) en la barra superior */
+/* Indicadores de contexto (ambiente / base de datos) en la barra superior.
+   min-width: 0 + ellipsis: en pantallas angostas se acortan con «…» en vez
+   de desbordar la barra (o, si tampoco entran así, pasan a la línea
+   siguiente gracias al flex-wrap de .app-topbar). */
 .app-topbar .badge {
   background: var(--brand-tint);
   color: var(--brand-tint-fg);
   border: 1px solid var(--brand-tint-bd);
+  min-width: 0;
+  max-width: 60vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .app-topbar select.badge--select {
   background: var(--btn-primary-bg);
   color: var(--btn-primary-fg);
   border-color: var(--btn-primary-bg);
+  min-width: 0;
+  max-width: 60vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Hamburguesa de la barra superior: sólo en móvil (abre el cajón).

@@ -39,6 +39,9 @@ CONFIG_DEFAULTS = {
     "metodo_envio": "simulado",
     "numeros_prueba_dev": "",
     "numeros_prueba_prod": "",
+    # Sesiones: horas de INACTIVIDAD tras las que una sesión expira sola
+    # (se renueva con cada acción; 0 = no expiran).
+    "sesion_expira_horas": "5",
     "intervalo_ms": "1000",
     "url_base": "",
     # Call center: el número al que lleva el botón de las plantillas de call
@@ -75,6 +78,12 @@ CONFIG_DEFAULTS = {
     "wa_webhook_path": "/api/whatsapp/webhook",
     "wa_graph_version": "v26.0",
     "wa_moneda": "USD",
+    # Cada tantos minutos se revisa en Meta el estado de las plantillas que
+    # todavía no están aprobadas (para detectar la aprobación/el rechazo
+    # solas, sin que alguien tenga que consultarlo a mano). Al arrancar el
+    # servidor el primer chequeo sale rápido (20 s), no espera el intervalo
+    # completo. 0 = desactivado.
+    "plantillas_revision_minutos": "2",
     # Rate limits de la Graph API de Meta. El sistema lee las cabeceras de uso de
     # cuota (`X-App-Usage` / `X-Business-Use-Case-Usage`) y frena los envíos antes
     # de chocar con el límite; ante un 429 espera el tiempo que indica Meta.

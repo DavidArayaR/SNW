@@ -7,6 +7,9 @@ body {
   font-family: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
   background: var(--fondo);
   color: var(--texto);
+  /* Red de seguridad: un texto largo sin espacios (URL, error de Meta) en
+     algún lugar de la página nunca debe abrir scroll horizontal del body. */
+  overflow-x: hidden;
 }
 
 button { font: inherit; cursor: pointer; }
@@ -44,7 +47,13 @@ select.badge--select {
 
 .layout {
   display: grid;
-  grid-template-columns: 340px 1fr;
+  /* minmax(0, 1fr) en vez de 1fr: sin el mínimo en 0, una columna de grid no
+     se encoge más allá del ancho mínimo de su contenido (p. ej. una tabla con
+     un texto largo sin espacios), y eso estira toda la página hacia la
+     derecha. Con el mínimo en 0, ese contenido se desborda DENTRO de la
+     columna (su propio .tabla-wrap ya tiene overflow: auto) en vez de
+     empujar el layout entero. */
+  grid-template-columns: 340px minmax(0, 1fr);
   gap: 20px;
   max-width: 1100px;
   margin: 24px auto;
@@ -123,9 +132,53 @@ select.badge--select {
 }
 .tpl-item:hover { background: var(--hover); }
 .tpl-item--activa { background: var(--brand-tint); border-color: var(--verde); }
+.tpl-item--pendiente { opacity: .82; }
 .tpl-item__nombre { display: block; font-weight: 600; font-size: .92rem; }
 .tpl-item__vista { display: block; margin-top: 3px; color: var(--texto-suave); font-size: .8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tpl-item__estado {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: .62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  vertical-align: middle;
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  border: 1px solid var(--warn-bd);
+}
+.tpl-item__estado--rechazada { background: var(--danger-bg); color: var(--danger-fg); border-color: var(--danger-bd); }
+.tpl-item__estado--nueva,
+.estado-badge--nueva {
+  background: var(--ok-bg);
+  color: var(--ok-fg);
+  border: 1px solid var(--ok-bd);
+  animation: destello-aprobada 1.8s ease-in-out 2;
+}
+@keyframes destello-aprobada {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.35); }
+}
 .tpl-list__vacio { padding: 22px 14px; text-align: center; color: var(--texto-suave); font-size: .88rem; }
+.tpl-list__grupo {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 12px 4px 5px;
+  padding: 7px 11px;
+  border-radius: 8px;
+  font-size: .74rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.tpl-list__grupo:first-child { margin-top: 2px; }
+.tpl-list__grupo i { font-size: .8rem; }
+.tpl-list__grupo--ok { background: var(--ok-bg); color: var(--ok-fg); }
+.tpl-list__grupo--warn { background: var(--warn-bg); color: var(--warn-fg); }
+.tpl-list__grupo--danger { background: var(--danger-bg); color: var(--danger-fg); }
 
 .btn {
   display: inline-flex;
@@ -212,6 +265,7 @@ button:disabled:hover { outline: none; }
   font-size: .84rem;
 }
 .warn--nombre { margin: 8px 0 0; }
+#avisoPendiente { margin: 14px 18px 0; }
 
 .preview-wrap { margin-bottom: 22px; }
 .preview-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
@@ -362,7 +416,7 @@ button:disabled:hover { outline: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 900px) {
-  .layout { grid-template-columns: 1fr; }
+  .layout { grid-template-columns: minmax(0, 1fr); }
   .panel--list { position: static; max-height: none; }
   .tpl-list { max-height: 260px; }
 }

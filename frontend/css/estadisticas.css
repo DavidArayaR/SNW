@@ -101,7 +101,7 @@
 /* Costos de mensajes (solo admin) */
 .tarifas-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr));
   gap: 12px;
   padding: 14px 18px 4px;
 }

@@ -94,6 +94,13 @@ async def sin_cache(request, call_next):
 
 MAX_TEXTO_PLANTILLA = 1024  # máximo de caracteres del cuerpo del mensaje (límite de Meta)
 CATEGORIAS_TEMPLATE = ("UTILITY", "MARKETING", "AUTHENTICATION")  # categorías válidas de Meta
+# Estados de plantilla en los que SÍ se puede editar/guardar/eliminar:
+# aprobada, o rechazada (para poder corregirla y volver a mandarla a revisión,
+# o borrarla). Mientras esté realmente pendiente de revisión (recién creada,
+# sin categoría todavía enviada, o en estado PENDING) queda de solo lectura,
+# para no tocar algo que Meta está evaluando en ese momento. Solo APPROVED se
+# puede usar para enviar mensajes (ver POST /api/notificaciones/enviar).
+ESTADOS_TEMPLATE_EDITABLES = ("APPROVED", "REJECTED")
 
 
 def _validar_categoria_template(valor: str | None) -> str:
@@ -251,12 +258,60 @@ def permisos_efectivos(usuario: dict) -> list[str]:
     return [p for p in (usuario.get("permisos") or []) if p in PERMISOS_VALIDOS]
 
 
+def _sesion_expira_segundos() -> float:
+    try:
+        horas = float(config_get("sesion_expira_horas", "5") or 0)
+    except (TypeError, ValueError):
+        horas = 5.0
+    return max(0.0, horas) * 3600.0
+
+
+def _purgar_sesiones_expiradas() -> None:
+    """Al arrancar, descarta sesiones que ya llevan más de sesion_expira_horas
+    sin actividad (p. ej. quedaron abiertas de una corrida anterior)."""
+    expira_seg = _sesion_expira_segundos()
+    if not expira_seg:
+        return
+    ahora = time.time()
+    quitadas = False
+    for tk, s in list(SESIONES.items()):
+        ultima = s.get("actividad") or s.get("creada") or ahora
+        if ahora - ultima > expira_seg:
+            SESIONES.pop(tk, None)
+            quitadas = True
+    if quitadas:
+        guardar_sesiones()
+
+
+_purgar_sesiones_expiradas()
+
+
 def sesion_actual(request: Request) -> dict:
     authz = request.headers.get("Authorization", "")
     token = authz[7:] if authz.startswith("Bearer ") else ""
     sesion = SESIONES.get(token)
     if not sesion:
         raise HTTPException(401, detail="Sesión no válida. Inicia sesión nuevamente.")
+
+    # Expira sola tras N horas SIN actividad (0 = no expira). Cualquier
+    # petición autenticada cuenta como actividad y renueva el plazo; las
+    # sesiones cargadas de antes de esta funcionalidad (sin "actividad") no
+    # se cierran de golpe: el plazo arranca a contar recién ahora.
+    ahora = time.time()
+    expira_seg = _sesion_expira_segundos()
+    ultima_actividad = sesion.get("actividad") or sesion.get("creada") or ahora
+    if expira_seg and (ahora - ultima_actividad) > expira_seg:
+        SESIONES.pop(token, None)
+        guardar_sesiones()
+        raise HTTPException(401, detail="Tu sesión expiró por inactividad. Inicia sesión nuevamente.")
+    sesion["actividad"] = ahora
+    # El respaldo en disco se actualiza como mucho una vez por minuto por
+    # sesión: así un reinicio del servidor no da por inactiva una sesión que
+    # en realidad se estaba usando, sin escribir el archivo en cada petición.
+    if ahora - (sesion.get("actividad_guardada") or 0) > 60:
+        sesion["actividad_guardada"] = ahora
+        guardar_sesiones()
+
     # El archivo de usuarios es la fuente de verdad: al validar cada petición se
     # refrescan rol y permisos, de modo que un cambio del administrador surte
     # efecto de inmediato y una cuenta eliminada queda sin sesión.
@@ -313,11 +368,15 @@ def login(body: LoginIn):
         raise HTTPException(401, detail="Usuario o contraseña incorrectos")
 
     token = uuid.uuid4().hex
+    ahora = time.time()
     SESIONES[token] = {
         "usuario": str(usuario.get("usuario", "")).strip().lower(),
         "rol": usuario.get("rol", "usuario"),
         "nombre": usuario.get("nombre", body.usuario),
         "permisos": permisos_efectivos(usuario),
+        "creada": ahora,
+        "actividad": ahora,
+        "actividad_guardada": ahora,
     }
     guardar_sesiones()
     s = SESIONES[token]
@@ -1249,6 +1308,11 @@ def _registrar_template_meta(p: dict, nombre_anterior: str | None = None,
     p["whatsapp_template_id"] = resultado.get("template_id") or id_conocido
     p["whatsapp_template_status"] = resultado.get("status")
     p["whatsapp_template_error"] = resultado.get("error")
+    # Crear o reenviar a revisión nunca deja la plantilla en APPROVED de
+    # entrada (Meta siempre la vuelve a revisar); se limpia el aviso de
+    # «aprobada recientemente» de una aprobación previa si la hubo.
+    if resultado.get("status") != "APPROVED":
+        p["whatsapp_template_aprobada_en"] = None
     return p
 
 
@@ -1258,21 +1322,43 @@ def listar_plantillas(sesion: dict = Depends(sesion_actual)):
 
 
 def _actualizar_estado_meta(p: dict) -> dict:
-    """Consulta el estado real en Meta de una plantilla y actualiza sus campos."""
+    """Consulta el estado real en Meta de una plantilla y actualiza sus campos.
+
+    Si la consulta falla (Meta caído, rate limit, credenciales...) NO se pisa
+    el último estado conocido: solo se registra el error. Esto importa sobre
+    todo para el barrido automático (`_revisar_plantillas_pendientes`), que
+    corre solo cada tantos minutos: una falla transitoria no debe hacer
+    "desaparecer" una aprobación ya detectada.
+
+    También registra `whatsapp_template_aprobada_en` (epoch ms) la primera vez
+    que el estado pasa a APPROVED, para mostrar el aviso de «aprobada
+    recientemente» un rato después de detectarlo (se limpia si deja de estar
+    aprobada)."""
     nombre_template = (p.get("whatsapp_template") or "").strip()
     if not nombre_template:
         p["whatsapp_template_status"] = None
         p["whatsapp_template_error"] = "Esta plantilla no tiene un template de Meta configurado"
         p["whatsapp_template_rejected_reason"] = None
+        p["whatsapp_template_aprobada_en"] = None
         return p
 
     lang = (p.get("whatsapp_template_lang") or "").strip() or "es"
     servicio = WhatsAppService()
     resultado = servicio.estado_template_meta(nombre_template, lang)
 
-    p["whatsapp_template_status"] = resultado.get("status")
-    p["whatsapp_template_error"] = resultado.get("error")
+    if not resultado.get("ok"):
+        p["whatsapp_template_error"] = resultado.get("error")
+        return p
+
+    anterior = p.get("whatsapp_template_status")
+    nuevo = resultado.get("status")
+    p["whatsapp_template_status"] = nuevo
+    p["whatsapp_template_error"] = None
     p["whatsapp_template_rejected_reason"] = resultado.get("rejected_reason")
+    if nuevo == "APPROVED" and anterior != "APPROVED":
+        p["whatsapp_template_aprobada_en"] = int(time.time() * 1000)
+    elif nuevo != "APPROVED":
+        p["whatsapp_template_aprobada_en"] = None
     return p
 
 
@@ -1296,6 +1382,54 @@ def actualizar_todos_estados_meta(sesion: dict = Depends(sesion_actual)):
             _actualizar_estado_meta(p)
     escribir_plantillas(plantillas)
     return sorted(plantillas, key=lambda p: p.get("actualizada", 0), reverse=True)
+
+
+# --- Revisión automática del estado en Meta (cron) --------------------------
+# Nadie tiene que apretar "Consultar estado": cada `plantillas_revision_minutos`
+# este barrido consulta en Meta las plantillas que todavía no están APPROVED
+# (incluye las PENDING y las ya REJECTED, por si se reenviaron a revisión o
+# Meta revierte un rechazo) y actualiza su estado solo. Así se detecta la
+# aprobación O el rechazo sin intervención manual; el aviso de «aprobada
+# recientemente» sale de acá (ver _actualizar_estado_meta). El frontend hace
+# su propio polling cada 30 s y avisa con un toast apenas ve el cambio.
+def _revisar_plantillas_pendientes() -> None:
+    try:
+        plantillas = leer_plantillas()
+        pendientes = [
+            p for p in plantillas
+            if not p.get("especial")
+            and (p.get("whatsapp_template") or "").strip()
+            and p.get("whatsapp_template_status") != "APPROVED"
+        ]
+        for p in pendientes:
+            _actualizar_estado_meta(p)
+        if pendientes:
+            escribir_plantillas(plantillas)
+    except Exception as e:
+        log_error("_revisar_plantillas_pendientes", e)
+    finally:
+        _programar_revision_plantillas()
+
+
+def _programar_revision_plantillas(demora_seg: float | None = None) -> None:
+    """Programa el próximo barrido según `plantillas_revision_minutos`
+    (0 = desactivado). `demora_seg` fuerza una espera puntual en vez del
+    intervalo completo: se usa para el primer chequeo al arrancar el
+    servidor, así una aprobación/rechazo que ya estaba esperando se detecta
+    en segundos y no hay que esperar el intervalo entero la primera vez."""
+    try:
+        minutos = float(config_get("plantillas_revision_minutos", "2") or 0)
+    except (TypeError, ValueError):
+        minutos = 5.0
+    if minutos <= 0:
+        return
+    espera = demora_seg if demora_seg is not None else minutos * 60
+    timer = threading.Timer(espera, _revisar_plantillas_pendientes)
+    timer.daemon = True
+    timer.start()
+
+
+_programar_revision_plantillas(demora_seg=20)
 
 
 def _texto_desde_componentes(components: list) -> str:
@@ -1467,6 +1601,15 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
                     400,
                     detail="Las plantillas de call center se editan desde la sección del Historial.",
                 )
+            # Mientras esté pendiente de revisión en Meta la plantilla queda de
+            # solo lectura (ver también DELETE y el envío); aprobada o
+            # rechazada sí se puede editar (una rechazada, para corregirla).
+            if p.get("whatsapp_template_status") not in ESTADOS_TEMPLATE_EDITABLES:
+                raise HTTPException(
+                    400,
+                    detail="Esta plantilla todavía está pendiente de revisión en Meta: no se puede "
+                           "editar hasta que se apruebe o sea rechazada.",
+                )
             # La categoría del template es obligatoria para poder guardar.
             categoria = _validar_categoria_template(body.whatsapp_template_categoria)
             # El nombre es permanente: una vez creada la plantilla no se puede
@@ -1504,6 +1647,12 @@ def eliminar_plantilla(plantilla_id: int, sesion: dict = Depends(exigir("plantil
         raise HTTPException(
             400,
             detail="Las plantillas de call center se eliminan desde la sección del Historial.",
+        )
+    if objetivo.get("whatsapp_template_status") not in ESTADOS_TEMPLATE_EDITABLES:
+        raise HTTPException(
+            400,
+            detail="Esta plantilla todavía está pendiente de revisión en Meta: no se puede "
+                   "eliminar hasta que se apruebe o sea rechazada.",
         )
 
     # Borra también el template en Meta. Si Meta falla, se avisa pero la
@@ -1771,6 +1920,9 @@ _CONFIG_SECCIONES = [
              "ayuda": "Separados por coma. En entorno de desarrollo solo se envía a estos."},
             {"clave": "numeros_prueba_prod", "etiqueta": "Números de prueba · producción", "tipo": "text",
              "ayuda": "Separados por coma."},
+            {"clave": "sesion_expira_horas", "etiqueta": "Sesión inactiva · horas para expirar", "tipo": "number",
+             "ayuda": "Una sesión se cierra sola si pasa este tiempo sin que la cuenta haga ninguna "
+                      "acción en la app; cada acción renueva el plazo. 0 = las sesiones no expiran."},
         ],
     },
     {
@@ -1815,6 +1967,10 @@ _CONFIG_SECCIONES = [
              "ayuda": "Ej: v26.0"},
             {"clave": "wa_moneda", "etiqueta": "Moneda de facturación", "tipo": "text",
              "ayuda": "Se autodetecta al pulsar «Actualizar tarifas» en Estadísticas. Ej: CLP, USD."},
+            {"clave": "plantillas_revision_minutos", "etiqueta": "Revisar plantillas pendientes cada (min)", "tipo": "number",
+             "ayuda": "Cada cuántos minutos se consulta en Meta el estado de las plantillas que "
+                      "todavía no están aprobadas, para detectar la aprobación o el rechazo solas, "
+                      "sin tener que consultarlo a mano. 0 = desactivado."},
             {"clave": "wa_rate_limit_activo", "etiqueta": "Frenar envíos al acercarse al límite de Meta", "tipo": "bool",
              "ayuda": "Lee el consumo de cuota que Meta informa en cada respuesta y espera antes de "
                       "seguir enviando. Un error 429 de Meta se respeta aunque esto esté apagado."},
@@ -1895,7 +2051,8 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
         if clave in ("intervalo_ms", "smtp_port", "call_center_auto_segundos",
                      "wa_rate_limit_umbral_pct", "wa_rate_limit_pausa_max_s",
                      "wa_rate_limit_espera_defecto_s", "wa_rate_limit_reintentos",
-                     "wa_throughput_mps", "wa_messaging_limit_24h"):
+                     "wa_throughput_mps", "wa_messaging_limit_24h", "sesion_expira_horas",
+                     "plantillas_revision_minutos"):
             try:
                 n = int(v or "0")
             except ValueError:
@@ -2384,6 +2541,12 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         raise HTTPException(
             400,
             detail="Esta plantilla solo se puede enviar a un paciente interesado, desde el Historial.",
+        )
+    if plantilla.get("whatsapp_template_status") != "APPROVED":
+        raise HTTPException(
+            400,
+            detail="Esta plantilla todavía no fue aprobada por Meta: no se puede usar para enviar "
+                   "hasta que se apruebe.",
         )
 
     with conectar(amb) as conn, conn.cursor() as cur:

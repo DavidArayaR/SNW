@@ -11,7 +11,7 @@
     "whatsapp_template_id": "1382444860710230",
     "whatsapp_template_status": "APPROVED",
     "whatsapp_template_error": null,
-    "whatsapp_template_rejected_reason": null
+    "whatsapp_template_rejected_reason": "NONE"
   },
   {
     "id": 2,
@@ -25,7 +25,7 @@
     "whatsapp_template_id": "1737252654192451",
     "whatsapp_template_status": "APPROVED",
     "whatsapp_template_error": null,
-    "whatsapp_template_rejected_reason": null
+    "whatsapp_template_rejected_reason": "NONE"
   },
   {
     "id": 4,
@@ -37,7 +37,7 @@
     "whatsapp_template_categoria": "UTILITY",
     "whatsapp_template_id": "1285483704651425",
     "whatsapp_template_status": "APPROVED",
-    "whatsapp_template_rejected_reason": null,
+    "whatsapp_template_rejected_reason": "NONE",
     "whatsapp_template_error": null,
     "actualizada": 1788545013118
   },
@@ -51,5 +51,34 @@
     "cc_boton": true,
     "cc_boton_texto": "Ir al call center",
     "cc_auto": false
+  },
+  {
+    "id": 6,
+    "clave": "recordar_cita",
+    "nombre": "Recordar cita",
+    "texto": "hola {{1}}, te recuerdo tu agenda",
+    "whatsapp_template": "recordar_cita",
+    "whatsapp_template_lang": "es",
+    "whatsapp_template_categoria": "MARKETING",
+    "whatsapp_template_id": "4045523162418166",
+    "whatsapp_template_status": "APPROVED",
+    "whatsapp_template_rejected_reason": null,
+    "whatsapp_template_error": null,
+    "actualizada": 1789482634143
+  },
+  {
+    "id": 7,
+    "clave": "tets",
+    "nombre": "tets",
+    "texto": "probando plantilla",
+    "whatsapp_template": "tets",
+    "whatsapp_template_lang": "es",
+    "whatsapp_template_categoria": "UTILITY",
+    "actualizada": 1789482665456,
+    "whatsapp_template_id": "38380529971561589",
+    "whatsapp_template_status": "APPROVED",
+    "whatsapp_template_error": null,
+    "whatsapp_template_rejected_reason": null,
+    "whatsapp_template_aprobada_en": 1789484343672
   }
 ]

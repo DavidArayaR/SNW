@@ -54,6 +54,8 @@
         </div>
       </div>
 
+      <p id="avisoPendiente" class="warn" hidden></p>
+
       <form id="formPlantilla" novalidate>
         <div class="field">
           <label for="inpNombre">Nombre</label>
@@ -93,11 +95,12 @@
           </div>
         </div>
 
-        <div class="field">
-          <label for="inpTemplate">Nombre del template de Meta (automático)</label>
-          <input type="text" id="inpTemplate" maxlength="100" placeholder="(se genera desde el nombre)" autocomplete="off" tabindex="-1" aria-readonly="true" disabled>
-          <p id="hintTemplate" class="field__hint">Se genera automáticamente a partir del nombre de la plantilla (solo minúsculas, números y guiones bajos). No se puede editar y, una vez creada la plantilla, queda fijo en Meta.</p>
-        </div>
+        <!-- Nombre del template de Meta: se genera solo desde el nombre de la
+             plantilla y se guarda por detrás; no se muestra al usuario. -->
+        <input type="hidden" id="inpTemplate">
+        <!-- Categoría del template: todas las plantillas son Marketing, no se
+             elige ni se muestra. -->
+        <input type="hidden" id="inpTemplateCategoria" value="MARKETING">
 
         <div class="field">
           <label for="inpTemplateLang">Idioma del template</label>
@@ -108,23 +111,13 @@
           </select>
         </div>
 
-        <div class="field">
-          <label for="inpTemplateCategoria">Categoría del template</label>
-          <select id="inpTemplateCategoria">
-            <option value="" selected>Selecciona una categoría</option>
-            <option value="UTILITY">Utility (transaccional)</option>
-            <option value="MARKETING">Marketing</option>
-            <option value="AUTHENTICATION">Authentication (códigos OTP)</option>
-          </select>
-          <p class="field__hint">Obligatoria: elige la categoría correcta del template (Utility, Marketing o Authentication) para poder guardar la plantilla. No se puede cambiar una vez que Meta lo aprueba.</p>
-        </div>
-
         <div class="field" id="bloqueEstadoMeta" hidden>
           <label>Estado en Meta</label>
           <div class="estado-meta-fila">
             <span id="badgeEstadoMeta" class="estado-badge">—</span>
-            <button type="button" id="btnRevisarEstadoMeta" class="btn btn--ghost">Consultar estado</button>
+            <span id="badgeAprobadaReciente" class="estado-badge estado-badge--nueva" hidden>✨ Aprobada recientemente</span>
           </div>
+          <p class="field__hint">El estado se revisa solo cada pocos minutos; no hace falta consultarlo a mano.</p>
           <p id="motivoRechazoMeta" class="field__hint" hidden></p>
         </div>
 

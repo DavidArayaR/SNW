@@ -1,6 +1,8 @@
 .layout--ancho {
   max-width: 1300px;
-  grid-template-columns: 1fr;
+  /* minmax(0, 1fr): evita que un texto largo sin espacios (nombre, error,
+     URL) estire toda la página hacia la derecha; ver detalle en .layout. */
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .stats {
@@ -315,6 +317,12 @@ td.campo-id { color: var(--texto-suave); font-family: Consolas, monospace; }
 .estado-enviado { background: var(--ok-bg); color: var(--ok-fg); border: 1px solid var(--ok-bd); }
 .estado-error { background: var(--danger-bg); color: var(--danger-fg); border: 1px solid var(--danger-bd); }
 
+/* Estado del template en Meta (editor de plantillas: #badgeEstadoMeta). */
+.estado-badge.estado-APPROVED { background: var(--ok-bg); color: var(--ok-fg); border: 1px solid var(--ok-bd); }
+.estado-badge.estado-PENDING { background: var(--warn-bg); color: var(--warn-fg); border: 1px solid var(--warn-bd); }
+.estado-badge.estado-REJECTED { background: var(--danger-bg); color: var(--danger-fg); border: 1px solid var(--danger-bd); }
+.estado-badge.estado-DESCONOCIDO { background: var(--surface-3); color: var(--texto-suave); border: 1px solid var(--borde); }
+
 .estado-select {
   padding: 3px 10px;
   border-radius: 999px;
@@ -340,6 +348,7 @@ td.campo-id { color: var(--texto-suave); font-family: Consolas, monospace; }
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  overflow-wrap: anywhere;
   line-height: 1.35;
   cursor: help;
 }

@@ -1,7 +1,7 @@
 /* Página de gestión de usuarios (administrador / desarrollador) */
 
 /* .layout--ancho vive en pacientes.css; esta página no la carga. */
-.layout--ancho { max-width: 1100px; grid-template-columns: 1fr; }
+.layout--ancho { max-width: 1100px; grid-template-columns: minmax(0, 1fr); }
 
 .usr-intro {
   margin: 4px 0 16px;
@@ -71,7 +71,7 @@
 
 .usr-grid {
   display: grid;
-  grid-template-columns: 150px 1fr;
+  grid-template-columns: 150px minmax(0, 1fr);
   gap: 10px 16px;
   align-items: start;
 }
@@ -94,7 +94,7 @@
 
 .usr-perms {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(210px, 100%), 1fr));
   gap: 6px 14px;
 }
 .usr-perms__grupo { grid-column: 1 / -1; margin-top: 6px; font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--texto-suave); }

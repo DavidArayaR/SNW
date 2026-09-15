@@ -348,17 +348,6 @@
     ],
     "correo_recuperacion": ""
   },
-  "bb63bc6ad8744c9180ea4254fd54dd2c": {
-    "usuario": "usuario",
-    "rol": "usuario",
-    "nombre": "Usuario Final",
-    "permisos": [
-      "mensajeria",
-      "historial",
-      "estadisticas",
-      "plantillas_editar"
-    ]
-  },
   "92e490d76b25420c902c26c508c0fdc8": {
     "usuario": "dev",
     "rol": "desarrollador",
@@ -424,5 +413,289 @@
       "call_center",
       "call_center_registro"
     ]
+  },
+  "5de216e654d24664a1076ae08f6e3b38": {
+    "usuario": "dev",
+    "rol": "desarrollador",
+    "nombre": "Desarrollador",
+    "permisos": [
+      "pacientes",
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar",
+      "envio_produccion",
+      "tarifas_editar",
+      "call_center",
+      "call_center_registro"
+    ]
+  },
+  "a5b97ad23deb4f6c8ccdb85a3504c5c8": {
+    "usuario": "dev",
+    "rol": "desarrollador",
+    "nombre": "Desarrollador",
+    "permisos": [
+      "pacientes",
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar",
+      "envio_produccion",
+      "tarifas_editar",
+      "call_center",
+      "call_center_registro"
+    ],
+    "correo_recuperacion": ""
+  },
+  "a4800278f3c74b19af25b6d7a9a1a83d": {
+    "usuario": "dev",
+    "rol": "desarrollador",
+    "nombre": "Desarrollador",
+    "permisos": [
+      "pacientes",
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar",
+      "envio_produccion",
+      "tarifas_editar",
+      "call_center",
+      "call_center_registro"
+    ],
+    "correo_recuperacion": ""
+  },
+  "0ac03fed0d44425c89f7f76a3d75b66b": {
+    "usuario": "dev",
+    "rol": "desarrollador",
+    "nombre": "Desarrollador",
+    "permisos": [
+      "pacientes",
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar",
+      "envio_produccion",
+      "tarifas_editar",
+      "call_center",
+      "call_center_registro"
+    ],
+    "correo_recuperacion": ""
+  },
+  "f6bfdff1e6604cfdbdaba9a9ff992b51": {
+    "usuario": "dev",
+    "rol": "desarrollador",
+    "nombre": "Desarrollador",
+    "permisos": [
+      "pacientes",
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar",
+      "envio_produccion",
+      "tarifas_editar",
+      "call_center",
+      "call_center_registro"
+    ],
+    "correo_recuperacion": ""
+  },
+  "ceed2fcbf7ce4978829f0978944e4838": {
+    "usuario": "dev",
+    "rol": "desarrollador",
+    "nombre": "Desarrollador",
+    "permisos": [
+      "pacientes",
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar",
+      "envio_produccion",
+      "tarifas_editar",
+      "call_center",
+      "call_center_registro"
+    ],
+    "correo_recuperacion": ""
+  },
+  "91ec265c8f6642549be4aa539207ac95": {
+    "usuario": "dev",
+    "rol": "desarrollador",
+    "nombre": "Desarrollador",
+    "permisos": [
+      "pacientes",
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar",
+      "envio_produccion",
+      "tarifas_editar",
+      "call_center",
+      "call_center_registro"
+    ],
+    "correo_recuperacion": ""
+  },
+  "015c18eb320f4632b276c69c841473bf": {
+    "usuario": "dev",
+    "rol": "desarrollador",
+    "nombre": "Desarrollador",
+    "permisos": [
+      "pacientes",
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar",
+      "envio_produccion",
+      "tarifas_editar",
+      "call_center",
+      "call_center_registro"
+    ],
+    "correo_recuperacion": ""
+  },
+  "d9b1da7e309c456fbf610eafdceb51de": {
+    "usuario": "dev",
+    "rol": "desarrollador",
+    "nombre": "Desarrollador",
+    "permisos": [
+      "pacientes",
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar",
+      "envio_produccion",
+      "tarifas_editar",
+      "call_center",
+      "call_center_registro"
+    ],
+    "correo_recuperacion": ""
+  },
+  "d957e81cf27946389bc057704c4a04bf": {
+    "usuario": "dev",
+    "rol": "desarrollador",
+    "nombre": "Desarrollador",
+    "permisos": [
+      "pacientes",
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar",
+      "envio_produccion",
+      "tarifas_editar",
+      "call_center",
+      "call_center_registro"
+    ],
+    "correo_recuperacion": ""
+  },
+  "3fb9278b5b7b4fe59b71a0a929f29962": {
+    "usuario": "dev",
+    "rol": "desarrollador",
+    "nombre": "Desarrollador",
+    "permisos": [
+      "pacientes",
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar",
+      "envio_produccion",
+      "tarifas_editar",
+      "call_center",
+      "call_center_registro"
+    ],
+    "correo_recuperacion": ""
+  },
+  "8f82f61b464b41838d3bf70ff541be68": {
+    "usuario": "admin",
+    "rol": "administrador",
+    "nombre": "Administrador",
+    "permisos": [
+      "pacientes",
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar",
+      "envio_produccion",
+      "tarifas_editar",
+      "call_center",
+      "call_center_registro"
+    ],
+    "actividad": 1789482835.1498775,
+    "actividad_guardada": 1789482835.0888855,
+    "correo_recuperacion": ""
+  },
+  "8a7c32c0d7b44953b70c5d887a4f623e": {
+    "usuario": "dev",
+    "rol": "desarrollador",
+    "nombre": "Desarrollador",
+    "permisos": [
+      "pacientes",
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar",
+      "envio_produccion",
+      "tarifas_editar",
+      "call_center",
+      "call_center_registro"
+    ],
+    "creada": 1789482796.029709,
+    "actividad": 1789482796.3432233,
+    "actividad_guardada": 1789482796.029709,
+    "correo_recuperacion": ""
+  },
+  "1e15e80e71264dcc83a4a6531f8f8be7": {
+    "usuario": "dev",
+    "rol": "desarrollador",
+    "nombre": "Desarrollador",
+    "permisos": [
+      "pacientes",
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar",
+      "envio_produccion",
+      "tarifas_editar",
+      "call_center",
+      "call_center_registro"
+    ],
+    "creada": 1789483740.0917015,
+    "actividad": 1789483740.5309982,
+    "actividad_guardada": 1789483740.0917015,
+    "correo_recuperacion": ""
+  },
+  "1a12a67d9c3d4fadb66f1fae21fedb23": {
+    "usuario": "dev",
+    "rol": "desarrollador",
+    "nombre": "Desarrollador",
+    "permisos": [
+      "pacientes",
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar",
+      "envio_produccion",
+      "tarifas_editar",
+      "call_center",
+      "call_center_registro"
+    ],
+    "creada": 1789483780.0408845,
+    "actividad": 1789483780.0408845,
+    "actividad_guardada": 1789483780.0408845
+  },
+  "45eac5e9fb2a4627baee16251dbf7238": {
+    "usuario": "dev",
+    "rol": "desarrollador",
+    "nombre": "Desarrollador",
+    "permisos": [
+      "pacientes",
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar",
+      "envio_produccion",
+      "tarifas_editar",
+      "call_center",
+      "call_center_registro"
+    ],
+    "creada": 1789484025.6993139,
+    "actividad": 1789484392.740042,
+    "actividad_guardada": 1789484392.740042,
+    "correo_recuperacion": ""
   }
 }
