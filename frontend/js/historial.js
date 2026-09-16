@@ -35,7 +35,7 @@ async function cargar() {
       fetch(`${API_HISTORIAL}?ambiente=todos`, { headers: authHeaders(), cache: "no-store" }),
       fetch(`api/configuracion?ambiente=produccion`, { headers: authHeaders(), cache: "no-store" }),
     ]);
-    if (rh.status === 401 || rc.status === 401) { window.snwSalir(); return; }
+    if (rh.status === 401 || rc.status === 401) { window.snwSesionExpirada(); return; }
     if (!rh.ok || !rc.ok) throw new Error();
     registros = await rh.json();
     $("#badgeEntorno").textContent = "Todas las bases de datos";
@@ -106,7 +106,7 @@ tbodyEl.addEventListener("click", async (e) => {
     const r = await fetch(`api/notificaciones/historial/${envioId}/detalle?ambiente=${amb}`, {
       headers: authHeaders(), cache: "no-store"
     });
-    if (r.status === 401) { window.snwSalir(); return; }
+    if (r.status === 401) { window.snwSesionExpirada(); return; }
     if (!r.ok) throw new Error();
     const detalle = await r.json();
     abrirDetalle(envio, detalle);
@@ -191,7 +191,7 @@ async function abrirMensajes(pacienteId) {
     const r = await fetch(`api/pacientes/${pacienteId}/mensajes?ambiente=${ambienteDetalle}`, {
       headers: authHeaders(), cache: "no-store",
     });
-    if (r.status === 401) { window.snwSalir(); return; }
+    if (r.status === 401) { window.snwSesionExpirada(); return; }
     if (!r.ok) throw new Error();
     const data = await r.json();
     renderMensajes(data);
@@ -229,8 +229,12 @@ function renderMensajes(data) {
         `<div class="msg-meta">${meta}</div></div>`;
     }).join("");
   }
-  const chk = $("#chkInteresado");
-  if (chk) chk.checked = !!pac.interesado;
+  const estadoInteres = $("#msgInteresEstado");
+  if (estadoInteres) {
+    estadoInteres.querySelector("span").textContent =
+      pac.interesado ? "Interés: sí (detectado automáticamente)" : "Interés: no";
+    estadoInteres.classList.toggle("msg-interes-estado--si", !!pac.interesado);
+  }
   actualizarAccionCC(!!pac.interesado);
 
   $("#modalMensajes").hidden = false;
@@ -261,33 +265,8 @@ function actualizarAccionCC(interesado) {
   btn.title = !hayPlantilla
     ? "Primero crea una plantilla de call center (sección al final de la página)"
     : !interesado
-      ? "Marca al paciente como interesado para poder enviarle este mensaje"
+      ? "El sistema todavía no detectó interés en los mensajes de este paciente"
       : "";
-}
-
-const chkInteresado = $("#chkInteresado");
-if (chkInteresado) {
-  chkInteresado.addEventListener("change", async () => {
-    if (!pacienteMsgActual) return;
-    const quiere = chkInteresado.checked;
-    try {
-      const r = await fetch(`api/pacientes/${pacienteMsgActual.id}/interes?ambiente=${pacienteMsgActual.ambiente}`, {
-        method: "PUT",
-        headers: authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ interesado: quiere }),
-      });
-      if (r.status === 401) { window.snwSalir(); return; }
-      if (!r.ok) throw new Error();
-      pacienteMsgActual.interesado = quiere;
-      actualizarAccionCC(quiere);
-      toast(quiere ? "Paciente marcado como interesado." : "Se quitó la marca de interés.", "ok");
-      // El estado de respuesta pudo cambiar (baja → respondió): refrescar historial detrás.
-      cargar();
-    } catch {
-      chkInteresado.checked = !quiere;
-      toast("No se pudo actualizar el estado del paciente.", "error");
-    }
-  });
 }
 
 const btnEnviarCC = $("#btnEnviarCallCenter");
@@ -303,7 +282,7 @@ if (btnEnviarCC) {
         method: "POST", headers: authHeaders(),
       });
       const data = await r.json().catch(() => ({}));
-      if (r.status === 401) { window.snwSalir(); return; }
+      if (r.status === 401) { window.snwSesionExpirada(); return; }
       if (!r.ok) throw new Error(data.detail || "No se pudo enviar");
       toast("Mensaje de call center enviado.", "ok");
       abrirMensajes(pacienteMsgActual.id); // recargar el hilo con el mensaje recién enviado
@@ -345,7 +324,7 @@ async function cargarCC() {
   if (!listaCCEl) return;
   try {
     const r = await fetch("api/plantillas/call-center", { headers: authHeaders(), cache: "no-store" });
-    if (r.status === 401) { window.snwSalir(); return; }
+    if (r.status === 401) { window.snwSesionExpirada(); return; }
     if (r.status === 403) { return; }
     if (!r.ok) throw new Error();
     const data = await r.json();
@@ -474,7 +453,7 @@ if (listaCCEl) {
         },
       );
       const data = await r.json().catch(() => ({}));
-      if (r.status === 401) { window.snwSalir(); return; }
+      if (r.status === 401) { window.snwSesionExpirada(); return; }
       if (!r.ok) throw new Error(data.detail || `Error ${r.status}`);
       modalCCEl.hidden = true;
       toast(esNueva ? "Plantilla creada." : "Plantilla actualizada.", "ok");
@@ -490,7 +469,7 @@ async function borrarCC(id) {
   if (!confirm(`¿Eliminar la plantilla de call center «${p ? p.nombre : id}»?`)) return;
   try {
     const r = await fetch(`api/plantillas/call-center/${id}`, { method: "DELETE", headers: authHeaders() });
-    if (r.status === 401) { window.snwSalir(); return; }
+    if (r.status === 401) { window.snwSesionExpirada(); return; }
     if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.detail || `Error ${r.status}`); }
     toast("Plantilla eliminada.", "ok");
     await cargarCC();
@@ -510,7 +489,7 @@ async function cargarLogCC() {
   body.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--texto-suave);">Cargando…</td></tr>`;
   try {
     const r = await fetch("api/call-center/log", { headers: authHeaders(), cache: "no-store" });
-    if (r.status === 401) { window.snwSalir(); return; }
+    if (r.status === 401) { window.snwSesionExpirada(); return; }
     if (!r.ok) throw new Error();
     const data = await r.json();
     const c = data.contadores || {};

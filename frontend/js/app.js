@@ -68,14 +68,17 @@ const esPlantillaEditable = (p) => !p || esPlantillaAprobada(p) || esPlantillaRe
 
 // El servidor revisa solo (cada `plantillas_revision_minutos`) el estado en
 // Meta de las plantillas pendientes y guarda cuándo pasaron a aprobadas
-// (whatsapp_template_aprobada_en). Durante los 10 minutos siguientes se
+// (whatsapp_template_aprobada_en). Durante estos minutos siguientes se
 // destaca con un aviso; después se deja de mostrar (no hace falta borrar
-// nada, el cálculo es por tiempo).
-const MINUTOS_APROBADA_RECIENTE = 10;
+// nada, el cálculo es por tiempo). Valor por defecto hasta que se lea el
+// real desde /api/configuracion (clave `plantillas_badge_aprobada_minutos`,
+// ver actualizarBadgeMensajeria) — configurable en Configuración → WhatsApp.
+let MINUTOS_APROBADA_RECIENTE = 10;
 const esRecienAprobada = (p) =>
   !!p &&
   p.whatsapp_template_status === "APPROVED" &&
   !!p.whatsapp_template_aprobada_en &&
+  MINUTOS_APROBADA_RECIENTE > 0 &&
   Date.now() - p.whatsapp_template_aprobada_en < MINUTOS_APROBADA_RECIENTE * 60 * 1000;
 
 if (!localStorage.getItem("snw_token")) location.replace("login.html");
@@ -105,7 +108,7 @@ async function cargar() {
   for (let intento = 1; intento <= 2; intento++) {
     try {
       const res = await fetch(API_URL, { headers: authHeaders(), cache: "no-store" });
-      if (res.status === 401) { window.snwSalir(); return; }
+      if (res.status === 401) { window.snwSesionExpirada(); return; }
       if (!res.ok) throw new Error(res.status);
       const datos = await res.json();
       if (!Array.isArray(datos)) throw new Error("formato inválido");
@@ -131,7 +134,7 @@ async function cargar() {
 async function revisarPlantillasEnSegundoPlano() {
   try {
     const res = await fetch(API_URL, { headers: authHeaders(), cache: "no-store" });
-    if (res.status === 401) { window.snwSalir(); return; }
+    if (res.status === 401) { window.snwSesionExpirada(); return; }
     if (!res.ok) return;
     const datos = await res.json();
     if (!Array.isArray(datos)) return;
@@ -164,7 +167,7 @@ async function crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_te
     headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ clave: slug(nombre), nombre, texto, whatsapp_template_lang, whatsapp_template_categoria }),
   });
-  if (res.status === 401) { window.snwSalir(); return Promise.reject(new Error("Sesión expirada")); }
+  if (res.status === 401) { window.snwSesionExpirada(); return Promise.reject(new Error("Sesión expirada")); }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.detail ?? data.error ?? `Error ${res.status}`);
   return data;
@@ -176,7 +179,7 @@ async function actualizarPlantilla(id, nombre, texto, whatsapp_template_lang, wh
     headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ nombre, texto, whatsapp_template_lang, whatsapp_template_categoria }),
   });
-  if (res.status === 401) { window.snwSalir(); return Promise.reject(new Error("Sesión expirada")); }
+  if (res.status === 401) { window.snwSesionExpirada(); return Promise.reject(new Error("Sesión expirada")); }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.detail ?? data.error ?? `Error ${res.status}`);
   return data;
@@ -184,7 +187,7 @@ async function actualizarPlantilla(id, nombre, texto, whatsapp_template_lang, wh
 
 async function eliminarPlantilla(id) {
   const res = await fetch(`${API_URL}/${id}`, { method: "DELETE", headers: authHeaders() });
-  if (res.status === 401) { window.snwSalir(); return Promise.reject(new Error("Sesión expirada")); }
+  if (res.status === 401) { window.snwSesionExpirada(); return Promise.reject(new Error("Sesión expirada")); }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.detail ?? data.error ?? `Error ${res.status}`);
   return data;
@@ -227,8 +230,10 @@ function crearItemPlantilla(p) {
     (p.id === activaId ? " tpl-item--activa" : "") +
     (aprobada ? "" : " tpl-item--pendiente");
   let estadoTag = "";
-  if (!aprobada) {
-    estadoTag = ` <span class="tpl-item__estado${p.whatsapp_template_status === "REJECTED" ? " tpl-item__estado--rechazada" : ""}">` +
+  if (esPlantillaRechazada(p)) {
+    // Las pendientes de revisión no llevan badge: ya están agrupadas bajo
+    // «Plantillas pendientes de aprobación por Meta», el badge era redundante.
+    estadoTag = ` <span class="tpl-item__estado tpl-item__estado--rechazada">` +
       `${escaparHtml(etiquetaEstadoMeta(p.whatsapp_template_status))}</span>`;
   } else if (esRecienAprobada(p)) {
     estadoTag = ` <span class="tpl-item__estado tpl-item__estado--nueva">✨ Aprobada</span>`;
@@ -783,6 +788,9 @@ async function actualizarBadgeMensajeria() {
     if (badgeEntornoMensajeria) {
       badgeEntornoMensajeria.textContent = `Base de datos ${cfg.entorno === "produccion" ? "producción" : "desarrollo"} · ${cfg.base_datos ?? ""}`;
     }
+    if (typeof cfg.plantillas_badge_aprobada_minutos === "number") {
+      MINUTOS_APROBADA_RECIENTE = cfg.plantillas_badge_aprobada_minutos;
+    }
   } catch {}
 }
 
@@ -938,22 +946,43 @@ function configurarLimiteConf(max) {
   num.addEventListener("change", () => { num.value = range.value = clamp(num.value); });
 })();
 
+function fmtMoneda(monto, moneda) {
+  const entero = Number.isInteger(monto);
+  const s = monto.toLocaleString("de-DE", {
+    minimumFractionDigits: entero ? 0 : 2,
+    maximumFractionDigits: entero ? 0 : 2,
+  });
+  return `${s} ${moneda}`;
+}
+
 async function actualizarResumenConf() {
   const dd = $("#confDestinatarios");
+  const filaCosto = $("#filaCostoConf");
+  const ddCosto = $("#confCosto");
   dd.textContent = "Contando...";
+  filaCosto.hidden = true;
   $("#btnLanzarConf").disabled = true;
 
   try {
     const res = await fetch("api/notificaciones/destinatarios", {
       method: "POST",
       headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ ambiente: ambienteConf }),
+      body: JSON.stringify({ ambiente: ambienteConf, plantilla_id: activaId }),
     });
-    if (res.status === 401) { window.snwSalir(); return; }
+    if (res.status === 401) { window.snwSesionExpirada(); return; }
     const data = await res.json();
     dd.textContent = `${data.pendientes} pendiente(s) · base: ${data.base_datos}`;
     configurarLimiteConf(data.pendientes || 0);
     $("#btnLanzarConf").disabled = data.pendientes === 0;
+
+    if (data.costo) {
+      ddCosto.textContent =
+        `${fmtMoneda(data.costo.costo, data.costo.moneda)} ` +
+        `(${data.costo.total} × ${fmtMoneda(data.costo.rate, data.costo.moneda)}, categoría ${data.costo.categoria})`;
+      filaCosto.hidden = false;
+    } else {
+      filaCosto.hidden = true;
+    }
   } catch {
     dd.textContent = "No se pudieron contar.";
     configurarLimiteConf(0);
@@ -991,7 +1020,7 @@ $("#btnConfirmarCancelarConf").addEventListener("click", async () => {
         method: "POST",
         headers: authHeaders(),
       });
-      if (res.status === 401) { window.snwSalir(); return false; }
+      if (res.status === 401) { window.snwSesionExpirada(); return false; }
       return res.ok;
     } catch {
       return false;
@@ -1043,7 +1072,7 @@ $("#btnLanzarConf").addEventListener("click", async () => {
       headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(cuerpo),
     });
-    if (res.status === 401) { window.snwSalir(); setBloqueoEnvioConf(false); return; }
+    if (res.status === 401) { window.snwSesionExpirada(); setBloqueoEnvioConf(false); return; }
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail ?? `Error ${res.status}`);
 
@@ -1149,7 +1178,7 @@ function seguirProgresoConf(jobId, total) {
         headers: authHeaders(),
         cache: "no-store",
       });
-      if (res.status === 401) { window.snwSalir(); return; }
+      if (res.status === 401) { window.snwSesionExpirada(); return; }
       if (!res.ok) throw new Error();
       const job = await res.json();
 
@@ -1210,7 +1239,7 @@ if (btnRevisarTodos) {
         method: "POST",
         headers: authHeaders(),
       });
-      if (res.status === 401) { window.snwSalir(); return; }
+      if (res.status === 401) { window.snwSesionExpirada(); return; }
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail ?? `Error ${res.status}`);
       // Las plantillas de call center se gestionan desde el Historial.
@@ -1240,7 +1269,7 @@ if (btnSincronizarMeta) {
         method: "POST",
         headers: authHeaders(),
       });
-      if (res.status === 401) { window.snwSalir(); return; }
+      if (res.status === 401) { window.snwSesionExpirada(); return; }
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.detail ?? `Error ${res.status}`);
       // Las plantillas de call center se gestionan desde el Historial.

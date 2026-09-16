@@ -25,7 +25,8 @@
     "whatsapp_template_id": "1737252654192451",
     "whatsapp_template_status": "APPROVED",
     "whatsapp_template_error": null,
-    "whatsapp_template_rejected_reason": "NONE"
+    "whatsapp_template_rejected_reason": null,
+    "whatsapp_template_aprobada_en": 1789571194959
   },
   {
     "id": 4,
@@ -37,9 +38,10 @@
     "whatsapp_template_categoria": "UTILITY",
     "whatsapp_template_id": "1285483704651425",
     "whatsapp_template_status": "APPROVED",
-    "whatsapp_template_rejected_reason": "NONE",
+    "whatsapp_template_rejected_reason": null,
     "whatsapp_template_error": null,
-    "actualizada": 1788545013118
+    "actualizada": 1788545013118,
+    "whatsapp_template_aprobada_en": 1789571195327
   },
   {
     "id": 5,
@@ -47,16 +49,16 @@
     "nombre": "Mensaje para paciente interesado (call center)",
     "texto": "¡Hola {nombre}! Gracias por tu interés. Nuestro equipo de atención te puede ayudar directamente por WhatsApp.",
     "especial": "call_center",
-    "actualizada": 1788967074320,
+    "actualizada": 1789486137009,
     "cc_boton": true,
     "cc_boton_texto": "Ir al call center",
-    "cc_auto": false
+    "cc_auto": true
   },
   {
     "id": 6,
     "clave": "recordar_cita",
     "nombre": "Recordar cita",
-    "texto": "hola {{1}}, te recuerdo tu agenda",
+    "texto": "hola {nombre}, te recordamos que debes agendar tu hora",
     "whatsapp_template": "recordar_cita",
     "whatsapp_template_lang": "es",
     "whatsapp_template_categoria": "MARKETING",
@@ -64,21 +66,7 @@
     "whatsapp_template_status": "APPROVED",
     "whatsapp_template_rejected_reason": null,
     "whatsapp_template_error": null,
-    "actualizada": 1789482634143
-  },
-  {
-    "id": 7,
-    "clave": "tets",
-    "nombre": "tets",
-    "texto": "probando plantilla",
-    "whatsapp_template": "tets",
-    "whatsapp_template_lang": "es",
-    "whatsapp_template_categoria": "UTILITY",
-    "actualizada": 1789482665456,
-    "whatsapp_template_id": "38380529971561589",
-    "whatsapp_template_status": "APPROVED",
-    "whatsapp_template_error": null,
-    "whatsapp_template_rejected_reason": null,
-    "whatsapp_template_aprobada_en": 1789484343672
+    "actualizada": 1789570848863,
+    "whatsapp_template_aprobada_en": 1789571074573
   }
 ]

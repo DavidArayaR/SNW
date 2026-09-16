@@ -1,6 +1,4 @@
 const API_PACIENTES = "api/pacientes";
-const API_PLANTILLAS = "api/plantillas";
-const API_ENVIAR = "api/notificaciones/enviar";
 
 function authHeaders(extra = {}) {
   return { Authorization: "Bearer " + (localStorage.getItem("snw_token") || ""), ...extra };
@@ -22,30 +20,12 @@ let ambienteAdmin = localStorage.getItem("snw_ambiente_admin");
 let _ambienteInicializado = false;
 
 let pacientes = [];
-let plantillas = [];
 let config = null;
 let filtro = "";
 let filtroEstado = "todos";
 let filtroRespuesta = "todas";
 let seleccionados = new Set();
 let todoMarcado = false;
-let plantillaId = null;
-let timerPolling = null;
-let envioEnCurso = false;
-let jobIdActual = null;
-let totalActual = 0;
-let hechosActual = 0;
-
-function setBloqueoEnvio(bloquear) {
-  envioEnCurso = bloquear;
-  document.querySelectorAll("button, input, select, textarea").forEach((el) => {
-    // Cancelar y Cerrar del modal de envío siempre quedan disponibles.
-    if (el.id === "btnCancelarEnvio" || el.id === "btnCerrarModal") return;
-    el.disabled = bloquear;
-  });
-  // Si se desbloquea, restaurar estados correctos vía render
-  if (!bloquear) render();
-}
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -55,10 +35,11 @@ const buscadorEl = $("#buscador");
 const statsEl = $("#stats");
 const chkTodos = $("#chkTodos");
 const contadorSel = $("#contadorSel");
-const btnIniciar = $("#btnIniciar");
-const modalEl = $("#modalEnvio");
 const toastEl = $("#toast");
 const selAmbiente = $("#selAmbiente");
+const toolbarMasivo = $("#toolbarMasivo");
+const selEstadoMasivo = $("#selEstadoMasivo");
+const selRespuestaMasivo = $("#selRespuestaMasivo");
 
 if (ambienteAdmin) selAmbiente.value = ambienteAdmin;
 selAmbiente.addEventListener("change", async () => {
@@ -93,19 +74,17 @@ async function cargar() {
       _ambienteInicializado = true;
     }
     const amb = ambienteActual() || ambienteAdmin || "desarrollo";
-    const [rp, rt, rc] = await Promise.all([
+    const [rp, rc] = await Promise.all([
       fetch(`${API_PACIENTES}?ambiente=${amb}`, { headers: authHeaders(), cache: "no-store" }),
-      fetch(API_PLANTILLAS, { headers: authHeaders(), cache: "no-store" }),
       fetch(`api/configuracion?ambiente=${amb}`, { headers: authHeaders(), cache: "no-store" }),
     ]);
-    if (rp.status === 401 || rt.status === 401 || rc.status === 401) { window.snwSalir(); return; }
+    if (rp.status === 401 || rc.status === 401) { window.snwSesionExpirada(); return; }
     if (rp.status === 403) { location.href = "mensajeria.html"; return; }
 
     pacientes = (await rp.json()).map((p) => ({
       ...p,
       estado: p.estado || "pendiente",
     }));
-    plantillas = (await rt.json()).filter((p) => !p.especial);
     config = await rc.json();
 
     $("#nombreBd").textContent = config.base_datos ?? "";
@@ -141,6 +120,9 @@ function render() {
     const tr = document.createElement("tr");
     const respuesta = p.respuesta || "pendiente";
     const esBaja = respuesta === "baja" || !!p.whatsapp_opt_out;
+    // Baja pedida con sus propias palabras por WhatsApp: no se puede editar a
+    // mano, solo se libera si el paciente se retracta (webhook).
+    const bajaBloqueada = respuesta === "baja" && !!p.whatsapp_opt_out && !!p.opt_out_explicito;
     const respuestaLabels = { pendiente: "Sin respuesta", respondio: "Respondió", baja: "Se dio de baja" };
     tr.classList.toggle("es-baja", esBaja);
     const hayError = p.estado === "error" || p.ultimo_estado_envio === "error";
@@ -155,11 +137,15 @@ function render() {
       tituloResp += ` · ${p.ultima_respuesta_fecha}`;
       if (p.ultimo_mensaje_recibido) tituloResp += `\n«${p.ultimo_mensaje_recibido}»`;
     }
+    if (bajaBloqueada) {
+      tituloResp = "El paciente pidió la baja por WhatsApp: no se puede editar a mano. " +
+        "Se libera solo si el paciente escribe de nuevo mostrando interés.";
+    }
     const subResp = p.ultima_respuesta_fecha
       ? `<span class="respuesta-fecha">${escaparHtml(p.ultima_respuesta_fecha)}</span>`
       : "";
     tr.innerHTML =
-      `<td class="col-check"><input type="checkbox" data-id="${p.id}" ${seleccionados.has(p.id) ? "checked" : ""} ${esBaja ? "disabled" : ""} title="${esBaja ? "No se puede enviar mensaje (se dio de baja)" : ""}"></td>` +
+      `<td class="col-check"><input type="checkbox" data-id="${p.id}" ${seleccionados.has(p.id) ? "checked" : ""}></td>` +
       `<td class="campo-id">${p.id}</td>` +
       `<td class="campo-nombre">${escaparHtml(nombreCompleto)}</td>` +
       `<td class="campo-tel">${escaparHtml(p.telefono)}</td>` +
@@ -172,7 +158,10 @@ function render() {
       `</td>` +
       celdaError +
       `<td class="campo-respuesta">` +
-        `<span class="respuesta-badge respuesta-${escaparHtml(respuesta)}" data-editable data-id="${p.id}" title="${escaparHtml(tituloResp + " · click para cambiar")}">${escaparHtml(respuestaLabels[respuesta] ?? respuesta)}</span>` +
+        `<span class="respuesta-badge respuesta-${escaparHtml(respuesta)}${bajaBloqueada ? " respuesta-badge--bloqueada" : ""}"` +
+          `${bajaBloqueada ? "" : " data-editable"} data-id="${p.id}"` +
+          ` title="${escaparHtml(bajaBloqueada ? tituloResp : tituloResp + " · click para cambiar")}">` +
+          `${bajaBloqueada ? '<i class="fa-solid fa-lock"></i> ' : ""}${escaparHtml(respuestaLabels[respuesta] ?? respuesta)}</span>` +
         `<select class="respuesta-select" data-id="${p.id}" hidden>` +
           ["pendiente", "respondio", "baja"].map((v) =>
             `<option value="${v}"${v === respuesta ? " selected" : ""}>${respuestaLabels[v]}</option>`).join("") +
@@ -182,7 +171,6 @@ function render() {
       `<td class="campo-fecha">${escaparHtml(p.actualizado)}</td>`;
     const chk = tr.querySelector('input[type="checkbox"]');
     chk.addEventListener("change", (e) => {
-      if (esBaja) return;
       e.target.checked ? seleccionados.add(p.id) : seleccionados.delete(p.id);
       if (!e.target.checked) todoMarcado = false;
       refrescarSeleccion();
@@ -227,19 +215,13 @@ function refrescarSeleccion(visibles = null) {
   contadorSel.textContent =
     seleccionados.size > 0 ? `${seleccionados.size} seleccionado${seleccionados.size === 1 ? "" : "s"}` : "";
 
-  btnIniciar.disabled = seleccionados.size === 0;
-  btnIniciar.textContent =
-    seleccionados.size > 0 ? `Iniciar envío (${seleccionados.size})` : "Iniciar envío";
+  if (toolbarMasivo) toolbarMasivo.hidden = seleccionados.size === 0;
 
-  const idsVisibles = visibles
-    .filter((p) => (p.respuesta || "pendiente") !== "baja" && !p.whatsapp_opt_out)
-    .map((p) => p.id);
   chkTodos.checked =
-    idsVisibles.length > 0 && idsVisibles.every((id) => seleccionados.has(id));
+    visibles.length > 0 && visibles.every((p) => seleccionados.has(p.id));
 }
 
-// Devuelve el Set de ids de los pacientes seleccionables (cumplen el filtro actual
-// y no están dados de baja).
+// Devuelve el Set de ids de los pacientes visibles con el filtro actual.
 function idsSeleccionables() {
   const q = filtro.trim().toLowerCase();
   return new Set(
@@ -248,8 +230,6 @@ function idsSeleccionables() {
         (p) =>
           (filtroEstado === "todos" || p.estado === filtroEstado) &&
           (filtroRespuesta === "todas" || (p.respuesta || "pendiente") === filtroRespuesta) &&
-          (p.respuesta || "pendiente") !== "baja" &&
-          !p.whatsapp_opt_out &&
           (!q ||
             [p.nombre, p.apellido, p.telefono]
               .filter(Boolean)
@@ -295,7 +275,7 @@ tbodyEl.addEventListener("click", (e) => {
   const tr = e.target.closest("tr");
   if (!tr || !tbodyEl.contains(tr)) return;
   const chk = tr.querySelector("input[type=checkbox]");
-  if (!chk || chk.disabled) return;
+  if (!chk) return;
   chk.checked = !chk.checked;
   chk.checked ? seleccionados.add(Number(chk.dataset.id)) : seleccionados.delete(Number(chk.dataset.id));
   if (!chk.checked) todoMarcado = false;
@@ -337,7 +317,7 @@ tbodyEl.addEventListener("change", async (e) => {
       headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ respuesta: nueva }),
     });
-    if (res.status === 401) { window.snwSalir(); return; }
+    if (res.status === 401) { window.snwSesionExpirada(); return; }
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || "No se pudo actualizar la respuesta");
@@ -378,7 +358,7 @@ tbodyEl.addEventListener("change", async (e) => {
       headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ estado: nuevoEstado }),
     });
-    if (res.status === 401) { window.snwSalir(); return; }
+    if (res.status === 401) { window.snwSesionExpirada(); return; }
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || "No se pudo actualizar el estado");
@@ -441,278 +421,54 @@ statsEl.addEventListener("click", (e) => {
 
 $("#btnActualizar").addEventListener("click", cargar);
 
-btnIniciar.addEventListener("click", () => {
-  if (!seleccionados.size) return;
-  plantillaId = null;
-  abrirModal();
-});
+// --- Edición masiva: cambiar estado o respuesta de todos los seleccionados --
+const ESTADO_LABEL = { pendiente: "pendiente", enviado: "enviado", error: "error" };
+const RESPUESTA_LABEL = { pendiente: "sin respuesta", respondio: "respondió", baja: "dado de baja" };
 
-function abrirModal() {
-  renderPlantillasModal();
-
-  $("#resumenLinea").textContent =
-    `Se enviará un mensaje a ${seleccionados.size} ${seleccionados.size === 1 ? "persona" : "personas"}`;
-
-  const esDev = config?.entorno === "desarrollo";
-  if (!esDev) {
-    avisoDevEl.hidden = true;
-  } else {
-    avisoDevEl.hidden = false;
-    const nums = (config?.numeros_autorizados ?? []).join(", ") || "ninguno";
-    avisoDevEl.textContent = `Base de datos desarrollo: solo se enviará a los números autorizados (${nums}). El resto será descartado.`;
-  }
-
-  $("#faseConfig").hidden = false;
-  $("#faseProgreso").hidden = true;
-  $("#btnLanzarEnvio").hidden = true;
-  $("#btnCerrarModal").disabled = false;
-  $("#listaRechazados").innerHTML = "";
-  $("#listaRechazados").hidden = true;
-  $("#barraFill").style.width = "0%";
-
-  modalEl.hidden = false;
-}
-
-function renderPlantillasModal() {
-  const cont = $("#listaPlantillasModal");
-  cont.innerHTML = "";
-
-  for (const t of plantillas) {
-    const label = document.createElement("label");
-    label.className = "tpl-card" + (t.id === plantillaId ? " seleccionada" : "");
-    label.innerHTML =
-      `<input type="radio" name="plantillaModal" value="${t.id}" ${t.id === plantillaId ? "checked" : ""}>` +
-      `<span class="tpl-card__nombre">${escaparHtml(t.nombre)}</span>` +
-      `<span class="tpl-card__texto">${escaparHtml(t.texto.split("\n")[0])}</span>`;
-    label.querySelector("input").addEventListener("change", () => {
-      plantillaId = t.id;
-      cont.querySelectorAll(".tpl-card").forEach((c) => c.classList.remove("seleccionada"));
-      label.classList.add("seleccionada");
-      $("#btnLanzarEnvio").hidden = false;
-    });
-    cont.appendChild(label);
-  }
-}
-
-const avisoDevEl = $("#avisoDev");
-
-$("#btnCancelarEnvio").addEventListener("click", () => {
-  const enProgreso = envioEnCurso && jobIdActual;
-  if (enProgreso) {
-    clearInterval(timerPolling);
-    const restantes = Math.max(0, totalActual - hechosActual);
-    $("#mensajeCancelar").textContent =
-      `¿Seguro que quieres cancelar el envío de ${restantes} mensaje(s) restante(s)?`;
-    $("#btnNoCancelar").disabled = false;
-    $("#btnConfirmarCancelar").disabled = false;
-    $("#modalCancelar").hidden = false;
-    pausarJob(jobIdActual);
+async function aplicarMasivo(sel, url, campo, etiquetas) {
+  const valor = sel.value;
+  if (!valor) return;
+  const ids = [...seleccionados];
+  const cantidad = ids.length;
+  const pregunta = campo === "estado"
+    ? `¿Cambiar el estado de ${cantidad} paciente${cantidad === 1 ? "" : "s"} a "${etiquetas[valor]}"?`
+    : `¿Cambiar la respuesta de ${cantidad} paciente${cantidad === 1 ? "" : "s"} a "${etiquetas[valor]}"?`;
+  if (!confirm(pregunta)) {
+    sel.value = "";
     return;
   }
-  // Sin envío en curso: se comporta como cerrar.
-  clearInterval(timerPolling);
-  modalEl.hidden = true;
-});
-
-$("#btnNoCancelar").addEventListener("click", () => {
-  $("#modalCancelar").hidden = true;
-  if (jobIdActual) {
-    reanudarJob(jobIdActual);
-    seguirProgreso(jobIdActual, totalActual);
-  }
-});
-$("#btnConfirmarCancelar").addEventListener("click", async () => {
-  const accion = await (async () => {
-    try {
-      const res = await fetch(`api/notificaciones/jobs/${jobIdActual}/cancelar`, {
-        method: "POST",
-        headers: authHeaders(),
-      });
-      if (res.status === 401) { window.snwSalir(); return false; }
-      return res.ok;
-    } catch {
-      return false;
-    }
-  })();
-  $("#modalCancelar").hidden = true;
-  if (accion) {
-    finalizar("Envío cancelado por el usuario.", true);
-    setBloqueoEnvio(false);
-    jobIdActual = null;
-    totalActual = 0;
-    hechosActual = 0;
-    modalEl.hidden = true;
-    render();
-  } else {
-    toast("No se pudo cancelar el envío.", "error");
-    if (jobIdActual) seguirProgreso(jobIdActual, totalActual);
-  }
-});
-modalEl.addEventListener("click", (e) => {
-  if (envioEnCurso) return;
-  if (e.target === modalEl) {
-    clearInterval(timerPolling);
-    modalEl.hidden = true;
-  }
-});
-$("#btnCerrarModal").addEventListener("click", () => {
-  clearInterval(timerPolling);
-  // Si había un envío en curso, el trabajo sigue en el servidor (se ve en Historial).
-  if (envioEnCurso) setBloqueoEnvio(false);
-  seleccionados.clear();
-  plantillaId = null;
-  modalEl.hidden = true;
-  render();
-});
-
-$("#btnLanzarEnvio").addEventListener("click", async () => {
-  if (envioEnCurso) return;
-
-  $("#btnLanzarEnvio").hidden = true;
-  setBloqueoEnvio(true);
-
+  sel.disabled = true;
   try {
-    const res = await fetch(API_ENVIAR, {
-      method: "POST",
+    const amb = ambienteActual();
+    const res = await fetch(`${url}?ambiente=${encodeURIComponent(amb)}`, {
+      method: "PUT",
       headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ pacientes: [...seleccionados], plantilla_id: plantillaId, ambiente: ambienteActual() }),
+      body: JSON.stringify({ pacientes: ids, [campo]: valor }),
     });
-    const data = await res.json();
-    if (res.status === 401) { window.snwSalir(); setBloqueoEnvio(false); return; }
-    if (!res.ok) throw new Error(data.detail ?? `Error ${res.status}`);
-
-    pintarRechazados(data.rechazados ?? []);
-
-    if (data.requiere_confirmacion) {
-      modalEl.hidden = true;
-      const espera = document.getElementById("modalEspera");
-      espera.hidden = false;
-      const linkEl = document.getElementById("linkConfirmacionEspera");
-      if (linkEl && data.confirm_url && window.snwEsPrivilegiado) {
-        linkEl.innerHTML = `Para pruebas sin correo: <a href="${data.confirm_url}" target="_blank">Confirmar manualmente</a> · <a href="${data.confirm_url.replace('confirmar', 'rechazar')}" target="_blank" style="color:#b23b37;">Rechazar</a>`;
-      }
-      const beforeUnload = (e) => { e.preventDefault(); e.returnValue = ""; return ""; };
-      window.addEventListener("beforeunload", beforeUnload);
-      const poll = setInterval(async () => {
-        try {
-          const r2 = await fetch(`api/notificaciones/solicitud/${data.solicitud_id}`, { headers: authHeaders(), cache: "no-store" });
-          if (!r2.ok) return;
-          const s = await r2.json();
-          if (s.estado === "confirmado" && s.job_id) {
-            clearInterval(poll);
-            window.removeEventListener("beforeunload", beforeUnload);
-            espera.hidden = true;
-            alert("Envío confirmado por supervisor");
-            await new Promise((res) => setTimeout(res, 3000));
-            modalEl.hidden = false;
-            $("#faseConfig").hidden = true;
-            $("#faseProgreso").hidden = false;
-            jobIdActual = s.job_id;
-            totalActual = s.total;
-            seguirProgreso(s.job_id, s.total);
-          }
-        } catch {}
-      }, 2000);
-      window._pollEspera = poll;
-      window._beforeUnloadEspera = beforeUnload;
-      return;
+    if (res.status === 401) { window.snwSesionExpirada(); return; }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || "No se pudo aplicar el cambio");
+    let msg = `${data.actualizados} paciente${data.actualizados === 1 ? "" : "s"} actualizado${data.actualizados === 1 ? "" : "s"}.`;
+    if (data.bloqueados) {
+      msg += ` ${data.bloqueados} no se pudo${data.bloqueados === 1 ? "" : "n"} cambiar (pidieron la baja por WhatsApp).`;
     }
-
-    if (!data.iniciado) {
-      const rech = data.rechazados ?? [];
-      const bajas = rech.filter((r) => (r.motivo || "").toLowerCase().includes("baja")).length;
-      let msg = "No se envió a nadie: ninguno de los pacientes seleccionados puede recibir mensajes.";
-      if (bajas) msg += ` ${bajas} se ${bajas === 1 ? "dio" : "dieron"} de baja.`;
-      toast(msg, "error");
-      setBloqueoEnvio(false);
-      $("#btnLanzarEnvio").hidden = false;
-      return;
-    }
-
-    $("#faseConfig").hidden = true;
-    $("#faseProgreso").hidden = false;
-    jobIdActual = data.job_id;
-    totalActual = data.total;
-    seguirProgreso(data.job_id, data.total);
+    toast(msg, data.bloqueados ? "error" : "ok");
+    await cargar();
   } catch (err) {
-    toast(`Error al iniciar el envío: ${err.message}`, "error");
-    setBloqueoEnvio(false);
-    $("#btnLanzarEnvio").hidden = false;
+    toast(err.message || "No se pudo aplicar el cambio", "error");
+  } finally {
+    sel.value = "";
+    sel.disabled = false;
   }
-});
-
-function pintarRechazados(rechazados) {
-  const ul = $("#listaRechazados");
-  ul.innerHTML = "";
-  for (const r of rechazados) {
-    const li = document.createElement("li");
-    li.textContent = `${r.nombre || "(sin nombre)"} (${r.telefono || "sin teléfono"}): ${r.motivo}`;
-    ul.appendChild(li);
-  }
-  ul.hidden = rechazados.length === 0;
 }
 
-async function pausarJob(jobId) {
-  try {
-    await fetch(`api/notificaciones/jobs/${jobId}/pausa`, { method: "POST", headers: authHeaders() });
-  } catch {}
+if (selEstadoMasivo) {
+  selEstadoMasivo.addEventListener("change", () =>
+    aplicarMasivo(selEstadoMasivo, "api/pacientes/estado-masivo", "estado", ESTADO_LABEL));
 }
-async function reanudarJob(jobId) {
-  try {
-    await fetch(`api/notificaciones/jobs/${jobId}/reanudar`, { method: "POST", headers: authHeaders() });
-  } catch {}
-}
-
-function seguirProgreso(jobId, total) {
-  clearInterval(timerPolling);
-  timerPolling = setInterval(async () => {
-    try {
-      const res = await fetch(`api/notificaciones/jobs/${jobId}`, {
-        headers: authHeaders(),
-        cache: "no-store",
-      });
-      if (res.status === 401) { window.snwSalir(); return; }
-      if (!res.ok) throw new Error();
-      const job = await res.json();
-
-      const hechos = job.enviados + job.fallidos;
-      hechosActual = hechos;
-      const porcentaje = total ? Math.round((hechos / total) * 100) : 100;
-      $("#barraFill").style.width = `${porcentaje}%`;
-      $("#progresoNumeros").textContent = `${hechos} / ${total}`;
-      $("#progresoTexto").textContent =
-        job.estado === "completado"
-          ? "Envío finalizado."
-          : `Enviando mensajes... (${hechos}/${total})`;
-
-      if (job.estado === "completado" || job.estado === "error" || job.estado === "cancelado") {
-        clearInterval(timerPolling);
-        const msg = job.estado === "error"
-          ? `Error del canal: ${job.detalle}`
-          : job.estado === "cancelado"
-            ? "Envío cancelado por el usuario."
-            : `Envío completado: ${job.enviados} enviado(s), ${job.fallidos} fallido(s).`;
-        finalizar(msg, job.estado !== "completado");
-        setBloqueoEnvio(false);
-        jobIdActual = null;
-        totalActual = 0;
-        hechosActual = 0;
-        cargar();
-      }
-    } catch {
-      clearInterval(timerPolling);
-      finalizar("Se perdió la conexión con el servidor.", true);
-      setBloqueoEnvio(false);
-    }
-  }, 700);
-}
-
-function finalizar(mensaje, esError) {
-  $("#progresoTexto").textContent = mensaje;
-  toast(mensaje, esError ? "error" : "ok");
-  // Terminó el envío: ya no hay nada que iniciar ni que cancelar.
-  $("#btnCerrarModal").disabled = false;
-  $("#btnLanzarEnvio").hidden = true;
+if (selRespuestaMasivo) {
+  selRespuestaMasivo.addEventListener("change", () =>
+    aplicarMasivo(selRespuestaMasivo, "api/pacientes/respuesta-masiva", "respuesta", RESPUESTA_LABEL));
 }
 
 let toastTimer;

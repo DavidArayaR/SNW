@@ -139,10 +139,9 @@
       <div id="msgPacienteCab" class="msg-cab"></div>
       <div id="msgHilo" class="msg-hilo"></div>
       <div class="msg-acciones" data-perm="call_center">
-        <label class="msg-interes">
-          <input type="checkbox" id="chkInteresado">
-          <span>Marcar como interesado</span>
-        </label>
+        <p class="msg-interes-estado" id="msgInteresEstado" title="Se detecta solo, a partir de lo que escribe el paciente; no se puede marcar a mano.">
+          <i class="fa-solid fa-star"></i> <span>Interés: —</span>
+        </p>
         <div class="msg-cc-envio">
           <select id="selCC" hidden></select>
           <button type="button" class="btn btn--primary" id="btnEnviarCallCenter" disabled>
@@ -196,6 +195,7 @@
   <div id="toast" class="toast"></div>
 
   <script src="js/layout.js"></script>
+  <script src="js/pass-toggle.js"></script>
   <script src="js/historial.js"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>

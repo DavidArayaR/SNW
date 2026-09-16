@@ -39,14 +39,15 @@ snw/
 ├── frontend/
 │   ├── index.html             Landing con navegación por rol
 │   ├── login.html             Inicio de sesión + «¿Olvidaste tu contraseña?»
-│   ├── registro.html          Alta pública de cuenta (correo + contraseña segura)
+│   ├── registro.html          Activar cuenta invitada: elige contraseña con el token del correo
 │   ├── reset.html             Restablecer contraseña con el token del correo
 │   ├── mensajeria.html        Editor de plantillas, vista previa estilo WhatsApp, envío
-│   ├── pacientes.html         Base de datos de pacientes + envío masivo (permiso: pacientes)
+│   ├── pacientes.html         Base de datos de pacientes: ver, filtrar, editar estado/
+│   │                          respuesta (uno o en bloque). No envía mensajes (permiso: pacientes)
 │   ├── historial.html         Historial de envíos (batch + detalle por paciente)
 │   ├── estadisticas.html      Contador mensual de mensajes, desgloses y costos WhatsApp
-│   ├── configuracion.html     Editor de todos los ajustes por secciones (solo desarrollador)
-│   ├── usuarios.html          Gestión de cuentas y permisos (admin / desarrollador)
+│   ├── administracion.html    Panel de administración con pestañas: Usuarios (admin/dev) y
+│   │                          Configuración (pestaña visible solo para desarrollador)
 │   ├── css/                   tema.css (paleta claro/oscuro), styles.css (compartido), layout.css (sidebar), pacientes.css, estadisticas.css, configuracion.css, usuarios.css
 │   ├── js/                    tema.js (modo claro/oscuro), layout.js (sidebar/sesión/permisos, común), app.js, pacientes.js, historial.js, estadisticas.js, configuracion.js, usuarios.js
 │   └── vendor/bootstrap/     Bootstrap 5.3.3 (CSS + bundle JS) servido localmente
@@ -104,7 +105,7 @@ vive el resto.
 
 **Todo lo demás vive en la tabla `configuracion`** (clave/valor). El backend la crea y la
 siembra con los valores por defecto en el primer arranque. Se edita desde
-la página **Configuración** (`configuracion.html`, **solo rol desarrollador**) — que muestra TODAS las claves
+la pestaña **Configuración** de `administracion.html` (**solo rol desarrollador**) — que muestra TODAS las claves
 por secciones (Aplicación, URL pública, Correo/SMTP, WhatsApp) — o con `UPDATE configuracion`
 (requiere reiniciar por la caché). Los cambios de la página se aplican sin reiniciar (salvo
 el `entorno` activo, que las demás pantallas leen al cargar).
@@ -114,7 +115,7 @@ el `entorno` activo, que las demás pantallas leen al cargar).
 | App / envío | `entorno` (`desarrollo`/`produccion`), `metodo_envio` (`simulado`/`api_oficial`), `numeros_prueba_dev`, `numeros_prueba_prod`, `intervalo_ms`, `sesion_expira_horas` (horas de inactividad antes de cerrar una sesión sola; 0 = no expiran; por defecto 5), `url_base` |
 | Call center | `call_center_url` (servicio que devuelve un número de call center; se consulta en cada respuesta y ese servicio reparte la carga), `call_center_numeros` (respaldo manual, uno o varios separados por coma, solo si la URL no responde), `call_center_auto_segundos` (espera antes del envío automático tras detectar interés; 0 = desactivado), `call_center_boton_mensaje` / `call_center_boton_mensaje_oferta` (texto que autocompleta el botón; el de oferta se usa si la última plantilla enviada mencionaba un descuento o precio especial) |
 | Correo | `smtp_host`, `smtp_port`, `smtp_user`, `smtp_pass`, `smtp_tls`, `correo_emisor`, `correo_destino` |
-| WhatsApp / Meta | `wa_token`, `wa_phone_id`, `wa_business_account_id`, `wa_verify_token`, `wa_template_nombre`, `wa_template_lang`, `wa_webhook_path`, `wa_graph_version` (por defecto `v26.0`), `wa_moneda` (moneda de facturación de la cuenta, se autodetecta desde Meta al actualizar tarifas — por defecto `USD`), `plantillas_revision_minutos` (cada cuántos minutos se revisa sola en Meta el estado de las plantillas pendientes; 0 = desactivado; por defecto 2) |
+| WhatsApp / Meta | `wa_token`, `wa_phone_id`, `wa_business_account_id`, `wa_verify_token`, `wa_template_nombre`, `wa_template_lang`, `wa_webhook_path`, `wa_graph_version` (por defecto `v26.0`), `wa_moneda` (moneda de facturación de la cuenta, se autodetecta desde Meta al actualizar tarifas — por defecto `USD`), `plantillas_revision_minutos` (cada cuántos minutos se revisa sola en Meta el estado de las plantillas pendientes; 0 = desactivado; por defecto 2), `plantillas_badge_aprobada_minutos` (cuánto se muestra el aviso «Aprobada recientemente»; 0 = nunca; por defecto 10) |
 | Límites de envío Meta | `wa_rate_limit_activo` (frenado proactivo on/off), `wa_rate_limit_umbral_pct` (% de cuota a partir del cual se espera, 80), `wa_rate_limit_pausa_max_s` (espera entre mensajes al 100 % de cuota, 30), `wa_rate_limit_espera_defecto_s` (espera tras un 429 sin dato, 60), `wa_rate_limit_reintentos` (reintentos de una llamada tras un 429, 3), `wa_throughput_mps` (ritmo máximo de salida hacia Meta, msg/s; 0 = sin límite; 10), `wa_messaging_limit_24h` (usuarios únicos que se pueden contactar en 24 h antes de bloquear el envío masivo; 0 = ilimitado; 250) |
 
 ## Base de datos
@@ -133,8 +134,9 @@ enlaces de «Olvidé mi contraseña» (token de 2 h, un solo uso). Las demás:
 | `telefono` | VARCHAR(20) | Formato `+569XXXXXXXXX` |
 | `estado` | ENUM | `pendiente` / `enviado` / `error` |
 | `whatsapp_opt_out` | TINYINT(1) | 1 si el paciente pidió no recibir más mensajes |
+| `opt_out_explicito` | TINYINT(1) | 1 si esa baja la pidió el propio paciente con sus palabras por WhatsApp (la detectó el webhook). Con esto en 1, la respuesta queda **bloqueada para edición manual** (panel de Pacientes, uno o en bloque) hasta que el paciente se retracte (vuelva a escribir mostrando interés) — eso la pone en 0 solo. Una baja puesta **a mano** (panel, sin que el paciente lo haya pedido así) deja esto en 0 y sigue editable siempre |
 | `respuesta_manual` | VARCHAR(12) | Corrección manual de la respuesta (NULL = sin corrección); gana sobre la señal automática |
-| `interesado` | TINYINT(1) | 1 si el paciente mostró interés real (por webhook o a mano). Marcarlo revierte una baja previa; darse de baja lo pone en 0 |
+| `interesado` | TINYINT(1) | 1 si el paciente mostró interés real. Lo marca **solo el webhook** (no se puede a mano); marcarlo revierte una baja previa; darse de baja lo pone en 0 |
 | `fecha_actualizacion` | DATETIME | Última actualización |
 
 **`envios`** — un registro por cada "Iniciar envío" (batch-level, sin nombres de pacientes)
@@ -146,6 +148,7 @@ enlaces de «Olvidé mi contraseña» (token de 2 h, un solo uso). Las demás:
 | `total_pacientes`, `enviados`, `fallidos`, `invalidos` | Contadores del batch |
 | `estado` | `completado` / `cancelado` / `rechazado` (por el supervisor) |
 | `comentario` | Motivo del rechazo escrito por el supervisor (NULL si no aplica) |
+| `usuario` | Cuenta (login) que inició el envío; NULL en los anteriores a esta columna. Fuente de «Envíos realizados» en Usuarios (`GET /api/usuarios/{correo}/envios`) |
 | `fecha_hora` | Fecha del envío |
 
 **`log_envios`** — un registro por mensaje individual (fuente de la columna **Error** en Pacientes y del detalle en Historial)
@@ -237,9 +240,11 @@ Reglas del editor:
   **20 s**, no espera el intervalo completo. La pantalla de Mensajería, a su vez, refresca
   la lista sola cada 30 s mientras está abierta y avisa con un **toast** apenas detecta el
   cambio: «✨ … fue aprobada por Meta» o «⚠️ … fue rechazada por Meta». Durante los
-  **10 minutos** siguientes a una aprobación esa plantilla muestra además un aviso
-  «✨ Aprobada recientemente» (en la lista y en el editor); después se deja de mostrar solo
-  (no hay que borrar nada, es por tiempo: `whatsapp_template_aprobada_en`). El botón manual
+  `plantillas_badge_aprobada_minutos` siguientes (config; por defecto **10**, `0` lo apaga)
+  a una aprobación esa plantilla muestra además un aviso «✨ Aprobada recientemente» (en la
+  lista y en el editor); después se deja de mostrar solo (no hay que borrar nada, es por
+  tiempo: se compara `whatsapp_template_aprobada_en` contra el reloj en el navegador — el
+  valor del umbral llega vía `GET /api/configuracion`). El botón manual
   «Consultar estado» se quitó por quedar redundante; «Actualizar estados» / «Sincronizar»
   siguen disponibles para forzar un refresco o traer templates nuevos desde Meta.
 
@@ -249,11 +254,12 @@ Reglas del editor:
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| POST | `/api/auth/registro` | Alta pública `{usuario, clave}`. `usuario` debe ser un correo válido; `clave` ≥ 8 con minúscula, mayúscula y número. Nace con rol `usuario` y permisos básicos (`mensajeria`, `historial`, `estadisticas`, `plantillas_editar`) |
-| POST | `/api/auth/login` | `{usuario, clave}` → `{token, rol, nombre, permisos}` |
+| POST | `/api/auth/login` | `{usuario, clave}` → `{token, rol, nombre, permisos}`. 403 si la cuenta está desactivada (`activo=false`) |
+| GET | `/api/auth/invitacion/{token}` | Verifica un enlace de invitación (48 h) → `{ok, correo}`. Usado por `registro.html` para mostrar el correo al que se le manda la invitación |
+| POST | `/api/auth/activar` | Último paso de una invitación `{token, clave}`. `clave` ≥ 8 con minúscula, mayúscula y número. Nace con rol `usuario` y permisos básicos (`mensajeria`, `historial`, `estadisticas`, `plantillas_editar`) |
 | GET | `/api/auth/me` | Rol, permisos y `correo_recuperacion` vigentes de la sesión (el frontend lo usa para refrescarse si un admin cambió los permisos) |
-| PUT | `/api/auth/clave` | Cambiar **la propia** contraseña estando dentro: `{clave_actual, clave_nueva}`. Valida la actual y la fuerza de la nueva (botón «Mi cuenta» de la barra lateral) |
-| PUT | `/api/auth/correo-recuperacion` | La cuenta define a qué correo llega el enlace de «Olvidé mi contraseña»: `{correo}`. Para cuentas cuyo usuario ya es un correo suele coincidir; `admin`/`dev` lo necesitan porque entran con nombre corto. 409 si el correo es el usuario de otra cuenta |
+| PUT | `/api/auth/clave` | Cambiar **la propia** contraseña estando dentro: `{clave_actual, clave_nueva}`. Valida la actual y la fuerza de la nueva (botón «Mi cuenta» de la barra lateral); si la cuenta tiene correo de recuperación, le manda un aviso de confirmación |
+| PUT | `/api/auth/correo-recuperacion` | Define a qué correo llega el enlace de «Olvidé mi contraseña» y el aviso de cambio de contraseña: `{correo}`. **Sin campo en la interfaz** (se quitó de «Mi cuenta»); solo queda como endpoint. 409 si el correo es el usuario de otra cuenta |
 | POST | `/api/auth/olvide` | **Pública.** `{correo}` → si hay una cuenta con ese correo (login o de recuperación) se le manda un enlace con un token de **2 horas** desde `correo_emisor`. Responde siempre `{ok: true}` (no revela si existe) |
 | GET | `/api/auth/reset/{token}` | **Pública.** Valida el token → 200 si sirve, 400 con el motivo si no (inexistente / usado / expirado) |
 | POST | `/api/auth/reset` | **Pública.** `{token, clave_nueva}` → cambia la contraseña, marca el token usado y cierra las sesiones de esa cuenta |
@@ -264,21 +270,28 @@ Reglas del editor:
 | Método | Endpoint | Descripción |
 |---|---|---|
 | GET | `/api/usuarios` | Cuentas con `rol`, `permisos`, `editable`/`motivo_bloqueo` según quién pregunta, más `desarrolladores`/`max_desarrolladores` |
-| PUT | `/api/usuarios/{correo}` | `{permisos?, nombre?, rol?}`. `rol` solo lo cambia un desarrollador; promover a `desarrollador` da 409 si ya hay 4. Nadie modifica su propia cuenta; un administrador solo toca cuentas de rol `usuario` |
+| POST | `/api/usuarios/invitar` | `{correo}`. Manda un correo de invitación (enlace de 48 h a `registro.html?token=`) para que la persona cree su propia cuenta con contraseña propia; 409 si ya existe una cuenta con ese correo |
+| PUT | `/api/usuarios/{correo}` | `{permisos?, nombre?, rol?, activo?}`. `rol`: un desarrollador lo cambia a cualquier valor (promover a `desarrollador` da 409 si ya hay 4); un administrador solo puede ascender una cuenta `usuario` a `administrador` (nunca a `desarrollador`). `activo=false` desactiva la cuenta (no puede iniciar sesión) y cierra sus sesiones abiertas al instante; `activo=true` la reactiva. Nadie modifica su propia cuenta; un administrador solo toca cuentas de rol `usuario`. Si `permisos` incluye `tarifas_editar`, se agrega `estadisticas` automáticamente |
 | DELETE | `/api/usuarios/{correo}` | Elimina la cuenta y cierra sus sesiones (mismas reglas que PUT) |
+| PUT | `/api/usuarios/{correo}/correo-recuperacion` | `{correo}`. Asigna o cambia el correo de recuperación de una cuenta que se gestiona (mismas reglas de quién puede tocar a quién que PUT). 409 si ese correo ya es el usuario o el correo de recuperación de otra cuenta |
+| POST | `/api/usuarios/{correo}/enviar-cambio-clave` | Le manda a la cuenta el mismo enlace de «Olvidé mi contraseña» (2 h) a su correo de recuperación (o al propio `usuario` si ya es un correo). 400 si la cuenta todavía no tiene ningún correo asignado |
+| GET | `/api/usuarios/{correo}/envios` | Envíos masivos que inició esa cuenta (tabla `envios`, últimos 200): fecha, plantilla, estado (`completado`/`cancelado`/`rechazado`), `total_pacientes` y `costo` aproximado (mismo cálculo que en el resto del sistema). De solo lectura: cualquier admin/dev puede consultarlo para cualquier cuenta, sin las restricciones de «quién gestiona a quién» (esas son solo para editar) |
+| GET | `/api/usuarios/{correo}/auditoria` | Trazabilidad de la cuenta (tabla `usuarios_auditoria`, últimos 200): quién la invitó, quién le cambió rol/permisos/acceso, quién le asignó un correo de recuperación o le activó el cambio de contraseña, y quién la eliminó (si ya no existe, el registro se conserva). De solo lectura, mismas reglas que `/envios` |
 
-**Nadie cambia la contraseña de otra cuenta.** Si alguien la olvida usa «¿Olvidaste tu
-contraseña?» en el login (`/api/auth/olvide`).
+**Nadie cambia la contraseña de otra cuenta directamente**; solo puede activarle el enlace de
+cambio (arriba) para que la persona elija una nueva. Si alguien la olvida usa «¿Olvidaste tu
+contraseña?» en el login (`/api/auth/olvide`) — mismo mecanismo, pero autoservicio.
 
 ### Pacientes (permiso: `pacientes`)
 
 | Método | Endpoint | Descripción |
 |---|---|---|
 | GET | `/api/pacientes?q=&ambiente=` | Lista con respuesta y error del último `log_envios` |
-| PUT | `/api/pacientes/{id}?ambiente=` | Cambiar `estado` (`pendiente`/`enviado`/`error`) |
-| PUT | `/api/pacientes/{id}/respuesta?ambiente=` | Ajuste manual de la respuesta (`pendiente`/`respondio`/`baja`); `baja` activa el opt-out |
-| GET | `/api/pacientes/{id}/mensajes?ambiente=` | **(cualquier usuario, solo lectura)** Todos los mensajes (entrantes y salientes) del paciente, para revisar si su interés es real. Marca `interes: true` los entrantes que suenan a interés. Es lo que muestra el botón **«Ver mensajes»** de la columna *Detalle* en el modal del Historial |
-| PUT | `/api/pacientes/{id}/interes?ambiente=` | `{interesado: bool}` — marca/desmarca a mano. Marcarlo **revierte una baja previa** (opt-out, corrección manual y señal 'pegajosa') |
+| PUT | `/api/pacientes/{id}?ambiente=` | Cambiar `estado` (`pendiente`/`enviado`/`error`) de **un** paciente |
+| PUT | `/api/pacientes/estado-masivo?ambiente=` | `{pacientes: [ids], estado}` — igual que arriba pero para **varios** pacientes a la vez (selección en Base de datos) |
+| PUT | `/api/pacientes/{id}/respuesta?ambiente=` | Ajuste manual de la respuesta (`pendiente`/`respondio`/`baja`) de **un** paciente; `baja` activa el opt-out. 409 si el paciente pidió la baja explícitamente por WhatsApp y se intenta poner algo distinto de `baja` (ver `opt_out_explicito`) |
+| PUT | `/api/pacientes/respuesta-masiva?ambiente=` | `{pacientes: [ids], respuesta}` — igual que arriba pero para **varios** pacientes a la vez. Los que tengan la baja bloqueada se saltan (no fallan los demás); responde `{actualizados, bloqueados}`; 409 solo si **todos** los seleccionados están bloqueados |
+| GET | `/api/pacientes/{id}/mensajes?ambiente=` | **(cualquier usuario, solo lectura)** Todos los mensajes (entrantes y salientes) del paciente, para revisar si su interés es real. Marca `interes: true` los entrantes que suenan a interés. Es lo que muestra el botón **«Ver mensajes»** de la columna *Detalle* en el modal del Historial. `paciente.telefono` viene `null` si quien pregunta no es admin/dev |
 | POST | `/api/pacientes/{id}/call-center?ambiente=&plantilla_id=` | Envía **a mano** al paciente **interesado** una plantilla de call center (texto libre + botón CTA, ventana de 24 h). Requiere `interesado = 1`; `plantilla_id` obligatorio si hay más de una |
 
 ### Plantillas
@@ -330,7 +343,7 @@ página Historial. Al arrancar se siembra una si no hay ninguna.
 | Método | Endpoint | Descripción |
 |---|---|---|
 | GET | `/api/plantillas/call-center` | `{plantillas, call_center_url, numeros_respaldo, auto_segundos}`. Cada plantilla trae `cc_boton`, `cc_boton_texto`, `cc_auto`, `es_auto_efectiva` |
-| GET | `/api/call-center/log` | (permiso `call_center_registro`) `{entradas, contadores}` — últimas 200 respuestas de call center + usos por número. Es el panel *Registro de respuestas de call center* del Historial |
+| GET | `/api/call-center/log` | (permiso `call_center_registro`) `{entradas, contadores}` — últimas 200 respuestas de call center + usos por número. Es el panel *Registro de respuestas de call center* del Historial. `numero_paciente` viene `null` si quien pregunta no es admin/dev |
 | POST | `/api/plantillas/call-center` | Crear `{nombre, texto, boton, boton_texto, auto}` |
 | PUT | `/api/plantillas/call-center/{id}` | Actualizar `{nombre, texto, boton, boton_texto, auto}` (marcar `auto` desmarca las demás) |
 | DELETE | `/api/plantillas/call-center/{id}` | Eliminar |
@@ -340,7 +353,7 @@ página Historial. Al arrancar se siembra una si no hay ninguna.
 | Método | Endpoint | Descripción |
 |---|---|---|
 | POST | `/api/notificaciones/enviar` | Inicia el envío `{pacientes: [ids] \| null, plantilla_id, ambiente, limite?}`. `pacientes: null` = todos los elegibles (usado desde Mensajería). `limite` (solo producción) recorta cuántos pendientes entran en esta tanda; el resto quedan pendientes. Rechaza (400) si la plantilla no está `APPROVED` en Meta |
-| POST | `/api/notificaciones/destinatarios` | Cuenta pacientes totales/pendientes de un ambiente |
+| POST | `/api/notificaciones/destinatarios` | Cuenta pacientes totales/pendientes de un ambiente. Con `plantilla_id`, agrega `costo` (aproximado, mismo cálculo que el correo de confirmación del supervisor) para mostrarlo en el modal antes de enviar; `null` si no hay tarifas cargadas, la plantilla no se factura, o la cuenta no tiene el permiso `tarifas_editar` (admin/dev sí lo ven siempre) |
 | GET | `/api/notificaciones/jobs/{job_id}` | Progreso en vivo del envío en curso |
 | POST | `/api/notificaciones/jobs/{job_id}/pausa` \| `/reanudar` \| `/cancelar` | Control del job en curso |
 | POST | `/api/notificaciones/prueba-wa` | (solo desarrollador) Envía un mensaje de prueba real vía API oficial |
@@ -351,14 +364,14 @@ página Historial. Al arrancar se siembra una si no hay ninguna.
 |---|---|---|
 | GET | `/api/notificaciones/solicitud/{token}` | Estado de una solicitud pendiente (usado por polling del frontend) |
 | GET / POST | `/api/notificaciones/confirmar/{token}` | Confirmar envío (link del correo) |
-| GET / POST | `/api/notificaciones/rechazar/{token}` | Formulario y envío del rechazo, con comentario opcional |
+| GET / POST | `/api/notificaciones/rechazar/{token}` | Formulario y envío del rechazo, con comentario opcional (máximo 250 caracteres; 422 si se pasa) |
 
 ### Historial
 
 | Método | Endpoint | Descripción |
 |---|---|---|
 | GET | `/api/notificaciones/historial?ambiente=todos` | Envíos batch (`ambiente=todos` junta ambas bases) |
-| GET | `/api/notificaciones/historial/{id}/detalle?ambiente=` | Pacientes individuales de un envío |
+| GET | `/api/notificaciones/historial/{id}/detalle?ambiente=` | Pacientes individuales de un envío. `numero_telefono` viene `null` si quien pregunta no es admin/dev |
 | PUT | `/api/notificaciones/historial/{id}/respuesta?ambiente=` | Corregir la respuesta de un registro |
 
 ### Estadísticas
@@ -415,8 +428,14 @@ leyendo los templates existentes en Meta (solo `GET`, nunca crea/edita) y:
 
 - actualiza estado, id y categoría de las plantillas que ya conocen su template, y
 - **importa como plantilla nueva** cualquier template que exista en Meta y no tenga
-  todavía una plantilla local asociada (el texto se extrae del componente `BODY`; los
-  `{{1}}`, `{{2}}` quedan tal cual porque no se sabe a qué comodín corresponden).
+  todavía una plantilla local asociada. El texto se extrae del componente `BODY` y sus
+  placeholders `{{1}}`, `{{2}}`... se traducen a los comodines internos (`{nombre}`,
+  `{apellido}`) usando los valores de ejemplo del template (`example.body_text` — los
+  mismos que manda esta app al crear un template, ver `WhatsAppService.COMODINES`), así que
+  no importa el orden en que aparezcan. Sin ejemplo (templates hechos a mano en Meta) se
+  asume el orden habitual de esta app (`{{1}}` = nombre, `{{2}}` = apellido); cualquier
+  posición que no se pueda identificar queda como `{variable}` (`_texto_desde_componentes`
+  en `main.py`).
 
 ### Límites de envío de Meta
 
@@ -515,8 +534,9 @@ marca de interés (`interesado = 0`), tanto por webhook como por el ajuste manua
 escribió "quiero darme de baja" y más tarde "en realidad me interesa", la badge de
 *interesado* desaparece y vuelve a aparecer con cada cambio. En el **detalle de un envío del
 Historial** hay una columna *Detalle* con un botón **«Ver mensajes»** (para cualquier
-usuario) que abre el hilo completo del paciente; un admin además puede marcar/desmarcar
-`interesado` a mano ahí y, si está interesado, enviarle el mensaje de call center.
+usuario) que abre el hilo completo del paciente; ahí se ve el estado de interés (de solo
+lectura — **no se puede marcar/desmarcar a mano**, solo lo detecta el webhook) y, con el
+permiso `call_center`, si está interesado se puede enviarle el mensaje de call center.
 
 **Ajuste manual:** en Pacientes, hacer click en el badge de la columna **Respuesta** abre
 un selector para marcar a mano `respondió` / `se dio de baja` / etc. — útil si el webhook
@@ -524,6 +544,15 @@ no llegó o el paciente avisó por otro canal. `PUT /api/pacientes/{id}/respuest
 admin) guarda la corrección en la columna `respuesta_manual` de la tabla de pacientes;
 `baja` activa el opt-out y las demás lo revierten. Esa corrección **gana** sobre la señal
 automática y se limpia sola si más tarde llega una respuesta real por el webhook.
+
+**Baja explícita (bloqueada para edición manual):** si la baja la detectó el webhook a
+partir de las propias palabras del paciente, la columna `opt_out_explicito` queda en 1 y
+esa respuesta **no se puede cambiar a mano** — ni desde el selector de Pacientes ni por la
+edición en bloque — mientras siga en `baja`. Solo se libera si el **propio paciente**
+vuelve a escribir mostrando interés (eso limpia `opt_out_explicito` solo, vía
+`_registrar_interes`). Una baja puesta **a mano** por un admin/dev (el paciente avisó por
+otro canal, o fue un error) no activa este bloqueo: `opt_out_explicito` queda en 0 y esa
+respuesta se puede seguir corrigiendo libremente, como cualquier otro ajuste manual.
 
 ### Quién respondió / se dio de baja
 
@@ -583,17 +612,19 @@ propagar como error 500.
 
 ## Módulo de envío
 
-- **Mensajería** (`mensajeria.html`): al editar una plantilla existente aparece
-  "Enviar mensaje" → envía esa plantilla a **todos los pacientes elegibles** del ambiente
-  elegido (`pacientes: null`). En **producción** el modal muestra un slider + campo numérico
-  (1 … pendientes) para acotar cuántos se envían en esta tanda; el resto quedan pendientes.
-- **Pacientes** (`pacientes.html`, permiso `pacientes`): selecciona pacientes puntuales con
-  checkboxes/filtros → elige plantilla → "Iniciar envío" (`pacientes: [ids]`). Los
-  seleccionados que no pueden recibir (dados de baja, teléfono inválido, no autorizados
+- **Enviar mensajes solo se hace desde Mensajería y plantillas** (`mensajeria.html`): al
+  editar una plantilla existente aparece "Enviar mensaje" → envía esa plantilla a **todos
+  los pacientes elegibles** del ambiente elegido (`pacientes: null`, único modo — no se
+  elige un subconjunto puntual). En **producción** el modal muestra un slider + campo
+  numérico (1 … pendientes) para acotar cuántos se envían en esta tanda; el resto quedan
+  pendientes. Los que no pueden recibir (dados de baja, teléfono inválido, no autorizados
   en dev) se listan como **rechazados** con el motivo, y el intento **igual queda en el
   Historial** (0 enviados, N inválidos) aunque no salga ningún mensaje.
-- Ambos flujos terminan en el mismo `POST /api/notificaciones/enviar` y comparten
-  confirmación, job y progreso.
+- **Base de datos** (`pacientes.html`, permiso `pacientes`) **no envía mensajes** — ni
+  siquiera admin/desarrollador: es solo para gestionar los registros (ver, buscar, filtrar,
+  corregir estado/respuesta, uno por uno o en bloque con la selección — ver más abajo).
+  `POST /api/notificaciones/enviar` sigue existiendo como el único punto de envío, usado
+  por Mensajería, y comparte confirmación, job y progreso con el resto de ese flujo.
 - **Producción**: si quien envía **no** tiene el permiso `envio_produccion`, se genera un
   correo de confirmación al supervisor con el **costo aproximado del envío en grande y rojo**
   (nº de mensajes × tarifa vigente de Meta para la categoría de la plantilla, **total
@@ -616,18 +647,46 @@ propagar como error 500.
 ## Usuarios, roles y permisos
 
 Las cuentas viven en la tabla **`usuarios`** de `snw_base` (`usuario` = correo,
-`clave_hash` SHA-256, `rol`, `permisos` como lista CSV, `correo_recuperacion`). Cualquiera
-se registra desde **`registro.html`** (correo válido + contraseña segura); la cuenta nace
-con rol `usuario` y acceso básico. Un administrador o desarrollador ajusta nombre, permisos
-y rol desde **`usuarios.html`** (una cuenta por vez, elegida en un desplegable).
+`clave_hash` SHA-256, `rol`, `permisos` como lista CSV, `correo_recuperacion`). No hay alta
+pública: un administrador o desarrollador invita a una persona desde la pestaña **Usuarios** de
+**`administracion.html`** («Crear usuario», solo el correo); le llega un correo con un enlace de
+48 h a **`registro.html?token=`** donde elige su propia contraseña. La cuenta nace con rol
+`usuario` y acceso básico. Un administrador o desarrollador ajusta nombre, permisos y rol desde
+esa misma pestaña (una cuenta por vez, elegida en un desplegable).
 
 **Roles:**
 
 | Rol | Alcance | Puede gestionar |
 |---|---|---|
 | `usuario` | Solo lo que tenga en `permisos` | — |
-| `administrador` | Todo **salvo la página Configuración** | Permisos de las cuentas de rol `usuario` (nunca las de otro admin/dev ni la suya) |
-| `desarrollador` | Acceso total, **incluida Configuración** | Rol **y** permisos de cualquier cuenta salvo la suya |
+| `administrador` | Todo **salvo la página Configuración** | Permisos, activar/desactivar y ascender a `administrador` en cuentas de rol `usuario` (nunca toca otro admin/dev ni la suya) |
+| `desarrollador` | Acceso total, **incluida Configuración** | Rol (cualquiera), permisos y activar/desactivar de cualquier cuenta salvo la suya |
+
+**Activar / desactivar cuentas.** Además de editar permisos y rol, un admin/dev puede desmarcar
+«Cuenta activa» en el panel de una cuenta (mismas reglas de quién puede gestionar a quién): la
+cuenta desactivada no puede iniciar sesión (`403` en el login) y sus sesiones abiertas se cierran
+al instante. Se reactiva marcando la casilla de nuevo.
+
+**Activar el cambio de contraseña de una cuenta.** En el panel, sección «Contraseña»: si la
+cuenta no tiene un correo de recuperación asignado, primero se le escribe uno y se presiona
+«Guardar correo» (se valida que ese correo no esté ya en uso en otra cuenta). Con el correo ya
+guardado, el botón «Activar cambio de contraseña» se habilita; al presionarlo pide confirmar el
+correo mostrado (`confirm()` del navegador) antes de mandar el enlace, igual que «¿Olvidaste tu
+contraseña?» pero disparado por un admin/dev en vez de por la propia cuenta.
+
+**Envíos realizados.** Al final del panel de cada cuenta se lista lo que esa cuenta envió (tabla
+`envios`, columna `usuario`, agregada cuando se sumó esta sección — los envíos anteriores quedan
+con ese campo vacío y no aparecen aquí): fecha, plantilla, estado (Aprobado/Rechazado/Cancelado),
+cantidad de pacientes y costo aproximado. Es de solo lectura y no depende de si la cuenta se puede
+editar o no.
+
+**Actividad (trazabilidad).** Debajo de «Envíos realizados», la sección «Actividad» muestra el
+historial de acciones que un admin/dev hizo sobre esa cuenta (tabla `usuarios_auditoria`): quién
+la invitó y cuándo se activó (con el correo de quien mandó la invitación), cada cambio de rol o
+permisos (detalle tipo «Permisos: +tarifas_editar; -pacientes»), activar/desactivar el acceso,
+asignar un correo de recuperación, activar un cambio de contraseña, y la eliminación de la cuenta
+(el registro se conserva aunque la cuenta ya no exista). Igual que «Envíos realizados», es de solo
+lectura y no depende de si la cuenta se puede editar.
 
 **Permisos** (campo `permisos` de la tabla; los roles privilegiados los tienen todos de forma implícita):
 
@@ -644,14 +703,20 @@ eliminada pierde la sesión.
 **Contraseñas.**
 
 - Estando dentro, cada cuenta cambia la suya desde **«Mi cuenta»** (barra lateral),
-  indicando la actual. Ahí mismo fija su **correo de recuperación**.
+  indicando la actual. Al cambiarla, si la cuenta tiene un correo de recuperación guardado,
+  le llega un **aviso de confirmación** ahí mismo (`[SNW] Tu contraseña cambió`) — «Mi
+  cuenta» ya no tiene un campo para editar ese correo; ver más abajo.
 - Si la olvida, **«¿Olvidaste tu contraseña?»** en el login pide el correo; llega un enlace
   (`{url_base}/reset.html?token=…`) con un token de **2 horas** al correo de recuperación de
   la cuenta, desde `correo_emisor` (p. ej. `no-reply@somosprosalud.cl`). El enlace es de un
   solo uso y, al usarlo, cierra las sesiones de esa cuenta.
-- Las cuentas registradas con correo lo tienen como correo de recuperación por defecto.
-  `admin` y `dev` entran con un nombre corto, así que **deben** cargar el suyo en «Mi cuenta»
-  para poder recuperar el acceso.
+- Las cuentas registradas con correo lo tienen como correo de recuperación por defecto (se
+  usa el mismo para el aviso de cambio de contraseña y para «Olvidé mi contraseña»).
+  `admin` y `dev` entran con un nombre corto y **no tienen forma en la interfaz** de cargar
+  un correo de recuperación (se quitó el campo de «Mi cuenta» a pedido); solo queda
+  disponible el endpoint `PUT /api/auth/correo-recuperacion` para fijarlo a mano si hiciera
+  falta. Sin correo, ninguna de las dos cosas (aviso de cambio, «Olvidé mi contraseña») les
+  llega — la cuenta `dev` igual no se pierde: el sistema la garantiza en cada arranque.
 - **Ningún rol (ni el desarrollador) puede cambiar la contraseña de otra cuenta.**
 - Los tokens viven en la tabla `password_resets`.
 
@@ -695,28 +760,38 @@ como variables CSS: `:root` para claro y `:root[data-tema="oscuro"]` para oscuro
 antes del primer render para que no haya parpadeo. Se cambia con el botón **Modo oscuro /
 claro** de la sidebar, o con el botón flotante en la portada y el login (páginas sin sidebar).
 
-- **Landing** (`index.html`): sin sesión muestra la portada con los botones **Iniciar
-  sesión** y **Crear cuenta**; con sesión, la sidebar y el contenido informativo. El menú
+- **Landing** (`index.html`): sin sesión muestra la portada con el botón **Iniciar
+  sesión**; con sesión, la sidebar y el contenido informativo. El menú
   lateral solo muestra las páginas permitidas para la cuenta.
 - **Login** (`login.html`): acceso + «¿Olvidaste tu contraseña?» (pide el correo y envía un
-  enlace de recuperación). **Registro** (`registro.html`): alta pública de cuenta (correo +
-  contraseña segura). **Reset** (`reset.html`): pantalla de contraseña nueva a la que lleva
+  enlace de recuperación); ya no hay enlace de alta pública. **Registro** (`registro.html`):
+  activar una cuenta invitada, con el correo precargado desde el token y solo pidiendo
+  la contraseña. **Reset** (`reset.html`): pantalla de contraseña nueva a la que lleva
   el enlace del correo. Tras entrar, redirige a Pacientes (admin/dev) o Mensajería según los permisos.
 - **«Mi cuenta»** (modal de la barra lateral, todas las páginas): cambiar la propia
-  contraseña (pide la actual) y fijar el correo de recuperación.
-- **Mensajería** (`mensajeria.html`, permiso `mensajeria`): editor de plantillas con vista
+  contraseña (pide la actual); si la cuenta tiene correo de recuperación, avisa el cambio
+  ahí. No tiene campo para fijar ese correo (ver «Contraseñas» más arriba).
+- **Mensajería y plantillas** (`mensajeria.html`, permiso `mensajeria`): editor de plantillas con vista
   previa estilo WhatsApp (formato `*negrita*`/`_cursiva_`/`~tachado~`), nombre y template
   de Meta permanentes, botón **Sincronizar** con Meta, y envío directo a todos los
   pendientes. Sin el permiso `plantillas_editar` el editor queda de solo lectura.
-- **Usuarios** (`usuarios.html`, rol admin/desarrollador): alta implícita por registro;
-  se elige una cuenta en un desplegable y el panel de abajo muestra sus datos: nombre,
-  permisos, rol (solo el desarrollador) y eliminar. Máximo 4 desarrolladores.
-  Aquí no se cambian contraseñas — cada cuenta usa «Mi cuenta» o «¿Olvidaste tu contraseña?».
-- **Pacientes** (`pacientes.html`, permiso `pacientes`): tabla con estado editable en línea,
-  columna **Error** (motivo del último fallo), columna **Respuesta** con la señal de
-  WhatsApp (Respondió / Se dio de baja / Sin respuesta) y su fecha, filtros por
-  estado/respuesta, selección múltiple y envío masivo. Aquí se ve **quiénes** respondieron
-  o se dieron de baja.
+- **Administración** (`administracion.html`, rol admin/desarrollador): página con pestañas.
+  La pestaña **Usuarios** (admin/desarrollador): arriba, **«Crear usuario»** manda
+  la invitación por correo (solo el correo, sin permisos ni rol — esos se ajustan después de
+  que la cuenta exista); abajo se elige una cuenta en un desplegable y el panel muestra sus
+  datos: nombre, permisos, rol (solo el desarrollador), envíos realizados, actividad
+  (trazabilidad) y eliminar. Máximo 4 desarrolladores. Aquí no se cambian contraseñas — cada
+  cuenta usa «Mi cuenta» o «¿Olvidaste tu contraseña?».
+- **Base de datos / Pacientes** (`pacientes.html`, permiso `pacientes`): tabla con estado
+  editable en línea, columna **Error** (motivo del último fallo), columna **Respuesta** con
+  la señal de WhatsApp (Respondió / Se dio de baja / Sin respuesta) y su fecha, filtros por
+  estado/respuesta, y selección múltiple para editar **estado o respuesta de varios
+  pacientes a la vez** (barra «Con los seleccionados», aparece al marcar alguno; pide
+  confirmación con la cantidad antes de aplicar). Un badge de «Se dio de baja» con
+  &#128274; no se puede editar (ni uno por uno ni en bloque): esa baja la pidió el propio
+  paciente por WhatsApp (ver «Baja explícita» en «Sistema de baja»). Aquí se ve **quiénes**
+  respondieron o se dieron de baja — **no se envían mensajes desde esta página** (ver
+  «Módulo de envío»).
 - **Historial** (`historial.html`): envíos de ambas bases (o filtrado por una), detalle
   individual por paciente con estado, respuesta y error de cada mensaje.
 - **Estadísticas** (`estadisticas.html`, **solo cuenta envíos de producción**): mensajes
@@ -729,7 +804,8 @@ claro** de la sidebar, o con el botón flotante en la portada y el login (págin
   tarifa futura, descarga del CSV de Chile y el mismo gráfico de barras aplicado al costo
   estimado por día / mes / año (solo mensajes de plantilla facturables; los de texto libre
   de la ventana de 24 h se excluyen y se indican bajo el total).
-- **Configuración** (`configuracion.html`, **solo rol desarrollador**): edita **todas** las claves de la
+  La pestaña **Configuración** (dentro de `administracion.html`, **solo rol desarrollador** —
+  la pestaña ni se crea para un administrador): edita **todas** las claves de la
   tabla `configuracion` por secciones (Aplicación, URL pública, Correo/SMTP, WhatsApp).
   Muestra el valor real (los secretos con botón de ojo), marca los campos modificados,
   guarda solo lo cambiado con una barra flotante y avisa si sales con cambios sin guardar.

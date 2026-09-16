@@ -1,11 +1,14 @@
+/* Pestaña «Configuración» de administracion.html (solo desarrollador).
+   Se carga en la misma página que Usuarios; por eso todo va en un IIFE
+   (evita choques de nombres con usuarios.js) y no se auto-ejecuta al cargar
+   el script: administracion.html llama a window.snwCargarConfiguracion()
+   recién cuando esa pestaña se abre por primera vez. */
+(function () {
 const $ = (sel) => document.querySelector(sel);
 
 function authHeaders(extra = {}) {
   return { Authorization: "Bearer " + (localStorage.getItem("snw_token") || ""), ...extra };
 }
-
-if (!localStorage.getItem("snw_token")) location.replace("login.html");
-else if (localStorage.getItem("snw_rol") !== "desarrollador") location.replace("mensajeria.html");
 
 const toastEl = $("#toast");
 let toastTimer;
@@ -39,7 +42,7 @@ function escaparHtml(t) {
 async function cargar() {
   try {
     const res = await fetch("api/configuracion/todo", { headers: authHeaders(), cache: "no-store" });
-    if (res.status === 401) { window.snwSalir(); return; }
+    if (res.status === 401) { window.snwSesionExpirada(); return; }
     if (res.status === 403) { location.replace("mensajeria.html"); return; }
     if (!res.ok) throw new Error();
     const d = await res.json();
@@ -209,7 +212,7 @@ async function guardar() {
       body: JSON.stringify({ cambios }),
     });
     const d = await res.json().catch(() => ({}));
-    if (res.status === 401) { window.snwSalir(); return; }
+    if (res.status === 401) { window.snwSesionExpirada(); return; }
     if (!res.ok) throw new Error(d.detail || "No se pudo guardar");
     valores = d.valores || valores;
 
@@ -253,4 +256,10 @@ window.addEventListener("beforeunload", (e) => {
   if (Object.keys(diff()).length) { e.preventDefault(); e.returnValue = ""; }
 });
 
-cargar();
+let yaCargada = false;
+window.snwCargarConfiguracion = function () {
+  if (yaCargada) return;
+  yaCargada = true;
+  cargar();
+};
+})();

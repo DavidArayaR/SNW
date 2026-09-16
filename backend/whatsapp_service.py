@@ -859,6 +859,13 @@ class WhatsAppService:
                     return
                 for p in pacientes:
                     cur.execute(f"UPDATE {p['tabla']} SET whatsapp_opt_out = 1 WHERE {match}", (telefono,))
+                    # Baja pedida con sus propias palabras por WhatsApp: queda
+                    # bloqueada para edición manual hasta que el paciente se
+                    # retracte (ver _registrar_interes).
+                    try:
+                        cur.execute(f"UPDATE {p['tabla']} SET opt_out_explicito = 1 WHERE {match}", (telefono,))
+                    except Exception:
+                        pass  # esquema sin la columna
                     # Al darse de baja se quita la marca de interés (si la tenía).
                     try:
                         cur.execute(f"UPDATE {p['tabla']} SET interesado = 0 WHERE {match}", (telefono,))
@@ -886,6 +893,8 @@ class WhatsAppService:
                     for sql in (
                         f"UPDATE {p['tabla']} SET interesado = 1 WHERE {match}",
                         f"UPDATE {p['tabla']} SET whatsapp_opt_out = 0 WHERE {match}",
+                        # El propio paciente se retracta: se libera el bloqueo.
+                        f"UPDATE {p['tabla']} SET opt_out_explicito = 0 WHERE {match}",
                     ):
                         try:
                             cur.execute(sql, (telefono,))

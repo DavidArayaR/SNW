@@ -6,6 +6,7 @@
   <title>SNW · Iniciar sesi&oacute;n</title>
   <link rel="stylesheet" href="css/tema.css">
   <script src="js/tema.js"></script>
+  <script src="js/pass-toggle.js"></script>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -100,9 +101,28 @@
     .nota a { display: inline-block; }
     .link-olvide { display: block; margin: -8px 0 16px; text-align: right; font-size: .8rem; }
     a { color: var(--verde); }
+    .toast {
+      position: fixed;
+      bottom: 26px;
+      left: 50%;
+      transform: translateX(-50%) translateY(10px);
+      background: var(--toast-bg);
+      color: var(--toast-fg);
+      padding: 12px 20px;
+      border-radius: 10px;
+      font-size: .9rem;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, .3);
+      opacity: 0;
+      transition: opacity .25s, transform .25s;
+      z-index: 60;
+    }
+    .toast.visible { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .toast--ok { background: #2f7d55; color: #fff; }
   </style>
 </head>
 <body>
+
+  <div id="toast" class="toast"></div>
 
   <div class="card">
     <div class="logo">💬</div>
@@ -130,13 +150,21 @@
     </form>
 
     <p class="nota">
-      ¿No tienes cuenta? <a href="registro.html">Crear una cuenta</a><br>
+      ¿No tienes cuenta? Pide que un administrador te invite.<br>
       <a href="index.html">Volver a la p&aacute;gina principal</a>
     </p>
   </div>
 
   <script>
     if (window.snwMontarFabTema) window.snwMontarFabTema();
+
+    if (new URLSearchParams(location.search).get("salida") === "ok") {
+      const toast = document.getElementById("toast");
+      toast.textContent = "Sesión cerrada exitosamente";
+      toast.className = "toast visible toast--ok";
+      setTimeout(() => toast.classList.remove("visible"), 3200);
+      history.replaceState(null, "", location.pathname);
+    }
 
     (async function () {
       const t = localStorage.getItem("snw_token");
@@ -177,8 +205,8 @@
         localStorage.setItem("snw_nombre", data.nombre);
         localStorage.setItem("snw_permisos", JSON.stringify(data.permisos || []));
 
-        location.href = data.rol === "administrador" || data.rol === "desarrollador"
-          ? "pacientes.html" : "mensajeria.html";
+        location.href = (data.rol === "administrador" || data.rol === "desarrollador"
+          ? "pacientes.html" : "mensajeria.html") + "?entrada=ok";
       } catch (ex) {
         err.textContent = ex.message;
         err.classList.add("visible");

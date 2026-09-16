@@ -6,6 +6,7 @@
   <title>SNW &middot; Crear cuenta</title>
   <link rel="stylesheet" href="css/tema.css">
   <script src="js/tema.js"></script>
+  <script src="js/pass-toggle.js"></script>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -61,6 +62,7 @@
     }
     input:focus { border-color: var(--verde); outline: none; }
     input.malo { border-color: var(--danger-fg); }
+    input:disabled { opacity: .7; cursor: not-allowed; }
     button {
       width: 100%;
       border: none;
@@ -97,11 +99,11 @@
   <div class="card">
     <div class="logo">&#128100;</div>
     <h1>Crear una cuenta</h1>
-    <p class="sub">Reg&iacute;strate con tu correo para acceder a SNW</p>
+    <p class="sub" id="sub">Verificando la invitaci&oacute;n&hellip;</p>
 
-    <form id="formRegistro" novalidate>
+    <form id="formRegistro" novalidate hidden>
       <label for="inpUsuario">Correo electr&oacute;nico</label>
-      <input type="email" id="inpUsuario" autocomplete="username" placeholder="nombre@empresa.cl" required>
+      <input type="email" id="inpUsuario" disabled>
 
       <label for="inpClave">Contrase&ntilde;a</label>
       <input type="password" id="inpClave" autocomplete="new-password" required>
@@ -120,9 +122,10 @@
       <button type="submit" id="btnCrear">Crear cuenta</button>
     </form>
 
+    <p class="aviso aviso--error" id="msgEnlace"></p>
+
     <p class="nota">
-      ¿Ya tienes cuenta? <a href="login.html">Iniciar sesi&oacute;n</a><br>
-      <a href="index.html">Volver a la p&aacute;gina principal</a>
+      <a href="login.html">Volver a iniciar sesi&oacute;n</a>
     </p>
   </div>
 
@@ -130,13 +133,17 @@
     if (window.snwMontarFabTema) window.snwMontarFabTema();
 
     const $ = (s) => document.querySelector(s);
+    const params = new URLSearchParams(location.search);
+    const token = params.get("token") || "";
+
+    const sub = $("#sub");
+    const formRegistro = $("#formRegistro");
     const inpUsuario = $("#inpUsuario");
     const inpClave = $("#inpClave");
     const inpClave2 = $("#inpClave2");
     const msg = $("#msg");
+    const msgEnlace = $("#msgEnlace");
     const btn = $("#btnCrear");
-
-    const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/;
 
     function chequeos(clave) {
       return {
@@ -159,15 +166,31 @@
       msg.textContent = texto;
       msg.className = "aviso visible aviso--" + tipo;
     }
+    function enlaceInvalido(texto) {
+      sub.textContent = "Este enlace ya no sirve.";
+      msgEnlace.textContent = texto;
+      msgEnlace.classList.add("visible");
+    }
 
-    $("#formRegistro").addEventListener("submit", async (e) => {
+    (async function () {
+      if (!token) { enlaceInvalido("Falta el token de la invitación."); return; }
+      try {
+        const r = await fetch("api/auth/invitacion/" + encodeURIComponent(token));
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.detail || "El enlace no es válido.");
+        inpUsuario.value = data.correo || "";
+        sub.textContent = "Elige una contraseña para tu cuenta.";
+        formRegistro.hidden = false;
+        inpClave.focus();
+      } catch (ex) {
+        enlaceInvalido(ex.message);
+      }
+    })();
+
+    formRegistro.addEventListener("submit", async (e) => {
       e.preventDefault();
       msg.className = "aviso";
-      const correo = inpUsuario.value.trim().toLowerCase();
       const clave = inpClave.value;
-
-      inpUsuario.classList.toggle("malo", !EMAIL_RE.test(correo));
-      if (!EMAIL_RE.test(correo)) return mostrar("Escribe un correo electrónico válido.", "error");
 
       const c = chequeos(clave);
       if (!(c.len && c.min && c.may && c.num)) {
@@ -185,15 +208,24 @@
       btn.disabled = true;
       btn.textContent = "Creando...";
       try {
-        const res = await fetch("api/auth/registro", {
+        const res = await fetch("api/auth/activar", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ usuario: correo, clave: clave }),
+          body: JSON.stringify({ token, clave }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.detail || "No se pudo crear la cuenta.");
-        mostrar("Cuenta creada. Redirigiendo al inicio de sesión…", "ok");
-        setTimeout(() => location.replace("login.html"), 1400);
+
+        localStorage.setItem("snw_token", data.token);
+        localStorage.setItem("snw_rol", data.rol);
+        localStorage.setItem("snw_nombre", data.nombre);
+        localStorage.setItem("snw_permisos", JSON.stringify(data.permisos || []));
+
+        mostrar("Cuenta creada. Entrando…", "ok");
+        setTimeout(() => {
+          location.replace(data.rol === "administrador" || data.rol === "desarrollador"
+            ? "pacientes.html" : "mensajeria.html");
+        }, 900);
       } catch (ex) {
         mostrar(ex.message, "error");
         btn.disabled = false;

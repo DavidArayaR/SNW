@@ -68,7 +68,15 @@ select.badge--select {
   box-shadow: var(--sombra);
 }
 
-.panel--list { position: sticky; top: 20px; max-height: calc(100vh - 44px); display: flex; flex-direction: column; }
+.panel--list {
+  position: sticky;
+  top: 20px;
+  max-height: calc(100vh - 44px);
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-2);
+  border-top: 3px solid var(--verde);
+}
 
 .panel__head {
   display: flex;
@@ -86,6 +94,8 @@ select.badge--select {
   flex-wrap: wrap;
   align-items: center;
   row-gap: 10px;
+  background: var(--brand-tint);
+  border-radius: calc(var(--radio) - 3px) calc(var(--radio) - 3px) 0 0;
 }
 .panel--list .panel__actions {
   flex-basis: 100%;
@@ -210,7 +220,7 @@ button:hover {
 .btn[disabled]:hover,
 button:disabled:hover { outline: none; }
 
-.panel--editor { min-height: 60vh; }
+.panel--editor { min-height: 60vh; border-top: 3px solid var(--borde); }
 .panel--editor form { padding: 20px 24px 26px; }
 
 .field { margin-bottom: 18px; }
@@ -252,6 +262,15 @@ button:disabled:hover { outline: none; }
 }
 .field__hint { margin: 6px 0 0; font-size: .78rem; color: var(--texto-suave); }
 .field__hint.atajos { margin-top: 14px; text-align: center; }
+.field__valor {
+  margin: 0;
+  padding: 11px 13px;
+  border: 1.5px solid var(--borde);
+  border-radius: 10px;
+  font-size: .93rem;
+  color: var(--texto-suave);
+  background: var(--surface-3);
+}
 .char-count { font-size: .78rem; color: var(--texto-suave); white-space: nowrap; }
 .char-count--limite { color: var(--rojo); font-weight: 700; }
 
@@ -267,7 +286,13 @@ button:disabled:hover { outline: none; }
 .warn--nombre { margin: 8px 0 0; }
 #avisoPendiente { margin: 14px 18px 0; }
 
-.preview-wrap { margin-bottom: 22px; }
+.preview-wrap {
+  margin-bottom: 22px;
+  padding: 16px;
+  border: 1px solid var(--borde);
+  border-radius: var(--radio);
+  background: var(--panel-2);
+}
 .preview-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
 .preview-head h3 { margin: 0; font-size: .92rem; }
 .preview-note { font-size: .78rem; color: var(--texto-suave); }

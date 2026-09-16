@@ -133,6 +133,7 @@ INSERT IGNORE INTO configuracion (clave, valor) VALUES
   ('wa_graph_version', 'v26.0'),
   ('wa_moneda', 'USD'),
   ('plantillas_revision_minutos', '2'),
+  ('plantillas_badge_aprobada_minutos', '2'),
   -- Límites de envío de Meta (Graph API rate limits, throughput y messaging limit)
   ('wa_rate_limit_activo', 'true'),
   ('wa_rate_limit_umbral_pct', '80'),
@@ -161,8 +162,7 @@ CREATE TABLE IF NOT EXISTS tarifas_whatsapp (
 ) CHARACTER SET utf8mb4;
 
 -- Log de las respuestas enviadas a pacientes interesados (mensaje de call
--- center). Se guarda qué número de call center se asignó, para repartir la
--- carga: la siguiente respuesta usa el número menos usado.
+-- center). Se guarda qué número de call center se asignó.
 CREATE TABLE IF NOT EXISTS call_center_log (
   id INT AUTO_INCREMENT PRIMARY KEY,
   paciente_id INT DEFAULT NULL,

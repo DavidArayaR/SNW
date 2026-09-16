@@ -42,7 +42,7 @@ async function cargar() {
   btn.disabled = true;
   try {
     const res = await fetch("api/estadisticas", { headers: authHeaders(), cache: "no-store" });
-    if (res.status === 401) { window.snwSalir(); return; }
+    if (res.status === 401) { window.snwSesionExpirada(); return; }
     if (!res.ok) throw new Error();
     render(await res.json());
   } catch {
@@ -79,9 +79,9 @@ function renderWebhookSalud(w) {
   el.hidden = false;
   el.classList.toggle("webhook-salud--alerta", stale);
   if (!w.total_eventos) {
-    el.textContent = "⚠ Nunca se ha recibido un evento del webhook de WhatsApp. Revisa en Meta que el webhook esté configurado y suscrito al campo «messages», y que el túnel público (ngrok) esté arriba.";
+    el.textContent = "⚠ Nunca se ha recibido un evento del webhook de WhatsApp. Revisa en Meta que el webhook esté configurado y suscrito al campo «messages», y que el servidor esté arriba.";
   } else if (stale) {
-    el.textContent = `⚠ El webhook de WhatsApp no recibe eventos desde hace ${horas} h (último: ${w.ultimo_evento}). Si esperabas respuestas, revisa el webhook en Meta y que ngrok/el servidor sigan corriendo.`;
+    el.textContent = `⚠ El webhook de WhatsApp no recibe eventos desde hace ${horas} h (último: ${w.ultimo_evento}). Si esperabas respuestas, revisa el webhook en Meta y que  el servidor siga corriendo.`;
   } else {
     el.textContent = `Webhook de WhatsApp activo · último evento hace ${horas} h (${w.ultimo_evento}) · ${num(w.total_eventos)} en total.`;
   }
@@ -247,7 +247,7 @@ async function cargarEnvios(gran) {
     const res = await fetch(`api/estadisticas/envios?granularidad=${gran}`, {
       headers: authHeaders(), cache: "no-store",
     });
-    if (res.status === 401) { window.snwSalir(); return; }
+    if (res.status === 401) { window.snwSesionExpirada(); return; }
     if (!res.ok) throw new Error();
     const d = await res.json();
     pintarGrafico($("#enviosGrafico"), (d.filas || []).map((f) => ({ periodo: f.periodo, valor: f.enviados })), {
@@ -272,7 +272,7 @@ let granCostos = "mes";
 async function cargarTarifas() {
   try {
     const res = await fetch("api/tarifas", { headers: authHeaders(), cache: "no-store" });
-    if (res.status === 401) { window.snwSalir(); return; }
+    if (res.status === 401) { window.snwSesionExpirada(); return; }
     if (!res.ok) throw new Error();
     renderTarifas(await res.json());
   } catch {
@@ -382,7 +382,7 @@ async function cargarCostos(gran) {
     const res = await fetch(`api/estadisticas/costos?granularidad=${gran}`, {
       headers: authHeaders(), cache: "no-store",
     });
-    if (res.status === 401) { window.snwSalir(); return; }
+    if (res.status === 401) { window.snwSesionExpirada(); return; }
     if (!res.ok) throw new Error();
     renderCostos(await res.json());
   } catch {

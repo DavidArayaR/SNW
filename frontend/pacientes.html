@@ -39,7 +39,6 @@
         <h2 id="tituloPacientes">Pacientes</h2>
         <div class="panel__actions">
           <button id="btnActualizar" class="btn btn--ghost" type="button">Actualizar</button>
-          <button id="btnIniciar" class="btn btn--primary" type="button" disabled>Iniciar env&iacute;o</button>
         </div>
       </div>
 
@@ -48,6 +47,28 @@
       <div class="toolbar-pacientes">
         <input type="search" id="buscador" placeholder="Buscar por nombre, tel&eacute;fono o info..." autocomplete="off">
         <span id="contadorSel" class="contador-sel"></span>
+      </div>
+
+      <div class="toolbar-masivo" id="toolbarMasivo" hidden>
+        <span class="toolbar-masivo__label">Con los seleccionados:</span>
+        <label class="toolbar-masivo__campo">
+          Estado
+          <select id="selEstadoMasivo">
+            <option value="" selected>— cambiar a —</option>
+            <option value="pendiente">Pendiente</option>
+            <option value="enviado">Enviado</option>
+            <option value="error">Error</option>
+          </select>
+        </label>
+        <label class="toolbar-masivo__campo">
+          Respuesta
+          <select id="selRespuestaMasivo">
+            <option value="" selected>— cambiar a —</option>
+            <option value="pendiente">Sin respuesta</option>
+            <option value="respondio">Respondió</option>
+            <option value="baja">Se dio de baja</option>
+          </select>
+        </label>
       </div>
 
       <div class="tabla-wrap">
@@ -74,65 +95,10 @@
     </div>
   </div>
 
-  <div id="modalEnvio" class="modal" hidden>
-    <div class="modal__card modal__card--envio" role="dialog" aria-modal="true">
-      <h3>Enviar mensaje</h3>
-
-      <div id="faseConfig">
-        <div id="listaPlantillasModal" class="tpl-radio"></div>
-        <p class="resumen-linea" id="resumenLinea"></p>
-        <div class="aviso-dev" id="avisoDev" hidden></div>
-      </div>
-
-      <div id="faseProgreso" hidden>
-        <div class="progreso-info">
-          <span id="progresoTexto">Preparando env&iacute;o...</span>
-          <span id="progresoNumeros" class="progreso-numeros"></span>
-        </div>
-        <div class="barra"><div class="barra__fill" id="barraFill"></div></div>
-      </div>
-
-      <ul id="listaRechazados" class="rechazados" hidden></ul>
-
-      <div class="modal__actions">
-        <div class="acciones-izq">
-          <button type="button" class="btn btn--ghost" id="btnCerrarModal">Cerrar</button>
-          <button type="button" class="btn btn--danger" id="btnCancelarEnvio">Cancelar</button>
-        </div>
-        <div class="acciones-derecha">
-          <button type="button" class="btn btn--primary" id="btnLanzarEnvio" hidden>Iniciar Env&iacute;o</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div id="modalEspera" class="modal" hidden>
-    <div class="modal__card" style="text-align:center; max-width:480px;">
-      <h3>Esperando respuesta de supervisor</h3>
-      <p>Se ha enviado un correo a <strong id="correoEspera">supervisor</strong> solicitando confirmaci&oacute;n.</p>
-      <p><strong>Por favor no cerrar esta ventana.</strong></p>
-      <div style="margin:20px auto; width:40px; height:40px; border:4px solid #dde1e6; border-top-color:#128c7e; border-radius:50%; animation:spin 1s linear infinite;"></div>
-      <p style="font-size:13px; color:#66757f;">Cuando el supervisor confirme desde su correo, el env&iacute;o iniciar&aacute; autom&aacute;ticamente.</p>
-      <p id="linkConfirmacionEspera" style="font-size:11px; word-break:break-all; color:#66757f; margin-top:10px;"></p>
-    </div>
-  </div>
-
-  <div id="modalCancelar" class="modal" hidden>
-    <div class="modal__card" style="text-align:center; max-width:420px;" role="dialog" aria-modal="true">
-      <h3>Cancelar env&iacute;o</h3>
-      <p id="mensajeCancelar">¿Seguro que quieres cancelar el env&iacute;o?</p>
-      <p style="font-size:13px; color:#66757f;">Los mensajes ya enviados no se pueden recuperar.</p>
-      <div class="modal__actions" style="justify-content:center; margin-top:20px;">
-        <button type="button" class="btn btn--ghost" id="btnNoCancelar">No, continuar</button>
-        <button type="button" class="btn btn--primary" id="btnConfirmarCancelar" style="background:#b23b37;">S&iacute;, cancelar</button>
-      </div>
-    </div>
-  </div>
-
   <div id="toast" class="toast"></div>
-  <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
 
   <script src="js/layout.js"></script>
+  <script src="js/pass-toggle.js"></script>
   <script src="js/pacientes.js"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>

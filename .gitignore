@@ -34,3 +34,5 @@ backup_*.sql
 # Cuentas: migradas a la tabla `usuarios` de la BD
 data/usuarios.json
 data/usuarios.json.migrado
+
+documentacion/

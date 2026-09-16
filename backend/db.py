@@ -84,6 +84,9 @@ CONFIG_DEFAULTS = {
     # servidor el primer chequeo sale rápido (20 s), no espera el intervalo
     # completo. 0 = desactivado.
     "plantillas_revision_minutos": "2",
+    # Cuánto tiempo (minutos) se muestra el aviso «Aprobada recientemente»
+    # (lista y editor de plantillas) después de detectar la aprobación.
+    "plantillas_badge_aprobada_minutos": "10",
     # Rate limits de la Graph API de Meta. El sistema lee las cabeceras de uso de
     # cuota (`X-App-Usage` / `X-Business-Use-Case-Usage`) y frena los envíos antes
     # de chocar con el límite; ante un 429 espera el tiempo que indica Meta.
@@ -188,6 +191,15 @@ def asegurar_tabla_config() -> None:
             )
             if not (cur.fetchone() or {}).get("n"):
                 cur.execute("ALTER TABLE usuarios ADD COLUMN correo_recuperacion VARCHAR(150) NOT NULL DEFAULT ''")
+            # Cuenta activa/desactivada: un admin/dev puede bloquear el acceso de
+            # una cuenta sin borrarla. Todas nacen activas.
+            cur.execute(
+                "SELECT COUNT(*) AS n FROM information_schema.COLUMNS"
+                " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'usuarios'"
+                "   AND COLUMN_NAME = 'activo'"
+            )
+            if not (cur.fetchone() or {}).get("n"):
+                cur.execute("ALTER TABLE usuarios ADD COLUMN activo TINYINT(1) NOT NULL DEFAULT 1")
             # Enlaces temporales de restablecimiento de contraseña (2 h).
             cur.execute(
                 "CREATE TABLE IF NOT EXISTS password_resets ("
@@ -200,6 +212,41 @@ def asegurar_tabla_config() -> None:
                 ") CHARACTER SET utf8mb4"
             )
             cur.execute("DELETE FROM password_resets WHERE usado = 1 OR expira < DATE_SUB(NOW(), INTERVAL 7 DAY)")
+            # Enlaces temporales de invitación para crear una cuenta (48 h).
+            # Los envía un admin/dev desde Usuarios -> Crear usuario.
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS account_invites ("
+                "  token CHAR(64) PRIMARY KEY,"
+                "  correo VARCHAR(150) NOT NULL,"
+                "  invitado_por VARCHAR(150) NOT NULL DEFAULT '',"
+                "  creado DATETIME DEFAULT CURRENT_TIMESTAMP,"
+                "  expira DATETIME NOT NULL,"
+                "  usado TINYINT(1) NOT NULL DEFAULT 0,"
+                "  INDEX idx_ai_correo (correo)"
+                ") CHARACTER SET utf8mb4"
+            )
+            cur.execute(
+                "SELECT COUNT(*) AS n FROM information_schema.COLUMNS"
+                " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'account_invites'"
+                "   AND COLUMN_NAME = 'invitado_por'"
+            )
+            if not (cur.fetchone() or {}).get("n"):
+                cur.execute("ALTER TABLE account_invites ADD COLUMN invitado_por VARCHAR(150) NOT NULL DEFAULT ''")
+            cur.execute("DELETE FROM account_invites WHERE usado = 1 OR expira < DATE_SUB(NOW(), INTERVAL 7 DAY)")
+            # Trazabilidad: qué admin/dev invitó, cambió permisos/rol/acceso, etc.
+            # a cada cuenta. Se ve en Usuarios -> panel de la cuenta -> Actividad.
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS usuarios_auditoria ("
+                "  id INT AUTO_INCREMENT PRIMARY KEY,"
+                "  fecha_hora DATETIME DEFAULT CURRENT_TIMESTAMP,"
+                "  actor VARCHAR(150) NOT NULL,"
+                "  accion VARCHAR(30) NOT NULL,"
+                "  objetivo VARCHAR(150) NOT NULL,"
+                "  detalle VARCHAR(500) NOT NULL DEFAULT '',"
+                "  INDEX idx_aud_objetivo (objetivo),"
+                "  INDEX idx_aud_fecha (fecha_hora)"
+                ") CHARACTER SET utf8mb4"
+            )
             _sembrar_usuarios(cur)
             # Si el login ya es un correo y no hay correo de recuperación, se copia.
             cur.execute(
@@ -220,8 +267,11 @@ def asegurar_tabla_config() -> None:
                     "       AND COLUMN_NAME = 'respuesta_manual') AS col,"
                     "  (SELECT COUNT(*) FROM information_schema.COLUMNS"
                     "     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s"
-                    "       AND COLUMN_NAME = 'interesado') AS col_int",
-                    (tp, tp, tp),
+                    "       AND COLUMN_NAME = 'interesado') AS col_int,"
+                    "  (SELECT COUNT(*) FROM information_schema.COLUMNS"
+                    "     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s"
+                    "       AND COLUMN_NAME = 'opt_out_explicito') AS col_exp",
+                    (tp, tp, tp, tp),
                 )
                 fila = cur.fetchone() or {}
                 if not fila.get("tabla"):
@@ -240,6 +290,13 @@ def asegurar_tabla_config() -> None:
                     )
                 if not fila.get("col_int"):
                     cur.execute(f"ALTER TABLE {tp} ADD COLUMN interesado TINYINT(1) NOT NULL DEFAULT 0")
+                if not fila.get("col_exp"):
+                    # 1 = el paciente pidió la baja con sus propias palabras por
+                    # WhatsApp (detectado por el webhook); a diferencia de una
+                    # baja puesta a mano, esta no se puede editar en el panel de
+                    # Pacientes salvo que el propio paciente se retracte (vuelva
+                    # a escribir mostrando interés, lo que la borra solo).
+                    cur.execute(f"ALTER TABLE {tp} ADD COLUMN opt_out_explicito TINYINT(1) NOT NULL DEFAULT 0")
                 cur.execute(f"UPDATE {tp} SET respuesta_manual = 'respondio' WHERE respuesta_manual = 'click'")
 
             # El tipo de respuesta 'click' se eliminó: quita el valor del ENUM
@@ -266,7 +323,9 @@ def asegurar_tabla_config() -> None:
                 "  (SELECT COLUMN_TYPE FROM information_schema.COLUMNS"
                 "     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'envios' AND COLUMN_NAME = 'estado') AS estado_tipo,"
                 "  (SELECT COUNT(*) FROM information_schema.COLUMNS"
-                "     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'envios' AND COLUMN_NAME = 'comentario') AS tiene_com"
+                "     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'envios' AND COLUMN_NAME = 'comentario') AS tiene_com,"
+                "  (SELECT COUNT(*) FROM information_schema.COLUMNS"
+                "     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'envios' AND COLUMN_NAME = 'usuario') AS tiene_usr"
             )
             e = cur.fetchone() or {}
             if e.get("tabla"):
@@ -277,6 +336,11 @@ def asegurar_tabla_config() -> None:
                     )
                 if not e.get("tiene_com"):
                     cur.execute("ALTER TABLE envios ADD COLUMN comentario VARCHAR(255) NULL")
+                # Cuenta que inició el envío. NULL en envíos previos a esta
+                # columna; se usa en Usuarios -> «Envíos realizados».
+                if not e.get("tiene_usr"):
+                    cur.execute("ALTER TABLE envios ADD COLUMN usuario VARCHAR(150) NULL")
+                    cur.execute("ALTER TABLE envios ADD INDEX idx_envios_usuario (usuario)")
 
             # (uno o varios, separados por coma). Se traspasa una vez.
             cur.execute("SELECT clave, valor FROM configuracion WHERE clave IN ('call_center_numero', 'call_center_numeros')")
@@ -404,10 +468,11 @@ def _fila_usuario(row: dict) -> dict:
         "permisos": [p for p in (row.get("permisos") or "").split(",") if p],
         "clave_hash": row.get("clave_hash") or "",
         "correo_recuperacion": (row.get("correo_recuperacion") or "").strip().lower(),
+        "activo": bool(row.get("activo", 1)),
     }
 
 
-_USUARIO_COLS = "usuario, nombre, rol, permisos, clave_hash, correo_recuperacion"
+_USUARIO_COLS = "usuario, nombre, rol, permisos, clave_hash, correo_recuperacion, activo"
 
 
 def usuarios_listar() -> list[dict]:
@@ -467,6 +532,62 @@ def usuario_set_correo_recuperacion(correo: str, correo_rec: str) -> None:
         conn.commit()
 
 
+def correo_en_uso(correo: str, excluir_usuario: str | None = None) -> bool:
+    """True si `correo` ya es el usuario (login) o el correo de recuperación de
+    OTRA cuenta (distinta de `excluir_usuario`)."""
+    correo = (correo or "").strip().lower()
+    excluir = (excluir_usuario or "").strip().lower()
+    if not correo:
+        return False
+    try:
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) AS n FROM usuarios"
+                " WHERE (usuario = %s OR correo_recuperacion = %s) AND usuario <> %s",
+                (correo, correo, excluir),
+            )
+            return bool((cur.fetchone() or {}).get("n"))
+    except Exception as e:
+        log_error("correo_en_uso", e)
+        return True  # ante la duda, bloquea (no queremos duplicar un correo)
+
+
+# --- Auditoría de cuentas (trazabilidad de acciones de admin/dev) ----------
+
+def auditoria_registrar(actor: str, accion: str, objetivo: str, detalle: str = "") -> None:
+    try:
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO usuarios_auditoria (actor, accion, objetivo, detalle)"
+                " VALUES (%s, %s, %s, %s)",
+                ((actor or "").strip().lower(), accion, (objetivo or "").strip().lower(), (detalle or "")[:500]),
+            )
+            conn.commit()
+    except Exception as e:
+        log_error("auditoria_registrar", e)
+
+
+def auditoria_listar(objetivo: str | None = None, limite: int = 200) -> list[dict]:
+    try:
+        with conectar() as conn, conn.cursor() as cur:
+            if objetivo:
+                cur.execute(
+                    "SELECT fecha_hora, actor, accion, objetivo, detalle FROM usuarios_auditoria"
+                    " WHERE objetivo = %s ORDER BY id DESC LIMIT %s",
+                    ((objetivo or "").strip().lower(), limite),
+                )
+            else:
+                cur.execute(
+                    "SELECT fecha_hora, actor, accion, objetivo, detalle FROM usuarios_auditoria"
+                    " ORDER BY id DESC LIMIT %s",
+                    (limite,),
+                )
+            return cur.fetchall()
+    except Exception as e:
+        log_error("auditoria_listar", e)
+        return []
+
+
 def contar_desarrolladores(excluir: str | None = None) -> int:
     try:
         with conectar() as conn, conn.cursor() as cur:
@@ -495,7 +616,8 @@ def usuario_crear(correo: str, nombre: str, rol: str, permisos, clave_hash: str)
 
 
 def usuario_actualizar(correo: str, *, nombre: str | None = None,
-                       rol: str | None = None, permisos=None) -> None:
+                       rol: str | None = None, permisos=None,
+                       activo: bool | None = None) -> None:
     sets, params = [], []
     if nombre is not None:
         sets.append("nombre = %s")
@@ -506,6 +628,9 @@ def usuario_actualizar(correo: str, *, nombre: str | None = None,
     if permisos is not None:
         sets.append("permisos = %s")
         params.append(_permisos_csv(permisos))
+    if activo is not None:
+        sets.append("activo = %s")
+        params.append(1 if activo else 0)
     if not sets:
         return
     params.append((correo or "").strip().lower())
@@ -571,6 +696,49 @@ def reset_estado(token: str) -> dict:
 def reset_consumir(token: str) -> None:
     with conectar() as conn, conn.cursor() as cur:
         cur.execute("UPDATE password_resets SET usado = 1 WHERE token = %s", (token,))
+        conn.commit()
+
+
+# --- Invitaciones para crear cuenta -----------------------------------------
+
+def invite_crear(token: str, correo: str, invitado_por: str = "", horas: int = 48) -> None:
+    correo = (correo or "").strip().lower()
+    with conectar() as conn, conn.cursor() as cur:
+        # Un solo enlace activo por correo: anula los anteriores.
+        cur.execute("UPDATE account_invites SET usado = 1 WHERE correo = %s AND usado = 0", (correo,))
+        cur.execute(
+            "INSERT INTO account_invites (token, correo, invitado_por, expira)"
+            " VALUES (%s, %s, %s, DATE_ADD(NOW(), INTERVAL %s HOUR))",
+            (token, correo, (invitado_por or "").strip().lower(), int(horas)),
+        )
+        conn.commit()
+
+
+def invite_estado(token: str) -> dict:
+    """{'estado': 'ok'|'no_existe'|'usado'|'expirado', 'correo': <correo>, 'invitado_por': <correo>}."""
+    try:
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT correo, invitado_por, usado, (expira <= NOW()) AS venc"
+                " FROM account_invites WHERE token = %s",
+                (token,),
+            )
+            row = cur.fetchone()
+    except Exception as e:
+        log_error("invite_estado", e)
+        return {"estado": "no_existe"}
+    if not row:
+        return {"estado": "no_existe"}
+    if row.get("usado"):
+        return {"estado": "usado", "correo": row["correo"], "invitado_por": row.get("invitado_por") or ""}
+    if row.get("venc"):
+        return {"estado": "expirado", "correo": row["correo"], "invitado_por": row.get("invitado_por") or ""}
+    return {"estado": "ok", "correo": row["correo"], "invitado_por": row.get("invitado_por") or ""}
+
+
+def invite_consumir(token: str) -> None:
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("UPDATE account_invites SET usado = 1 WHERE token = %s", (token,))
         conn.commit()
 
 

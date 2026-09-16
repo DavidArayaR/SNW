@@ -33,8 +33,10 @@ from db import (
     ROLES_USUARIO, PERMISOS_VALIDOS, PERMISOS_BASICOS, MAX_DESARROLLADORES,
     usuarios_listar, usuario_buscar, usuario_crear, usuario_actualizar, usuario_borrar,
     usuario_cambiar_clave, contar_desarrolladores,
-    usuario_por_recuperacion, usuario_set_correo_recuperacion,
+    usuario_por_recuperacion, usuario_set_correo_recuperacion, correo_en_uso,
     reset_crear, reset_estado, reset_consumir,
+    invite_crear, invite_estado, invite_consumir,
+    auditoria_registrar, auditoria_listar,
 )
 from motor_envio import obtener_canal
 import whatsapp_service
@@ -170,8 +172,12 @@ class LoginIn(BaseModel):
     clave: str
 
 
-class RegistroIn(BaseModel):
-    usuario: str
+class InvitarIn(BaseModel):
+    correo: str
+
+
+class ActivarCuentaIn(BaseModel):
+    token: str
     clave: str
 
 
@@ -179,6 +185,7 @@ class UsuarioUpdIn(BaseModel):
     rol: str | None = None
     permisos: list[str] | None = None
     nombre: str | None = None
+    activo: bool | None = None
 
 
 class ClavePropiaIn(BaseModel):
@@ -366,6 +373,8 @@ def login(body: LoginIn):
     usuario = usuario_buscar(body.usuario)
     if usuario is None or usuario.get("clave_hash") != clave_hash:
         raise HTTPException(401, detail="Usuario o contraseña incorrectos")
+    if not usuario.get("activo", True):
+        raise HTTPException(403, detail="Tu cuenta está desactivada. Contacta a un administrador.")
 
     token = uuid.uuid4().hex
     ahora = time.time()
@@ -397,7 +406,8 @@ def auth_me(sesion: dict = Depends(sesion_actual)):
 
 @app.put("/api/auth/clave")
 def cambiar_clave_propia(body: ClavePropiaIn, sesion: dict = Depends(sesion_actual)):
-    """Cualquier cuenta puede cambiar su propia contraseña indicando la actual."""
+    """Cualquier cuenta puede cambiar su propia contraseña indicando la actual.
+    Si la cuenta tiene un correo de recuperación guardado, se le avisa ahí."""
     correo = str(sesion.get("usuario", "")).strip().lower()
     u = usuario_buscar(correo)
     if u is None:
@@ -409,6 +419,12 @@ def cambiar_clave_propia(body: ClavePropiaIn, sesion: dict = Depends(sesion_actu
     if err:
         raise HTTPException(422, detail=err)
     usuario_cambiar_clave(correo, hashlib.sha256(body.clave_nueva.encode("utf-8")).hexdigest())
+    destino = (u.get("correo_recuperacion") or "").strip()
+    if destino:
+        _enviar_correo(
+            destino, "[SNW] Tu contraseña cambió",
+            _html_correo_clave_cambiada(u.get("nombre", "") or correo),
+        )
     return {"ok": True}
 
 
@@ -421,11 +437,37 @@ def cambiar_correo_recuperacion(body: CorreoRecuperacionIn, sesion: dict = Depen
     correo_rec = (body.correo or "").strip().lower()
     if not _EMAIL_RE.match(correo_rec):
         raise HTTPException(422, detail="Escribe un correo electrónico válido.")
-    otra = usuario_buscar(correo_rec)
-    if otra is not None and str(otra.get("usuario", "")).strip().lower() != yo:
-        raise HTTPException(409, detail="Ese correo es el usuario de otra cuenta.")
+    if correo_en_uso(correo_rec, excluir_usuario=yo):
+        raise HTTPException(409, detail="Ese correo ya está en uso en otra cuenta.")
     usuario_set_correo_recuperacion(yo, correo_rec)
     return {"ok": True, "correo_recuperacion": correo_rec}
+
+
+def _html_correo_clave_cambiada(nombre: str) -> str:
+    n = _html.escape(nombre or "")
+    return f"""
+    <html><body style="font-family: Arial, sans-serif; color: #24303c;">
+      <h2>Tu contraseña cambió</h2>
+      <p>Hola {n}, te avisamos que la contraseña de tu cuenta de SNW se acaba de cambiar
+      desde «Mi cuenta».</p>
+      <p style="font-size:13px; color:#66757f;">Si fuiste tú, no necesitas hacer nada. Si no
+      reconoces este cambio, contacta a un administrador de inmediato.</p>
+    </body></html>
+    """
+
+
+def _html_correo_invitacion(enlace: str) -> str:
+    return f"""
+    <html><body style="font-family: Arial, sans-serif; color: #24303c;">
+      <h2>Te invitaron a SNW</h2>
+      <p>Un administrador te invitó a crear una cuenta en el Sistema de Notificaciones WhatsApp.</p>
+      <p style="margin:24px 0;">
+        <a href="{enlace}" style="display:inline-block; background:#128c7e; color:#fff; padding:12px 22px; border-radius:8px; text-decoration:none; font-weight:bold;">Crear mi cuenta</a>
+      </p>
+      <p style="font-size:13px; color:#66757f;">El enlace dura <strong>48 horas</strong>. Si no esperabas esta invitación, ignora este correo.</p>
+      <p style="font-size:12px; color:#66757f;">Si el botón no funciona, copia y pega este enlace:<br>{enlace}</p>
+    </body></html>
+    """
 
 
 def _html_correo_reset(nombre: str, enlace: str) -> str:
@@ -502,24 +544,77 @@ def logout(request: Request):
     return {"ok": True}
 
 
-@app.post("/api/auth/registro", status_code=201)
-def registro(body: RegistroIn):
-    """Alta pública de una cuenta. El correo hace de usuario y debe ser válido;
-    la contraseña debe ser segura. La cuenta nace con rol `usuario` y los
-    permisos básicos (mensajería, historial, estadísticas)."""
-    correo = body.usuario.strip().lower()
+@app.post("/api/usuarios/invitar", status_code=201)
+def invitar_usuario(body: InvitarIn, sesion: dict = Depends(solo_admin)):
+    """Un admin/dev invita a crear una cuenta: se le manda un correo con un
+    enlace (48 h) para que la persona elija su propia contraseña. La cuenta
+    nace con rol `usuario` y los permisos básicos recién al activarse."""
+    correo = (body.correo or "").strip().lower()
     if not _EMAIL_RE.match(correo):
         raise HTTPException(422, detail="Escribe un correo electrónico válido.")
+    if usuario_buscar(correo) is not None:
+        raise HTTPException(409, detail="Ya existe una cuenta con ese correo.")
+    token = secrets.token_hex(32)
+    invite_crear(token, correo, invitado_por=sesion.get("usuario", ""), horas=48)
+    enlace = f"{url_base()}/registro.html?token={token}"
+    enviado = _enviar_correo(correo, "[SNW] Crea tu cuenta",
+                              _html_correo_invitacion(enlace))
+    auditoria_registrar(sesion.get("usuario", ""), "invitar", correo,
+                        "Invitación enviada" if enviado else "Invitación creada (no se pudo enviar el correo)")
+    return {"ok": True, "correo_enviado": enviado}
+
+
+@app.get("/api/auth/invitacion/{token}")
+def invitacion_verificar(token: str):
+    est = invite_estado(token)
+    if est.get("estado") == "ok":
+        return {"ok": True, "correo": est["correo"]}
+    detalle = {
+        "usado": "Este enlace ya se usó.",
+        "expirado": "El enlace expiró (dura 48 horas). Pide que te inviten de nuevo.",
+    }.get(est.get("estado"), "El enlace no es válido.")
+    raise HTTPException(400, detail=detalle)
+
+
+@app.post("/api/auth/activar", status_code=201)
+def activar_cuenta(body: ActivarCuentaIn):
+    """Último paso de la invitación: la persona invitada elige su contraseña,
+    la cuenta se crea con rol `usuario` y permisos básicos, y queda con la
+    sesión ya iniciada (mismo formato de respuesta que /api/auth/login)."""
+    est = invite_estado(body.token)
+    if est.get("estado") != "ok":
+        raise HTTPException(400, detail="El enlace no es válido o expiró. Pide que te inviten de nuevo.")
     err = validar_clave_segura(body.clave)
     if err:
         raise HTTPException(422, detail=err)
+    correo = str(est["correo"]).strip().lower()
     if usuario_buscar(correo) is not None:
+        invite_consumir(body.token)
         raise HTTPException(409, detail="Ya existe una cuenta con ese correo.")
     usuario_crear(
         correo, correo.split("@")[0], "usuario", list(PERMISOS_BASICOS),
         hashlib.sha256(body.clave.encode("utf-8")).hexdigest(),
     )
-    return {"ok": True}
+    invite_consumir(body.token)
+    invitador = est.get("invitado_por") or "invitación"
+    auditoria_registrar(invitador, "cuenta_creada", correo,
+                        f"Cuenta creada por invitación de {invitador}" if est.get("invitado_por") else "Cuenta creada por invitación")
+
+    usuario = usuario_buscar(correo)
+    token = uuid.uuid4().hex
+    ahora = time.time()
+    SESIONES[token] = {
+        "usuario": correo,
+        "rol": usuario.get("rol", "usuario"),
+        "nombre": usuario.get("nombre", correo),
+        "permisos": permisos_efectivos(usuario),
+        "creada": ahora,
+        "actividad": ahora,
+        "actividad_guardada": ahora,
+    }
+    guardar_sesiones()
+    s = SESIONES[token]
+    return {"token": token, "rol": s["rol"], "nombre": s["nombre"], "permisos": s["permisos"]}
 
 
 def _puede_gestionar(actor: dict, objetivo: dict) -> tuple[bool, str]:
@@ -548,13 +643,15 @@ def listar_usuarios(sesion: dict = Depends(solo_admin)):
             "es_actual": es_actual,
             "editable": puede,
             "motivo_bloqueo": motivo,
+            "activo": u.get("activo", True),
+            "correo_recuperacion": u.get("correo_recuperacion") or "",
         })
     return {
         "usuarios": filas,
         "permisos_validos": list(PERMISOS_VALIDOS),
         "roles": list(ROLES),
         "mi_rol": sesion.get("rol"),
-        "puede_cambiar_rol": sesion.get("rol") == "desarrollador",
+        "puede_cambiar_rol": sesion.get("rol") in ROLES_PRIVILEGIADOS,
         "desarrolladores": contar_desarrolladores(),
         "max_desarrolladores": MAX_DESARROLLADORES,
     }
@@ -571,10 +668,16 @@ def actualizar_usuario(usuario: str, body: UsuarioUpdIn, sesion: dict = Depends(
 
     nuevo_rol = None
     if body.rol is not None and body.rol != obj.get("rol"):
-        if sesion.get("rol") != "desarrollador":
-            raise HTTPException(403, detail="Solo un desarrollador puede cambiar el rol de una cuenta.")
-        if body.rol not in ROLES:
-            raise HTTPException(422, detail="Rol no válido.")
+        if sesion.get("rol") == "desarrollador":
+            if body.rol not in ROLES:
+                raise HTTPException(422, detail="Rol no válido.")
+        elif sesion.get("rol") == "administrador":
+            # Un administrador solo puede ascender una cuenta de rol «usuario»
+            # a «administrador» (nunca a «desarrollador»).
+            if body.rol != "administrador":
+                raise HTTPException(403, detail="Un administrador solo puede dar permisos de administrador.")
+        else:
+            raise HTTPException(403, detail="No puedes cambiar el rol de esta cuenta.")
         if body.rol == "desarrollador" and contar_desarrolladores(excluir=obj["usuario"]) >= MAX_DESARROLLADORES:
             raise HTTPException(409, detail=f"Solo puede haber {MAX_DESARROLLADORES} desarrolladores.")
         nuevo_rol = body.rol
@@ -586,11 +689,130 @@ def actualizar_usuario(usuario: str, body: UsuarioUpdIn, sesion: dict = Depends(
     nuevos_permisos = None
     if body.permisos is not None:
         nuevos_permisos = [p for p in body.permisos if p in PERMISOS_VALIDOS]
+        # "Administrar tarifas y costos" necesita "Estadísticas".
+        if "tarifas_editar" in nuevos_permisos and "estadisticas" not in nuevos_permisos:
+            nuevos_permisos.append("estadisticas")
 
-    usuario_actualizar(obj["usuario"], nombre=nuevo_nombre, rol=nuevo_rol, permisos=nuevos_permisos)
+    # Arma el detalle de auditoría ANTES de aplicar los cambios (compara contra
+    # el estado que tenía la cuenta) para que quede trazable qué cambió y quién.
+    cambios = []
+    if nuevo_rol is not None:
+        cambios.append(f"Rol: {obj.get('rol')} → {nuevo_rol}")
+    if nuevos_permisos is not None:
+        antes = set(obj.get("permisos") or [])
+        despues = set(nuevos_permisos)
+        agregados = sorted(despues - antes)
+        quitados = sorted(antes - despues)
+        if agregados or quitados:
+            partes = []
+            if agregados:
+                partes.append("+" + ", +".join(agregados))
+            if quitados:
+                partes.append("-" + ", -".join(quitados))
+            cambios.append("Permisos: " + "; ".join(partes))
+    if body.activo is not None and bool(body.activo) != bool(obj.get("activo", True)):
+        cambios.append("Cuenta reactivada" if body.activo else "Cuenta desactivada")
+
+    usuario_actualizar(obj["usuario"], nombre=nuevo_nombre, rol=nuevo_rol, permisos=nuevos_permisos,
+                        activo=body.activo)
+    if cambios:
+        auditoria_registrar(sesion.get("usuario", ""), "editar", obj["usuario"], "; ".join(cambios))
+    if body.activo is False:
+        # Corta el acceso al instante: cierra cualquier sesión abierta de esa cuenta.
+        for tk, s in list(SESIONES.items()):
+            if str(s.get("usuario", "")).strip().lower() == obj["usuario"]:
+                SESIONES.pop(tk, None)
+        guardar_sesiones()
     fresco = usuario_buscar(obj["usuario"]) or obj
     return {"ok": True, "usuario": fresco["usuario"], "rol": fresco["rol"],
-            "permisos": permisos_efectivos(fresco)}
+            "permisos": permisos_efectivos(fresco), "activo": fresco.get("activo", True)}
+
+
+@app.put("/api/usuarios/{usuario}/correo-recuperacion")
+def asignar_correo_recuperacion(usuario: str, body: CorreoRecuperacionIn, sesion: dict = Depends(solo_admin)):
+    """Un admin/dev le asigna (o cambia) el correo de recuperación a una cuenta
+    que gestiona, típicamente para poder mandarle luego un enlace de cambio de
+    contraseña. Se verifica que ese correo no esté ya en uso en otra cuenta."""
+    obj = usuario_buscar(usuario)
+    if obj is None:
+        raise HTTPException(404, detail="Usuario no encontrado.")
+    puede, motivo = _puede_gestionar(sesion, obj)
+    if not puede:
+        raise HTTPException(403, detail=motivo)
+    correo_rec = (body.correo or "").strip().lower()
+    if not _EMAIL_RE.match(correo_rec):
+        raise HTTPException(422, detail="Escribe un correo electrónico válido.")
+    if correo_en_uso(correo_rec, excluir_usuario=obj["usuario"]):
+        raise HTTPException(409, detail="Ese correo ya está en uso en otra cuenta.")
+    usuario_set_correo_recuperacion(obj["usuario"], correo_rec)
+    auditoria_registrar(sesion.get("usuario", ""), "correo_recuperacion", obj["usuario"],
+                        f"Correo de recuperación asignado: {correo_rec}")
+    return {"ok": True, "correo_recuperacion": correo_rec}
+
+
+@app.post("/api/usuarios/{usuario}/enviar-cambio-clave")
+def enviar_cambio_clave(usuario: str, sesion: dict = Depends(solo_admin)):
+    """Un admin/dev activa el cambio de contraseña de una cuenta que gestiona:
+    le manda el mismo enlace de «Olvidé mi contraseña» al correo que la cuenta
+    tiene registrado. Requiere que ya haya un correo (propio o de recuperación)."""
+    obj = usuario_buscar(usuario)
+    if obj is None:
+        raise HTTPException(404, detail="Usuario no encontrado.")
+    puede, motivo = _puede_gestionar(sesion, obj)
+    if not puede:
+        raise HTTPException(403, detail=motivo)
+    destino = (obj.get("correo_recuperacion") or "").strip()
+    if not destino and _EMAIL_RE.match(str(obj.get("usuario", ""))):
+        destino = obj["usuario"]
+    if not _EMAIL_RE.match(destino):
+        raise HTTPException(400, detail="Esta cuenta no tiene un correo asignado. Asígnale uno primero.")
+    token = secrets.token_hex(32)
+    reset_crear(token, obj["usuario"], horas=2)
+    enlace = f"{url_base()}/reset.html?token={token}"
+    enviado = _enviar_correo(destino, "[SNW] Restablecer tu contraseña",
+                              _html_correo_reset(obj.get("nombre") or obj["usuario"], enlace))
+    auditoria_registrar(sesion.get("usuario", ""), "reset_clave", obj["usuario"],
+                        f"Enlace de cambio de contraseña enviado a {destino}")
+    return {"ok": True, "correo_enviado": enviado, "destino": destino}
+
+
+@app.get("/api/usuarios/{usuario}/envios")
+def envios_de_usuario(usuario: str, sesion: dict = Depends(solo_admin)):
+    """Envíos masivos que inició esta cuenta: fecha, plantilla, estado
+    (completado/cancelado/rechazado), cantidad de pacientes y costo
+    aproximado. De solo lectura: cualquier admin/dev puede consultar el
+    historial de cualquier cuenta (no aplican las reglas de «quién gestiona a
+    quién», que son solo para editar permisos/rol/acceso)."""
+    obj = usuario_buscar(usuario)
+    if obj is None:
+        raise HTTPException(404, detail="Usuario no encontrado.")
+    com_col = "comentario" if "comentario" in columnas_tabla("envios", "produccion") else "NULL AS comentario"
+    sql = (f"SELECT id, base_datos, plantilla_clave, plantilla_nombre, total_pacientes,"
+           f" enviados, fallidos, invalidos, estado, {com_col}, fecha_hora FROM envios"
+           " WHERE usuario = %s ORDER BY id DESC LIMIT 200")
+    with conectar("produccion") as conn, conn.cursor() as cur:
+        cur.execute(sql, (obj["usuario"],))
+        filas = cur.fetchall()
+    for f in filas:
+        f["fecha"] = f.pop("fecha_hora").strftime("%d-%m-%Y %H:%M")
+        f["costo"] = _costo_estimado_por_clave(f.get("plantilla_clave") or "", f.get("total_pacientes") or 0)
+    return filas
+
+
+@app.get("/api/usuarios/{usuario}/auditoria")
+def auditoria_de_usuario(usuario: str, sesion: dict = Depends(solo_admin)):
+    """Trazabilidad de la cuenta: quién la invitó, quién le cambió permisos/rol/
+    acceso, quién le asignó un correo de recuperación o le activó el cambio de
+    contraseña, y (si se borró) quién la eliminó. De solo lectura, igual que
+    «Envíos realizados»: no aplican las reglas de «quién gestiona a quién»."""
+    obj = usuario_buscar(usuario)
+    correo = (usuario or "").strip().lower()
+    if obj is None and not auditoria_listar(correo, limite=1):
+        raise HTTPException(404, detail="Usuario no encontrado.")
+    filas = auditoria_listar(correo)
+    for f in filas:
+        f["fecha"] = f.pop("fecha_hora").strftime("%d-%m-%Y %H:%M")
+    return filas
 
 
 @app.delete("/api/usuarios/{usuario}")
@@ -603,6 +825,7 @@ def eliminar_usuario(usuario: str, sesion: dict = Depends(solo_admin)):
         raise HTTPException(403, detail=motivo)
     correo = str(obj.get("usuario", "")).strip().lower()
     usuario_borrar(correo)
+    auditoria_registrar(sesion.get("usuario", ""), "eliminar", correo, "Cuenta eliminada")
     for tk, s in list(SESIONES.items()):
         if str(s.get("usuario", "")).strip().lower() == correo:
             SESIONES.pop(tk, None)
@@ -702,6 +925,21 @@ def expr_respuesta_efectiva(alias: str = "p", tiene_opt_out: bool = True,
     )
 
 
+def _pacientes_baja_bloqueada(cur, tabla: str, ambiente: str, ids: list[int]) -> set[int]:
+    """IDs (entre los pedidos) que pidieron la baja con sus propias palabras
+    por WhatsApp: no se les puede quitar esa respuesta a mano, solo si el
+    propio paciente se retracta (vuelve a escribir mostrando interés)."""
+    if not ids or not columna_existe(tabla, "opt_out_explicito", ambiente):
+        return set()
+    placeholders = ", ".join("%s" for _ in ids)
+    cur.execute(
+        f"SELECT id FROM {tabla} WHERE id IN ({placeholders})"
+        " AND whatsapp_opt_out = 1 AND opt_out_explicito = 1",
+        tuple(ids),
+    )
+    return {r["id"] for r in cur.fetchall()}
+
+
 def expr_select_pacientes(ambiente: str) -> str:
     """Genera las expresiones SELECT de la tabla pacientes adaptándose a las
     columnas reales existentes (soporta bases con esquema mínimo)."""
@@ -724,6 +962,10 @@ def expr_select_pacientes(ambiente: str) -> str:
         exprs.append("p.whatsapp_opt_out")
     else:
         exprs.append("0 AS whatsapp_opt_out")
+    if "opt_out_explicito" in cols:
+        exprs.append("p.opt_out_explicito")
+    else:
+        exprs.append("0 AS opt_out_explicito")
     if "interesado" in cols:
         exprs.append("COALESCE(p.interesado, 0) AS interesado")
     else:
@@ -775,6 +1017,105 @@ class RespuestaIn(BaseModel):
     respuesta: str
 
 
+class EstadoPacientesBulkIn(BaseModel):
+    pacientes: list[int]
+    estado: str
+
+
+@app.put("/api/pacientes/estado-masivo")
+def actualizar_estado_pacientes(body: EstadoPacientesBulkIn, ambiente: str = Query("produccion"),
+                                sesion: dict = Depends(exigir("pacientes"))):
+    """Cambia el estado de varios pacientes de una sola vez (selección en
+    Base de datos). Misma validación y permiso que el ajuste individual."""
+    if not body.pacientes:
+        raise HTTPException(400, detail="No se seleccionó ningún paciente")
+    if body.estado not in ("pendiente", "enviado", "error"):
+        raise HTTPException(400, detail="Estado inválido. Use: pendiente, enviado o error")
+    t = tabla_pacientes(ambiente)
+    placeholders = ", ".join("%s" for _ in body.pacientes)
+    with conectar(ambiente) as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT id FROM {t} WHERE id IN ({placeholders})", tuple(body.pacientes))
+        encontrados = [r["id"] for r in cur.fetchall()]
+        if not encontrados:
+            raise HTTPException(404, detail="No se encontró ninguno de los pacientes seleccionados")
+        if columna_existe(t, "estado", ambiente):
+            placeholders_enc = ", ".join("%s" for _ in encontrados)
+            cur.execute(
+                f"UPDATE {t} SET estado = %s WHERE id IN ({placeholders_enc})",
+                (body.estado, *encontrados),
+            )
+            conn.commit()
+    return {"ok": True, "actualizados": len(encontrados)}
+
+
+class RespuestaPacientesBulkIn(BaseModel):
+    pacientes: list[int]
+    respuesta: str
+
+
+@app.put("/api/pacientes/respuesta-masiva")
+def actualizar_respuesta_pacientes(body: RespuestaPacientesBulkIn, ambiente: str = Query("produccion"),
+                                   sesion: dict = Depends(exigir("pacientes"))):
+    """Ajuste manual de la respuesta de varios pacientes a la vez (mismo efecto
+    que el ajuste individual: 'baja' activa el opt-out y quita el interés)."""
+    if not body.pacientes:
+        raise HTTPException(400, detail="No se seleccionó ningún paciente")
+    if body.respuesta not in ("pendiente", "respondio", "baja"):
+        raise HTTPException(400, detail="Respuesta inválida. Use: pendiente, respondio, baja")
+    t = tabla_pacientes(ambiente)
+    tiene_manual = columna_existe(t, "respuesta_manual", ambiente)
+    tiene_interesado = columna_existe(t, "interesado", ambiente)
+    placeholders = ", ".join("%s" for _ in body.pacientes)
+    with conectar(ambiente) as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT id FROM {t} WHERE id IN ({placeholders})", tuple(body.pacientes))
+        encontrados = [r["id"] for r in cur.fetchall()]
+        if not encontrados:
+            raise HTTPException(404, detail="No se encontró ninguno de los pacientes seleccionados")
+
+        bloqueados: set[int] = set()
+        if body.respuesta != "baja":
+            bloqueados = _pacientes_baja_bloqueada(cur, t, ambiente, encontrados)
+            encontrados = [pid for pid in encontrados if pid not in bloqueados]
+        if not encontrados:
+            raise HTTPException(
+                409,
+                detail="Los pacientes seleccionados pidieron la baja con sus propias palabras por "
+                       "WhatsApp: no se les puede quitar esa respuesta a mano.",
+            )
+        placeholders_enc = ", ".join("%s" for _ in encontrados)
+
+        cur.execute(
+            f"UPDATE {t} SET whatsapp_opt_out = %s WHERE id IN ({placeholders_enc})",
+            (1 if body.respuesta == "baja" else 0, *encontrados),
+        )
+        if body.respuesta == "baja" and tiene_interesado:
+            cur.execute(f"UPDATE {t} SET interesado = 0 WHERE id IN ({placeholders_enc})", tuple(encontrados))
+        if tiene_manual:
+            cur.execute(
+                f"UPDATE {t} SET respuesta_manual = %s WHERE id IN ({placeholders_enc})",
+                (body.respuesta, *encontrados),
+            )
+        if body.respuesta == "pendiente":
+            cur.execute(
+                "UPDATE log_envios SET respuesta = 'pendiente'"
+                f" WHERE paciente_id IN ({placeholders_enc}) AND respuesta = 'baja'",
+                tuple(encontrados),
+            )
+        elif not tiene_manual:
+            # Esquema antiguo sin columna: se conserva el mecanismo por log
+            # (una fila por paciente, no se puede hacer en un solo UPDATE).
+            for pid in encontrados:
+                cur.execute(
+                    "INSERT INTO log_envios (paciente_id, nombre_paciente, numero_telefono,"
+                    " mensaje, plantilla_clave, estado_envio, respuesta)"
+                    f" SELECT id, nombre, telefono, %s, 'ajuste_manual', 'enviado', %s"
+                    f" FROM {t} WHERE id = %s",
+                    (f"[Ajuste manual · {sesion.get('nombre', 'admin')}]", body.respuesta, pid),
+                )
+        conn.commit()
+    return {"ok": True, "actualizados": len(encontrados), "bloqueados": len(bloqueados)}
+
+
 @app.put("/api/pacientes/{paciente_id}")
 def actualizar_paciente(paciente_id: int, body: EstadoPacienteIn,
                         ambiente: str = Query("produccion"),
@@ -813,6 +1154,14 @@ def actualizar_respuesta_paciente(paciente_id: int, body: RespuestaIn,
         cur.execute(f"SELECT id FROM {t} WHERE id = %s", (paciente_id,))
         if not cur.fetchone():
             raise HTTPException(404, detail="Paciente no encontrado")
+
+        if body.respuesta != "baja" and _pacientes_baja_bloqueada(cur, t, ambiente, [paciente_id]):
+            raise HTTPException(
+                409,
+                detail="Este paciente pidió la baja con sus propias palabras por WhatsApp: no se "
+                       "puede quitar esa respuesta a mano. Solo se revierte si el paciente vuelve "
+                       "a escribir mostrando interés.",
+            )
 
         cur.execute(
             f"UPDATE {t} SET whatsapp_opt_out = %s WHERE id = %s",
@@ -891,6 +1240,9 @@ def mensajes_paciente(paciente_id: int, ambiente: str = Query("produccion"),
         filas = cur.fetchall()
     pac["interesado"] = bool(pac.get("interesado"))
     pac["whatsapp_opt_out"] = bool(pac.get("whatsapp_opt_out"))
+    if sesion.get("rol") not in ROLES_PRIVILEGIADOS:
+        # El número de teléfono del paciente es solo para admin/dev.
+        pac["telefono"] = None
     mensajes = []
     for f in filas:
         entrante = (f.get("plantilla_clave") or "") == "respuesta"
@@ -906,49 +1258,6 @@ def mensajes_paciente(paciente_id: int, ambiente: str = Query("produccion"),
             "interes": entrante and es_mensaje_interes(txt),
         })
     return {"paciente": pac, "mensajes": mensajes}
-
-
-class InteresIn(BaseModel):
-    interesado: bool
-
-
-@app.put("/api/pacientes/{paciente_id}/interes")
-def marcar_interes(paciente_id: int, body: InteresIn,
-                   ambiente: str = Query("produccion"),
-                   sesion: dict = Depends(exigir("call_center", "pacientes"))):
-    """Marca/desmarca a mano a un paciente como interesado. Marcarlo sobreescribe
-    cualquier baja previa (opt-out, corrección manual y señal 'pegajosa')."""
-    t = tabla_pacientes(ambiente)
-    cols = columnas_tabla(t, ambiente)
-    if "interesado" not in cols:
-        raise HTTPException(400, detail="La base no tiene la columna 'interesado'")
-    with conectar(ambiente) as conn, conn.cursor() as cur:
-        cur.execute(f"SELECT id FROM {t} WHERE id = %s", (paciente_id,))
-        if not cur.fetchone():
-            raise HTTPException(404, detail="Paciente no encontrado")
-        cur.execute(f"UPDATE {t} SET interesado = %s WHERE id = %s",
-                    (1 if body.interesado else 0, paciente_id))
-        if body.interesado:
-            if "whatsapp_opt_out" in cols:
-                cur.execute(f"UPDATE {t} SET whatsapp_opt_out = 0 WHERE id = %s", (paciente_id,))
-            if "respuesta_manual" in cols:
-                cur.execute(f"UPDATE {t} SET respuesta_manual = NULL WHERE id = %s", (paciente_id,))
-            cur.execute(
-                "UPDATE log_envios SET respuesta = 'respondio'"
-                " WHERE paciente_id = %s AND respuesta = 'baja'",
-                (paciente_id,),
-            )
-        conn.commit()
-        cur.execute(
-            "SELECT " + expr_select_pacientes(ambiente) + from_pacientes(ambiente) + " WHERE p.id = %s",
-            (paciente_id,),
-        )
-        fila = cur.fetchone()
-    fecha = fila.pop("fecha_actualizacion", None)
-    fila["actualizado"] = fecha.strftime("%d-%m-%Y %H:%M") if fecha else "—"
-    fr = fila.get("ultima_respuesta_fecha")
-    fila["ultima_respuesta_fecha"] = fr.strftime("%d-%m-%Y %H:%M") if fr else None
-    return fila
 
 
 def _call_center_numeros() -> list[str]:
@@ -1433,13 +1742,43 @@ _programar_revision_plantillas(demora_seg=20)
 
 
 def _texto_desde_componentes(components: list) -> str:
-    """Extrae el texto del componente BODY de un template de Meta (los
-    placeholders {{1}}, {{2}}... quedan tal cual, no sabemos a qué comodín
-    del sistema corresponden)."""
+    """Extrae el texto del componente BODY de un template de Meta y traduce
+    sus placeholders {{1}}, {{2}}... a los comodines internos ({nombre},
+    {apellido}...), para que una plantilla importada por «Sincronizar» se
+    pueda usar igual que una creada acá.
+
+    Si el template trae valores de ejemplo (`example.body_text`, los que esta
+    app manda al crear un template — ver `WhatsAppService.COMODINES`) se usan
+    para saber a qué comodín corresponde cada posición, sin importar el
+    orden. Si no hay ejemplo (templates hechos a mano en Meta), se asume el
+    orden habitual de esta app: {{1}} = nombre, {{2}} = apellido. Cualquier
+    posición que no se pueda identificar queda como {variable}."""
+    texto = ""
+    ejemplos: list = []
     for c in components or []:
         if (c.get("type") or "").upper() == "BODY":
-            return c.get("text", "") or ""
-    return ""
+            texto = c.get("text", "") or ""
+            cuerpo_ejemplo = (c.get("example") or {}).get("body_text") or []
+            if cuerpo_ejemplo and isinstance(cuerpo_ejemplo[0], list):
+                ejemplos = cuerpo_ejemplo[0]
+            break
+    if not texto or "{{" not in texto:
+        return texto
+
+    ejemplo_a_comodin = {
+        str(valor).strip().lower(): clave for clave, valor in WhatsAppService.COMODINES.items()
+    }
+    orden_por_defecto = list(WhatsAppService.COMODINES.keys())  # ["nombre", "apellido"]
+
+    def reemplazo(m: re.Match) -> str:
+        n = int(m.group(1))
+        valor_ejemplo = str(ejemplos[n - 1]).strip().lower() if n - 1 < len(ejemplos) else ""
+        comodin = ejemplo_a_comodin.get(valor_ejemplo)
+        if not comodin:
+            comodin = orden_por_defecto[n - 1] if n <= len(orden_por_defecto) else "variable"
+        return "{" + comodin + "}"
+
+    return re.sub(r"\{\{(\d+)\}\}", reemplazo, texto)
 
 
 def _nombre_libre(base: str, ocupados: set) -> str:
@@ -1496,10 +1835,23 @@ def sincronizar_plantillas_meta(sesion: dict = Depends(exigir("plantillas_editar
 
         if match:
             usados_id.add(match.get("id"))
+
+            # Si el texto local todavía tiene placeholders crudos de Meta
+            # ({{1}}...) de una sincronización de antes de que esto tradujera
+            # a comodines, se traduce ahora. No toca un texto ya limpio (así
+            # no se pisa una edición manual).
+            texto_actual = p.get("texto") or ""
+            texto_nuevo = texto_actual
+            if "{{" in texto_actual:
+                texto_traducido = _texto_desde_componentes(match.get("components"))
+                if texto_traducido:
+                    texto_nuevo = texto_traducido
+
             cambio = (
                 p.get("whatsapp_template_id") != match.get("id")
                 or p.get("whatsapp_template_status") != match.get("status")
                 or p.get("whatsapp_template_categoria") != match.get("category")
+                or texto_nuevo != texto_actual
             )
             actualizadas += 1 if cambio else 0
             p["whatsapp_template_id"] = match.get("id")
@@ -1508,6 +1860,7 @@ def sincronizar_plantillas_meta(sesion: dict = Depends(exigir("plantillas_editar
             p["whatsapp_template_lang"] = match.get("language") or lang
             p["whatsapp_template_rejected_reason"] = match.get("rejected_reason") or match.get("reject_reason")
             p["whatsapp_template_error"] = None
+            p["texto"] = texto_nuevo
         else:
             p["whatsapp_template_status"] = None
             p["whatsapp_template_error"] = (
@@ -1736,9 +2089,13 @@ def obtener_call_center_log(sesion: dict = Depends(exigir("call_center_registro"
                 " plantilla_clave, automatico, estado, descripcion_error, base_datos, fecha_hora"
                 " FROM call_center_log ORDER BY id DESC LIMIT 200"
             )
+            privilegiado = sesion.get("rol") in ROLES_PRIVILEGIADOS
             for r in cur.fetchall():
                 r["fecha"] = r.pop("fecha_hora").strftime("%d-%m-%Y %H:%M")
                 r["automatico"] = bool(r["automatico"])
+                if not privilegiado:
+                    # El número de teléfono del paciente es solo para admin/dev.
+                    r["numero_paciente"] = None
                 entradas.append(r)
     except Exception as e:
         log_error("obtener_call_center_log", e)
@@ -1821,6 +2178,10 @@ def leer_config(ambiente: str | None = None) -> dict:
         intervalo = int(cfg.get("intervalo_ms") or 1000)
     except (TypeError, ValueError):
         intervalo = 1000
+    try:
+        badge_aprobada_min = int(cfg.get("plantillas_badge_aprobada_minutos") or 10)
+    except (TypeError, ValueError):
+        badge_aprobada_min = 10
 
     return {
         "entorno": ent,
@@ -1828,6 +2189,7 @@ def leer_config(ambiente: str | None = None) -> dict:
         "numeros_autorizados": lista(cfg.get(clave_numeros)),
         "metodo_envio": cfg.get("metodo_envio") or "simulado",
         "intervalo_ms": intervalo,
+        "plantillas_badge_aprobada_minutos": badge_aprobada_min,
     }
 
 
@@ -1971,6 +2333,9 @@ _CONFIG_SECCIONES = [
              "ayuda": "Cada cuántos minutos se consulta en Meta el estado de las plantillas que "
                       "todavía no están aprobadas, para detectar la aprobación o el rechazo solas, "
                       "sin tener que consultarlo a mano. 0 = desactivado."},
+            {"clave": "plantillas_badge_aprobada_minutos", "etiqueta": "Aviso «Aprobada recientemente» (min)", "tipo": "number",
+             "ayuda": "Cuánto tiempo se muestra el aviso «✨ Aprobada recientemente» en la lista y el "
+                      "editor de plantillas después de detectar la aprobación. 0 = no mostrarlo nunca."},
             {"clave": "wa_rate_limit_activo", "etiqueta": "Frenar envíos al acercarse al límite de Meta", "tipo": "bool",
              "ayuda": "Lee el consumo de cuota que Meta informa en cada respuesta y espera antes de "
                       "seguir enviando. Un error 429 de Meta se respeta aunque esto esté apagado."},
@@ -2052,7 +2417,7 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
                      "wa_rate_limit_umbral_pct", "wa_rate_limit_pausa_max_s",
                      "wa_rate_limit_espera_defecto_s", "wa_rate_limit_reintentos",
                      "wa_throughput_mps", "wa_messaging_limit_24h", "sesion_expira_horas",
-                     "plantillas_revision_minutos"):
+                     "plantillas_revision_minutos", "plantillas_badge_aprobada_minutos"):
             try:
                 n = int(v or "0")
             except ValueError:
@@ -2263,6 +2628,9 @@ def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, p
     costo = _costo_estimado_por_clave(plantilla_clave, total)
     costo_txt = _fmt_moneda(costo["costo"], costo["moneda"]) if costo else "no disponible"
     quien = solicitante.strip() or "usuario desconocido"
+    quien_html = _html.escape(quien)
+    plantilla_nombre_html = _html.escape(plantilla_nombre)
+    plantilla_texto_html = _html.escape(plantilla_texto)
 
     if not host or not pwd:
         # Modo simulado: logear URL para pruebas sin SMTP real
@@ -2289,11 +2657,11 @@ def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, p
     html = f"""
     <html><body style="font-family: Arial, sans-serif; color: #24303c;">
       <h2>Solicitud de envío masivo</h2>
-      <p><strong>{quien}</strong> solicitó enviar la plantilla <strong>{plantilla_nombre}</strong> a <strong>{total} personas</strong> desde la base de datos <strong>{ambiente}</strong>.</p>
+      <p><strong>{quien_html}</strong> solicitó enviar la plantilla <strong>{plantilla_nombre_html}</strong> a <strong>{total} personas</strong> desde la base de datos <strong>{ambiente}</strong>.</p>
       {bloque_costo}
       <div style="background:#f5f7f8; border-left:4px solid #128c7e; padding:14px 16px; margin:18px 0; border-radius:6px;">
         <p style="margin:0 0 6px; font-size:12px; color:#66757f; font-weight:bold;">Mensaje a enviar:</p>
-        <p style="margin:0; white-space:pre-wrap; font-family:Consolas,monospace; font-size:13px; color:#24303c;">{plantilla_texto}</p>
+        <p style="margin:0; white-space:pre-wrap; font-family:Consolas,monospace; font-size:13px; color:#24303c;">{plantilla_texto_html}</p>
       </div>
       <p style="margin:24px 0;">
         <a href="{confirm_url}" style="display:inline-block; background:#128c7e; color:#fff; padding:12px 22px; border-radius:8px; text-decoration:none; font-weight:bold;">Confirmar envío</a>
@@ -2368,13 +2736,13 @@ def registrar_historial(paciente_id, nombre, telefono, clave_plantilla, mensaje,
         print(f"[HISTORIAL] No se pudo registrar: {e}")
 
 
-def crear_envio_batch(base_datos, plantilla_clave, plantilla_nombre, total, ambiente) -> int | None:
+def crear_envio_batch(base_datos, plantilla_clave, plantilla_nombre, total, ambiente, usuario: str = "") -> int | None:
     try:
         with conectar(ambiente) as conn, conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO envios (base_datos, plantilla_clave, plantilla_nombre, total_pacientes, estado)"
-                " VALUES (%s, %s, %s, %s, 'completado')",
-                (base_datos, plantilla_clave, plantilla_nombre, total),
+                "INSERT INTO envios (base_datos, plantilla_clave, plantilla_nombre, total_pacientes, estado, usuario)"
+                " VALUES (%s, %s, %s, %s, 'completado', %s)",
+                (base_datos, plantilla_clave, plantilla_nombre, total, (usuario or "").strip().lower() or None),
             )
             conn.commit()
             return cur.lastrowid
@@ -2639,7 +3007,8 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         envio_id = None
         if rechazados:
             envio_id = crear_envio_batch(nombre_base(amb), plantilla["clave"],
-                                         plantilla["nombre"], len(rechazados), amb)
+                                         plantilla["nombre"], len(rechazados), amb,
+                                         usuario=sesion.get("usuario", ""))
             if envio_id:
                 actualizar_envio_batch(envio_id, amb, invalidos=len(rechazados))
                 for r in rechazados:
@@ -2674,7 +3043,8 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
     if amb == "produccion" and not tiene_permiso(sesion, "envio_produccion"):
         token = uuid.uuid4().hex
         envio_id = crear_envio_batch(nombre_base(amb), plantilla["clave"], plantilla["nombre"],
-                                     len(destinatarios) + len(rechazados), amb)
+                                     len(destinatarios) + len(rechazados), amb,
+                                     usuario=sesion.get("usuario", ""))
         PENDIENTES[token] = {
             "ambiente": amb,
             "plantilla": {"id": plantilla["id"], "clave": plantilla["clave"],
@@ -2708,7 +3078,8 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
                 "confirm_url": f"{url_base()}/api/notificaciones/confirmar/{token}"}
 
     envio_id = crear_envio_batch(nombre_base(amb), plantilla["clave"], plantilla["nombre"],
-                                 len(destinatarios) + len(rechazados), amb)
+                                 len(destinatarios) + len(rechazados), amb,
+                                 usuario=sesion.get("usuario", ""))
     if envio_id:
         actualizar_envio_batch(envio_id, amb, invalidos=len(rechazados))
         for r in rechazados:
@@ -2757,7 +3128,7 @@ def formulario_rechazo(token: str):
     if pend["estado"] == "confirmado":
         return HTMLResponse("<html><body style='font-family:Arial; text-align:center; padding:40px;'><h2>Este envío ya fue confirmado y está en proceso</h2></body></html>")
     total = len(pend["destinatarios"])
-    plantilla = pend["plantilla"]["nombre"]
+    plantilla = _html.escape(pend["plantilla"]["nombre"])
     return HTMLResponse(f"""
 <html><head><meta charset='utf-8'><title>Rechazar envío</title></head>
 <body style='font-family: Segoe UI, Arial; text-align:center; padding:40px; background:#f0f2f5;'>
@@ -2765,8 +3136,8 @@ def formulario_rechazo(token: str):
 <h2 style='color:#b23b37; margin-top:0;'>Rechazar envío</h2>
 <p>Vas a rechazar el envío de <strong>{total} mensajes</strong> de la plantilla <strong>{plantilla}</strong>.</p>
 <form method="POST" action="/api/notificaciones/rechazar/{token}">
-  <label style="display:block; font-size:14px; color:#66757f; margin:14px 0 6px;">Comentario para el enviador (opcional):</label>
-  <textarea name="comentario" rows="4" style="width:100%; padding:10px; font:inherit; font-size:14px; border:1px solid #dde1e6; border-radius:8px;" placeholder="Ej: falta adjuntar el consentimiento firmado."></textarea>
+  <label style="display:block; font-size:14px; color:#66757f; margin:14px 0 6px;">Comentario para el enviador (opcional, máximo 255 caracteres):</label>
+  <textarea name="comentario" rows="4" maxlength="255" style="width:100%; padding:10px; font:inherit; font-size:14px; border:1px solid #dde1e6; border-radius:8px;" placeholder="Ej: falta adjuntar el consentimiento firmado."></textarea>
   <div style="margin-top:20px; text-align:right;">
     <button type="button" onclick="window.location.href='{url_base()}/api/notificaciones/confirmar/{token}'" style="background:#fafbfc; color:#24303c; border:1px solid #dde1e6; padding:11px 20px; border-radius:10px; font-weight:600; cursor:pointer; font-family:inherit;">Volver</button>
     <button type="submit" style="background:#b23b37; color:#fff; border:none; padding:11px 22px; border-radius:10px; font-weight:700; cursor:pointer; font-family:inherit;">Rechazar envío</button>
@@ -2786,8 +3157,14 @@ def rechazar_envio(token: str, comentario: str = Form("")):
         return HTMLResponse("<html><body style='font-family:Arial; text-align:center; padding:40px;'><h2>Este envío ya fue rechazado</h2></body></html>")
     if pend["estado"] == "confirmado":
         return HTMLResponse("<html><body style='font-family:Arial; text-align:center; padding:40px;'><h2>Este envío ya fue confirmado y está en proceso</h2></body></html>")
-    pend["estado"] = "rechazado"
     comentario = (comentario or "").strip()
+    if len(comentario) > 255:
+        return HTMLResponse(
+            "<html><body style='font-family:Arial; text-align:center; padding:40px;'>"
+            "<h3>El comentario no puede superar los 255 caracteres.</h3>"
+            "<p style='color:#66757f;'>Vuelve atrás e intenta de nuevo con un comentario más corto.</p>"
+            "</body></html>", status_code=422)
+    pend["estado"] = "rechazado"
     pend["comentario"] = comentario
     envio_id = pend.get("envio_id")
     if envio_id:
@@ -2856,6 +3233,7 @@ def confirmar_envio(token: str, background_tasks: BackgroundTasks):
 
 class DestinosIn(BaseModel):
     ambiente: str = "produccion"
+    plantilla_id: int | None = None
 
 
 @app.post("/api/notificaciones/destinatarios")
@@ -2884,10 +3262,17 @@ def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensaj
     # En producción se respeta el filtro de solo pendientes.
     elegibles = total if amb == "desarrollo" else int(fila["pendientes"] or 0)
 
+    costo = None
+    if body.plantilla_id is not None and tiene_permiso(sesion, "tarifas_editar"):
+        plantilla = next((p for p in leer_plantillas() if p["id"] == body.plantilla_id), None)
+        if plantilla is not None:
+            costo = _costo_estimado_por_clave(plantilla.get("clave", ""), elegibles)
+
     return {
         "total": total,
         "pendientes": elegibles,
         "base_datos": nombre_base(amb),
+        "costo": costo,
     }
 
 
@@ -2994,12 +3379,16 @@ def detalle_historial(envio_id: int, ambiente: str = Query("produccion"),
     with conectar(ambiente) as conn, conn.cursor() as cur:
         cur.execute(sql, (envio_id,))
         filas = cur.fetchall()
+    privilegiado = sesion.get("rol") in ROLES_PRIVILEGIADOS
     for f in filas:
         f["fecha"] = f.pop("fecha_hora").strftime("%d-%m-%Y %H:%M")
         f["interesado"] = bool(f.get("interesado"))
         msg = (f.get("mensaje_respuesta") or "").strip()
         f["mensaje_respuesta"] = msg
         f["respuesta_interes"] = bool(msg) and es_mensaje_interes(msg)
+        if not privilegiado:
+            # El número de teléfono del paciente es solo para admin/dev.
+            f["numero_telefono"] = None
     return filas
 
 

@@ -23,10 +23,24 @@
   window.snwEsPrivilegiado = ES_PRIV;
   window.snwEsDev = ES_DEV;
 
-  window.snwSalir = function () {
+  function limpiarSesion() {
     ["snw_token", "snw_rol", "snw_nombre", "snw_permisos", "snw_ambiente_admin", "snw_ambiente"]
       .forEach((k) => localStorage.removeItem(k));
-    location.replace("login.html");
+  }
+
+  // Cierre de sesión manual (botón «Cerrar sesión»): vuelve directo al login,
+  // que le muestra un toast de confirmación (ver login.html).
+  window.snwSalir = function () {
+    limpiarSesion();
+    location.replace("login.html?salida=ok");
+  };
+
+  // Sesión vencida/inválida (token rechazado por el servidor con 401): a
+  // diferencia de snwSalir, esto vuelve a la portada (no a la página en la
+  // que estaba) y le avisa a la persona que tuvo que volver a entrar.
+  window.snwSesionExpirada = function () {
+    limpiarSesion();
+    location.replace("index.html?sesion=expirada");
   };
 
   // La portada (index) es pública: sin sesión se muestra sin sidebar.
@@ -39,6 +53,18 @@
     }
     location.replace("login.html");
     return;
+  }
+
+  // Acaba de iniciar sesión (login.html la trae con ?entrada=ok): avisa con
+  // un toast en la página a la que aterrizó.
+  if (new URLSearchParams(location.search).get("entrada") === "ok") {
+    const toastEl = document.getElementById("toast");
+    if (toastEl) {
+      toastEl.textContent = "Sesión iniciada exitosamente";
+      toastEl.className = "toast visible toast--ok";
+      setTimeout(() => toastEl.classList.remove("visible"), 3200);
+    }
+    history.replaceState(null, "", location.pathname);
   }
 
   // Permiso que exige cada página; si no lo tiene, se le manda a la primera
@@ -57,15 +83,13 @@
   ];
   function primeraPaginaPermitida() {
     for (const [perm, href] of ORDEN_PAGINAS) if (puede(perm)) return href;
-    if (ES_DEV) return "configuracion.html";
+    if (ES_PRIV) return "administracion.html";
     return "index.html";
   }
-  // Páginas exclusivas del rol desarrollador / privilegiado.
-  if (PAGINA === "configuracion" && !ES_DEV) {
-    location.replace(primeraPaginaPermitida());
-    return;
-  }
-  if (PAGINA === "usuarios" && !ES_PRIV) {
+  // Administración (Usuarios + Configuración) es exclusiva de admin/dev; la
+  // pestaña Configuración, dentro de esa página, es exclusiva de desarrollador
+  // (esa parte se resuelve en administracion.html, no acá).
+  if (PAGINA === "administracion" && !ES_PRIV) {
     location.replace(primeraPaginaPermitida());
     return;
   }
@@ -75,7 +99,7 @@
   }
 
   // Con sesión activa, la portada oculta los botones de acceso/registro.
-  ["btnLogin", "btnRegistro", "heroAcciones"].forEach((id) => {
+  ["btnLogin", "heroAcciones"].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.hidden = true;
   });
@@ -89,11 +113,10 @@
   const LINKS = [
     { pagina: "inicio",       href: "index.html",        icono: "fa-house",             texto: "Inicio" },
     { pagina: "pacientes",    href: "pacientes.html",    icono: "fa-database",          texto: "Base de datos", perm: "pacientes" },
-    { pagina: "mensajeria",   href: "mensajeria.html",   icono: "fa-paper-plane",       texto: "Mensajería", perm: "mensajeria" },
+    { pagina: "mensajeria",   href: "mensajeria.html",   icono: "fa-paper-plane",       texto: "Mensajería y plantillas", perm: "mensajeria" },
     { pagina: "historial",    href: "historial.html",    icono: "fa-clock-rotate-left", texto: "Historial", perm: "historial" },
     { pagina: "estadisticas", href: "estadisticas.html", icono: "fa-chart-column",      texto: "Estadísticas", perm: "estadisticas" },
-    { pagina: "configuracion", href: "configuracion.html", icono: "fa-gear",            texto: "Configuración", dev: true },
-    { pagina: "usuarios",     href: "usuarios.html",     icono: "fa-users-gear",        texto: "Usuarios", priv: true },
+    { pagina: "administracion", href: "administracion.html", icono: "fa-user-shield",   texto: "Administración", priv: true },
   ];
 
   const items = LINKS
@@ -145,7 +168,7 @@
     document.getElementById("btnClavePropia").addEventListener("click", abrirModalClave);
   }
 
-  // ----- Modal "Mi cuenta": correo de recuperación + contraseña -----
+  // ----- Modal "Mi cuenta": cambiar la propia contraseña -----
   let modalClave = null;
   function abrirModalClave() {
     if (!modalClave) {
@@ -156,16 +179,7 @@
       modalClave.innerHTML =
         `<div class="modal__card" role="dialog" aria-modal="true">` +
         `<h3>Mi cuenta</h3>` +
-
-        `<form id="formCorreoRec" novalidate style="margin-bottom:22px;">` +
-        `<div class="field"><label for="crInp">Correo de recuperación</label>` +
-        `<input type="email" id="crInp" autocomplete="email" placeholder="nombre@empresa.cl">` +
-        `<p class="field__hint">Si olvidas tu contraseña, el enlace para restablecerla llega a este correo.</p></div>` +
-        `<p class="warn" id="crMsg" hidden></p>` +
-        `<div class="modal__actions"><button type="submit" class="btn btn--ghost" id="crGuardar">Guardar correo</button></div>` +
-        `</form>` +
-
-        `<hr style="border:none;border-top:1px solid var(--borde);margin:0 0 18px;">` +
+        `<div class="field"><label>Correo</label><p class="field__valor" id="miCuentaCorreo">&hellip;</p></div>` +
 
         `<form id="formClavePropia" novalidate>` +
         `<div class="field"><label for="clAct">Contraseña actual</label>` +
@@ -175,48 +189,24 @@
         `<p class="field__hint">Mínimo 8 caracteres, con una minúscula, una mayúscula y un número.</p></div>` +
         `<div class="field"><label for="clRep">Repite la contraseña nueva</label>` +
         `<input type="password" id="clRep" autocomplete="new-password"></div>` +
+        `<p class="field__hint">Al cambiarla te avisamos por correo, si tu cuenta tiene uno registrado.</p>` +
         `<p class="warn" id="clMsg" hidden></p>` +
         `<div class="modal__actions">` +
         `<button type="button" class="btn btn--ghost" id="clCancelar">Cerrar</button>` +
         `<button type="submit" class="btn btn--primary" id="clGuardar">Cambiar contraseña</button>` +
         `</div></form></div>`;
       document.body.appendChild(modalClave);
+      if (window.snwOjitoPass) window.snwOjitoPass(modalClave);
 
       const q = (s) => modalClave.querySelector(s);
       const cerrar = () => {
         modalClave.hidden = true;
         q("#formClavePropia").reset();
         q("#clMsg").hidden = true;
-        q("#crMsg").hidden = true;
       };
       q("#clCancelar").addEventListener("click", cerrar);
       modalClave.addEventListener("click", (e) => { if (e.target === modalClave) cerrar(); });
       document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !modalClave.hidden) cerrar(); });
-
-      q("#formCorreoRec").addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const msg = q("#crMsg");
-        msg.hidden = true;
-        const correo = q("#crInp").value.trim();
-        const btn = q("#crGuardar");
-        btn.disabled = true;
-        try {
-          const r = await fetch("api/auth/correo-recuperacion", {
-            method: "PUT",
-            headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
-            body: JSON.stringify({ correo }),
-          });
-          const data = await r.json().catch(() => ({}));
-          if (!r.ok) throw new Error(data.detail || "No se pudo guardar el correo.");
-          msg.textContent = "Correo de recuperación guardado.";
-          msg.hidden = false;
-        } catch (ex) {
-          msg.textContent = ex.message;
-          msg.hidden = false;
-        } finally {
-          btn.disabled = false;
-        }
-      });
 
       q("#formClavePropia").addEventListener("submit", async (e) => {
         e.preventDefault();
@@ -237,7 +227,7 @@
           const data = await r.json().catch(() => ({}));
           if (!r.ok) throw new Error(data.detail || "No se pudo cambiar la contraseña.");
           cerrar();
-          alert("Contraseña actualizada.");
+          alert("Contraseña actualizada. Si tu cuenta tiene un correo registrado, te llegará un aviso.");
         } catch (ex) {
           mostrar(ex.message);
         } finally {
@@ -245,14 +235,17 @@
         }
       });
     }
-    // Prefill del correo de recuperación con lo que hay en el servidor.
-    modalClave.querySelector("#crInp").value = "";
-    fetch("api/auth/me", { headers: { Authorization: "Bearer " + token } })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((me) => { if (me) modalClave.querySelector("#crInp").value = me.correo_recuperacion || ""; })
-      .catch(() => {});
     modalClave.hidden = false;
-    modalClave.querySelector("#crInp").focus();
+    modalClave.querySelector("#clAct").focus();
+
+    const correoEl = modalClave.querySelector("#miCuentaCorreo");
+    if (correoEl) {
+      correoEl.textContent = "…";
+      fetch("api/auth/me", { headers: { Authorization: "Bearer " + token } })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => { correoEl.textContent = (d && d.usuario) || "—"; })
+        .catch(() => { correoEl.textContent = "—"; });
+    }
   }
 
   // Elementos que dependen de un permiso concreto (data-perm="call_center", ...):

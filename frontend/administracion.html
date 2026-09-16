@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SNW &middot; Administraci&oacute;n</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
+  <link rel="stylesheet" href="css/tema.css">
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="css/pacientes.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/usuarios.css">
+  <link rel="stylesheet" href="css/configuracion.css">
+  <script src="js/tema.js"></script>
+  <style>
+    .admin-tabs {
+      display: flex;
+      gap: 4px;
+      margin: 0 0 16px;
+      border-bottom: 1px solid var(--borde);
+    }
+    .admin-tab {
+      border: none;
+      background: transparent;
+      color: var(--texto-suave);
+      font: inherit;
+      font-weight: 600;
+      font-size: .92rem;
+      padding: 10px 16px;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+    }
+    .admin-tab:hover { color: var(--texto); }
+    .admin-tab.active { color: var(--verde); border-bottom-color: var(--verde); }
+  </style>
+</head>
+<body data-pagina="administracion">
+
+  <div class="app-shell">
+    <nav class="sidebar" id="sidebar"></nav>
+    <div class="sidebar-backdrop"></div>
+
+    <div class="app-main">
+      <header class="app-topbar">
+        <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="Abrir men&uacute;">
+          <i class="fa-solid fa-bars"></i>
+        </button>
+        <span class="app-topbar__titulo">Administraci&oacute;n</span>
+      </header>
+
+      <main class="layout layout--ancho">
+
+        <div class="admin-tabs" role="tablist">
+          <button type="button" class="admin-tab active" id="tabBtnUsuarios" data-tab="usuarios" role="tab" aria-selected="true">Usuarios</button>
+          <button type="button" class="admin-tab" id="tabBtnConfiguracion" data-tab="configuracion" role="tab" aria-selected="false" hidden>Configuraci&oacute;n</button>
+        </div>
+
+        <div id="tabUsuarios" class="admin-panel" role="tabpanel">
+          <section class="panel">
+            <div class="panel__head">
+              <h2>Cuentas y permisos</h2>
+              <div class="panel__actions">
+                <span class="badge badge--dev" id="badgeRol">&mdash;</span>
+                <button id="btnRecargar" class="btn btn--ghost" type="button">Actualizar</button>
+              </div>
+            </div>
+
+            <p class="usr-intro" style="margin: 14px 18px 0;">
+              Las cuentas nuevas se crean invitando a la persona por correo: recibe un enlace para elegir
+              su propia contrase&ntilde;a y la cuenta nace con rol <strong>usuario</strong> y acceso
+              b&aacute;sico (Mensajer&iacute;a, Historial, Estad&iacute;sticas y edici&oacute;n de plantillas). Aqu&iacute; ajustas qu&eacute;
+              puede ver y hacer cada cuenta. Un administrador solo gestiona cuentas de rol
+              <strong>usuario</strong>; un desarrollador gestiona cualquier cuenta (salvo la suya) y
+              adem&aacute;s puede cambiar el rol. La pesta&ntilde;a <strong>Configuraci&oacute;n</strong> es
+              exclusiva del rol desarrollador. M&aacute;ximo 4 desarrolladores.
+            </p>
+            <p id="devInfo" class="usr-intro" style="margin: 0 18px 4px; font-weight: 600;"></p>
+
+            <form id="formInvitar" class="usr-invitar">
+              <div class="usr-invitar__campo">
+                <label for="invCorreo">Crear usuario (correo)</label>
+                <input type="email" id="invCorreo" placeholder="nombre@empresa.cl" required>
+              </div>
+              <button type="submit" id="btnInvitar" class="btn btn--primary">Enviar invitaci&oacute;n</button>
+            </form>
+            <p id="invMsg" class="usr-intro" style="margin: 0 18px 10px;"></p>
+
+            <div class="usr-selector">
+              <label for="selUsuario">Cuenta</label>
+              <select id="selUsuario"></select>
+            </div>
+            <div id="detalle" class="usr-detalle"></div>
+            <p id="vacio" class="tabla-vacia" hidden style="padding: 24px;">No hay cuentas registradas.</p>
+          </section>
+        </div>
+
+        <div id="tabConfiguracion" class="admin-panel" role="tabpanel" hidden>
+          <section class="panel">
+            <div class="panel__head">
+              <h2>Configuraci&oacute;n</h2>
+              <button id="btnGuardar" class="btn btn--primary" type="button" disabled>Guardar cambios</button>
+            </div>
+            <p class="config-intro">
+              Todos los ajustes de la aplicaci&oacute;n. Se guardan en la base de datos y (salvo el
+              entorno activo) se aplican sin reiniciar.
+            </p>
+
+            <div id="secciones"></div>
+          </section>
+        </div>
+
+      </main>
+    </div>
+  </div>
+
+  <div class="config-guardar-fijo" id="barraGuardar" hidden>
+    <span id="cambiosResumen">Sin cambios</span>
+    <div class="config-guardar-fijo__btns">
+      <button id="btnDescartar" class="btn btn--ghost" type="button">Descartar</button>
+      <button id="btnGuardarFijo" class="btn btn--primary" type="button">Guardar cambios</button>
+    </div>
+  </div>
+
+  <div id="modalBorrar" class="modal" hidden>
+    <div class="modal__card">
+      <h3>Eliminar cuenta</h3>
+      <p id="borrarTexto" style="margin: 0 0 20px; font-size: .92rem; line-height: 1.5;"></p>
+      <div class="modal__actions">
+        <button type="button" class="btn btn--ghost" id="btnCancelarBorrar">Cancelar</button>
+        <button type="button" class="btn btn--danger" id="btnConfirmarBorrar">Eliminar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="js/layout.js"></script>
+  <script src="js/pass-toggle.js"></script>
+  <script src="js/usuarios.js"></script>
+  <script src="js/configuracion.js"></script>
+  <script>
+    (function () {
+      const btnUsuarios = document.getElementById("tabBtnUsuarios");
+      const btnConfig = document.getElementById("tabBtnConfiguracion");
+      const panelUsuarios = document.getElementById("tabUsuarios");
+      const panelConfig = document.getElementById("tabConfiguracion");
+
+      // La pestaña Configuración ni siquiera existe para quien no es
+      // desarrollador (no solo se oculta con CSS).
+      if (window.snwEsDev) btnConfig.hidden = false;
+
+      function activar(tab) {
+        const esConfig = tab === "configuracion";
+        btnUsuarios.classList.toggle("active", !esConfig);
+        btnUsuarios.setAttribute("aria-selected", String(!esConfig));
+        btnConfig.classList.toggle("active", esConfig);
+        btnConfig.setAttribute("aria-selected", String(esConfig));
+        panelUsuarios.hidden = esConfig;
+        panelConfig.hidden = !esConfig;
+        if (esConfig && window.snwCargarConfiguracion) window.snwCargarConfiguracion();
+      }
+      btnUsuarios.addEventListener("click", () => activar("usuarios"));
+      btnConfig.addEventListener("click", () => activar("configuracion"));
+    })();
+  </script>
+  <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
+</body>
+</html>

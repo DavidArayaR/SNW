@@ -142,3 +142,25 @@
   box-shadow: var(--sombra);
 }
 .tema-fab:hover { filter: brightness(1.05); }
+
+/* Ojito para mostrar/ocultar una contraseña mientras se escribe. */
+.pass-wrap { position: relative; }
+.pass-wrap input { padding-right: 40px !important; }
+.pass-toggle {
+  position: absolute;
+  top: 0;
+  right: 2px;
+  bottom: 0;
+  width: 34px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: none;
+  background: transparent;
+  color: var(--texto-suave);
+  cursor: pointer;
+  padding: 0;
+  margin: 0;
+}
+.pass-toggle:hover { color: var(--texto); }
+.pass-toggle svg { width: 23px; height: 23px; pointer-events: none; }
