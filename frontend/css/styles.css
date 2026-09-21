@@ -333,7 +333,7 @@ button:disabled:hover { outline: none; }
 .bubble {
   position: relative;
   align-self: flex-start;
-  max-width: 85%;
+  width: 85%;
   background: var(--chat-out);
   color: var(--texto);
   border-radius: 10px;

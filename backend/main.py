@@ -1861,16 +1861,19 @@ def sincronizar_plantillas_meta(sesion: dict = Depends(exigir("mensajeria"))):
         if match:
             usados_id.add(match.get("id"))
 
-            # Si el texto local todavía tiene placeholders crudos de Meta
-            # ({{1}}...) de una sincronización de antes de que esto tradujera
-            # a comodines, se traduce ahora. No toca un texto ya limpio (así
-            # no se pisa una edición manual).
+            # Meta es la fuente de verdad: el texto que realmente se envía es
+            # el que está aprobado allá, no esta copia local. Por eso el
+            # texto siempre se trae de Meta al sincronizar (si sus
+            # componentes traen algo utilizable) — antes esto solo pasaba
+            # si el texto local todavía tenía placeholders crudos ({{1}}...),
+            # así que una plantilla ya "limpia" quedaba congelada para
+            # siempre y nunca reflejaba un cambio hecho en Meta o en otro
+            # servidor.
             texto_actual = p.get("texto") or ""
             texto_nuevo = texto_actual
-            if "{{" in texto_actual:
-                texto_traducido = _texto_desde_componentes(match.get("components"))
-                if texto_traducido:
-                    texto_nuevo = texto_traducido
+            texto_traducido = _texto_desde_componentes(match.get("components"))
+            if texto_traducido:
+                texto_nuevo = texto_traducido
 
             cambio = (
                 p.get("whatsapp_template_id") != match.get("id")

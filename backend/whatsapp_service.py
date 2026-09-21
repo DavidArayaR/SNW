@@ -997,6 +997,11 @@ class WhatsAppService:
                 pacientes = self._pacientes_con_tel(cur, telefono)
                 if not pacientes:
                     return
+                # Si ya estaba de baja, esto es un webhook repetido (Meta
+                # garantiza entrega "al menos una vez", no exactamente una) o
+                # un segundo mensaje del mismo paciente — no es una baja
+                # nueva, así que no se reenvía el aviso de despedida.
+                ya_de_baja = all(p.get("whatsapp_opt_out") for p in pacientes)
                 for p in pacientes:
                     cur.execute(f"UPDATE {p['tabla']} SET whatsapp_opt_out = 1 WHERE {match}", (telefono,))
                     # Baja pedida con sus propias palabras por WhatsApp: queda
@@ -1020,6 +1025,8 @@ class WhatsAppService:
         except Exception as e:
             log_error(f"_registrar_baja({telefono})", e)
             return
+        if ya_de_baja:
+            return
         if callable(al_detectar_baja):
             try:
                 al_detectar_baja(telefono)
@@ -1036,6 +1043,10 @@ class WhatsAppService:
                 pacientes = self._pacientes_con_tel(cur, telefono)
                 if not pacientes:
                     return
+                # Igual que en _registrar_baja: si nadie estaba de baja, esto
+                # es un webhook repetido o un segundo mensaje del mismo
+                # paciente — no hay nada que reactivar ni aviso que reenviar.
+                nadie_de_baja = not any(p.get("whatsapp_opt_out") for p in pacientes)
                 for p in pacientes:
                     cur.execute(f"UPDATE {p['tabla']} SET whatsapp_opt_out = 0 WHERE {match}", (telefono,))
                     try:
@@ -1050,6 +1061,8 @@ class WhatsAppService:
                 conn.commit()
         except Exception as e:
             log_error(f"_registrar_retractacion({telefono})", e)
+            return
+        if nadie_de_baja:
             return
         if callable(al_detectar_retractacion):
             try:

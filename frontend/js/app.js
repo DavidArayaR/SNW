@@ -457,7 +457,10 @@ function actualizarBotonesSegunEstado(p) {
   const puedeGuardar = PUEDE_EDITAR_PLANTILLAS && editable && !enEnfriamiento;
   const puedeEliminar = PUEDE_EDITAR_PLANTILLAS && editable;
   btnGuardar.hidden = !puedeGuardar;
-  if (btnCancelar) btnCancelar.hidden = !puedeGuardar;
+  // Cancelar no guarda nada, solo deselecciona: debe poder usarse para salir
+  // de una plantilla aunque Guardar esté bloqueado (en enfriamiento, pendiente
+  // de revisión, etc.).
+  if (btnCancelar) btnCancelar.hidden = !p;
   // Eliminar solo aplica si ya existe (tiene id) y se puede gestionar.
   btnEliminar.hidden = !(p && puedeEliminar);
   if (btnEnviarActual) btnEnviarActual.hidden = !(p && aprobada);
@@ -505,6 +508,11 @@ function actualizarBloqueoCampos() {
     formEl.querySelectorAll("input, textarea, select").forEach((el) => { el.disabled = true; });
     return;
   }
+  // El mensaje se deja sin disabled explícito acá arriba: solo se pone
+  // en true en la rama bloqueada de más arriba, nunca se revierte a
+  // false al pasar a una plantilla sí editable — quedaba pegado en
+  // disabled para siempre después de abrir la primera no editable.
+  inpMensaje.disabled = false;
   const esExistente = !!activaId;
   inpNombre.disabled = esExistente;
   inpNombre.title = esExistente
