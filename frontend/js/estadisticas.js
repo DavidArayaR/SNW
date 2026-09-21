@@ -1,10 +1,11 @@
+/* Pestaña «Estadísticas» de administracion.html (solo admin/dev). Se carga en
+   la misma página que Pacientes/Usuarios/Configuración */
+(function () {
 const $ = (sel) => document.querySelector(sel);
 
 function authHeaders() {
   return { Authorization: "Bearer " + (localStorage.getItem("snw_token") || "") };
 }
-
-if (!localStorage.getItem("snw_token")) location.replace("login.html");
 
 const toastEl = $("#toast");
 let toastTimer;
@@ -38,7 +39,7 @@ function chip(label, valor, clase, resp) {
 }
 
 async function cargar() {
-  const btn = $("#btnActualizar");
+  const btn = $("#btnActualizarEstadisticas");
   btn.disabled = true;
   try {
     const res = await fetch("api/estadisticas", { headers: authHeaders(), cache: "no-store" });
@@ -141,9 +142,6 @@ function aplicarRespCat(cat) {
     f.classList.toggle("atenuada", cat !== "todos" && f.dataset.cat !== cat)
   );
 }
-
-$("#btnActualizar").addEventListener("click", cargar);
-cargar();
 
 /* ================================================================== *
  *  Gráficos de barras por periodo (día / mes / año)
@@ -260,11 +258,6 @@ async function cargarEnvios(gran) {
       '<p class="mes-vacio" style="padding:8px 18px;">No se pudo cargar el gráfico.</p>';
   }
 }
-
-document.querySelectorAll("#enviosTabs button").forEach((b) =>
-  b.addEventListener("click", () => cargarEnvios(b.dataset.gran))
-);
-cargarEnvios("mes");
 
 /* -- Costos de mensajes de WhatsApp (solo administrador) ----------- */
 let granCostos = "mes";
@@ -439,6 +432,22 @@ if (ES_ADMIN && $("#panelCostos")) {
   document.querySelectorAll("#costosTabs button").forEach((b) =>
     b.addEventListener("click", () => cargarCostos(b.dataset.gran))
   );
-  cargarTarifas();
-  cargarCostos("mes");
 }
+
+$("#btnActualizarEstadisticas").addEventListener("click", cargar);
+document.querySelectorAll("#enviosTabs button").forEach((b) =>
+  b.addEventListener("click", () => cargarEnvios(b.dataset.gran))
+);
+
+let yaCargada = false;
+window.snwCargarEstadisticas = function () {
+  if (yaCargada) return;
+  yaCargada = true;
+  cargar();
+  cargarEnvios("mes");
+  if (ES_ADMIN && $("#panelCostos")) {
+    cargarTarifas();
+    cargarCostos("mes");
+  }
+};
+})();

@@ -392,7 +392,7 @@ PERMISOS_VALIDOS = (
     "plantillas_editar", "envio_produccion", "tarifas_editar",
     "call_center", "call_center_registro",
 )
-PERMISOS_BASICOS = ["mensajeria", "historial", "estadisticas"]
+PERMISOS_BASICOS = ["mensajeria", "historial"]
 
 # Cuentas creadas automáticamente la primera vez (o si faltan). El hash es
 # SHA-256 de la contraseña indicada.

@@ -181,14 +181,22 @@ function render() {
 
   const esActivoEstado = (estado) => filtroRespuesta === "todas" && filtroEstado === estado;
   const esActivoResp = (resp) => filtroEstado === "todos" && filtroRespuesta === resp;
+  // Tarjeta con ícono en chip de color (mismo tono que usaban los puntitos
+  // de antes), en vez de la píldora chica: mismo botón/atributos de
+  // filtro, solo cambia cómo se ve.
+  const statCard = (tono, icono, activo, attrs, etiqueta, numero) =>
+    `<button type="button" class="stat stat-card stat-card--${tono}${activo ? " activo" : ""}" ${attrs}>` +
+      `<span class="stat-card__icono"><i class="fa-solid ${icono}"></i></span>` +
+      `<span class="stat-card__texto"><strong>${numero}</strong><span>${etiqueta}</span></span>` +
+    `</button>`;
   statsEl.innerHTML =
-    `<button type="button" class="stat stat--total${esActivoEstado("todos") || (filtroEstado === "todos" && filtroRespuesta === "todas") ? " activo" : ""}" data-estado="todos">Total <strong>${conteo.total}</strong></button>` +
-    `<button type="button" class="stat stat--pendiente${esActivoEstado("pendiente") ? " activo" : ""}" data-estado="pendiente">Pendientes <strong>${conteo.pendiente}</strong></button>` +
-    `<button type="button" class="stat stat--enviado${esActivoEstado("enviado") ? " activo" : ""}" data-estado="enviado">Enviados <strong>${conteo.enviado}</strong></button>` +
-    `<button type="button" class="stat stat--error${esActivoEstado("error") ? " activo" : ""}" data-estado="error">Errores <strong>${conteo.error}</strong></button>` +
-    `<button type="button" class="stat stat--resp${esActivoResp("pendiente") ? " activo" : ""}" data-respuesta="pendiente">Sin resp. <strong>${conteoResp.pendiente}</strong></button>` +
-    `<button type="button" class="stat stat--resp${esActivoResp("respondio") ? " activo" : ""}" data-respuesta="respondio">Respondió <strong>${conteoResp.respondio}</strong></button>` +
-    `<button type="button" class="stat stat--resp${esActivoResp("baja") ? " activo" : ""}" data-respuesta="baja">Baja <strong>${conteoResp.baja}</strong></button>`;
+    statCard("neutral", "fa-users", esActivoEstado("todos") || (filtroEstado === "todos" && filtroRespuesta === "todas"), 'data-estado="todos"', "Total", conteo.total) +
+    statCard("warn", "fa-clock", esActivoEstado("pendiente"), 'data-estado="pendiente"', "Pendientes", conteo.pendiente) +
+    statCard("ok", "fa-paper-plane", esActivoEstado("enviado"), 'data-estado="enviado"', "Enviados", conteo.enviado) +
+    statCard("danger", "fa-triangle-exclamation", esActivoEstado("error"), 'data-estado="error"', "Errores", conteo.error) +
+    statCard("neutral", "fa-comment-slash", esActivoResp("pendiente"), 'data-respuesta="pendiente"', "Sin resp.", conteoResp.pendiente) +
+    statCard("ok", "fa-comments", esActivoResp("respondio"), 'data-respuesta="respondio"', "Respondió", conteoResp.respondio) +
+    statCard("danger", "fa-user-slash", esActivoResp("baja"), 'data-respuesta="baja"', "Baja", conteoResp.baja);
 
   refrescarSeleccion(visibles);
 }

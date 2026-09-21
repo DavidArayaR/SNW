@@ -17,40 +17,20 @@ const toastEl = $("#toast");
 const PERM_LABEL = {
   mensajeria: "Mensajería",
   historial: "Historial",
-  estadisticas: "Estadísticas",
   plantillas_editar: "Editar plantillas",
   envio_produccion: "Enviar en producción sin confirmación",
-  tarifas_editar: "Administrar tarifas y costos",
   call_center_registro: "Ver registro de respuestas de call center",
 };
 const _EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/;
-const PERM_PAGINAS = ["mensajeria", "historial", "estadisticas"];
-const PERM_ACCIONES = ["plantillas_editar", "envio_produccion", "tarifas_editar", "call_center_registro"];
-const PERMISOS_BASICOS = ["mensajeria", "historial", "estadisticas", "plantillas_editar"];
+const PERM_PAGINAS = ["mensajeria", "historial"];
+const PERM_ACCIONES = ["plantillas_editar", "envio_produccion", "call_center_registro"];
+const PERMISOS_BASICOS = ["mensajeria", "historial", "plantillas_editar"];
 const ROL_LABEL = { usuario: "Usuario", administrador: "Administrador", desarrollador: "Desarrollador" };
 const ROLES_TOTALES = ["administrador", "desarrollador"];
 
 let estado = { usuarios: [], roles: [], mi_rol: "", puede_cambiar_rol: false };
 let seleccion = null;   // correo de la cuenta mostrada en el panel
 let borrarCorreo = null;
-let permWrapEditable = false;   // si el panel de permisos actual se puede tocar
-
-// "Administrar tarifas y costos" necesita "Estadísticas": al marcarla se marca
-// sola Estadísticas, y esa queda bloqueada (no se puede desmarcar) hasta que
-// se desmarque primero "Administrar tarifas y costos".
-function aplicarDependenciaTarifas() {
-  if (!permWrapEditable) return;
-  const wrap = detalleEl.querySelector("#permWrap");
-  if (!wrap) return;
-  const chkTarifas = wrap.querySelector('[data-perm="tarifas_editar"]');
-  const chkEstadisticas = wrap.querySelector('[data-perm="estadisticas"]');
-  if (!chkTarifas || !chkEstadisticas) return;
-  if (chkTarifas.checked) chkEstadisticas.checked = true;
-  chkEstadisticas.disabled = chkTarifas.checked;
-  chkEstadisticas.title = chkTarifas.checked
-    ? "«Administrar tarifas y costos» necesita este permiso: desmárcalo primero."
-    : "";
-}
 
 let toastTimer;
 function toast(msg, tipo = "ok") {
@@ -121,10 +101,6 @@ const AUDITORIA_ACCION_LABEL = {
 };
 
 function renderAuditoriaUsuario(lista) {
-  // Qué hizo esta cuenta (filtrado por actor en el backend), no qué le
-  // hicieron a ella: por eso la columna muestra el objetivo de cada acción
-  // (a quién invitó/editó/eliminó, o qué plantilla creó), no el actor —
-  // el actor ya es, siempre, la cuenta que se está mirando.
   if (!lista.length) return `<p class="usr-envios__vacio">Sin actividad registrada.</p>`;
   const filas = lista.map((a) => {
     return `<tr>` +
@@ -230,8 +206,7 @@ function renderDetalle() {
   if (!u) { detalleEl.innerHTML = ""; return; }
   const bloqueada = !u.editable;
   detalleEl.innerHTML =
-    // Card 1: la cuenta en sí (datos + permisos + acciones). Guardar/Eliminar
-    // quedan acá arriba, justo después de los campos, no al final de todo.
+    // Card 1: la cuenta en sí (datos + permisos + acciones).
     `<div class="usr-card${bloqueada ? " usr-card--bloqueada" : ""}" data-correo="${esc(u.usuario)}">` +
       `<div class="usr-card__cab">` +
         `<span class="usr-card__correo">${esc(u.usuario)}</span>` +
@@ -272,20 +247,18 @@ function renderDetalle() {
         (u.editable ? `<button type="button" class="btn btn--primary" data-guardar>Guardar cambios</button>` : "") +
       `</div>` +
     `</div>` +
-    // Card 2: Envíos realizados (de solo lectura, siempre nítida).
+    // Card 2: Envíos realizados (de solo lectura).
     `<div class="usr-card usr-card--envios">` +
       `<h4>Envíos realizados</h4>` +
       `<div id="usrEnvios" class="usr-envios__cont">Cargando envíos…</div>` +
     `</div>` +
-    // Card 3: Actividad (de solo lectura, siempre nítida).
+    // Card 3: Actividad (de solo lectura).
     `<div class="usr-card usr-card--envios">` +
       `<h4>Actividad</h4>` +
       `<p class="usr-envios__vacio" style="margin-bottom: 8px;">Acciones que hizo esta cuenta (a quién invitó, editó, eliminó, qué plantilla creó...).</p>` +
       `<div id="usrAuditoria" class="usr-envios__cont">Cargando actividad…</div>` +
     `</div>`;
 
-  permWrapEditable = u.editable;
-  aplicarDependenciaTarifas();
   cargarEnviosUsuario(u.usuario, detalleEl.querySelector("#usrEnvios"));
   cargarAuditoriaUsuario(u.usuario, detalleEl.querySelector("#usrAuditoria"));
 
@@ -299,7 +272,6 @@ function renderDetalle() {
       if (nuevoRol === "usuario" && u.rol !== "usuario") permisos = PERMISOS_BASICOS;
       detalleEl.querySelector("#permWrap").innerHTML =
         permisosCheckboxes(nuevoRol, permisos, u.editable);
-      aplicarDependenciaTarifas();
     });
   }
 }
@@ -361,10 +333,6 @@ function cerrarModal() {
 selEl.addEventListener("change", () => {
   seleccion = selEl.value;
   renderDetalle();
-});
-
-detalleEl.addEventListener("change", (e) => {
-  if (e.target.matches("[data-perm]")) aplicarDependenciaTarifas();
 });
 
 detalleEl.addEventListener("click", (e) => {

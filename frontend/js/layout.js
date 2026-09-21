@@ -72,21 +72,20 @@
   const PERM_PAGINA = {
     mensajeria: "mensajeria",
     historial: "historial",
-    estadisticas: "estadisticas",
   };
   const ORDEN_PAGINAS = [
     ["mensajeria", "mensajeria.html"],
     ["historial", "historial.html"],
-    ["estadisticas", "estadisticas.html"],
   ];
   function primeraPaginaPermitida() {
     for (const [perm, href] of ORDEN_PAGINAS) if (puede(perm)) return href;
     if (ES_PRIV) return "administracion.html";
     return "index.html";
   }
-  // Administración (Pacientes + Usuarios + Configuración) es exclusiva de
-  // admin/dev; la pestaña Configuración, dentro de esa página, es exclusiva
-  // de desarrollador (esa parte se resuelve en administracion.html, no acá).
+  // Administración (Pacientes + Usuarios + Estadísticas + Configuración) es
+  // exclusiva de admin/dev; la pestaña Configuración, dentro de esa página,
+  // es exclusiva de desarrollador (esa parte se resuelve en
+  // administracion.html, no acá).
   if (PAGINA === "administracion" && !ES_PRIV) {
     location.replace(primeraPaginaPermitida());
     return;
@@ -112,7 +111,6 @@
     { pagina: "inicio",       href: "index.html",        icono: "fa-house",             texto: "Inicio" },
     { pagina: "mensajeria",   href: "mensajeria.html",   icono: "fa-paper-plane",       texto: "Mensajería y plantillas", perm: "mensajeria" },
     { pagina: "historial",    href: "historial.html",    icono: "fa-clock-rotate-left", texto: "Historial", perm: "historial" },
-    { pagina: "estadisticas", href: "estadisticas.html", icono: "fa-chart-column",      texto: "Estadísticas", perm: "estadisticas" },
     { pagina: "administracion", href: "administracion.html", icono: "fa-user-shield",   texto: "Administración", priv: true },
   ];
 
@@ -140,6 +138,18 @@
       `<i class="fa-solid fa-circle-user"></i><span>Mi cuenta</span></button>` +
       `<button type="button" class="sidebar__salir" id="btnSalir" title="Cerrar sesión">` +
       `<i class="fa-solid fa-right-from-bracket"></i><span>Cerrar sesión</span></button>`;
+
+    // Feedback instantáneo al hacer clic: marca el ítem como activo de
+    // una vez (sin esperar a que la página nueva termine de cargar),
+    // igual que el resaltado inmediato de AdminHub — acá SÍ navega de
+    // verdad (no hay preventDefault), esto solo adelanta el estado visual.
+    const navLinks = sidebar.querySelectorAll(".sidebar__nav .nav-link");
+    navLinks.forEach((link) => {
+      link.addEventListener("click", () => {
+        navLinks.forEach((l) => l.classList.remove("active"));
+        link.classList.add("active");
+      });
+    });
 
     const btnTema = document.getElementById("btnTema");
     const pintarTema = () => {

@@ -43,10 +43,11 @@ snw/
 │   ├── reset.html             Restablecer contraseña con el token del correo
 │   ├── mensajeria.html        Editor de plantillas, vista previa estilo WhatsApp, envío
 │   ├── historial.html         Historial de envíos (batch + detalle por paciente)
-│   ├── estadisticas.html      Contador mensual de mensajes, desgloses y costos WhatsApp
 │   ├── administracion.html    Panel de administración con pestañas: Pacientes (base de datos:
-│   │                          ver, filtrar, editar estado/respuesta), Usuarios y Configuración
-│   │                          (pestaña visible solo para desarrollador). Exclusivo admin/dev
+│   │                          ver, filtrar, editar estado/respuesta), Usuarios, Estadísticas
+│   │                          (contador mensual de mensajes, desgloses y costos WhatsApp) y
+│   │                          Configuración (pestaña visible solo para desarrollador).
+│   │                          Exclusivo admin/dev
 │   ├── css/                   tema.css (paleta claro/oscuro), styles.css (compartido), layout.css (sidebar), pacientes.css, estadisticas.css, configuracion.css, usuarios.css
 │   ├── js/                    tema.js (modo claro/oscuro), layout.js (sidebar/sesión/permisos, común), app.js, pacientes.js, historial.js, estadisticas.js, configuracion.js, usuarios.js
 │   └── vendor/bootstrap/     Bootstrap 5.3.3 (CSS + bundle JS) servido localmente
@@ -255,7 +256,7 @@ Reglas del editor:
 |---|---|---|
 | POST | `/api/auth/login` | `{usuario, clave}` → `{token, rol, nombre, permisos}`. 403 si la cuenta está desactivada (`activo=false`) |
 | GET | `/api/auth/invitacion/{token}` | Verifica un enlace de invitación (48 h) → `{ok, correo}`. Usado por `registro.html` para mostrar el correo al que se le manda la invitación |
-| POST | `/api/auth/activar` | Último paso de una invitación `{token, clave}`. `clave` ≥ 8 con minúscula, mayúscula y número. Nace con rol `usuario` y permisos básicos (`mensajeria`, `historial`, `estadisticas`, `plantillas_editar`) |
+| POST | `/api/auth/activar` | Último paso de una invitación `{token, clave}`. `clave` ≥ 8 con minúscula, mayúscula y número. Nace con rol `usuario` y permisos básicos (`mensajeria`, `historial`) |
 | GET | `/api/auth/me` | Rol, permisos y `correo_recuperacion` vigentes de la sesión (el frontend lo usa para refrescarse si un admin cambió los permisos) |
 | PUT | `/api/auth/clave` | Cambiar **la propia** contraseña estando dentro: `{clave_actual, clave_nueva}`. Valida la actual y la fuerza de la nueva (botón «Mi cuenta» de la barra lateral); si la cuenta tiene correo de recuperación, le manda un aviso de confirmación |
 | PUT | `/api/auth/correo-recuperacion` | Define a qué correo llega el enlace de «Olvidé mi contraseña» y el aviso de cambio de contraseña: `{correo}`. **Sin campo en la interfaz** (se quitó de «Mi cuenta»); solo queda como endpoint. 409 si el correo es el usuario de otra cuenta |
@@ -682,14 +683,15 @@ lectura y no depende de si la cuenta se puede editar.
 
 **Permisos** (campo `permisos` de la tabla; los roles privilegiados los tienen todos de forma implícita):
 
-- Páginas: `mensajeria`, `historial`, `estadisticas`
-- Acciones: `plantillas_editar`, `envio_produccion` (enviar en producción sin confirmación del supervisor), `tarifas_editar`, `call_center` (gestionar plantillas de call center), `call_center_registro` (ver el registro de respuestas de call center en el Historial)
+- Páginas: `mensajeria`, `historial`
+- Acciones: `plantillas_editar`, `envio_produccion` (enviar en producción sin confirmación del supervisor), `call_center_registro` (ver el registro de respuestas de call center en el Historial)
 
-**Pacientes** y **Configuración** ya no son permisos asignables: ambas pestañas viven dentro
-de `administracion.html`, exclusiva de los roles `administrador`/`desarrollador`
-(`Configuración`, además, exclusiva de `desarrollador`). El permiso `pacientes` sigue
-existiendo en el backend (endpoints `exigir("pacientes")`) por compatibilidad, pero ya no se
-puede otorgar desde la pestaña Usuarios.
+**Pacientes**, **Estadísticas** y **Configuración** ya no son permisos asignables: las tres
+pestañas viven dentro de `administracion.html`, exclusiva de los roles
+`administrador`/`desarrollador` (`Configuración`, además, exclusiva de `desarrollador`). Los
+permisos `pacientes`, `estadisticas` y `tarifas_editar` siguen existiendo en el backend
+(endpoints `exigir(...)`) por compatibilidad, pero ya no se pueden otorgar desde la pestaña
+Usuarios.
 
 El backend revalida rol y permisos desde la tabla en **cada** petición, así que un cambio
 surte efecto de inmediato (la página se recarga sola vía `GET /api/auth/me`) y una cuenta
@@ -722,7 +724,7 @@ promover una quinta el backend responde 409.
 | Cuenta semilla | Contraseña | Rol |
 |---|---|---|
 | `admin` | `admin123` | administrador |
-| `usuario` | `usuario123` | usuario (`mensajeria`, `historial`, `estadisticas`, `plantillas_editar`) |
+| `usuario` | `usuario123` | usuario (`mensajeria`, `historial`) |
 | `dev` | `dev123` | desarrollador |
 
 `sql/snw_base.sql` crea la tabla y siembra estas tres cuentas. Si al primer arranque
@@ -789,12 +791,13 @@ claro** de la sidebar, o con el botón flotante en la portada y el login (págin
   «Módulo de envío»).
 - **Historial** (`historial.html`): envíos de ambas bases (o filtrado por una), detalle
   individual por paciente con estado, respuesta y error de cada mensaje.
-- **Estadísticas** (`estadisticas.html`, **solo cuenta envíos de producción**): mensajes
-  enviados en el mes con su desglose; panel **"Respuestas de pacientes por WhatsApp"** con
-  botones de filtro (Todos / No han respondido / Respondieron / Se dieron
-  de baja) sobre una **comparación en barras** de los pacientes de producción por estado;
-  un **gráfico de barras** de mensajes enviados conmutable por día / mes / año y los
-  totales históricos. Con el permiso `tarifas_editar` se ve además el panel **"Costos de mensajes de WhatsApp"**:
+- **Estadísticas** (pestaña de `administracion.html`, exclusiva admin/dev, **solo cuenta
+  envíos de producción**): mensajes enviados en el mes con su desglose; panel **"Respuestas
+  de pacientes por WhatsApp"** con botones de filtro (Todos / No han respondido /
+  Respondieron / Se dieron de baja) sobre una **comparación en barras** de los pacientes de
+  producción por estado; un **gráfico de barras** de mensajes enviados conmutable por día /
+  mes / año y los totales históricos. Con el permiso `tarifas_editar` (implícito en
+  admin/dev) se ve además el panel **"Costos de mensajes de WhatsApp"**:
   tarifas vigentes de Meta para Chile por categoría, aviso cuando hay un cambio o una
   tarifa futura, descarga del CSV de Chile y el mismo gráfico de barras aplicado al costo
   estimado por día / mes / año (solo mensajes de plantilla facturables; los de texto libre

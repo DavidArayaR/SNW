@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="css/layout.css">
   <link rel="stylesheet" href="css/usuarios.css">
   <link rel="stylesheet" href="css/configuracion.css">
+  <link rel="stylesheet" href="css/estadisticas.css">
   <script src="js/tema.js"></script>
   <style>
     .admin-tabs {
@@ -19,18 +20,109 @@
       gap: 4px;
     }
     .admin-tab {
-      border: none;
+      border: 1px solid transparent;
       background: transparent;
-      color: var(--texto-suave);
+      color: var(--texto);
       font: inherit;
       font-weight: 600;
       font-size: .92rem;
-      padding: 7px 14px;
+      padding: 7px 16px;
       cursor: pointer;
-      border-radius: 8px;
+      border-radius: 999px;
+      transition: background-color .2s ease, color .2s ease,
+        border-color .2s ease, box-shadow .2s ease, transform .15s ease;
     }
     .admin-tab:hover { color: var(--texto); background: var(--panel-2); }
-    .admin-tab.active { color: var(--btn-primary-fg); background: var(--btn-primary-bg); }
+    .admin-tab:active { transform: scale(.96); }
+    /* La barra superior ahora comparte var(--nav-bg) con la sidebar (ver
+       .app-topbar en layout.css), así que la pestaña activa usa el mismo
+       criterio que .sidebar .nav-link.active: sin borde, del mismo color
+       que el fondo de la página (var(--fondo)). La transición de arriba
+       anima el cambio entre pestañas en vez de saltar de golpe. */
+    .admin-tab.active {
+      color: var(--verde-oscuro);
+      background: var(--fondo);
+      font-weight: 700;
+      box-shadow: var(--sombra);
+      transform: scale(1.03);
+    }
+
+    /* ---------------------------------------------------------------
+       Formas más redondeadas y tarjetas con ícono al estilo "AdminHub"
+       (https://github.com/fajarnurwahid/adminhub), con la paleta de
+       colores propia de SNW (no la de la plantilla). Todo va acá, en el
+       bloque de estilos propio de esta página, así no afecta a Pacientes/
+       Mensajería/Historial/Estadísticas, que comparten esas mismas
+       hojas de estilo (pacientes.css, styles.css).
+       --------------------------------------------------------------- */
+    body[data-pagina="administracion"] { --radio: 20px; }
+    body[data-pagina="administracion"] .btn { border-radius: 999px; }
+    body[data-pagina="administracion"] .field input[type="text"],
+    body[data-pagina="administracion"] .field input[type="password"],
+    body[data-pagina="administracion"] .field input[type="email"],
+    body[data-pagina="administracion"] .field input[type="number"],
+    body[data-pagina="administracion"] .field textarea,
+    body[data-pagina="administracion"] .field select,
+    body[data-pagina="administracion"] .config-campo input:not([type="checkbox"]),
+    body[data-pagina="administracion"] .config-campo select,
+    body[data-pagina="administracion"] #buscador,
+    body[data-pagina="administracion"] .usr-invitar__campo input,
+    body[data-pagina="administracion"] .usr-reset__correo input { border-radius: 14px; }
+    body[data-pagina="administracion"] .modal__card { border-radius: 22px; }
+    body[data-pagina="administracion"] .panel__head h2 { font-size: 1.15rem; font-weight: 700; }
+
+    /* Tarjetas de estadísticas con ícono en chip de color, en vez de la
+       píldora chica con puntito (mismo botón/filtro de siempre, solo
+       cambia cómo se ve). */
+    body[data-pagina="administracion"] .stats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .stat-card {
+      flex: 0 0 auto;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 16px;
+      border-radius: 16px;
+    }
+    .stat-card::before { display: none; }
+    .stat-card__icono {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      font-size: 1rem;
+      flex-shrink: 0;
+    }
+    .stat-card__texto { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.3; }
+    .stat-card__texto strong { font-size: 1.1rem; color: var(--texto); }
+    .stat-card__texto span { font-size: .76rem; color: var(--texto-suave); font-weight: 600; }
+    .stat-card--neutral .stat-card__icono { background: var(--neutral-bg); color: var(--neutral-fg); }
+    .stat-card--warn .stat-card__icono { background: var(--warn-bg); color: var(--warn-fg); }
+    .stat-card--ok .stat-card__icono { background: var(--ok-bg); color: var(--ok-fg); }
+    .stat-card--danger .stat-card__icono { background: var(--danger-bg); color: var(--danger-fg); }
+    .stat-card.activo { border-color: var(--verde); background: var(--brand-tint); }
+
+    /* La tarjeta entera de Pacientes mantiene siempre el mismo alto total
+       (cabecera + estadísticas + buscador + tabla), sin importar cuántas
+       filas deje el filtro aplicado ni si aparece la barra de edición en
+       bloque al seleccionar filas: así el resto de la página no salta de
+       arriba a abajo. La tabla es lo único que se estira o encoge (con
+       scroll interno) para absorber esa diferencia. Solo la de Pacientes
+       (#tabPacientes): el resto de las tablas de la app siguen
+       ajustándose a su contenido, como antes. */
+    #tabPacientes .panel {
+      display: flex;
+      flex-direction: column;
+      height: 80vh;
+    }
+    #tabPacientes .tabla-wrap {
+      flex: 1;
+      min-height: 0;
+    }
   </style>
 </head>
 <body data-pagina="administracion">
@@ -48,6 +140,7 @@
         <div class="admin-tabs" role="tablist">
           <button type="button" class="admin-tab active" id="tabBtnUsuarios" data-tab="usuarios" role="tab" aria-selected="true">Usuarios</button>
           <button type="button" class="admin-tab" id="tabBtnPacientes" data-tab="pacientes" role="tab" aria-selected="false">Base de datos</button>
+          <button type="button" class="admin-tab" id="tabBtnEstadisticas" data-tab="estadisticas" role="tab" aria-selected="false">Estad&iacute;sticas</button>
           <button type="button" class="admin-tab" id="tabBtnConfiguracion" data-tab="configuracion" role="tab" aria-selected="false" hidden>Configuraci&oacute;n</button>
         </div>
       </header>
@@ -114,6 +207,84 @@
               </table>
               <p id="tablaVacia" class="tabla-vacia" hidden>Sin resultados.</p>
             </div>
+          </section>
+        </div>
+
+        <div id="tabEstadisticas" class="admin-panel" role="tabpanel" hidden>
+          <section class="panel">
+            <div class="panel__head">
+              <h2>Mensajes enviados en <span id="nombreMes">este mes</span></h2>
+              <button id="btnActualizarEstadisticas" class="btn btn--ghost" type="button">Actualizar</button>
+            </div>
+
+            <div class="hero-grid">
+              <div class="hero-num-wrap">
+                <span class="hero-num" id="enviadosMes">&mdash;</span>
+                <span class="hero-sub">mensajes enviados este mes &middot; solo producci&oacute;n</span>
+              </div>
+            </div>
+
+            <div class="stats" id="statsMes"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel__head">
+              <h2>Respuestas de pacientes por WhatsApp</h2>
+            </div>
+            <p class="field__hint" style="margin:12px 18px 0;">Estado actual de los pacientes de producci&oacute;n <strong>a los que ya se les envi&oacute; un mensaje</strong>. Usa los botones para comparar cu&aacute;ntos respondieron, se dieron de baja o no han respondido. En <a href="historial.html">Historial</a> puedes ver qui&eacute;nes son.</p>
+            <p id="webhookSalud" class="webhook-salud" hidden></p>
+            <div id="respuestasPacientes"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel__head">
+              <h2>Mensajes enviados</h2>
+              <div class="grafico-tabs" id="enviosTabs">
+                <button type="button" data-gran="dia">D&iacute;a</button>
+                <button type="button" data-gran="mes" class="activo">Mes</button>
+                <button type="button" data-gran="anio">A&ntilde;o</button>
+              </div>
+            </div>
+            <div class="grafico-barras" id="enviosGrafico"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel__head"><h2>Total hist&oacute;rico</h2></div>
+            <div class="stats" id="statsTotal"></div>
+          </section>
+
+          <section class="panel" data-perm="tarifas_editar" id="panelCostos">
+            <div class="panel__head">
+              <h2>Costos de mensajes de WhatsApp</h2>
+              <button id="btnActualizarTarifas" class="btn btn--ghost" type="button">Actualizar tarifas</button>
+            </div>
+
+            <p class="field__hint" style="margin:12px 18px 0;">
+              Tarifas por mensaje que publica Meta para Chile
+              (<a href="https://developers.facebook.com/docs/whatsapp/pricing/" target="_blank" rel="noopener">documentaci&oacute;n de precios</a>).
+              El costo es una estimaci&oacute;n: se cuentan <strong>solo los mensajes de plantilla
+              iniciados por la empresa</strong> (Marketing / Utility / Authentication), aplicando la
+              tarifa vigente en su fecha. Los mensajes de texto libre dentro de la ventana de 24 h
+              no se cobran y quedan fuera.
+              Para ver una representación más precisa, visita <a href="https://business.facebook.com/latest/whatsapp_manager/insights/?business_id=799315784581199&tab=insights&nav_ref=whatsapp_manager&asset_id=1824108822101466" target="_blank" rel="noopener">el dashboard de meta</a>.
+            </p>
+
+            <p id="tarifasAlerta" class="webhook-salud" hidden></p>
+
+            <div class="tarifas-grid" id="tarifasVigente"></div>
+            <p class="tarifas-pie" id="tarifasPie"></p>
+
+            <div class="costos-cabecera">
+              <h3>Costo estimado por periodo</h3>
+              <div class="grafico-tabs" id="costosTabs">
+                <button type="button" data-gran="dia">D&iacute;a</button>
+                <button type="button" data-gran="mes" class="activo">Mes</button>
+                <button type="button" data-gran="anio">A&ntilde;o</button>
+              </div>
+            </div>
+
+            <div class="grafico-barras" id="costosBarras"></div>
+            <p class="costos-total" id="costosTotal"></p>
           </section>
         </div>
 
@@ -200,21 +371,25 @@
   <script src="js/pass-toggle.js"></script>
   <script src="js/usuarios.js"></script>
   <script src="js/pacientes.js"></script>
+  <script src="js/estadisticas.js"></script>
   <script src="js/configuracion.js"></script>
   <script>
     (function () {
       const botones = {
         usuarios: document.getElementById("tabBtnUsuarios"),
         pacientes: document.getElementById("tabBtnPacientes"),
+        estadisticas: document.getElementById("tabBtnEstadisticas"),
         configuracion: document.getElementById("tabBtnConfiguracion"),
       };
       const paneles = {
         usuarios: document.getElementById("tabUsuarios"),
         pacientes: document.getElementById("tabPacientes"),
+        estadisticas: document.getElementById("tabEstadisticas"),
         configuracion: document.getElementById("tabConfiguracion"),
       };
       const cargas = {
         pacientes: () => window.snwCargarPacientes && window.snwCargarPacientes(),
+        estadisticas: () => window.snwCargarEstadisticas && window.snwCargarEstadisticas(),
         configuracion: () => window.snwCargarConfiguracion && window.snwCargarConfiguracion(),
       };
 

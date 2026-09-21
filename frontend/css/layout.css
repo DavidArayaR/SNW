@@ -22,7 +22,14 @@
   transition: margin-left .2s ease;
 }
 
-/* ----- Sidebar ----- */
+/* ----- Sidebar -----
+   La sidebar y la barra superior comparten var(--nav-bg) — turquesa
+   clarito/oscuro según el tema — para que se vean como un solo bloque de
+   navegación, distinto del área de contenido (var(--fondo)). El ítem
+   activo es una tarjeta clara (var(--panel)) pegada al borde derecho de
+   la sidebar (redondeada solo a la izquierda), con dos recortes cóncavos
+   arriba/abajo, pintados con var(--nav-bg) en vez de su gris, y con la
+   paleta propia de SNW en el resto. */
 .sidebar {
   position: fixed;
   top: 0;
@@ -32,9 +39,9 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 16px 12px;
-  background: linear-gradient(180deg, var(--sidebar-1), var(--sidebar-2));
-  color: #fff;
+  padding: 16px 0 16px 12px;
+  background: var(--nav-bg);
+  color: var(--texto);
   z-index: 1040;
   overflow-y: auto;
   overflow-x: hidden;
@@ -49,58 +56,71 @@
   justify-content: center;
   width: 28px;
   height: 28px;
-  margin: -6px 2px 6px;
+  margin: -6px 14px 6px 2px;
   border: none;
-  border-radius: 7px;
-  background: rgba(255, 255, 255, .14);
-  color: #fff;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--texto-suave);
   font-size: .8rem;
 }
-.sidebar__plegar:hover { background: rgba(255, 255, 255, .28); }
+.sidebar__plegar:hover { background: var(--hover); color: var(--texto); }
 .sidebar__plegar i { transition: transform .2s ease; }
 
 .sidebar__brand {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 8px 10px 14px;
-  color: #fff;
+  padding: 8px 14px 14px 10px;
+  color: var(--texto);
   text-decoration: none;
-  border-bottom: 1px solid rgba(255, 255, 255, .16);
   margin-bottom: 10px;
 }
-.sidebar__brand i { font-size: 1.7rem; flex-shrink: 0; width: 1.9rem; text-align: center; }
+.sidebar__brand i { font-size: 1.7rem; flex-shrink: 0; width: 1.9rem; text-align: center; color: var(--verde-oscuro); }
 .sidebar__brand span { display: flex; flex-direction: column; line-height: 1.2; }
 .sidebar__brand strong { font-size: .98rem; font-weight: 700; }
 .sidebar__brand small { font-size: .72rem; opacity: .8; }
 
-.sidebar__nav { gap: 3px; }
+.sidebar__nav { gap: 0; }
 
 .sidebar .nav-link {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 13px;
-  padding: 10px 12px;
-  border-radius: 9px;
-  color: rgba(255, 255, 255, .82);
+  height: 48px;
+  padding: 0 26px 0 14px;
+  border-radius: 999px 0 0 999px;
+  border: 1px solid transparent;
+  color: var(--texto);
   font-size: .9rem;
   font-weight: 600;
-  transition: background .15s, color .15s;
+  transition: background-color .2s ease, color .2s ease,
+    border-color .2s ease, box-shadow .2s ease, transform .15s ease;
 }
 .sidebar .nav-link i {
   flex-shrink: 0;
-  width: 1.25rem;
+  width: 1.9rem;
+  height: 1.9rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
   text-align: center;
   font-size: .95rem;
+  transition: background .15s, color .15s;
 }
 .sidebar .nav-link:hover {
-  background: rgba(255, 255, 255, .13);
-  color: #fff;
+  background: var(--hover);
+  color: var(--texto);
 }
+.sidebar .nav-link:active { transform: scale(.97); }
 .sidebar .nav-link.active {
-  background: #fff;
-  color: #0b473c;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, .18);
+  background: var(--fondo);
+  color: var(--verde-oscuro);
+}
+.sidebar .nav-link.active i {
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-fg);
 }
 
 .sidebar__tema,
@@ -108,29 +128,31 @@
   display: flex;
   align-items: center;
   gap: 13px;
-  width: 100%;
-  padding: 10px 12px;
-  border: none;
-  border-radius: 9px;
-  background: rgba(0, 0, 0, .16);
-  color: rgba(255, 255, 255, .9);
+  height: 44px;
+  padding: 0 14px;
+  margin-right: 12px;
+  border: 1px solid var(--borde);
+  border-radius: 999px;
+  background: var(--fondo);
+  color: var(--texto);
   font-size: .9rem;
   font-weight: 600;
   text-align: left;
 }
-.sidebar__tema { margin-top: auto; background: rgba(255, 255, 255, .12); }
+.sidebar__tema { margin-top: auto; }
 .sidebar__salir { margin-top: 4px; }
 .sidebar__tema i,
 .sidebar__salir i { width: 1.25rem; text-align: center; flex-shrink: 0; }
-.sidebar__tema:hover { background: rgba(255, 255, 255, .22); color: #fff; }
-.sidebar__salir:hover { background: rgba(0, 0, 0, .3); color: #fff; }
-
-/* Contorno de hover claro para los botones sobre el fondo oscuro de la sidebar. */
 .sidebar__tema:hover,
-.sidebar__salir:hover,
-.sidebar__plegar:hover { outline-color: rgba(255, 255, 255, .9); }
+.sidebar__salir:hover { background: var(--hover); }
 
-/* ----- Barra superior del contenido ----- */
+/* ----- Barra superior del contenido -----
+   Cuadrada, sin nada en la esquina: con el cuadradito de fondo de antes,
+   la curva quedaba muy pegada a la esquina redondeada de la primera
+   tarjeta de contenido (ver .panel en styles.css) y se veían dos curvas
+   distintas compitiendo ahí — desordenado, no como AdminHub, que tiene
+   harto espacio entre la barra y las tarjetas. La única curva de esa
+   zona queda siendo la de la tarjeta. */
 .app-topbar {
   position: sticky;
   top: 0;
@@ -141,8 +163,7 @@
   gap: 8px 12px;
   min-height: var(--topbar-alto);
   padding: 8px 20px;
-  background: var(--panel);
-  border-bottom: 1px solid var(--borde);
+  background: var(--nav-bg);
 }
 .app-topbar__titulo {
   font-size: 1rem;
@@ -222,6 +243,7 @@
     gap: 0;
     padding-left: 0;
     padding-right: 0;
+    border-radius: 999px;
   }
 }
 

@@ -83,9 +83,11 @@ select.badge--select:focus { filter: brightness(1.12); }
 
 .panel__head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  row-gap: 10px;
   padding: 14px 18px;
   border-bottom: 1px solid var(--borde);
 }
@@ -319,7 +321,11 @@ button:disabled:hover { outline: none; }
   border: 1px solid var(--borde);
   border-radius: 14px;
   padding: 18px;
-  min-height: 120px;
+  /* Alto fijo (no min-height): así el tamaño de la página no cambia al
+     elegir una plantilla con texto más largo o más corto — un mensaje
+     largo hace scroll adentro de este recuadro en vez de estirarlo. */
+  height: 220px;
+  overflow-y: auto;
 }
 
 .chat { display: flex; flex-direction: column; }

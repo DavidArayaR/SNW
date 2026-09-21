@@ -39,6 +39,9 @@
   /* Degradado de la barra lateral (siempre verde, no cambia de rol en oscuro) */
   --sidebar-1: #3b8070;
   --sidebar-2: #4ea896;
+  /* Fondo de sidebar + barra superior: turquesa clarito (distinto del
+     fondo neutro de la página). */
+  --nav-bg: #c2ebe0;
 
   /* Estados semánticos: fondo / texto / borde */
   --rojo: #cf7d7d;
@@ -95,6 +98,7 @@
 
   --sidebar-1: #0f322b;
   --sidebar-2: #17493f;
+  --nav-bg: #123832;
 
   --rojo: #dd9393;
   --ok-bg: #26382e;   --ok-fg: #9edcb6;   --ok-bd: #3c5748;
