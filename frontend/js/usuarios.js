@@ -432,7 +432,7 @@ formInvitar.addEventListener("submit", async (e) => {
   }
 });
 
-$("#btnRecargar").addEventListener("click", cargar);
+window.snwConCooldown($("#btnRecargar"), cargar);
 $("#btnCancelarBorrar").addEventListener("click", cerrarModal);
 $("#btnConfirmarBorrar").addEventListener("click", eliminar);
 $("#modalBorrar").addEventListener("click", (e) => { if (e.target.id === "modalBorrar") cerrarModal(); });

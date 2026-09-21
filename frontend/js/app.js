@@ -1378,6 +1378,7 @@ if (btnRevisarTodos) {
       toast(`No se pudieron actualizar los estados: ${err.message}`, "error");
     } finally {
       setConsultandoEstado(false, btnRevisarTodos);
+      window.snwCooldownBoton(btnRevisarTodos);
     }
   });
 }
@@ -1412,6 +1413,7 @@ if (btnSincronizarMeta) {
       toast(`No se pudo sincronizar con Meta: ${err.message}`, "error");
     } finally {
       setConsultandoEstado(false, btnSincronizarMeta);
+      window.snwCooldownBoton(btnSincronizarMeta);
     }
   });
 }

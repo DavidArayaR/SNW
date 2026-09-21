@@ -39,8 +39,8 @@ function chip(label, valor, clase, resp) {
 }
 
 async function cargar() {
-  const btn = $("#btnActualizarEstadisticas");
-  btn.disabled = true;
+  // El botón lo deshabilita/rehabilita el cooldown de snwConCooldown, no
+  // esta función (ver el addEventListener más abajo).
   try {
     const res = await fetch("api/estadisticas", { headers: authHeaders(), cache: "no-store" });
     if (res.status === 401) { window.snwSesionExpirada(); return; }
@@ -48,8 +48,6 @@ async function cargar() {
     render(await res.json());
   } catch {
     toast("No se pudieron cargar las estadísticas.", "error");
-  } finally {
-    btn.disabled = false;
   }
 }
 
@@ -274,7 +272,41 @@ async function cargarTarifas() {
   }
 }
 
+// Meta limita a una descarga del CSV de tarifas por día: en vez del
+// cooldown fijo de 5s de los demás botones, este se deshabilita según la
+// fecha real del último intento (ultimo_intento_ms, del backend) hasta que
+// pasen 24h — mismo criterio que el enfriamiento de 24h de plantillas.
+// Ojo: es el último INTENTO, no la última fila nueva guardada (esa es
+// ultima_descarga_ms) — la tarifa de Meta rara vez cambia, así que con
+// INSERT IGNORE casi siempre no hay fila nueva aunque la descarga (la
+// scrapeada a la página de Meta) sí se haya repetido.
+const MS_24H_TARIFAS = 24 * 3600 * 1000;
+let _timerCooldownTarifas = null;
+function actualizarBotonTarifas(ultimoIntentoMs) {
+  const btn = $("#btnActualizarTarifas");
+  if (!btn) return;
+  if (_timerCooldownTarifas) { clearInterval(_timerCooldownTarifas); _timerCooldownTarifas = null; }
+  const pintar = () => {
+    const restante = ultimoIntentoMs ? MS_24H_TARIFAS - (Date.now() - ultimoIntentoMs) : 0;
+    if (restante <= 0) {
+      if (_timerCooldownTarifas) { clearInterval(_timerCooldownTarifas); _timerCooldownTarifas = null; }
+      btn.disabled = false;
+      btn.textContent = "Actualizar tarifas";
+      btn.title = "";
+      return;
+    }
+    const horas = String(Math.floor(restante / 3600000)).padStart(2, "0");
+    const minutos = String(Math.floor((restante % 3600000) / 60000)).padStart(2, "0");
+    btn.disabled = true;
+    btn.textContent = `Actualizar tarifas (${horas}:${minutos})`;
+    btn.title = "Meta solo permite descargar el CSV de tarifas una vez al día.";
+  };
+  pintar();
+  _timerCooldownTarifas = setInterval(pintar, 30000);
+}
+
 function renderTarifas(d) {
+  actualizarBotonTarifas(d.ultimo_intento_ms);
   const v = d.vigente;
   const alerta = $("#tarifasAlerta");
   alerta.hidden = true;
@@ -343,9 +375,9 @@ async function descargarCsvChile(e) {
 
 async function actualizarTarifas() {
   const btn = $("#btnActualizarTarifas");
+  const textoOriginal = btn.textContent;
   btn.disabled = true;
-  const previo = btn.textContent;
-  btn.textContent = "Actualizando…";
+  btn.innerHTML = '<span class="spinner"></span> Actualizando…';
   try {
     const res = await fetch("api/tarifas/actualizar", { method: "POST", headers: authHeaders() });
     const d = await res.json().catch(() => ({}));
@@ -356,13 +388,15 @@ async function actualizarTarifas() {
         : `Las tarifas ya estaban al día. Moneda: ${d.moneda}.`,
       "ok"
     );
+    // cargarTarifas() -> renderTarifas() -> actualizarBotonTarifas() deja el
+    // botón en su estado final real (habilitado, o en cooldown de 24h con
+    // la cuenta regresiva), así que acá no hace falta restaurarlo a mano.
     await cargarTarifas();
     await cargarCostos(granCostos);
   } catch (err) {
     toast("No se pudieron actualizar las tarifas. " + (err.message || ""), "error");
-  } finally {
     btn.disabled = false;
-    btn.textContent = previo;
+    btn.textContent = textoOriginal;
   }
 }
 
@@ -428,13 +462,20 @@ function renderCostos(d) {
 }
 
 if (ES_ADMIN && $("#panelCostos")) {
-  $("#btnActualizarTarifas").addEventListener("click", actualizarTarifas);
+  // El cooldown de este botón es el de 24h por fecha real (ver
+  // actualizarBotonTarifas), no el genérico de 5s: acá alcanza con no
+  // dejar clickear un botón ya deshabilitado; el spinner mientras se
+  // actualiza de verdad vive adentro de actualizarTarifas().
+  $("#btnActualizarTarifas").addEventListener("click", () => {
+    if ($("#btnActualizarTarifas").disabled) return;
+    actualizarTarifas();
+  });
   document.querySelectorAll("#costosTabs button").forEach((b) =>
     b.addEventListener("click", () => cargarCostos(b.dataset.gran))
   );
 }
 
-$("#btnActualizarEstadisticas").addEventListener("click", cargar);
+window.snwConCooldown($("#btnActualizarEstadisticas"), cargar);
 document.querySelectorAll("#enviosTabs button").forEach((b) =>
   b.addEventListener("click", () => cargarEnvios(b.dataset.gran))
 );

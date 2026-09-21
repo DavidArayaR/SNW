@@ -23,6 +23,43 @@
   window.snwEsPrivilegiado = ES_PRIV;
   window.snwEsDev = ES_DEV;
 
+  // Deshabilita un botón y muestra una cuenta regresiva (N, N-1, ... "0s")
+  // hasta volver a habilitarlo — el cooldown en sí, reusable para llamarlo
+  // en cualquier momento (al hacer clic, o al terminar una operación async
+  // que ya se bloqueaba sola mientras corría).
+  window.snwCooldownBoton = function (btn, segundos = 5) {
+    if (!btn) return;
+    const textoOriginal = btn.dataset.snwTextoOriginal ?? (btn.dataset.snwTextoOriginal = btn.textContent);
+    btn.disabled = true;
+    let restante = segundos;
+    btn.textContent = `${textoOriginal} (${restante}s)`;
+    const timer = setInterval(() => {
+      restante -= 1;
+      if (restante <= 0) {
+        clearInterval(timer);
+        btn.disabled = false;
+        btn.textContent = textoOriginal;
+      } else {
+        btn.textContent = `${textoOriginal} (${restante}s)`;
+      }
+    }, 1000);
+  };
+
+  // Envuelve el click de un botón de acción simple (Actualizar...) con el
+  // cooldown de arriba: al hacer clic, llama fn() y deshabilita de una vez.
+  // Para botones que ya se bloquean solos mientras dura una operación async
+  // (spinner propio), no uses esto — llamá snwCooldownBoton directo en el
+  // finally, después de que la operación realmente termine (ver
+  // btnRevisarTodos / btnSincronizarMeta en app.js).
+  window.snwConCooldown = function (btn, fn, segundos = 5) {
+    if (!btn) return;
+    btn.addEventListener("click", () => {
+      if (btn.disabled) return;
+      fn();
+      window.snwCooldownBoton(btn, segundos);
+    });
+  };
+
   function limpiarSesion() {
     ["snw_token", "snw_rol", "snw_nombre", "snw_permisos", "snw_ambiente_admin", "snw_ambiente"]
       .forEach((k) => localStorage.removeItem(k));
@@ -146,9 +183,7 @@
       `<i class="fa-solid fa-right-from-bracket"></i><span>Cerrar sesión</span></button>`;
 
     // Feedback instantáneo al hacer clic: marca el ítem como activo de
-    // una vez (sin esperar a que la página nueva termine de cargar),
-    // igual que el resaltado inmediato de AdminHub — acá SÍ navega de
-    // verdad (no hay preventDefault), esto solo adelanta el estado visual.
+    // una vez (sin esperar a que la página nueva termine de cargar)
     const navLinks = sidebar.querySelectorAll(".sidebar__nav .nav-link");
     navLinks.forEach((link) => {
       link.addEventListener("click", () => {

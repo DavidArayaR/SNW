@@ -3624,7 +3624,8 @@ def _tarifas_guardadas(moneda: str | None = None) -> list[dict]:
     sql = (
         "SELECT id, pais, moneda, marketing, utility, authentication, service,"
         " DATE_FORMAT(efectiva_desde, '%%Y-%%m-%%d') AS efectiva_desde,"
-        " DATE_FORMAT(descargada, '%%d-%%m-%%Y %%H:%%i') AS descargada"
+        " DATE_FORMAT(descargada, '%%d-%%m-%%Y %%H:%%i') AS descargada,"
+        " UNIX_TIMESTAMP(descargada) * 1000 AS descargada_ms"
         " FROM tarifas_whatsapp"
     )
     args: list = []
@@ -3695,6 +3696,11 @@ def obtener_tarifas(sesion: dict = Depends(exigir("tarifas_editar"))):
         "usd_vigente": _tarifa_vigente(_tarifas_guardadas("USD")),
         "historial": tarifas,
         "ultima_descarga": todas[0]["descargada"] if todas else None,
+        "ultima_descarga_ms": todas[0]["descargada_ms"] if todas else None,
+        # Para el cooldown de 24h del botón: cuándo se INTENTÓ la descarga
+        # por última vez (se haya guardado un dato nuevo o no) — a
+        # diferencia de ultima_descarga_ms, que es de la última fila NUEVA.
+        "ultimo_intento_ms": int(config_get("tarifas_ultimo_intento", "0") or 0) or None,
         "nunca_descargada": not todas,
     }
 
@@ -3712,6 +3718,14 @@ def actualizar_tarifas(sesion: dict = Depends(exigir("tarifas_editar"))):
     moneda_meta = _obtener_moneda_meta()
     if moneda_meta:
         config_set({"wa_moneda": moneda_meta})
+
+    # Se guarda el momento del INTENTO (se haya insertado una fila nueva o
+    # no), no cuándo cambió el dato: la tarifa de Meta rara vez cambia, así
+    # que con INSERT IGNORE casi siempre "nuevas" da 0 y la fila existente
+    # no actualiza su propio "descargada" — si el cooldown de 24h del botón
+    # se basara en eso, nunca se activaría aunque la descarga en sí (la
+    # scrapeada a la página de Meta) se repita en cada clic.
+    config_set({"tarifas_ultimo_intento": str(int(time.time() * 1000))})
 
     nuevas = 0
     with conectar() as conn, conn.cursor() as cur:

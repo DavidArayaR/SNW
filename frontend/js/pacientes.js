@@ -436,7 +436,7 @@ statsEl.addEventListener("click", (e) => {
   render();
 });
 
-$("#btnActualizar").addEventListener("click", cargar);
+window.snwConCooldown($("#btnActualizar"), cargar);
 
 // --- Edición masiva: cambiar estado o respuesta de todos los seleccionados --
 const ESTADO_LABEL = { pendiente: "pendiente", enviado: "enviado", error: "error" };

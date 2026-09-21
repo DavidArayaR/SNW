@@ -246,7 +246,7 @@ buscadorEl.addEventListener("input", () => {
   render();
 });
 
-$("#btnActualizar").addEventListener("click", cargar);
+window.snwConCooldown($("#btnActualizar"), cargar);
 
 let toastTimer;
 function toast(msg, tipo = "ok") {
@@ -294,7 +294,7 @@ async function cargarLogCC() {
 }
 
 if (panelCCLogEl) {
-  $("#btnActualizarCCLog").addEventListener("click", cargarLogCC);
+  window.snwConCooldown($("#btnActualizarCCLog"), cargarLogCC);
 }
 
 cargar();
