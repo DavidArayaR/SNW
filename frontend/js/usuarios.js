@@ -225,7 +225,7 @@ function renderDetalle() {
           `<div><label class="usr-check"><input type="checkbox" data-activo${u.activo === false ? "" : " checked"}> Cuenta activa (puede iniciar sesión)</label></div>`
           : "") +
         (u.editable ?
-          `<label>Contraseña</label>` +
+          `<label>Correo</label>` +
           `<div class="usr-reset">` +
             `<div class="usr-reset__correo">` +
               `<input type="email" data-correo-rec value="${esc(u.correo_recuperacion || "")}" placeholder="correo@ejemplo.cl">` +
