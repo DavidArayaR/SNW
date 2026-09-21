@@ -459,8 +459,11 @@ function actualizarBotonesSegunEstado(p) {
   btnGuardar.hidden = !puedeGuardar;
   // Cancelar no guarda nada, solo deselecciona: debe poder usarse para salir
   // de una plantilla aunque Guardar esté bloqueado (en enfriamiento, pendiente
-  // de revisión, etc.).
-  if (btnCancelar) btnCancelar.hidden = !p;
+  // de revisión, etc.) y también al estar creando una plantilla nueva
+  // (activaId es null igual que en el estado vacío, así que lo que
+  // distingue "creando" de "nada seleccionado" es si el formulario está
+  // visible, no si hay un `p`).
+  if (btnCancelar) btnCancelar.hidden = formEl.style.display === "none";
   // Eliminar solo aplica si ya existe (tiene id) y se puede gestionar.
   btnEliminar.hidden = !(p && puedeEliminar);
   if (btnEnviarActual) btnEnviarActual.hidden = !(p && aprobada);
@@ -504,6 +507,16 @@ function actualizarBotonesSegunEstado(p) {
 // edición") — ver actualizarBotonesSegunEstado.
 function actualizarBloqueoCampos() {
   const p = activaId ? plantillas.find((x) => x.id === activaId) : null;
+  // El aviso de "nombre permanente" y su texto de ayuda dependen solo de
+  // si se está creando (sin activaId) o editando una plantilla que ya
+  // existe — no de si además se puede guardar en este momento. Por eso se
+  // calculan antes del return de la rama bloqueada: si no, se quedaban
+  // con el valor por defecto del HTML (visible) apenas se abría una
+  // plantilla existente que estuviera en enfriamiento o de solo lectura.
+  const esExistente = !!activaId;
+  if (avisoNombrePermanente) avisoNombrePermanente.hidden = esExistente;
+  if (hintNombre) hintNombre.hidden = esExistente;
+
   if (!PUEDE_EDITAR_PLANTILLAS || (p && (!esPlantillaEditable(p) || editadaRecientemente(p)))) {
     formEl.querySelectorAll("input, textarea, select").forEach((el) => { el.disabled = true; });
     return;
@@ -513,15 +526,10 @@ function actualizarBloqueoCampos() {
   // false al pasar a una plantilla sí editable — quedaba pegado en
   // disabled para siempre después de abrir la primera no editable.
   inpMensaje.disabled = false;
-  const esExistente = !!activaId;
   inpNombre.disabled = esExistente;
   inpNombre.title = esExistente
     ? "El nombre es permanente y no se puede cambiar. Para usar otro nombre, elimina la plantilla y crea una nueva."
     : "";
-  // Los textos de ayuda del nombre solo tienen sentido al crear: en una
-  // plantilla ya guardada el campo está bloqueado.
-  if (avisoNombrePermanente) avisoNombrePermanente.hidden = esExistente;
-  if (hintNombre) hintNombre.hidden = esExistente;
 
   if (!hayTemplateMeta) return;
   // «Ya registrado en Meta»: solo si el template existe realmente allá
