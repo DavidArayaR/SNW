@@ -3,7 +3,7 @@
     "id": 1,
     "clave": "recordar_cita",
     "nombre": "Recordar cita",
-    "texto": "hola {nombre}, te recordamos que debes agendar tu hora (v2)",
+    "texto": "hola {nombre}, te recordamos que debes agendar tu hora",
     "whatsapp_template": "recordar_cita",
     "whatsapp_template_lang": "es",
     "whatsapp_template_categoria": "MARKETING",
@@ -11,13 +11,15 @@
     "whatsapp_template_status": "APPROVED",
     "whatsapp_template_rejected_reason": "NONE",
     "whatsapp_template_error": null,
-    "actualizada": 1789672086133
+    "actualizada": 1790016923822,
+    "ultima_edicion": 1790016923822,
+    "whatsapp_template_aprobada_en": 1790017097872
   },
   {
     "id": 2,
     "clave": "descuento_25",
     "nombre": "Descuento 25",
-    "texto": "¡Hola {nombre} 👋!\n\n💚 Esta semana, aprovecha un *25% de descuento* en tu sesión de *Salud Mental*.\n\n✍️ Escríbe *_Me interesa_* para agendar tu hora antes de que termine la promoción.\n¡Cuidarte también es quererte! 🏥✨",
+    "texto": "¡Hola {nombre} 👋!\n\n💚 Esta semana, aprovecha un *25% de descuento* en tu sesión de *Salud Mental*.\n\n✍️ Selecciona *_Me interesa_* para agendar tu hora antes de que termine la promoción.\n¡Cuidarte también es quererte! 🏥✨",
     "whatsapp_template": "descuento_25",
     "whatsapp_template_lang": "es",
     "whatsapp_template_categoria": "MARKETING",
@@ -25,13 +27,14 @@
     "whatsapp_template_status": "APPROVED",
     "whatsapp_template_rejected_reason": "NONE",
     "whatsapp_template_error": null,
-    "actualizada": 1789672086133
+    "actualizada": 1789672086133,
+    "whatsapp_template_aprobada_en": 1790016444747
   },
   {
     "id": 3,
     "clave": "default",
     "nombre": "Default",
-    "texto": "¡Hola {nombre} 👋!\n\n💚 Esta semana, en *Salud Mental Para Todos* aprovecha tu sesión a solo *$25.000*.\n\n✍️ Escríbe *_Me interesa_* para agendar tu hora antes de que termine la promoción. \n¡Cuidarte también es quererte! 🏥✨",
+    "texto": "¡Hola {nombre} 👋!\n\n💚 Esta semana, en *Salud Mental Para Todos* aprovecha tu sesión a solo *$25.000*.\n\n✍️ Selecciona *_Me interesa_* para agendar tu hora antes de que termine la promoción. \n¡Cuidarte también es quererte! 🏥✨",
     "whatsapp_template": "default",
     "whatsapp_template_lang": "es",
     "whatsapp_template_categoria": "MARKETING",
@@ -39,7 +42,9 @@
     "whatsapp_template_status": "APPROVED",
     "whatsapp_template_rejected_reason": "NONE",
     "whatsapp_template_error": null,
-    "actualizada": 1789672086133
+    "actualizada": 1790005668399,
+    "ultima_edicion": 1790005668399,
+    "whatsapp_template_aprobada_en": 1790005851005
   },
   {
     "id": 4,
@@ -54,22 +59,5 @@
     "whatsapp_template_rejected_reason": "NONE",
     "whatsapp_template_error": null,
     "actualizada": 1789672086133
-  },
-  {
-    "id": 5,
-    "clave": "test_trazabilidad_creacion",
-    "nombre": "TEST trazabilidad creacion",
-    "texto": "Mensaje de prueba para verificar auditoria.",
-    "whatsapp_template": "test_trazabilidad_creacion",
-    "whatsapp_template_lang": "es",
-    "whatsapp_template_categoria": "MARKETING",
-    "actualizada": 1789672649052,
-    "creado_por": "admin",
-    "creada_en": 1789672649052,
-    "whatsapp_template_id": "2017135675910545",
-    "whatsapp_template_status": "APPROVED",
-    "whatsapp_template_error": null,
-    "whatsapp_template_aprobada_en": 1789672780190,
-    "whatsapp_template_rejected_reason": null
   }
 ]
