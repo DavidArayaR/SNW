@@ -1,19 +1,8 @@
+(function () {
 const API_PACIENTES = "api/pacientes";
 
 function authHeaders(extra = {}) {
   return { Authorization: "Bearer " + (localStorage.getItem("snw_token") || ""), ...extra };
-}
-
-if (!localStorage.getItem("snw_token")) {
-  location.replace("login.html");
-} else {
-  const rol = localStorage.getItem("snw_rol");
-  const priv = rol === "administrador" || rol === "desarrollador";
-  let perms = [];
-  try { perms = JSON.parse(localStorage.getItem("snw_permisos") || "[]"); } catch (e) { perms = []; }
-  if (!priv && (!Array.isArray(perms) || perms.indexOf("pacientes") === -1)) {
-    location.replace("mensajeria.html");
-  }
 }
 
 let ambienteAdmin = localStorage.getItem("snw_ambiente_admin");
@@ -87,7 +76,6 @@ async function cargar() {
     }));
     config = await rc.json();
 
-    $("#nombreBd").textContent = config.base_datos ?? "";
     const tituloEl = $("#tituloPacientes");
     if (tituloEl) {
       const entornoLabel = config.entorno === "produccion" ? "producción" : "desarrollo";
@@ -479,4 +467,10 @@ function toast(msg, tipo = "ok") {
   toastTimer = setTimeout(() => toastEl.classList.remove("visible"), 3200);
 }
 
-cargar();
+let yaCargada = false;
+window.snwCargarPacientes = function () {
+  if (yaCargada) return;
+  yaCargada = true;
+  cargar();
+};
+})();

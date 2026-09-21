@@ -17,8 +17,6 @@
     .admin-tabs {
       display: flex;
       gap: 4px;
-      margin: 0 0 16px;
-      border-bottom: 1px solid var(--borde);
     }
     .admin-tab {
       border: none;
@@ -27,13 +25,12 @@
       font: inherit;
       font-weight: 600;
       font-size: .92rem;
-      padding: 10px 16px;
+      padding: 7px 14px;
       cursor: pointer;
-      border-bottom: 2px solid transparent;
-      margin-bottom: -1px;
+      border-radius: 8px;
     }
-    .admin-tab:hover { color: var(--texto); }
-    .admin-tab.active { color: var(--verde); border-bottom-color: var(--verde); }
+    .admin-tab:hover { color: var(--texto); background: var(--panel-2); }
+    .admin-tab.active { color: var(--btn-primary-fg); background: var(--btn-primary-bg); }
   </style>
 </head>
 <body data-pagina="administracion">
@@ -48,13 +45,76 @@
           <i class="fa-solid fa-bars"></i>
         </button>
         <span class="app-topbar__titulo">Administraci&oacute;n</span>
+        <div class="admin-tabs" role="tablist">
+          <button type="button" class="admin-tab active" id="tabBtnUsuarios" data-tab="usuarios" role="tab" aria-selected="true">Usuarios</button>
+          <button type="button" class="admin-tab" id="tabBtnPacientes" data-tab="pacientes" role="tab" aria-selected="false">Base de datos</button>
+          <button type="button" class="admin-tab" id="tabBtnConfiguracion" data-tab="configuracion" role="tab" aria-selected="false" hidden>Configuraci&oacute;n</button>
+        </div>
       </header>
 
       <main class="layout layout--ancho">
 
-        <div class="admin-tabs" role="tablist">
-          <button type="button" class="admin-tab active" id="tabBtnUsuarios" data-tab="usuarios" role="tab" aria-selected="true">Usuarios</button>
-          <button type="button" class="admin-tab" id="tabBtnConfiguracion" data-tab="configuracion" role="tab" aria-selected="false" hidden>Configuraci&oacute;n</button>
+        <div id="tabPacientes" class="admin-panel" role="tabpanel" hidden>
+          <section class="panel">
+            <div class="panel__head">
+              <h2 id="tituloPacientes">Pacientes</h2>
+              <div class="panel__actions">
+                <select id="selAmbiente" class="badge badge--select" aria-label="Base de datos">
+                  <option value="desarrollo">Base de datos desarrollo</option>
+                  <option value="produccion">Base de datos producci&oacute;n</option>
+                </select>
+                <button id="btnActualizar" class="btn btn--ghost" type="button">Actualizar</button>
+              </div>
+            </div>
+
+            <div class="stats" id="stats"></div>
+
+            <div class="toolbar-pacientes">
+              <input type="search" id="buscador" placeholder="Buscar por nombre, tel&eacute;fono o info..." autocomplete="off">
+              <span id="contadorSel" class="contador-sel"></span>
+            </div>
+
+            <div class="toolbar-masivo" id="toolbarMasivo" hidden>
+              <span class="toolbar-masivo__label">Con los seleccionados:</span>
+              <label class="toolbar-masivo__campo">
+                Estado
+                <select id="selEstadoMasivo">
+                  <option value="" selected>— cambiar a —</option>
+                  <option value="pendiente">Pendiente</option>
+                  <option value="enviado">Enviado</option>
+                  <option value="error">Error</option>
+                </select>
+              </label>
+              <label class="toolbar-masivo__campo">
+                Respuesta
+                <select id="selRespuestaMasivo">
+                  <option value="" selected>— cambiar a —</option>
+                  <option value="pendiente">Sin respuesta</option>
+                  <option value="respondio">Respondió</option>
+                  <option value="baja">Se dio de baja</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="tabla-wrap">
+              <table id="tablaPacientes">
+                <thead>
+                  <tr>
+                    <th class="col-check"><input type="checkbox" id="chkTodos" title="Seleccionar todos los visibles"></th>
+                    <th>ID</th>
+                    <th>Nombre</th>
+                    <th>Tel&eacute;fono</th>
+                    <th>Estado</th>
+                    <th>Error</th>
+                    <th>Respuesta</th>
+                    <th>Actualizado</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+              <p id="tablaVacia" class="tabla-vacia" hidden>Sin resultados.</p>
+            </div>
+          </section>
         </div>
 
         <div id="tabUsuarios" class="admin-panel" role="tabpanel">
@@ -139,30 +199,41 @@
   <script src="js/layout.js"></script>
   <script src="js/pass-toggle.js"></script>
   <script src="js/usuarios.js"></script>
+  <script src="js/pacientes.js"></script>
   <script src="js/configuracion.js"></script>
   <script>
     (function () {
-      const btnUsuarios = document.getElementById("tabBtnUsuarios");
-      const btnConfig = document.getElementById("tabBtnConfiguracion");
-      const panelUsuarios = document.getElementById("tabUsuarios");
-      const panelConfig = document.getElementById("tabConfiguracion");
+      const botones = {
+        usuarios: document.getElementById("tabBtnUsuarios"),
+        pacientes: document.getElementById("tabBtnPacientes"),
+        configuracion: document.getElementById("tabBtnConfiguracion"),
+      };
+      const paneles = {
+        usuarios: document.getElementById("tabUsuarios"),
+        pacientes: document.getElementById("tabPacientes"),
+        configuracion: document.getElementById("tabConfiguracion"),
+      };
+      const cargas = {
+        pacientes: () => window.snwCargarPacientes && window.snwCargarPacientes(),
+        configuracion: () => window.snwCargarConfiguracion && window.snwCargarConfiguracion(),
+      };
 
       // La pestaña Configuración ni siquiera existe para quien no es
       // desarrollador (no solo se oculta con CSS).
-      if (window.snwEsDev) btnConfig.hidden = false;
+      if (window.snwEsDev) botones.configuracion.hidden = false;
 
       function activar(tab) {
-        const esConfig = tab === "configuracion";
-        btnUsuarios.classList.toggle("active", !esConfig);
-        btnUsuarios.setAttribute("aria-selected", String(!esConfig));
-        btnConfig.classList.toggle("active", esConfig);
-        btnConfig.setAttribute("aria-selected", String(esConfig));
-        panelUsuarios.hidden = esConfig;
-        panelConfig.hidden = !esConfig;
-        if (esConfig && window.snwCargarConfiguracion) window.snwCargarConfiguracion();
+        for (const clave of Object.keys(botones)) {
+          const activo = clave === tab;
+          botones[clave].classList.toggle("active", activo);
+          botones[clave].setAttribute("aria-selected", String(activo));
+          paneles[clave].hidden = !activo;
+        }
+        if (cargas[tab]) cargas[tab]();
       }
-      btnUsuarios.addEventListener("click", () => activar("usuarios"));
-      btnConfig.addEventListener("click", () => activar("configuracion"));
+      for (const clave of Object.keys(botones)) {
+        botones[clave].addEventListener("click", () => activar(clave));
+      }
     })();
   </script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>

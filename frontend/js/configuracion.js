@@ -1,8 +1,3 @@
-/* Pestaña «Configuración» de administracion.html (solo desarrollador).
-   Se carga en la misma página que Usuarios; por eso todo va en un IIFE
-   (evita choques de nombres con usuarios.js) y no se auto-ejecuta al cargar
-   el script: administracion.html llama a window.snwCargarConfiguracion()
-   recién cuando esa pestaña se abre por primera vez. */
 (function () {
 const $ = (sel) => document.querySelector(sel);
 

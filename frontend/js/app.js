@@ -1,6 +1,13 @@
 const API_URL = "api/plantillas";
 const MAX_MENSAJE = 1024; // límite de caracteres del cuerpo del mensaje (límite de Meta)
 
+// Filtro de seguridad extra (el backend ya descarta esto): nunca renderizar
+// una entrada rota, por ejemplo si alguien edita plantillas.json a mano y
+// deja un objeto a medias.
+const esPlantillaValida = (p) =>
+  !!p && typeof p === "object" && p.id != null &&
+  !!String(p.nombre ?? "").trim() && !!String(p.texto ?? "").trim();
+
 let plantillas = [];
 let activaId = null;
 let snapshot = null;
@@ -33,8 +40,10 @@ const avisoPendiente = $("#avisoPendiente");
 const btnCancelar = $("#btnCancelar");
 const hintNombre = $("#hintNombre");
 const hintTemplate = $("#hintTemplate");
+const infoCreacion = $("#infoCreacion");
 const previewTexto = $("#previewTexto");
 const previewHora = $("#previewHora");
+const previewBotones = $("#previewBotones");
 const tituloForm = $("#tituloFormulario");
 const estadoVacio = $("#estadoVacio");
 const btnEliminar = $("#btnEliminar");
@@ -42,6 +51,8 @@ const btnGuardar = $("#btnGuardar");
 const btnEnviarActual = $("#btnEnviarActual");
 const modalEl = $("#modalEliminar");
 const toastEl = $("#toast");
+
+const BOTONES_PREDEFINIDOS = ["Me interesa", "No me interesa", "Dar de baja"];
 
 const DATOS_EJEMPLO = {
   nombre: "David",
@@ -65,6 +76,17 @@ const etiquetaEstadoMeta = (status) => ETIQUETAS_ESTADO_META[status] || ETIQUETA
 const esPlantillaAprobada = (p) => !p || p.whatsapp_template_status === "APPROVED";
 const esPlantillaRechazada = (p) => !!p && p.whatsapp_template_status === "REJECTED";
 const esPlantillaEditable = (p) => !p || esPlantillaAprobada(p) || esPlantillaRechazada(p);
+// Meta solo permite editar un template una vez cada 24h (ver actualizar_plantilla
+// en el backend, que es quien de verdad lo exige). No afecta a Eliminar.
+const MS_24H = 24 * 3600 * 1000;
+const editadaRecientemente = (p) => !!p && !!p.ultima_edicion && (Date.now() - p.ultima_edicion) < MS_24H;
+// Formato "HH:MM" con el tiempo que falta para poder editar de nuevo.
+function cuentaRegresivaEditable(p) {
+  const restanteMs = Math.max(0, MS_24H - (Date.now() - p.ultima_edicion));
+  const horas = Math.floor(restanteMs / 3600000);
+  const minutos = Math.floor((restanteMs % 3600000) / 60000);
+  return `${String(horas).padStart(2, "0")}:${String(minutos).padStart(2, "0")}`;
+}
 
 // El servidor revisa solo (cada `plantillas_revision_minutos`) el estado en
 // Meta de las plantillas pendientes y guarda cuándo pasaron a aprobadas
@@ -113,7 +135,7 @@ async function cargar() {
       const datos = await res.json();
       if (!Array.isArray(datos)) throw new Error("formato inválido");
       // Las plantillas de call center se gestionan desde el Historial.
-      plantillas = datos.filter((p) => !p.especial);
+      plantillas = datos.filter((p) => !p.especial && esPlantillaValida(p));
       renderLista(buscadorEl.value);
       if (activaId === null) seleccionarDefault();
       return;
@@ -138,7 +160,7 @@ async function revisarPlantillasEnSegundoPlano() {
     if (!res.ok) return;
     const datos = await res.json();
     if (!Array.isArray(datos)) return;
-    const nuevas = datos.filter((p) => !p.especial);
+    const nuevas = datos.filter((p) => !p.especial && esPlantillaValida(p));
 
     for (const p of nuevas) {
       const previa = plantillas.find((x) => x.id === p.id);
@@ -307,6 +329,12 @@ function actualizarPreview() {
     hour: "2-digit",
     minute: "2-digit",
   });
+
+  if (previewBotones) {
+    previewBotones.innerHTML = BOTONES_PREDEFINIDOS
+      .map((b) => `<div class="bubble__boton"><i class="fa-solid fa-reply"></i> ${escaparHtml(b)}</div>`)
+      .join("");
+  }
 }
 
 function actualizarContador() {
@@ -334,14 +362,26 @@ function refrescarEditor() {
   actualizarContador();
   validarComodines();
   actualizarPreview();
+  actualizarEstadoBotonGuardar();
+}
+
+function estadoActualEditor() {
+  return JSON.stringify([inpNombre.value, inpMensaje.value, valTemplate(), valTemplateLang(), valTemplateCategoria()]);
 }
 
 function marcarSnapshot() {
-  snapshot = JSON.stringify([inpNombre.value, inpMensaje.value, valTemplate(), valTemplateLang(), valTemplateCategoria()]);
+  snapshot = estadoActualEditor();
+  actualizarEstadoBotonGuardar();
 }
 
 function hayCambios() {
-  return snapshot !== null && snapshot !== JSON.stringify([inpNombre.value, inpMensaje.value, valTemplate(), valTemplateLang(), valTemplateCategoria()]);
+  return snapshot !== null && snapshot !== estadoActualEditor();
+}
+
+// El botón «Guardar» solo se habilita si hubo algún cambio desde que se abrió
+// la plantilla (o desde el último guardado); evita guardados vacíos/no-op.
+function actualizarEstadoBotonGuardar() {
+  if (btnGuardar) btnGuardar.disabled = !hayCambios();
 }
 
 function renderEstadoMeta(p) {
@@ -382,27 +422,64 @@ function sincronizarTemplateConNombre() {
 //   mandarla a revisión, o descartarla), pero NO enviar.
 // - pendiente de revisión (recién creada o PENDING): de solo lectura, sin
 //   ningún botón, aunque la cuenta tenga permiso de edición.
+let _timerEnfriamiento = null;
+
+function pararCuentaRegresiva() {
+  if (_timerEnfriamiento) { clearInterval(_timerEnfriamiento); _timerEnfriamiento = null; }
+}
+
+function textoEnfriamiento(p) {
+  return `Esta plantilla no se puede editar todavía: faltan ${cuentaRegresivaEditable(p)} para que vuelva ` +
+    "a estar disponible (Meta solo permite editar un template una vez al día). Sí se puede eliminar.";
+}
+
+// Actualiza el aviso cada 30s mientras dure el enfriamiento; al llegar a
+// 00:00 refresca los botones/campos solo, sin que haga falta recargar.
+function iniciarCuentaRegresiva(p) {
+  pararCuentaRegresiva();
+  _timerEnfriamiento = setInterval(() => {
+    if (!editadaRecientemente(p)) {
+      pararCuentaRegresiva();
+      actualizarBotonesSegunEstado(p);
+      actualizarBloqueoCampos();
+      return;
+    }
+    if (avisoPendiente) avisoPendiente.textContent = textoEnfriamiento(p);
+  }, 30000);
+}
+
 function actualizarBotonesSegunEstado(p) {
   const aprobada = esPlantillaAprobada(p);
   const editable = esPlantillaEditable(p);
-  const puedeEditar = PUEDE_EDITAR_PLANTILLAS && editable;
-  btnGuardar.hidden = !puedeEditar;
-  if (btnCancelar) btnCancelar.hidden = !puedeEditar;
+  const enEnfriamiento = editable && editadaRecientemente(p);
+  // Meta limita la edición a una vez cada 24h, pero no el borrado: Eliminar
+  // sigue disponible aunque Guardar esté bloqueado por el enfriamiento.
+  const puedeGuardar = PUEDE_EDITAR_PLANTILLAS && editable && !enEnfriamiento;
+  const puedeEliminar = PUEDE_EDITAR_PLANTILLAS && editable;
+  btnGuardar.hidden = !puedeGuardar;
+  if (btnCancelar) btnCancelar.hidden = !puedeGuardar;
   // Eliminar solo aplica si ya existe (tiene id) y se puede gestionar.
-  btnEliminar.hidden = !(p && puedeEditar);
+  btnEliminar.hidden = !(p && puedeEliminar);
   if (btnEnviarActual) btnEnviarActual.hidden = !(p && aprobada);
   if (avisoPendiente) {
     if (p && !editable) {
+      pararCuentaRegresiva();
       avisoPendiente.textContent =
         `Esta plantilla está ${etiquetaEstadoMeta(p.whatsapp_template_status).toLowerCase()} en Meta: ` +
         "no se puede editar, guardar, eliminar ni usar para enviar mensajes hasta que se resuelva.";
       avisoPendiente.hidden = false;
+    } else if (p && enEnfriamiento) {
+      avisoPendiente.textContent = textoEnfriamiento(p);
+      avisoPendiente.hidden = false;
+      iniciarCuentaRegresiva(p);
     } else if (p && editable && !aprobada) {
+      pararCuentaRegresiva();
       avisoPendiente.textContent =
-        "Esta plantilla fue rechazada por Meta: podés editarla y guardarla para mandarla de nuevo " +
+        "Esta plantilla fue rechazada por Meta: se puede editar y guardar para mandarla de nuevo " +
         "a revisión, o eliminarla. No se puede usar para enviar mensajes hasta que se apruebe.";
       avisoPendiente.hidden = false;
     } else {
+      pararCuentaRegresiva();
       avisoPendiente.hidden = true;
     }
   }
@@ -418,12 +495,13 @@ function actualizarBotonesSegunEstado(p) {
 // en Meta, quedan bloqueados. Las plantillas antiguas sin template todavía
 // pueden completarlos. El nombre del template está SIEMPRE bloqueado.
 //
-// Si la plantilla está pendiente de revisión (no es editable, ver
-// esPlantillaEditable), TODO el formulario queda deshabilitado (misma rama
-// que la de "sin permiso de edición") — ver actualizarBotonesSegunEstado.
+// Si la plantilla está pendiente de revisión, o fue editada hace menos de
+// 24h (no es editable, ver esPlantillaEditable / editadaRecientemente), TODO
+// el formulario queda deshabilitado (misma rama que la de "sin permiso de
+// edición") — ver actualizarBotonesSegunEstado.
 function actualizarBloqueoCampos() {
   const p = activaId ? plantillas.find((x) => x.id === activaId) : null;
-  if (!PUEDE_EDITAR_PLANTILLAS || (p && !esPlantillaEditable(p))) {
+  if (!PUEDE_EDITAR_PLANTILLAS || (p && (!esPlantillaEditable(p) || editadaRecientemente(p)))) {
     formEl.querySelectorAll("input, textarea, select").forEach((el) => { el.disabled = true; });
     return;
   }
@@ -478,6 +556,7 @@ function abrir(id) {
   }
   renderEstadoMeta(p);
   actualizarBotonesSegunEstado(p);
+  actualizarInfoCreacion(p);
   inpNombre.classList.remove("invalido");
   inpMensaje.classList.remove("invalido");
   if (hayTemplateMeta) { inpTemplate.classList.remove("invalido"); inpTemplateCategoria.classList.remove("invalido"); }
@@ -485,6 +564,23 @@ function abrir(id) {
   refrescarEditor();
   marcarSnapshot();
   renderLista(buscadorEl.value);
+}
+
+// Quién y cuándo creó la plantilla (trazabilidad); las plantillas sincronizadas
+// desde Meta o creadas antes de este campo no tienen `creado_por`.
+function actualizarInfoCreacion(p) {
+  if (!infoCreacion) return;
+  if (!p || !p.creado_por) {
+    infoCreacion.hidden = true;
+    return;
+  }
+  const fecha = p.creada_en
+    ? new Date(p.creada_en).toLocaleString("es-CL", { dateStyle: "short", timeStyle: "short" })
+    : null;
+  infoCreacion.textContent = fecha
+    ? `Creada por ${p.creado_por} el ${fecha}.`
+    : `Creada por ${p.creado_por}.`;
+  infoCreacion.hidden = false;
 }
 
 function modoNueva() {
@@ -498,6 +594,7 @@ function modoNueva() {
     inpTemplateLang.value = "es";
     inpTemplateCategoria.value = "MARKETING";
   }
+  actualizarInfoCreacion(null);
   if (bloqueEstadoMeta) bloqueEstadoMeta.hidden = true;
   actualizarBotonesSegunEstado(null);
   inpNombre.classList.remove("invalido");
@@ -545,9 +642,13 @@ formEl.addEventListener("submit", async (e) => {
   e.preventDefault();
   if (!PUEDE_EDITAR_PLANTILLAS) return;
   // Blindaje: aunque el botón esté oculto, el formulario no debe guardarse
-  // si la plantilla activa todavía está pendiente de revisión en Meta
-  // (Ctrl+S, Enter...); aprobada o rechazada sí se puede guardar.
-  if (activaId && !esPlantillaEditable(plantillas.find((x) => x.id === activaId))) return;
+  // si la plantilla activa todavía está pendiente de revisión en Meta, o se
+  // editó hace menos de 24h (Ctrl+S, Enter...); aprobada o rechazada, y fuera
+  // del enfriamiento de 24h, sí se puede guardar.
+  if (activaId) {
+    const activa = plantillas.find((x) => x.id === activaId);
+    if (!esPlantillaEditable(activa) || editadaRecientemente(activa)) return;
+  }
 
   const nombre = inpNombre.value.trim();
   const texto = inpMensaje.value.trim();
@@ -647,6 +748,8 @@ btnEliminar.addEventListener("click", () => {
 $("#btnModalCancelar").addEventListener("click", () => (modalEl.hidden = true));
 
 $("#btnModalConfirmar").addEventListener("click", async () => {
+  const btnConfirmar = $("#btnModalConfirmar");
+  setConsultandoEstado(true, btnConfirmar, "Eliminando plantilla...");
   try {
     const data = await eliminarPlantilla(activaId);
     plantillas = plantillas.filter((x) => x.id !== activaId);
@@ -662,6 +765,8 @@ $("#btnModalConfirmar").addEventListener("click", async () => {
   } catch (err) {
     modalEl.hidden = true;
     toast(`Error al eliminar: ${err.message}`, "error");
+  } finally {
+    setConsultandoEstado(false, btnConfirmar);
   }
 });
 
@@ -686,8 +791,14 @@ inpNombre.addEventListener("input", () => {
   // El nombre del template de Meta refleja el nombre de la plantilla en vivo.
   sincronizarTemplateConNombre();
   if (hayTemplateMeta) inpTemplate.classList.remove("invalido");
+  actualizarEstadoBotonGuardar();
 });
 inpMensaje.addEventListener("input", refrescarEditor);
+if (hayTemplateMeta) {
+  inpTemplateLang.addEventListener("change", actualizarEstadoBotonGuardar);
+  inpTemplateCategoria.addEventListener("change", actualizarEstadoBotonGuardar);
+}
+
 buscadorEl.addEventListener("input", () => renderLista(buscadorEl.value));
 $("#btnNueva")?.addEventListener("click", intentarNueva);
 $("#btnNuevaEmpty")?.addEventListener("click", intentarNueva);
@@ -1243,7 +1354,7 @@ if (btnRevisarTodos) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail ?? `Error ${res.status}`);
       // Las plantillas de call center se gestionan desde el Historial.
-      plantillas = data.filter((p) => !p.especial);
+      plantillas = data.filter((p) => !p.especial && esPlantillaValida(p));
       renderLista(buscadorEl.value);
       if (activaId) {
         const actual = plantillas.find((x) => x.id === activaId);
@@ -1273,7 +1384,7 @@ if (btnSincronizarMeta) {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.detail ?? `Error ${res.status}`);
       // Las plantillas de call center se gestionan desde el Historial.
-      plantillas = data.plantillas.filter((p) => !p.especial);
+      plantillas = data.plantillas.filter((p) => !p.especial && esPlantillaValida(p));
       renderLista(buscadorEl.value);
       if (activaId) {
         const actual = plantillas.find((x) => x.id === activaId);

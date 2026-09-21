@@ -70,7 +70,6 @@
   // Permiso que exige cada página; si no lo tiene, se le manda a la primera
   // página que sí pueda ver.
   const PERM_PAGINA = {
-    pacientes: "pacientes",
     mensajeria: "mensajeria",
     historial: "historial",
     estadisticas: "estadisticas",
@@ -79,16 +78,15 @@
     ["mensajeria", "mensajeria.html"],
     ["historial", "historial.html"],
     ["estadisticas", "estadisticas.html"],
-    ["pacientes", "pacientes.html"],
   ];
   function primeraPaginaPermitida() {
     for (const [perm, href] of ORDEN_PAGINAS) if (puede(perm)) return href;
     if (ES_PRIV) return "administracion.html";
     return "index.html";
   }
-  // Administración (Usuarios + Configuración) es exclusiva de admin/dev; la
-  // pestaña Configuración, dentro de esa página, es exclusiva de desarrollador
-  // (esa parte se resuelve en administracion.html, no acá).
+  // Administración (Pacientes + Usuarios + Configuración) es exclusiva de
+  // admin/dev; la pestaña Configuración, dentro de esa página, es exclusiva
+  // de desarrollador (esa parte se resuelve en administracion.html, no acá).
   if (PAGINA === "administracion" && !ES_PRIV) {
     location.replace(primeraPaginaPermitida());
     return;
@@ -112,7 +110,6 @@
 
   const LINKS = [
     { pagina: "inicio",       href: "index.html",        icono: "fa-house",             texto: "Inicio" },
-    { pagina: "pacientes",    href: "pacientes.html",    icono: "fa-database",          texto: "Base de datos", perm: "pacientes" },
     { pagina: "mensajeria",   href: "mensajeria.html",   icono: "fa-paper-plane",       texto: "Mensajería y plantillas", perm: "mensajeria" },
     { pagina: "historial",    href: "historial.html",    icono: "fa-clock-rotate-left", texto: "Historial", perm: "historial" },
     { pagina: "estadisticas", href: "estadisticas.html", icono: "fa-chart-column",      texto: "Estadísticas", perm: "estadisticas" },

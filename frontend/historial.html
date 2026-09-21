@@ -64,23 +64,6 @@
       </div>
     </section>
 
-    <section class="panel" id="panelCallCenter" data-perm="call_center">
-      <div class="panel__head">
-        <h2>Plantillas de call center</h2>
-        <div class="panel__actions">
-          <button id="btnNuevaCC" class="btn btn--primary" type="button">+ Nueva</button>
-        </div>
-      </div>
-      <p class="field__hint" style="margin: 12px 18px 0;">
-        Mensajes que se env&iacute;an a un paciente que responde que le interesa. Se manda uno
-        autom&aacute;ticamente tras unos segundos (plantilla marcada como autom&aacute;tica), y tambi&eacute;n
-        se puede enviar a mano desde «Ver mensajes» en el detalle de un env&iacute;o. No se usan en env&iacute;os masivos.
-        El servicio de tel&eacute;fonos del call center y la espera se configuran en <strong>Configuraci&oacute;n</strong>.
-      </p>
-      <p id="ccAviso" class="field__hint" style="margin: 6px 18px 0;"></p>
-      <div id="listaCC" class="cc-lista"></div>
-    </section>
-
     <section class="panel" id="panelCCRegistro" data-perm="call_center_registro">
       <div class="panel__head">
         <h2>Registro de respuestas de call center</h2>
@@ -98,7 +81,6 @@
               <th>Fecha</th>
               <th>Paciente</th>
               <th>N&uacute;mero de call center</th>
-              <th>Origen</th>
               <th>Estado</th>
             </tr>
           </thead>
@@ -138,57 +120,14 @@
       <h3 id="mensajesTitulo">Mensajes del paciente</h3>
       <div id="msgPacienteCab" class="msg-cab"></div>
       <div id="msgHilo" class="msg-hilo"></div>
-      <div class="msg-acciones" data-perm="call_center">
+      <div class="msg-acciones">
         <p class="msg-interes-estado" id="msgInteresEstado" title="Se detecta solo, a partir de lo que escribe el paciente; no se puede marcar a mano.">
           <i class="fa-solid fa-star"></i> <span>Interés: —</span>
         </p>
-        <div class="msg-cc-envio">
-          <select id="selCC" hidden></select>
-          <button type="button" class="btn btn--primary" id="btnEnviarCallCenter" disabled>
-            Enviar mensaje de call center
-          </button>
-        </div>
       </div>
       <div class="modal__actions">
         <button type="button" class="btn btn--ghost" id="btnCerrarMensajes">Cerrar</button>
       </div>
-    </div>
-  </div>
-
-  <div id="modalCC" class="modal" hidden>
-    <div class="modal__card" role="dialog" aria-modal="true">
-      <h3 id="ccTitulo">Nueva plantilla de call center</h3>
-      <form id="formCC" novalidate>
-        <div class="field">
-          <label for="ccNombre">Nombre</label>
-          <input type="text" id="ccNombre" maxlength="80" autocomplete="off" placeholder="Ej: Derivaci&oacute;n a call center">
-        </div>
-        <div class="field">
-          <label for="ccTexto">Mensaje</label>
-          <textarea id="ccTexto" rows="5" placeholder="Ej: ¡Hola {nombre}! Gracias por tu interés, nuestro equipo te puede ayudar."></textarea>
-          <div class="field__foot">
-            <p class="field__hint">Puedes usar <code>{nombre}</code> y <code>{apellido}</code>.</p>
-            <span id="ccContador" class="char-count">0 / 1024</span>
-          </div>
-        </div>
-        <label class="cc-check">
-          <input type="checkbox" id="ccBoton" checked>
-          <span>Incluir bot&oacute;n que abre el chat del call center</span>
-        </label>
-        <div class="field" id="ccBotonTextoWrap">
-          <label for="ccBotonTexto">Texto del bot&oacute;n</label>
-          <input type="text" id="ccBotonTexto" maxlength="20" placeholder="Ir al call center">
-          <p class="field__hint" id="ccBotonHint">El bot&oacute;n lleva al n&uacute;mero configurado en Configuraci&oacute;n. M&aacute;x. 20 caracteres.</p>
-        </div>
-        <label class="cc-check">
-          <input type="checkbox" id="ccAuto">
-          <span>Usar esta como respuesta autom&aacute;tica cuando un paciente muestre inter&eacute;s</span>
-        </label>
-        <div class="modal__actions">
-          <button type="button" class="btn btn--ghost" id="btnCancelarCC">Cancelar</button>
-          <button type="submit" class="btn btn--primary" id="btnGuardarCC">Guardar</button>
-        </div>
-      </form>
     </div>
   </div>
 

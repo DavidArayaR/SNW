@@ -42,12 +42,11 @@ snw/
 │   ├── registro.html          Activar cuenta invitada: elige contraseña con el token del correo
 │   ├── reset.html             Restablecer contraseña con el token del correo
 │   ├── mensajeria.html        Editor de plantillas, vista previa estilo WhatsApp, envío
-│   ├── pacientes.html         Base de datos de pacientes: ver, filtrar, editar estado/
-│   │                          respuesta (uno o en bloque). No envía mensajes (permiso: pacientes)
 │   ├── historial.html         Historial de envíos (batch + detalle por paciente)
 │   ├── estadisticas.html      Contador mensual de mensajes, desgloses y costos WhatsApp
-│   ├── administracion.html    Panel de administración con pestañas: Usuarios (admin/dev) y
-│   │                          Configuración (pestaña visible solo para desarrollador)
+│   ├── administracion.html    Panel de administración con pestañas: Pacientes (base de datos:
+│   │                          ver, filtrar, editar estado/respuesta), Usuarios y Configuración
+│   │                          (pestaña visible solo para desarrollador). Exclusivo admin/dev
 │   ├── css/                   tema.css (paleta claro/oscuro), styles.css (compartido), layout.css (sidebar), pacientes.css, estadisticas.css, configuracion.css, usuarios.css
 │   ├── js/                    tema.js (modo claro/oscuro), layout.js (sidebar/sesión/permisos, común), app.js, pacientes.js, historial.js, estadisticas.js, configuracion.js, usuarios.js
 │   └── vendor/bootstrap/     Bootstrap 5.3.3 (CSS + bundle JS) servido localmente
@@ -113,7 +112,7 @@ el `entorno` activo, que las demás pantallas leen al cargar).
 | Grupo | Claves |
 |---|---|
 | App / envío | `entorno` (`desarrollo`/`produccion`), `metodo_envio` (`simulado`/`api_oficial`), `numeros_prueba_dev`, `numeros_prueba_prod`, `intervalo_ms`, `sesion_expira_horas` (horas de inactividad antes de cerrar una sesión sola; 0 = no expiran; por defecto 5), `url_base` |
-| Call center | `call_center_url` (servicio que devuelve un número de call center; se consulta en cada respuesta y ese servicio reparte la carga), `call_center_numeros` (respaldo manual, uno o varios separados por coma, solo si la URL no responde), `call_center_auto_segundos` (espera antes del envío automático tras detectar interés; 0 = desactivado), `call_center_boton_mensaje` / `call_center_boton_mensaje_oferta` (texto que autocompleta el botón; el de oferta se usa si la última plantilla enviada mencionaba un descuento o precio especial) |
+| Call center | `call_center_url` (servicio que devuelve un número de call center; se consulta en cada respuesta y ese servicio reparte la carga), `call_center_numeros` (respaldo manual, uno o varios separados por coma, solo si la URL no responde), `call_center_boton_mensaje` / `call_center_boton_mensaje_oferta` (texto que autocompleta el botón; el de oferta se usa si la última plantilla enviada mencionaba un descuento o precio especial). El mensaje de call center y su espera (1s fija) no son configurables, ver [Mensaje de call center](#mensaje-de-call-center) |
 | Correo | `smtp_host`, `smtp_port`, `smtp_user`, `smtp_pass`, `smtp_tls`, `correo_emisor`, `correo_destino` |
 | WhatsApp / Meta | `wa_token`, `wa_phone_id`, `wa_business_account_id`, `wa_verify_token`, `wa_template_nombre`, `wa_template_lang`, `wa_webhook_path`, `wa_graph_version` (por defecto `v26.0`), `wa_moneda` (moneda de facturación de la cuenta, se autodetecta desde Meta al actualizar tarifas — por defecto `USD`), `plantillas_revision_minutos` (cada cuántos minutos se revisa sola en Meta el estado de las plantillas pendientes; 0 = desactivado; por defecto 2), `plantillas_badge_aprobada_minutos` (cuánto se muestra el aviso «Aprobada recientemente»; 0 = nunca; por defecto 10) |
 | Límites de envío Meta | `wa_rate_limit_activo` (frenado proactivo on/off), `wa_rate_limit_umbral_pct` (% de cuota a partir del cual se espera, 80), `wa_rate_limit_pausa_max_s` (espera entre mensajes al 100 % de cuota, 30), `wa_rate_limit_espera_defecto_s` (espera tras un 429 sin dato, 60), `wa_rate_limit_reintentos` (reintentos de una llamada tras un 429, 3), `wa_throughput_mps` (ritmo máximo de salida hacia Meta, msg/s; 0 = sin límite; 10), `wa_messaging_limit_24h` (usuarios únicos que se pueden contactar en 24 h antes de bloquear el envío masivo; 0 = ilimitado; 250) |
@@ -282,17 +281,16 @@ Reglas del editor:
 cambio (arriba) para que la persona elija una nueva. Si alguien la olvida usa «¿Olvidaste tu
 contraseña?» en el login (`/api/auth/olvide`) — mismo mecanismo, pero autoservicio.
 
-### Pacientes (permiso: `pacientes`)
+### Pacientes (pestaña de administración, exclusiva admin/dev; permiso `pacientes` en el backend)
 
 | Método | Endpoint | Descripción |
 |---|---|---|
 | GET | `/api/pacientes?q=&ambiente=` | Lista con respuesta y error del último `log_envios` |
 | PUT | `/api/pacientes/{id}?ambiente=` | Cambiar `estado` (`pendiente`/`enviado`/`error`) de **un** paciente |
-| PUT | `/api/pacientes/estado-masivo?ambiente=` | `{pacientes: [ids], estado}` — igual que arriba pero para **varios** pacientes a la vez (selección en Base de datos) |
+| PUT | `/api/pacientes/estado-masivo?ambiente=` | `{pacientes: [ids], estado}` — igual que arriba pero para **varios** pacientes a la vez (selección en la pestaña Pacientes) |
 | PUT | `/api/pacientes/{id}/respuesta?ambiente=` | Ajuste manual de la respuesta (`pendiente`/`respondio`/`baja`) de **un** paciente; `baja` activa el opt-out. 409 si el paciente pidió la baja explícitamente por WhatsApp y se intenta poner algo distinto de `baja` (ver `opt_out_explicito`) |
 | PUT | `/api/pacientes/respuesta-masiva?ambiente=` | `{pacientes: [ids], respuesta}` — igual que arriba pero para **varios** pacientes a la vez. Los que tengan la baja bloqueada se saltan (no fallan los demás); responde `{actualizados, bloqueados}`; 409 solo si **todos** los seleccionados están bloqueados |
 | GET | `/api/pacientes/{id}/mensajes?ambiente=` | **(cualquier usuario, solo lectura)** Todos los mensajes (entrantes y salientes) del paciente, para revisar si su interés es real. Marca `interes: true` los entrantes que suenan a interés. Es lo que muestra el botón **«Ver mensajes»** de la columna *Detalle* en el modal del Historial. `paciente.telefono` viene `null` si quien pregunta no es admin/dev |
-| POST | `/api/pacientes/{id}/call-center?ambiente=&plantilla_id=` | Envía **a mano** al paciente **interesado** una plantilla de call center (texto libre + botón CTA, ventana de 24 h). Requiere `interesado = 1`; `plantilla_id` obligatorio si hay más de una |
 
 ### Plantillas
 
@@ -306,47 +304,40 @@ contraseña?» en el login (`/api/auth/olvide`) — mismo mecanismo, pero autose
 | POST | `/api/plantillas/estado-meta/actualizar` | Refresca el estado de todas las plantillas con template |
 | POST | `/api/plantillas/sincronizar-meta` | Lee los templates que existen en Meta: actualiza estado/id de los conocidos e **importa como plantilla nueva** los que falten (no crea/edita nada en Meta, solo lee) |
 
-#### Plantillas de call center
+#### Mensaje de call center
 
-Plantillas normales con `especial: "call_center"` en `plantillas.json`: el mensaje que
-recibe un paciente que responde que **le interesa**. **No** tienen template de Meta (van
-como texto libre, ventana de 24 h) ni entran en los envíos masivos (`iniciar_envio` las
-rechaza). Se gestionan desde la sección **"Plantillas de call center"** al final de la
-página Historial. Al arrancar se siembra una si no hay ninguna.
+El mensaje que recibe un paciente que responde que **le interesa** es **fijo**, definido en
+el backend (`CALL_CENTER_PLANTILLA_FIJA` en `main.py`) — no es editable desde la app ni
+tiene template de Meta (va como texto libre, ventana de 24 h). No hay gestión de
+"plantillas" de call center: solo queda su registro de envíos (ver abajo).
 
-- **Envío automático:** cuando el webhook detecta interés, tras `call_center_auto_segundos`
-  (Configuración; 0 = desactivado) se manda la plantilla marcada como **automática** (`cc_auto`;
-  si ninguna lo está, la más antigua). Se manda **una vez por cada plantilla enviada al
-  paciente**: si desde el último call center hubo un nuevo envío de plantilla y el paciente
-  vuelve a mostrar interés, se le manda otro; si ya lo recibió después del último envío de
-  plantilla, no se repite (aunque mande varios mensajes de interés seguidos — hay además un
-  guard por número mientras hay un envío programado). También se puede mandar a mano desde
-  «Ver mensajes».
-- **Botón:** cada plantilla puede incluir (`cc_boton`) un botón CTA que abre el chat del
-  call center (`https://wa.me/<número>`, mensaje interactivo `cta_url`). El número **no** se
-  guarda en la plantilla: en cada respuesta se le pide a **`call_center_url`** (configurado
-  en **Configuración → Call center**), un servicio que devuelve un número —solo dígitos, con
-  código de país— y ya reparte la carga entre los teléfonos por su cuenta. Si esa URL no
-  responde, se usa el respaldo manual `call_center_numeros` (el menos usado según
-  `call_center_log`). El texto del botón (`cc_boton_texto`) sí es por plantilla (máx. 20 car.).
-  El botón autocompleta un mensaje en el chat (`?text=`): `call_center_boton_mensaje_oferta`
-  si la última plantilla enviada al paciente mencionaba un descuento / oferta / precio
-  especial (detección por palabras clave sobre `log_envios.mensaje`), o
-  `call_center_boton_mensaje` en cualquier otro caso (ambos en **Configuración → Call center**;
-  vacíos = sin autocompletar).
-- **Registro:** cada envío (auto o manual) queda en `call_center_log` con el número asignado.
-  El panel **«Registro de respuestas de call center»** del Historial (permiso propio
-  `call_center_registro`, debajo de las plantillas de call center) lo muestra: fecha, nombre
-  y número del paciente, número de call center, origen y estado, más los usos por número.
-  Admin y desarrollador lo ven por defecto; a un `usuario` se le puede asignar ese permiso.
+- **Envío automático:** cuando el webhook detecta interés (mensaje de texto o botón «Me
+  interesa» de una plantilla normal), 1 segundo después se manda el mensaje fijo de call
+  center (`CALL_CENTER_AUTO_SEGUNDOS` en `main.py`; no es configurable). Se manda **una vez
+  por cada plantilla enviada al paciente**: si desde el último call center hubo un nuevo
+  envío de plantilla y el paciente vuelve a mostrar interés, se le manda otro; si ya lo
+  recibió después del último envío de plantilla, no se repite (aunque mande varios mensajes
+  de interés seguidos — hay además un guard por número mientras hay un envío programado). No
+  hay envío manual.
+- **Botón:** el mensaje incluye un botón CTA que abre el chat del call center
+  (`https://wa.me/<número>`, mensaje interactivo `cta_url`). El número se pide en cada
+  respuesta a **`call_center_url`** (configurado en **Configuración → Call center**), un
+  servicio que devuelve un número —solo dígitos, con código de país— y ya reparte la carga
+  entre los teléfonos por su cuenta. Si esa URL no responde, se usa el respaldo manual
+  `call_center_numeros` (el menos usado según `call_center_log`). El botón autocompleta un
+  mensaje en el chat (`?text=`): `call_center_boton_mensaje_oferta` si la última plantilla
+  enviada al paciente mencionaba un descuento / oferta / precio especial (detección por
+  palabras clave sobre `log_envios.mensaje`), o `call_center_boton_mensaje` en cualquier otro
+  caso (ambos en **Configuración → Call center**; vacíos = sin autocompletar).
+- **Registro:** cada envío queda en `call_center_log` con el número asignado. El panel
+  **«Registro de respuestas de call center»** del Historial (permiso propio
+  `call_center_registro`) lo muestra: fecha, nombre y número del paciente, número de call
+  center, origen y estado, más los usos por número. Admin y desarrollador lo ven por
+  defecto; a un `usuario` se le puede asignar ese permiso.
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/plantillas/call-center` | `{plantillas, call_center_url, numeros_respaldo, auto_segundos}`. Cada plantilla trae `cc_boton`, `cc_boton_texto`, `cc_auto`, `es_auto_efectiva` |
 | GET | `/api/call-center/log` | (permiso `call_center_registro`) `{entradas, contadores}` — últimas 200 respuestas de call center + usos por número. Es el panel *Registro de respuestas de call center* del Historial. `numero_paciente` viene `null` si quien pregunta no es admin/dev |
-| POST | `/api/plantillas/call-center` | Crear `{nombre, texto, boton, boton_texto, auto}` |
-| PUT | `/api/plantillas/call-center/{id}` | Actualizar `{nombre, texto, boton, boton_texto, auto}` (marcar `auto` desmarca las demás) |
-| DELETE | `/api/plantillas/call-center/{id}` | Eliminar |
 
 ### Envíos
 
@@ -392,7 +383,7 @@ página Historial. Al arrancar se siembra una si no hay ninguna.
 | GET | `/api/configuracion?ambiente=` | Vista mínima para las pantallas y el motor de envío (`entorno`, `base_datos`, `numeros_autorizados`, `metodo_envio`, `intervalo_ms`) — cualquier sesión. Los valores completos y los secretos van por `/api/configuracion/todo` |
 | PUT | `/api/configuracion` | Guarda claves sueltas de `configuracion` sin reiniciar |
 | GET | `/api/configuracion/todo` | TODAS las claves con su **valor real** (incluye secretos) + metadata de secciones, para la página Configuración |
-| PUT | `/api/configuracion/todo` | `{cambios: {clave: valor, …}}` — valida clave conocida, enums (`entorno`, `metodo_envio`) y enteros (`intervalo_ms`, `smtp_port`, `call_center_auto_segundos`, `wa_rate_limit_*`, `wa_throughput_mps`, `wa_messaging_limit_24h`); `call_center_numeros` (respaldo) se normaliza a lista de solo-dígitos separada por coma; persiste con `config_set` |
+| PUT | `/api/configuracion/todo` | `{cambios: {clave: valor, …}}` — valida clave conocida, enums (`entorno`, `metodo_envio`) y enteros (`intervalo_ms`, `smtp_port`, `wa_rate_limit_*`, `wa_throughput_mps`, `wa_messaging_limit_24h`); `call_center_numeros` (respaldo) se normaliza a lista de solo-dígitos separada por coma; persiste con `config_set` |
 | GET | `/api/whatsapp/rate-limit` | (solo `desarrollador`) Consumo de cuota de la Graph API visto en la última respuesta de Meta y la espera que el sistema aplica: `{activo, uso_pct, bloqueado, bloqueado_segundos, pausa_sugerida_s, throughput_mps, ultimo_motivo, cabecera_hace_s}` |
 | GET | `/api/whatsapp/messaging-limit` | (admin / dev) `{tier, usados_24h, disponibles, ventana_horas}` — usuarios únicos contactados (mensajes iniciados por el negocio) en las últimas 24 h frente al `wa_messaging_limit_24h` |
 
@@ -620,9 +611,10 @@ propagar como error 500.
   pendientes. Los que no pueden recibir (dados de baja, teléfono inválido, no autorizados
   en dev) se listan como **rechazados** con el motivo, y el intento **igual queda en el
   Historial** (0 enviados, N inválidos) aunque no salga ningún mensaje.
-- **Base de datos** (`pacientes.html`, permiso `pacientes`) **no envía mensajes** — ni
-  siquiera admin/desarrollador: es solo para gestionar los registros (ver, buscar, filtrar,
-  corregir estado/respuesta, uno por uno o en bloque con la selección — ver más abajo).
+- **Pacientes** (pestaña de `administracion.html`, exclusiva admin/dev) **no envía
+  mensajes** — ni siquiera admin/desarrollador: es solo para gestionar los registros (ver,
+  buscar, filtrar, corregir estado/respuesta, uno por uno o en bloque con la selección — ver
+  más abajo).
   `POST /api/notificaciones/enviar` sigue existiendo como el único punto de envío, usado
   por Mensajería, y comparte confirmación, job y progreso con el resto de ese flujo.
 - **Producción**: si quien envía **no** tiene el permiso `envio_produccion`, se genera un
@@ -690,11 +682,14 @@ lectura y no depende de si la cuenta se puede editar.
 
 **Permisos** (campo `permisos` de la tabla; los roles privilegiados los tienen todos de forma implícita):
 
-- Páginas: `pacientes`, `mensajeria`, `historial`, `estadisticas`
+- Páginas: `mensajeria`, `historial`, `estadisticas`
 - Acciones: `plantillas_editar`, `envio_produccion` (enviar en producción sin confirmación del supervisor), `tarifas_editar`, `call_center` (gestionar plantillas de call center), `call_center_registro` (ver el registro de respuestas de call center en el Historial)
 
-**Configuración** no es un permiso asignable: la página y sus endpoints son exclusivos del
-rol `desarrollador` (dependencia `solo_dev` en el backend).
+**Pacientes** y **Configuración** ya no son permisos asignables: ambas pestañas viven dentro
+de `administracion.html`, exclusiva de los roles `administrador`/`desarrollador`
+(`Configuración`, además, exclusiva de `desarrollador`). El permiso `pacientes` sigue
+existiendo en el backend (endpoints `exigir("pacientes")`) por compatibilidad, pero ya no se
+puede otorgar desde la pestaña Usuarios.
 
 El backend revalida rol y permisos desde la tabla en **cada** petición, así que un cambio
 surte efecto de inmediato (la página se recarga sola vía `GET /api/auth/me`) y una cuenta
@@ -782,7 +777,7 @@ claro** de la sidebar, o con el botón flotante en la portada y el login (págin
   datos: nombre, permisos, rol (solo el desarrollador), envíos realizados, actividad
   (trazabilidad) y eliminar. Máximo 4 desarrolladores. Aquí no se cambian contraseñas — cada
   cuenta usa «Mi cuenta» o «¿Olvidaste tu contraseña?».
-- **Base de datos / Pacientes** (`pacientes.html`, permiso `pacientes`): tabla con estado
+- **Pacientes** (pestaña de `administracion.html`, exclusiva admin/dev): tabla con estado
   editable en línea, columna **Error** (motivo del último fallo), columna **Respuesta** con
   la señal de WhatsApp (Respondió / Se dio de baja / Sin respuesta) y su fecha, filtros por
   estado/respuesta, y selección múltiple para editar **estado o respuesta de varios

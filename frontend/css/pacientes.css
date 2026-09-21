@@ -379,7 +379,7 @@ td.campo-id { color: var(--texto-suave); font-family: Consolas, monospace; }
   letter-spacing: .02em;
 }
 .estado-envio--completado { background: var(--ok-bg); color: var(--ok-fg); border: 1px solid var(--ok-bd); }
-.estado-envio--cancelado { background: var(--danger-bg); color: var(--danger-fg); border: 1px solid var(--danger-bd); }
+.estado-envio--cancelado { background: var(--neutral-bg); color: var(--neutral-fg); border: 1px solid var(--neutral-bd); }
 .estado-envio--rechazado { background: var(--danger-bg); color: var(--danger-fg); border: 1px solid var(--danger-bd); }
 
 /* Nota de rechazo bajo el nombre de la plantilla en el historial */

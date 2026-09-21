@@ -49,15 +49,13 @@ CONFIG_DEFAULTS = {
     # devuelve un número —solo dígitos, con código de país— y ya reparte la
     # carga). `call_center_numeros` es un respaldo manual (uno o varios,
     # separados por coma) por si la URL no responde.
-    # `call_center_auto_segundos`: espera antes del envío automático cuando un
-    # paciente muestra interés (0 = desactivado).
     # `call_center_boton_mensaje` / `..._oferta`: texto que se autocompleta en el
     # chat del call center al pulsar el botón. Se usa el de «oferta» cuando la
     # última plantilla enviada al paciente mencionaba un descuento o precio
-    # especial; si no, el genérico.
+    # especial; si no, el genérico. El envío automático de call center espera
+    # siempre 1s fijo (CALL_CENTER_AUTO_SEGUNDOS en main.py), no es configurable.
     "call_center_url": "https://saludmentalparatodos.cl/telefonosmpt.php",
     "call_center_numeros": "",
-    "call_center_auto_segundos": "10",
     "call_center_boton_mensaje": "Hola, estoy interesado/a en la información que me enviaron.",
     "call_center_boton_mensaje_oferta": "Hola, estoy interesado/a en la oferta que me enviaron.",
     # Correo (confirmación de envíos en producción)
@@ -270,8 +268,17 @@ def asegurar_tabla_config() -> None:
                     "       AND COLUMN_NAME = 'interesado') AS col_int,"
                     "  (SELECT COUNT(*) FROM information_schema.COLUMNS"
                     "     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s"
-                    "       AND COLUMN_NAME = 'opt_out_explicito') AS col_exp",
-                    (tp, tp, tp, tp),
+                    "       AND COLUMN_NAME = 'opt_out_explicito') AS col_exp,"
+                    "  (SELECT COUNT(*) FROM information_schema.COLUMNS"
+                    "     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s"
+                    "       AND COLUMN_NAME = 'no_interesado') AS col_noint,"
+                    "  (SELECT COUNT(*) FROM information_schema.COLUMNS"
+                    "     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s"
+                    "       AND COLUMN_NAME = 'interes_plantilla_clave') AS col_iplant,"
+                    "  (SELECT COUNT(*) FROM information_schema.COLUMNS"
+                    "     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s"
+                    "       AND COLUMN_NAME = 'interes_fecha') AS col_ifecha",
+                    (tp, tp, tp, tp, tp, tp, tp),
                 )
                 fila = cur.fetchone() or {}
                 if not fila.get("tabla"):
@@ -297,6 +304,14 @@ def asegurar_tabla_config() -> None:
                     # Pacientes salvo que el propio paciente se retracte (vuelva
                     # a escribir mostrando interés, lo que la borra solo).
                     cur.execute(f"ALTER TABLE {tp} ADD COLUMN opt_out_explicito TINYINT(1) NOT NULL DEFAULT 0")
+                if not fila.get("col_noint"):
+                    # "No me interesa" (botón de la plantilla normal): a diferencia
+                    # de una baja, el paciente sigue pudiendo recibir plantillas.
+                    cur.execute(f"ALTER TABLE {tp} ADD COLUMN no_interesado TINYINT(1) NOT NULL DEFAULT 0")
+                if not fila.get("col_iplant"):
+                    cur.execute(f"ALTER TABLE {tp} ADD COLUMN interes_plantilla_clave VARCHAR(50) NULL")
+                if not fila.get("col_ifecha"):
+                    cur.execute(f"ALTER TABLE {tp} ADD COLUMN interes_fecha DATETIME NULL")
                 cur.execute(f"UPDATE {tp} SET respuesta_manual = 'respondio' WHERE respuesta_manual = 'click'")
 
             # El tipo de respuesta 'click' se eliminó: quita el valor del ENUM
@@ -377,7 +392,7 @@ PERMISOS_VALIDOS = (
     "plantillas_editar", "envio_produccion", "tarifas_editar",
     "call_center", "call_center_registro",
 )
-PERMISOS_BASICOS = ["mensajeria", "historial", "estadisticas", "plantillas_editar"]
+PERMISOS_BASICOS = ["mensajeria", "historial", "estadisticas"]
 
 # Cuentas creadas automáticamente la primera vez (o si faltan). El hash es
 # SHA-256 de la contraseña indicada.
@@ -567,14 +582,19 @@ def auditoria_registrar(actor: str, accion: str, objetivo: str, detalle: str = "
         log_error("auditoria_registrar", e)
 
 
-def auditoria_listar(objetivo: str | None = None, limite: int = 200) -> list[dict]:
+def auditoria_listar(valor: str | None = None, limite: int = 200, campo: str = "actor") -> list[dict]:
+    """`campo`: sobre qué columna filtrar `valor` — "actor" (qué hizo esta
+    cuenta, el comportamiento por defecto) u "objetivo" (qué le hicieron a
+    esta cuenta). `campo` no viene del cliente, así que es seguro interpolarlo
+    en el SQL (solo hay estos dos valores posibles)."""
+    columna = "actor" if campo == "actor" else "objetivo"
     try:
         with conectar() as conn, conn.cursor() as cur:
-            if objetivo:
+            if valor:
                 cur.execute(
-                    "SELECT fecha_hora, actor, accion, objetivo, detalle FROM usuarios_auditoria"
-                    " WHERE objetivo = %s ORDER BY id DESC LIMIT %s",
-                    ((objetivo or "").strip().lower(), limite),
+                    f"SELECT fecha_hora, actor, accion, objetivo, detalle FROM usuarios_auditoria"
+                    f" WHERE {columna} = %s ORDER BY id DESC LIMIT %s",
+                    ((valor or "").strip().lower(), limite),
                 )
             else:
                 cur.execute(

@@ -37,7 +37,10 @@ select.badge--select {
   background: var(--btn-primary-bg);
   color: var(--btn-primary-fg);
   padding-right: 26px;
+  transition: filter .15s;
 }
+select.badge--select:hover,
+select.badge--select:focus { filter: brightness(1.12); }
 .badge--bd {
   background: rgba(255, 255, 255, .18);
   color: #fff;
@@ -103,7 +106,10 @@ select.badge--select {
 }
 .panel--list .panel__actions .btn { flex: 1 1 auto; justify-content: center; }
 
-.tpl-list__aviso-sync { margin: 12px 18px 4px; }
+/* Selector combinado (mayor especificidad que .field__hint solo) para que
+   gane su margen con los lados: si no, .field__hint (más abajo en este mismo
+   archivo) se lo pisa y queda sin margen izquierdo/derecho. */
+.field__hint.tpl-list__aviso-sync { margin: 12px 18px 4px; }
 
 .searchbox {
   margin: 12px 14px 6px;
@@ -209,6 +215,14 @@ select.badge--select {
 .btn--danger { background: var(--btn-danger-bg); color: var(--btn-danger-fg); }
 .btn--danger-ghost { background: transparent; color: var(--danger-fg); border: 1px solid var(--danger-fg); }
 .btn--danger-ghost:hover { background: var(--danger-bg); }
+
+.btn:disabled,
+.btn[disabled],
+button:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+  filter: none;
+}
 
 /* Todos los botones muestran un contorno al pasar el ratón. */
 .btn:hover,
@@ -346,6 +360,31 @@ button:disabled:hover { outline: none; }
   color: #53bdeb;
   letter-spacing: -2px;
 }
+
+.bubble__botones {
+  align-self: flex-start;
+  width: 85%;
+  max-width: 85%;
+  margin-top: 1px;
+  background: var(--chat-out);
+  border-radius: 0 0 10px 10px;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, .1);
+  overflow: hidden;
+}
+.bubble__botones:empty { display: none; }
+.bubble__boton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 10px;
+  font-size: .85rem;
+  font-weight: 500;
+  color: #00a5f4;
+  text-align: center;
+  border-top: 1px solid rgba(0, 0, 0, .08);
+}
+.bubble__boton i { font-size: .8em; }
 
 .wildcards {
   display: flex;

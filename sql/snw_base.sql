@@ -111,7 +111,6 @@ INSERT IGNORE INTO configuracion (clave, valor) VALUES
   ('url_base', ''),
   ('call_center_url', 'https://saludmentalparatodos.cl/telefonosmpt.php'),
   ('call_center_numeros', ''),
-  ('call_center_auto_segundos', '4'),
   ('call_center_boton_mensaje', 'Hola, estoy interesado/a en la información que me enviaron.'),
   ('call_center_boton_mensaje_oferta', 'Hola, estoy interesado/a en la oferta que me enviaron.'),
   -- Correo (confirmación de envíos en producción)

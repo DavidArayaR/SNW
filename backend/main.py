@@ -117,15 +117,22 @@ def _validar_categoria_template(valor: str | None) -> str:
         )
     return cat
 
-# Plantillas de call center: el mensaje que se envía a un paciente interesado.
-# El número al que lleva el botón se pide en cada respuesta a `call_center_url`
-# (con respaldo manual en `call_center_numeros`), ambas en Configuración; estas
-# plantillas solo definen el texto, el botón y cuál se usa para el envío automático.
+# Mensaje de call center: se manda automáticamente 1s después de detectar
+# interés (ver CALL_CENTER_AUTO_SEGUNDOS más abajo). No es editable: es un
+# texto fijo con un botón al call center. El número al que lleva el botón se
+# pide en cada respuesta a `call_center_url` (con respaldo manual en
+# `call_center_numeros`), ambas configurables en Configuración.
 CALL_CENTER_CLAVE = "call_center"
 CALL_CENTER_TEXTO_DEFAULT = (
     "¡Hola {nombre}! Gracias por tu interés. Nuestro equipo de atención te "
     "puede ayudar directamente por WhatsApp."
 )
+CALL_CENTER_PLANTILLA_FIJA = {
+    "clave": CALL_CENTER_CLAVE,
+    "texto": CALL_CENTER_TEXTO_DEFAULT,
+    "cc_boton": True,
+    "cc_boton_texto": "Ir al call center",
+}
 
 
 class PlantillaIn(BaseModel):
@@ -801,15 +808,17 @@ def envios_de_usuario(usuario: str, sesion: dict = Depends(solo_admin)):
 
 @app.get("/api/usuarios/{usuario}/auditoria")
 def auditoria_de_usuario(usuario: str, sesion: dict = Depends(solo_admin)):
-    """Trazabilidad de la cuenta: quién la invitó, quién le cambió permisos/rol/
-    acceso, quién le asignó un correo de recuperación o le activó el cambio de
-    contraseña, y (si se borró) quién la eliminó. De solo lectura, igual que
-    «Envíos realizados»: no aplican las reglas de «quién gestiona a quién»."""
+    """Trazabilidad de la cuenta: qué hizo (a quién invitó, a quién le cambió
+    permisos/rol/acceso, a quién le asignó un correo de recuperación o le
+    activó el cambio de contraseña, qué plantilla creó, etc.). Se guarda en
+    la cuenta que HIZO la acción, no en la que la recibió. De solo lectura,
+    igual que «Envíos realizados»: no aplican las reglas de «quién gestiona a
+    quién»."""
     obj = usuario_buscar(usuario)
     correo = (usuario or "").strip().lower()
-    if obj is None and not auditoria_listar(correo, limite=1):
+    if obj is None and not auditoria_listar(correo, limite=1, campo="actor"):
         raise HTTPException(404, detail="Usuario no encontrado.")
-    filas = auditoria_listar(correo)
+    filas = auditoria_listar(correo, campo="actor")
     for f in filas:
         f["fecha"] = f.pop("fecha_hora").strftime("%d-%m-%Y %H:%M")
     return filas
@@ -833,10 +842,23 @@ def eliminar_usuario(usuario: str, sesion: dict = Depends(solo_admin)):
     return {"ok": True}
 
 
+def _plantilla_valida(p) -> bool:
+    """Descarta entradas rotas (ej. ediciones manuales de plantillas.json que
+    dejan un objeto a medias): hace falta id, nombre y texto como mínimo."""
+    return (
+        isinstance(p, dict)
+        and p.get("id") is not None
+        and bool(str(p.get("nombre") or "").strip())
+        and bool(str(p.get("texto") or "").strip())
+    )
+
+
 def leer_plantillas() -> list:
     try:
         datos = json.loads(DATA_FILE.read_text(encoding="utf-8"))
-        return datos if isinstance(datos, list) else []
+        if not isinstance(datos, list):
+            return []
+        return [p for p in datos if _plantilla_valida(p)]
     except FileNotFoundError:
         return []
     except Exception as e:
@@ -851,27 +873,6 @@ def escribir_plantillas(datos: list) -> None:
     )
 
 
-def plantillas_call_center() -> list[dict]:
-    return [p for p in leer_plantillas() if p.get("especial") == CALL_CENTER_CLAVE]
-
-
-def _asegurar_plantilla_call_center() -> None:
-    """Crea una plantilla de call center inicial si no hay ninguna."""
-    plantillas = leer_plantillas()
-    if any(p.get("especial") == CALL_CENTER_CLAVE for p in plantillas):
-        return
-    plantillas.append({
-        "id": max((p.get("id", 0) for p in plantillas), default=0) + 1,
-        "clave": CALL_CENTER_CLAVE,
-        "nombre": "Mensaje para paciente interesado (call center)",
-        "texto": CALL_CENTER_TEXTO_DEFAULT,
-        "especial": CALL_CENTER_CLAVE,
-        "actualizada": int(time.time() * 1000),
-    })
-    escribir_plantillas(plantillas)
-
-
-_asegurar_plantilla_call_center()
 
 
 def slug(texto: str) -> str:
@@ -1382,30 +1383,29 @@ def _mensaje_boton_call_center(paciente_id, ambiente: str) -> str:
     return oferta if _CC_PALABRAS_OFERTA.search(texto_origen) else generico
 
 
-def _cc_datos_envio(plantilla: dict, pac: dict, ambiente: str) -> tuple[str, dict, str]:
-    """Devuelve (texto renderizado, datos_plantilla, numero_asignado). Añade el
-    botón que abre el chat del call center si la plantilla lo pide y hay al
-    menos un número configurado; el número se elige por menor uso. El botón lleva
-    un mensaje autocompletado según lo que decía la última plantilla enviada."""
-    texto = renderizar_mensaje(plantilla.get("texto", ""), pac)
+def _cc_datos_envio(pac: dict, ambiente: str) -> tuple[str, dict, str]:
+    """Devuelve (texto renderizado, datos_plantilla, numero_asignado) para el
+    mensaje fijo de call center. Añade el botón que abre el chat del call
+    center si hay al menos un número configurado; el número se elige por
+    menor uso. El botón lleva un mensaje autocompletado según lo que decía la
+    última plantilla enviada."""
+    texto = renderizar_mensaje(CALL_CENTER_PLANTILLA_FIJA["texto"], pac)
     datos = {"texto": texto}
-    numero = ""
-    if plantilla.get("cc_boton"):
-        numero = _elegir_numero_call_center()
-        if numero:
-            url = f"https://wa.me/{numero}"
-            prefijo = _mensaje_boton_call_center(pac.get("id"), ambiente)
-            if prefijo:
-                url += "?text=" + urllib.parse.quote(prefijo, safe="")
-            datos["cta"] = {
-                "texto": (plantilla.get("cc_boton_texto") or "Ir al call center")[:20],
-                "url": url,
-            }
+    numero = _elegir_numero_call_center()
+    if numero:
+        url = f"https://wa.me/{numero}"
+        prefijo = _mensaje_boton_call_center(pac.get("id"), ambiente)
+        if prefijo:
+            url += "?text=" + urllib.parse.quote(prefijo, safe="")
+        datos["cta"] = {
+            "texto": CALL_CENTER_PLANTILLA_FIJA["cc_boton_texto"][:20],
+            "url": url,
+        }
     return texto, datos, numero
 
 
-def _despachar_call_center(pac: dict, ambiente: str, plantilla: dict, automatico: bool = False) -> dict:
-    """Envía la plantilla de call center a un paciente y lo registra en el
+def _despachar_call_center(pac: dict, ambiente: str) -> dict:
+    """Envía el mensaje fijo de call center a un paciente y lo registra en el
     historial y en call_center_log. Devuelve {ok, error, telefono}. No lanza."""
     telefono = normalizar_telefono((pac.get("telefono") or "").strip())
     if telefono is None:
@@ -1416,7 +1416,7 @@ def _despachar_call_center(pac: dict, ambiente: str, plantilla: dict, automatico
         return {"ok": False, "error": "El número no está autorizado en la base de desarrollo", "telefono": telefono}
 
     nombre = " ".join(x for x in [pac.get("nombre"), pac.get("apellido")] if x)
-    texto, datos_plantilla, numero_cc = _cc_datos_envio(plantilla, pac, ambiente)
+    texto, datos_plantilla, numero_cc = _cc_datos_envio(pac, ambiente)
 
     canal = obtener_canal(cfg)
     try:
@@ -1435,19 +1435,10 @@ def _despachar_call_center(pac: dict, ambiente: str, plantilla: dict, automatico
                         whatsapp_message_id=message_id)
     if numero_cc:
         _registrar_call_center_log(
-            pac.get("id"), nombre, telefono, numero_cc, plantilla.get("clave"),
-            automatico, "enviado" if ok else "error", error, nombre_base(ambiente),
+            pac.get("id"), nombre, telefono, numero_cc, CALL_CENTER_CLAVE,
+            True, "enviado" if ok else "error", error, nombre_base(ambiente),
         )
     return {"ok": ok, "error": error, "telefono": telefono, "numero_call_center": numero_cc}
-
-
-def _plantilla_call_center_auto() -> dict | None:
-    """La plantilla de call center que se usa para el envío automático: la
-    marcada con `cc_auto`, o la más antigua si ninguna lo está."""
-    ccs = plantillas_call_center()
-    if not ccs:
-        return None
-    return next((p for p in ccs if p.get("cc_auto")), None) or min(ccs, key=lambda p: p.get("id", 0))
 
 
 # Teléfonos con un envío automático de call center ya programado o en curso: si
@@ -1458,17 +1449,14 @@ _cc_auto_pendientes: set[str] = set()
 
 
 def _enviar_call_center_auto(tel: str) -> None:
-    """Timer: envía el mensaje de call center al paciente interesado cuyo número
-    coincide, en la(s) base(s) donde esté marcado como interesado.
+    """Timer: envía el mensaje fijo de call center al paciente interesado cuyo
+    número coincide, en la(s) base(s) donde esté marcado como interesado.
 
     Se manda **una vez por cada plantilla que se le envía**: si desde el último
     call center hubo un nuevo envío de plantilla y el paciente vuelve a mostrar
     interés, se le manda otro. Si ya recibió el call center después del último
     envío de plantilla, no se repite."""
     try:
-        plantilla = _plantilla_call_center_auto()
-        if plantilla is None:
-            return
         match = "REPLACE(REPLACE(telefono, '+', ''), ' ', '') = REPLACE(REPLACE(%s, '+', ''), ' ', '')"
         for amb in ("produccion", "desarrollo"):
             try:
@@ -1496,7 +1484,7 @@ def _enviar_call_center_auto(tel: str) -> None:
                     # último envío de plantilla): no se repite.
                     if ult_cc is not None and (ult_plantilla is None or ult_cc > ult_plantilla):
                         continue
-                res = _despachar_call_center(pac, amb, plantilla, automatico=True)
+                res = _despachar_call_center(pac, amb)
                 if res.get("ok"):
                     print(f"[CALL-CENTER auto] enviado a {res['telefono']} ({amb})"
                           + (f" · call center {res['numero_call_center']}" if res.get("numero_call_center") else ""),
@@ -1510,21 +1498,19 @@ def _enviar_call_center_auto(tel: str) -> None:
             _cc_auto_pendientes.discard(tel)
 
 
+CALL_CENTER_AUTO_SEGUNDOS = 1  # espera fija: siempre da tiempo a que quede feedback perceptible.
+
+
 def _programar_call_center_auto(telefono: str) -> None:
-    """Callback del webhook: programa el envío automático tras unos segundos.
-    Si ya hay uno programado para este número, no programa otro."""
-    try:
-        segundos = int(config_get("call_center_auto_segundos", "10") or 0)
-    except (TypeError, ValueError):
-        segundos = 10
-    if segundos <= 0:
-        return
+    """Callback del webhook: programa el envío automático 1s después de
+    detectar interés. Si ya hay uno programado para este número, no programa
+    otro."""
     tel = normalizar_telefono(telefono) or telefono
     with _cc_auto_lock:
         if tel in _cc_auto_pendientes:
             return
         _cc_auto_pendientes.add(tel)
-    timer = threading.Timer(segundos, _enviar_call_center_auto, args=(tel,))
+    timer = threading.Timer(CALL_CENTER_AUTO_SEGUNDOS, _enviar_call_center_auto, args=(tel,))
     timer.daemon = True
     timer.start()
 
@@ -1533,38 +1519,74 @@ def _programar_call_center_auto(telefono: str) -> None:
 whatsapp_service.al_detectar_interes = _programar_call_center_auto
 
 
-@app.post("/api/pacientes/{paciente_id}/call-center")
-def enviar_call_center(paciente_id: int, ambiente: str = Query("produccion"),
-                       plantilla_id: int | None = Query(None),
-                       sesion: dict = Depends(exigir("call_center"))):
-    """Envía a mano a un paciente interesado una plantilla de call center. Si
-    hay varias plantillas hay que indicar `plantilla_id`."""
-    t = tabla_pacientes(ambiente)
-    cols = columnas_tabla(t, ambiente)
-    with conectar(ambiente) as conn, conn.cursor() as cur:
-        cur.execute(f"SELECT * FROM {t} WHERE id = %s", (paciente_id,))
-        pac = cur.fetchone()
-    if not pac:
-        raise HTTPException(404, detail="Paciente no encontrado")
-    if "interesado" in cols and not pac.get("interesado"):
-        raise HTTPException(400, detail="El paciente no está marcado como interesado")
+_MENSAJE_BAJA_DESPEDIDA = (
+    "Lamentamos que te vayas. Si quieres, puedes reactivar las notificaciones"
+    " en cualquier momento escribiendo cualquier mensaje."
+)
+_MENSAJE_BIENVENIDA_DEVUELTA = "¡Bienvenido/a de vuelta! Ya reactivamos tus notificaciones."
 
-    ccs = plantillas_call_center()
-    if not ccs:
-        raise HTTPException(400, detail="No hay ninguna plantilla de call center configurada")
-    if plantilla_id is not None:
-        plantilla = next((p for p in ccs if p["id"] == plantilla_id), None)
-        if plantilla is None:
-            raise HTTPException(404, detail="Plantilla de call center no encontrada")
-    elif len(ccs) == 1:
-        plantilla = ccs[0]
-    else:
-        raise HTTPException(400, detail="Hay varias plantillas de call center: elige una")
 
-    res = _despachar_call_center(pac, ambiente, plantilla)
-    if not res.get("ok"):
-        raise HTTPException(502, detail=res.get("error") or "No se pudo enviar el mensaje")
-    return {"ok": True, "telefono": res.get("telefono")}
+def _enviar_mensaje_directo(telefono_evento: str, texto: str, clave_log: str) -> None:
+    """Manda un mensaje de texto libre (respuesta inmediata, dentro de la
+    ventana de 24h) al paciente que coincide con este teléfono, en la(s)
+    base(s) donde exista. Se usa para los avisos automáticos de baja y
+    retractación: no dependen de un template aprobado por Meta porque son
+    respuesta inmediata a un mensaje del propio paciente."""
+    tel = normalizar_telefono(telefono_evento) or telefono_evento
+    match = "REPLACE(REPLACE(telefono, '+', ''), ' ', '') = REPLACE(REPLACE(%s, '+', ''), ' ', '')"
+    for amb in ("produccion", "desarrollo"):
+        try:
+            t = tabla_pacientes(amb)
+            with conectar(amb) as conn, conn.cursor() as cur:
+                cur.execute(f"SELECT * FROM {t} WHERE {match} LIMIT 1", (tel,))
+                pac = cur.fetchone()
+            if not pac:
+                continue
+            cfg = leer_config(amb)
+            if entorno_valido(amb) == "desarrollo" and tel not in set(cfg.get("numeros_autorizados", [])):
+                continue
+            nombre = " ".join(x for x in [pac.get("nombre"), pac.get("apellido")] if x)
+            canal = obtener_canal(cfg)
+            try:
+                resultado = canal.enviar(tel, texto)
+            except Exception as e:
+                log_error(f"_enviar_mensaje_directo(pac={pac.get('id')}, {amb})", e)
+                resultado = (False, None, f"Error inesperado: {e}")
+            if len(resultado) == 3:
+                ok, message_id, error = resultado
+            else:
+                ok, error = resultado
+                message_id = None
+            registrar_historial(pac.get("id"), nombre, tel, clave_log, texto,
+                                "enviado" if ok else "error", error, ambiente=amb,
+                                whatsapp_message_id=message_id)
+        except Exception as e:
+            log_error(f"_enviar_mensaje_directo({telefono_evento}, {amb})", e)
+
+
+def _avisar_baja(telefono: str) -> None:
+    _enviar_mensaje_directo(telefono, _MENSAJE_BAJA_DESPEDIDA, "baja_aviso")
+
+
+def _avisar_retractacion(telefono: str) -> None:
+    _enviar_mensaje_directo(telefono, _MENSAJE_BIENVENIDA_DEVUELTA, "retractacion_aviso")
+
+
+def _programar_aviso(fn, telefono: str) -> None:
+    """El webhook (endpoint async) llama a estos callbacks de forma síncrona,
+    dentro del event loop en curso; MotorApiOficial.enviar usa asyncio.run()
+    por dentro, que no se puede anidar en un loop ya corriendo. Igual que el
+    auto-envío de call center (_programar_call_center_auto), se despacha en
+    un hilo aparte para salir del event loop."""
+    timer = threading.Timer(0, fn, args=(telefono,))
+    timer.daemon = True
+    timer.start()
+
+
+# El webhook llama a estos callbacks al detectar una baja (por botón o texto
+# libre) y al detectar que un paciente dado de baja volvió a escribir.
+whatsapp_service.al_detectar_baja = lambda tel: _programar_aviso(_avisar_baja, tel)
+whatsapp_service.al_detectar_retractacion = lambda tel: _programar_aviso(_avisar_retractacion, tel)
 
 
 def _registrar_template_meta(p: dict, nombre_anterior: str | None = None,
@@ -1804,8 +1826,11 @@ def _clave_libre(base: str, ocupadas: set) -> str:
 
 
 @app.post("/api/plantillas/sincronizar-meta")
-def sincronizar_plantillas_meta(sesion: dict = Depends(exigir("plantillas_editar"))):
-    """Meta es la fuente de verdad para los templates: esta cuenta no tiene
+def sincronizar_plantillas_meta(sesion: dict = Depends(exigir("mensajeria"))):
+    """Solo lee de Meta (no crea ni edita nada allá), así que no hace falta
+    el permiso de edición de plantillas: alcanza con poder ver Mensajería.
+
+    Meta es la fuente de verdad para los templates: esta cuenta no tiene
     permiso para crear/editar templates vía API, así que se gestionan a mano
     en Meta y aquí solo se leen (GET). Esta acción:
       - Actualiza el estado/id/categoría de las plantillas locales que ya
@@ -1930,10 +1955,17 @@ def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(exigir("plantillas
         "whatsapp_template_lang": (body.whatsapp_template_lang or "").strip() or None,
         "whatsapp_template_categoria": categoria,
         "actualizada": int(time.time() * 1000),
+        "creado_por": sesion.get("usuario", ""),
+        "creada_en": int(time.time() * 1000),
     }
     nueva = _registrar_template_meta(nueva)
     plantillas.append(nueva)
     escribir_plantillas(plantillas)
+    # Trazabilidad: queda en la Actividad de quien la creó (Usuarios ->
+    # cuenta -> Actividad, filtrado por actor), igual que las acciones sobre
+    # cuentas. Acá el "objetivo" es la plantilla, no otra cuenta.
+    auditoria_registrar(sesion.get("usuario", ""), "plantilla_creada", nueva["clave"],
+                        f"Creó la plantilla «{nueva['nombre']}»")
     return nueva
 
 
@@ -1947,12 +1979,13 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
     plantillas = leer_plantillas()
     for p in plantillas:
         if p["id"] == plantilla_id:
-            # Las plantillas de call center se gestionan desde el Historial
-            # (endpoints /api/plantillas/call-center), no desde aquí.
+            # El mensaje de call center es fijo (CALL_CENTER_PLANTILLA_FIJA):
+            # no es editable desde ningún lado. Esto solo protege registros
+            # antiguos que pudieran quedar marcados como 'especial'.
             if p.get("especial"):
                 raise HTTPException(
                     400,
-                    detail="Las plantillas de call center se editan desde la sección del Historial.",
+                    detail="El mensaje de call center no es editable.",
                 )
             # Mientras esté pendiente de revisión en Meta la plantilla queda de
             # solo lectura (ver también DELETE y el envío); aprobada o
@@ -1963,6 +1996,20 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
                     detail="Esta plantilla todavía está pendiente de revisión en Meta: no se puede "
                            "editar hasta que se apruebe o sea rechazada.",
                 )
+            # Meta solo permite editar un template una vez cada 24h. Se avisa
+            # antes de intentarlo en vez de dejar que falle allá.
+            ultima_edicion = p.get("ultima_edicion")
+            if ultima_edicion:
+                transcurrido_ms = int(time.time() * 1000) - ultima_edicion
+                restante_ms = 24 * 3600 * 1000 - transcurrido_ms
+                if restante_ms > 0:
+                    horas_restantes = math.ceil(restante_ms / 3600000)
+                    raise HTTPException(
+                        400,
+                        detail=f"Esta plantilla se editó hace menos de 24 horas (Meta solo permite "
+                               f"editar un template una vez al día): se podrá editar de nuevo en "
+                               f"{horas_restantes} hora{'s' if horas_restantes != 1 else ''}.",
+                    )
             # La categoría del template es obligatoria para poder guardar.
             categoria = _validar_categoria_template(body.whatsapp_template_categoria)
             # El nombre es permanente: una vez creada la plantilla no se puede
@@ -1983,6 +2030,7 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
             p["whatsapp_template_lang"] = (body.whatsapp_template_lang or "").strip() or None
             p["whatsapp_template_categoria"] = categoria
             p["actualizada"] = int(time.time() * 1000)
+            p["ultima_edicion"] = p["actualizada"]
             p = _registrar_template_meta(p, nombre_template_anterior, lang_anterior, template_id_anterior)
             escribir_plantillas(plantillas)
             return p
@@ -1999,7 +2047,7 @@ def eliminar_plantilla(plantilla_id: int, sesion: dict = Depends(exigir("plantil
     if objetivo.get("especial"):
         raise HTTPException(
             400,
-            detail="Las plantillas de call center se eliminan desde la sección del Historial.",
+            detail="El mensaje de call center no se puede eliminar desde acá.",
         )
     if objetivo.get("whatsapp_template_status") not in ESTADOS_TEMPLATE_EDITABLES:
         raise HTTPException(
@@ -2030,51 +2078,9 @@ def eliminar_plantilla(plantilla_id: int, sesion: dict = Depends(exigir("plantil
     return {"ok": True, "meta_borrado": borrado_meta, "meta_advertencia": aviso_meta}
 
 
-# --- Plantillas de call center (se gestionan desde el Historial) ---------------
-# Son plantillas normales con especial = 'call_center': se editan con nombre y
-# texto libres, no tienen template de Meta y no entran en los envíos masivos.
-
-class PlantillaCCIn(BaseModel):
-    nombre: str
-    texto: str
-    boton: bool = True          # incluir botón que abre el chat del call center
-    boton_texto: str = "Ir al call center"
-    auto: bool = False          # usar esta como respuesta automática al interés
-
-
-def _valida_texto_cc(nombre: str, texto: str) -> None:
-    if not nombre.strip() or not texto.strip():
-        raise HTTPException(400, detail="Nombre y mensaje son obligatorios")
-    if len(texto) > MAX_TEXTO_PLANTILLA:
-        raise HTTPException(400, detail=f"El mensaje supera el limite de {MAX_TEXTO_PLANTILLA} caracteres")
-
-
-def _cc_campos(body: PlantillaCCIn) -> dict:
-    return {
-        "cc_boton": bool(body.boton),
-        "cc_boton_texto": (body.boton_texto or "Ir al call center").strip()[:20],
-        "cc_auto": bool(body.auto),
-    }
-
-
-@app.get("/api/plantillas/call-center")
-def listar_plantillas_cc(sesion: dict = Depends(exigir("call_center"))):
-    ccs = sorted(plantillas_call_center(), key=lambda p: p.get("actualizada", 0), reverse=True)
-    # Marca cuál se usaría en el envío automático (la marcada, o la más antigua).
-    auto = _plantilla_call_center_auto()
-    for p in ccs:
-        p["es_auto_efectiva"] = bool(auto and p.get("id") == auto.get("id"))
-    try:
-        segundos = int(config_get("call_center_auto_segundos", "10") or 0)
-    except (TypeError, ValueError):
-        segundos = 10
-    return {
-        "plantillas": ccs,
-        "call_center_url": (config_get("call_center_url", "") or "").strip(),
-        "numeros_respaldo": _call_center_numeros(),
-        "auto_segundos": segundos,
-    }
-
+# --- Registro de respuestas de call center (solo lectura) ----------------------
+# El mensaje de call center es fijo (CALL_CENTER_PLANTILLA_FIJA) y no se edita
+# desde la app; solo queda su historial de envíos acá.
 
 @app.get("/api/call-center/log")
 def obtener_call_center_log(sesion: dict = Depends(exigir("call_center_registro"))):
@@ -2100,68 +2106,6 @@ def obtener_call_center_log(sesion: dict = Depends(exigir("call_center_registro"
     except Exception as e:
         log_error("obtener_call_center_log", e)
     return {"entradas": entradas, "contadores": _contadores_call_center()}
-
-
-@app.post("/api/plantillas/call-center", status_code=201)
-def crear_plantilla_cc(body: PlantillaCCIn, sesion: dict = Depends(exigir("call_center"))):
-    _valida_texto_cc(body.nombre, body.texto)
-    campos = _cc_campos(body)
-    plantillas = leer_plantillas()
-    claves = {p["clave"] for p in plantillas}
-    base = slug(body.nombre) or CALL_CENTER_CLAVE
-    clave = base if base not in claves else _clave_libre(base, claves)
-    if campos["cc_auto"]:
-        for p in plantillas:
-            if p.get("especial") == CALL_CENTER_CLAVE:
-                p["cc_auto"] = False
-    nueva = {
-        "id": max((p.get("id", 0) for p in plantillas), default=0) + 1,
-        "clave": clave,
-        "nombre": body.nombre.strip(),
-        "texto": body.texto,
-        "especial": CALL_CENTER_CLAVE,
-        "actualizada": int(time.time() * 1000),
-        **campos,
-    }
-    plantillas.append(nueva)
-    escribir_plantillas(plantillas)
-    return nueva
-
-
-@app.put("/api/plantillas/call-center/{plantilla_id}")
-def actualizar_plantilla_cc(plantilla_id: int, body: PlantillaCCIn, sesion: dict = Depends(exigir("call_center"))):
-    _valida_texto_cc(body.nombre, body.texto)
-    campos = _cc_campos(body)
-    plantillas = leer_plantillas()
-    objetivo = next(
-        (p for p in plantillas if p["id"] == plantilla_id and p.get("especial") == CALL_CENTER_CLAVE),
-        None,
-    )
-    if objetivo is None:
-        raise HTTPException(404, detail="Plantilla de call center no encontrada")
-    if campos["cc_auto"]:
-        for p in plantillas:
-            if p.get("especial") == CALL_CENTER_CLAVE and p is not objetivo:
-                p["cc_auto"] = False
-    objetivo["nombre"] = body.nombre.strip()
-    objetivo["texto"] = body.texto
-    objetivo["actualizada"] = int(time.time() * 1000)
-    objetivo.update(campos)
-    escribir_plantillas(plantillas)
-    return objetivo
-
-
-@app.delete("/api/plantillas/call-center/{plantilla_id}")
-def eliminar_plantilla_cc(plantilla_id: int, sesion: dict = Depends(exigir("call_center"))):
-    plantillas = leer_plantillas()
-    objetivo = next(
-        (p for p in plantillas if p["id"] == plantilla_id and p.get("especial") == CALL_CENTER_CLAVE),
-        None,
-    )
-    if objetivo is None:
-        raise HTTPException(404, detail="Plantilla de call center no encontrada")
-    escribir_plantillas([p for p in plantillas if p["id"] != plantilla_id])
-    return {"ok": True}
 
 
 def leer_config(ambiente: str | None = None) -> dict:
@@ -2371,9 +2315,6 @@ _CONFIG_SECCIONES = [
              "ayuda": "Uno o varios, separados por coma, con código de país y sin «+». "
                       "Ej: 56912345678, 56987654321. Solo se usan si la URL de números no "
                       "responde; si hay varios se elige el menos usado."},
-            {"clave": "call_center_auto_segundos", "etiqueta": "Envío automático · segundos de espera", "tipo": "number",
-             "ayuda": "Cuando un paciente responde que le interesa, se le manda la plantilla de call "
-                      "center automáticamente tras estos segundos. 0 = desactivado."},
             {"clave": "call_center_boton_mensaje", "etiqueta": "Mensaje del botón (genérico)", "tipo": "text",
              "ayuda": "Texto que se autocompleta en el chat del call center cuando el paciente pulsa "
                       "el botón. Déjalo vacío para no autocompletar nada."},
@@ -2413,7 +2354,7 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
         v = "" if valor is None else str(valor).strip()
         if clave in _CONFIG_ENUM and v not in _CONFIG_ENUM[clave]:
             raise HTTPException(400, detail=f"«{clave}»: usa uno de {', '.join(_CONFIG_ENUM[clave])}")
-        if clave in ("intervalo_ms", "smtp_port", "call_center_auto_segundos",
+        if clave in ("intervalo_ms", "smtp_port",
                      "wa_rate_limit_umbral_pct", "wa_rate_limit_pausa_max_s",
                      "wa_rate_limit_espera_defecto_s", "wa_rate_limit_reintentos",
                      "wa_throughput_mps", "wa_messaging_limit_24h", "sesion_expira_horas",
@@ -2908,7 +2849,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
     if plantilla.get("especial"):
         raise HTTPException(
             400,
-            detail="Esta plantilla solo se puede enviar a un paciente interesado, desde el Historial.",
+            detail="El mensaje de call center se manda solo, automáticamente, a los pacientes interesados.",
         )
     if plantilla.get("whatsapp_template_status") != "APPROVED":
         raise HTTPException(
@@ -2941,7 +2882,19 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
             else:
                 cond = []
                 if tiene_estado:
-                    cond.append("p.estado = 'pendiente'")
+                    partes_estado = ["p.estado = 'pendiente'"]
+                    # Los que respondieron "me interesa" / "no me interesa" a una
+                    # oferta vuelven a ser elegibles al cabo de una semana.
+                    if columna_existe(t, "interes_fecha", amb):
+                        cols_t = columnas_tabla(t, amb)
+                        partes_interes = [c for c in ("interesado", "no_interesado") if c in cols_t]
+                        if partes_interes:
+                            partes_estado.append(
+                                "((" + " OR ".join(f"p.{c} = 1" for c in partes_interes) + ")"
+                                " AND p.interes_fecha IS NOT NULL"
+                                " AND p.interes_fecha < DATE_SUB(NOW(), INTERVAL 7 DAY))"
+                            )
+                    cond.append("(" + " OR ".join(partes_estado) + ")")
                 if tiene_opt_out:
                     cond.append("p.whatsapp_opt_out = 0")
                 if cond:

@@ -1,7 +1,7 @@
 /* Página de Configuración (solo admin) */
 
 .config-intro {
-  margin: 4px 0 18px;
+  margin: 4px 18px 18px;
   font-size: .88rem;
   color: var(--texto-suave);
   line-height: 1.5;

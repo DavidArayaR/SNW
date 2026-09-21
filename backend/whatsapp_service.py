@@ -12,6 +12,7 @@ o desde el router de webhook.
 import asyncio
 import hashlib
 import re
+from datetime import datetime
 
 import httpx
 
@@ -47,12 +48,46 @@ BAJA_FRASES = (
     "no quiero recibir", "no deseo recibir", "no quiero mas mensajes",
     "no me manden", "no me envien", "no enviar mas", "dejen de enviar",
     "dejar de recibir", "dejen de mandar", "no molestar", "no me contacten",
-    "no me interesa", "ya no quiero", "no quiero saber", "borrame", "borrenme",
+    "ya no quiero", "no quiero saber", "borrame", "borrenme",
     "sacame de", "sacarme de", "no quiero que me escriban",
     "quitar de la lista", "sacar de la lista", "borrar mi numero", "eliminar mi numero",
     "detener promociones", "detener promo", "stop promotions", "no promociones",
     "cancelar suscripcion", "cancelar suscripción",
 )
+
+# Mensajes que niegan interés en la oferta puntual ("no me interesa", "no
+# estoy interesada"…). A diferencia de una baja, el paciente sigue pudiendo
+# recibir futuras plantillas (ver _registrar_no_interes). Si el mismo mensaje
+# también encaja como baja explícita (arriba), gana la baja.
+NO_INTERES_EXACTAS = (
+    "no me interesa", "no interesa", "no interesado", "no interesada",
+    "no estoy interesado", "no estoy interesada",
+)
+NO_INTERES_FRASES = (
+    "no me interesa", "no me interesaria", "no me interesaría",
+    "no estoy interesad", "no esta interesad", "no está interesad",
+    "ya no me interesa", "ya no estoy interesad", "sigo sin interes",
+    "no tengo interes", "no tengo interés", "no me llama la atencion",
+    "no me llama la atención",
+)
+# Respaldo: cualquier negación cerca de una forma del verbo "interesar"
+# ("no", "nunca", "jamás", "tampoco"… seguido de "interesa/interesado/…").
+_RE_NO_INTERESAR = re.compile(
+    r"\b(no+|nunca|jamas|jamás|tampoco)\b[^.!?\n]{0,20}"
+    r"\binteres(a|an|ada|ado|adas|ados|aria|aría|arme|e|o|ó)\b"
+)
+
+
+def es_mensaje_no_interes(texto: str) -> bool:
+    """True si el mensaje niega interés en la oferta puntual (no es una baja:
+    el paciente sigue pudiendo recibir futuras plantillas)."""
+    t = re.sub(r"[^\wáéíóúñ\s]", " ", (texto or "").lower())
+    t = re.sub(r"\s+", " ", t).strip()
+    if not t:
+        return False
+    if t in NO_INTERES_EXACTAS or any(f in t for f in NO_INTERES_FRASES):
+        return True
+    return bool(_RE_NO_INTERESAR.search(t))
 
 # Mensajes del paciente que muestran interés / intención positiva. Se comparan
 # igual que las de baja (texto en minúsculas, sin signos). Si el mensaje también
@@ -117,6 +152,36 @@ ESTADO_WHATSAPP = {"sent", "delivered", "read", "failed"}
 # cuando el webhook detecta un mensaje de interés, para programar el envío
 # automático del mensaje de call center.
 al_detectar_interes = None
+
+# Callback opcional que main.py registra: se llama con el teléfono del paciente
+# cuando el webhook detecta que se dio de baja (por botón o por texto libre),
+# para mandarle el mensaje de despedida.
+al_detectar_baja = None
+
+# Callback opcional que main.py registra: se llama con el teléfono del paciente
+# cuando escribe estando dado de baja, para reactivarlo y mandarle un mensaje
+# de bienvenida de vuelta.
+al_detectar_retractacion = None
+
+# Texto exacto de los 3 botones de respuesta rápida que se agregan a toda
+# plantilla normal (no de call center). Los presses de estos botones se
+# identifican por su texto exacto, ANTES de pasar por los clasificadores de
+# texto libre (es_mensaje_interes/_es_baja) — importante porque "no me
+# interesa" ya es una de las BAJA_FRASES de arriba.
+BOTON_TEXTO_INTERES = "Me interesa"
+BOTON_TEXTO_NO_INTERES = "No me interesa"
+BOTON_TEXTO_BAJA = "Dar de baja"
+BOTONES_RESPUESTA = [
+    {"type": "QUICK_REPLY", "text": BOTON_TEXTO_INTERES},
+    {"type": "QUICK_REPLY", "text": BOTON_TEXTO_NO_INTERES},
+    {"type": "QUICK_REPLY", "text": BOTON_TEXTO_BAJA},
+]
+
+
+def _hoy_es() -> str:
+    """Fecha de hoy en formato dd-mm-aaaa, para los mensajes descriptivos de
+    interés/no-interés que quedan en el historial del paciente."""
+    return datetime.now().strftime("%d-%m-%Y")
 
 
 def _normalizar_telefono(crudo: str) -> str | None:
@@ -377,11 +442,15 @@ class WhatsAppService:
         if ejemplo:
             componente_body["example"] = {"body_text": [ejemplo]}
 
+        components = [componente_body]
+        if category != "AUTHENTICATION":
+            components.append({"type": "BUTTONS", "buttons": BOTONES_RESPUESTA})
+
         payload = {
             "name": nombre,
             "category": category,
             "language": lang,
-            "components": [componente_body],
+            "components": components,
         }
 
         try:
@@ -426,7 +495,11 @@ class WhatsAppService:
         if ejemplo:
             componente_body["example"] = {"body_text": [ejemplo]}
 
-        payload = {"category": categoria_real, "components": [componente_body]}
+        components = [componente_body]
+        if categoria_real != "AUTHENTICATION":
+            components.append({"type": "BUTTONS", "buttons": BOTONES_RESPUESTA})
+
+        payload = {"category": categoria_real, "components": components}
         aviso_categoria = None
         if categoria_real != category:
             aviso_categoria = (
@@ -442,7 +515,7 @@ class WhatsAppService:
             mensaje = (e.message or "").lower()
             if "categor" in mensaje:
                 # Último recurso: reintentar sin mandar el campo de categoría.
-                payload_sin_categoria = {"components": [componente_body]}
+                payload_sin_categoria = {"components": components}
                 try:
                     data = asyncio.run(self.cliente.editar_template(template_id, payload_sin_categoria))
                     aviso_categoria = (
@@ -728,11 +801,47 @@ class WhatsAppService:
             if not texto and not extra:
                 continue
             cuerpo = texto or extra
+
+            # Si el paciente escribe estando dado de baja (sea explícita o
+            # puesta a mano), se le reactivan las notificaciones antes de
+            # clasificar este mismo mensaje.
+            if self._estaba_opt_out(telefono):
+                self._registrar_retractacion(telefono)
+                acciones.append("retractacion")
+
             info = self._registrar_respuesta(telefono, cuerpo, mensaje.get("timestamp"))
             acciones.append(f"respuesta_{info}")
 
+            # Los 3 botones de la plantilla normal se identifican por su texto
+            # exacto, ANTES de pasar por los clasificadores de texto libre.
+            es_boton = tipo in ("button", "interactive")
+            boton = (texto or "").strip().casefold()
+            if es_boton and boton == BOTON_TEXTO_INTERES.casefold():
+                self._registrar_interes(telefono)
+                acciones.append("interes_boton")
+                if callable(al_detectar_interes):
+                    try:
+                        al_detectar_interes(telefono)
+                    except Exception as e:
+                        log_error(f"al_detectar_interes({telefono})", e)
+                continue
+            if es_boton and boton == BOTON_TEXTO_NO_INTERES.casefold():
+                self._registrar_no_interes(telefono)
+                acciones.append("no_interes_boton")
+                continue
+            if es_boton and boton == BOTON_TEXTO_BAJA.casefold():
+                self._registrar_baja(telefono)
+                acciones.append("baja_boton")
+                continue
+
             interes = es_mensaje_interes(cuerpo)
             baja = self._es_baja(texto) or self._es_baja(extra)
+            # "no me interesa" / "no estoy interesada"…: NO es una baja, el
+            # paciente sigue pudiendo recibir futuras plantillas. Una baja
+            # explícita en el mismo mensaje gana sobre esto.
+            no_interes = (not interes) and (not baja) and (
+                es_mensaje_no_interes(texto) or es_mensaje_no_interes(extra)
+            )
 
             if interes:
                 # El interés manda: si el paciente se había dado de baja y ahora
@@ -747,6 +856,9 @@ class WhatsAppService:
             elif baja:
                 self._registrar_baja(telefono)
                 acciones.append("baja")
+            elif no_interes:
+                self._registrar_no_interes(telefono)
+                acciones.append("no_interes")
         return acciones
 
     @staticmethod
@@ -807,17 +919,45 @@ class WhatsAppService:
     _TABLAS_PAC = (tabla_pacientes("desarrollo"), tabla_pacientes("produccion"))
 
     def _pacientes_con_tel(self, cur, telefono: str) -> list[dict]:
-        """Filas (id, nombre, telefono, tabla) de los pacientes cuyo teléfono
-        coincide, en ambas tablas (dev + prod). log_envios es compartida."""
+        """Filas (id, nombre, telefono, whatsapp_opt_out, tabla) de los
+        pacientes cuyo teléfono coincide, en ambas tablas (dev + prod).
+        log_envios es compartida."""
         match = _TEL_MATCH.format(col="telefono")
         hallados = []
         for t in self._TABLAS_PAC:
-            cur.execute(f"SELECT id, nombre, telefono FROM {t} WHERE {match} LIMIT 1", (telefono,))
+            cur.execute(
+                f"SELECT id, nombre, telefono, whatsapp_opt_out FROM {t} WHERE {match} LIMIT 1",
+                (telefono,),
+            )
             row = cur.fetchone()
             if row:
                 row["tabla"] = t
                 hallados.append(row)
         return hallados
+
+    def _estaba_opt_out(self, telefono: str) -> bool:
+        try:
+            with conectar() as conn, conn.cursor() as cur:
+                pacientes = self._pacientes_con_tel(cur, telefono)
+                return any(p.get("whatsapp_opt_out") for p in pacientes)
+        except Exception as e:
+            log_error(f"_estaba_opt_out({telefono})", e)
+            return False
+
+    def _ultima_plantilla_ofertada(self, cur, paciente_id) -> str | None:
+        """Clave de la última plantilla normal (no de sistema) que se le envió
+        realmente al paciente; sirve para registrar a qué oferta respondió."""
+        cur.execute(
+            "SELECT plantilla_clave FROM log_envios WHERE paciente_id = %s"
+            "  AND estado_envio = 'enviado'"
+            "  AND COALESCE(plantilla_clave, '') NOT IN"
+            "      ('respuesta', 'ajuste_manual', 'call_center', 'interes_boton',"
+            "       'no_interes_boton', 'baja_aviso', 'retractacion_aviso')"
+            " ORDER BY id DESC LIMIT 1",
+            (paciente_id,),
+        )
+        fila = cur.fetchone()
+        return (fila or {}).get("plantilla_clave") or None
 
     def _registrar_respuesta(self, telefono: str, texto: str, timestamp: str) -> str:
         match = _TEL_MATCH.format(col="telefono")
@@ -861,14 +1001,14 @@ class WhatsAppService:
                     cur.execute(f"UPDATE {p['tabla']} SET whatsapp_opt_out = 1 WHERE {match}", (telefono,))
                     # Baja pedida con sus propias palabras por WhatsApp: queda
                     # bloqueada para edición manual hasta que el paciente se
-                    # retracte (ver _registrar_interes).
+                    # retracte (ver _registrar_interes / _registrar_retractacion).
                     try:
                         cur.execute(f"UPDATE {p['tabla']} SET opt_out_explicito = 1 WHERE {match}", (telefono,))
                     except Exception:
                         pass  # esquema sin la columna
                     # Al darse de baja se quita la marca de interés (si la tenía).
                     try:
-                        cur.execute(f"UPDATE {p['tabla']} SET interesado = 0 WHERE {match}", (telefono,))
+                        cur.execute(f"UPDATE {p['tabla']} SET interesado = 0, no_interesado = 0 WHERE {match}", (telefono,))
                     except Exception:
                         pass  # esquema sin la columna
                     cur.execute(
@@ -879,10 +1019,17 @@ class WhatsAppService:
                 conn.commit()
         except Exception as e:
             log_error(f"_registrar_baja({telefono})", e)
+            return
+        if callable(al_detectar_baja):
+            try:
+                al_detectar_baja(telefono)
+            except Exception as e:
+                log_error(f"al_detectar_baja({telefono})", e)
 
-    def _registrar_interes(self, telefono: str) -> None:
-        """Marca al paciente como interesado y revierte cualquier baja previa
-        (opt-out, corrección manual y señal 'pegajosa' de baja en el historial)."""
+    def _registrar_retractacion(self, telefono: str) -> None:
+        """El paciente escribe estando dado de baja: se reactivan sus
+        notificaciones (sin tocar interesado/no_interesado), sin importar si
+        la baja fue explícita o puesta a mano por un admin/dev."""
         match = _TEL_MATCH.format(col="telefono")
         try:
             with conectar() as conn, conn.cursor() as cur:
@@ -890,14 +1037,49 @@ class WhatsAppService:
                 if not pacientes:
                     return
                 for p in pacientes:
-                    for sql in (
-                        f"UPDATE {p['tabla']} SET interesado = 1 WHERE {match}",
-                        f"UPDATE {p['tabla']} SET whatsapp_opt_out = 0 WHERE {match}",
+                    cur.execute(f"UPDATE {p['tabla']} SET whatsapp_opt_out = 0 WHERE {match}", (telefono,))
+                    try:
+                        cur.execute(f"UPDATE {p['tabla']} SET opt_out_explicito = 0 WHERE {match}", (telefono,))
+                    except Exception:
+                        pass  # esquema sin la columna
+                    cur.execute(
+                        "UPDATE log_envios SET respuesta = 'respondio'"
+                        " WHERE paciente_id = %s AND respuesta = 'baja'",
+                        (p["id"],),
+                    )
+                conn.commit()
+        except Exception as e:
+            log_error(f"_registrar_retractacion({telefono})", e)
+            return
+        if callable(al_detectar_retractacion):
+            try:
+                al_detectar_retractacion(telefono)
+            except Exception as e:
+                log_error(f"al_detectar_retractacion({telefono})", e)
+
+    def _registrar_interes(self, telefono: str) -> None:
+        """Marca al paciente como interesado y revierte cualquier baja previa
+        (opt-out, corrección manual y señal 'pegajosa' de baja en el historial).
+        Deja registrado a qué oferta/plantilla respondió, para el historial y
+        para volver a poder mandarle plantillas al cabo de una semana."""
+        match = _TEL_MATCH.format(col="telefono")
+        try:
+            with conectar() as conn, conn.cursor() as cur:
+                pacientes = self._pacientes_con_tel(cur, telefono)
+                if not pacientes:
+                    return
+                for p in pacientes:
+                    clave_oferta = self._ultima_plantilla_ofertada(cur, p["id"])
+                    for sql, params in (
+                        (f"UPDATE {p['tabla']} SET interesado = 1, no_interesado = 0 WHERE {match}", (telefono,)),
+                        (f"UPDATE {p['tabla']} SET whatsapp_opt_out = 0 WHERE {match}", (telefono,)),
                         # El propio paciente se retracta: se libera el bloqueo.
-                        f"UPDATE {p['tabla']} SET opt_out_explicito = 0 WHERE {match}",
+                        (f"UPDATE {p['tabla']} SET opt_out_explicito = 0 WHERE {match}", (telefono,)),
+                        (f"UPDATE {p['tabla']} SET interes_plantilla_clave = %s, interes_fecha = NOW() WHERE {match}",
+                         (clave_oferta, telefono)),
                     ):
                         try:
-                            cur.execute(sql, (telefono,))
+                            cur.execute(sql, params)
                         except Exception:
                             pass  # esquema sin esa columna
                     # Anula la señal 'pegajosa' de baja del historial del paciente.
@@ -906,9 +1088,57 @@ class WhatsAppService:
                         " WHERE paciente_id = %s AND respuesta = 'baja'",
                         (p["id"],),
                     )
+                # Una sola fila descriptiva (log_envios no distingue ambiente;
+                # mismo criterio que _registrar_respuesta, que también solo
+                # inserta con los datos del primer paciente encontrado).
+                p0 = pacientes[0]
+                clave_oferta0 = self._ultima_plantilla_ofertada(cur, p0["id"])
+                cur.execute(
+                    "INSERT INTO log_envios (envio_id, paciente_id, nombre_paciente, numero_telefono,"
+                    " mensaje, plantilla_clave, estado_envio, respuesta, descripcion_error)"
+                    " VALUES (NULL, %s, %s, %s, %s, 'interes_boton', 'enviado', 'respondio', NULL)",
+                    (p0["id"], p0["nombre"], p0["telefono"],
+                     f"Interesado en la oferta del {_hoy_es()}, plantilla '{clave_oferta0 or '—'}'."),
+                )
                 conn.commit()
         except Exception as e:
             log_error(f"_registrar_interes({telefono})", e)
+
+    def _registrar_no_interes(self, telefono: str) -> None:
+        """El paciente indicó (botón 'No me interesa') que esta oferta puntual
+        no le interesa: a diferencia de una baja, sigue pudiendo recibir
+        futuras plantillas (al cabo de una semana)."""
+        match = _TEL_MATCH.format(col="telefono")
+        try:
+            with conectar() as conn, conn.cursor() as cur:
+                pacientes = self._pacientes_con_tel(cur, telefono)
+                if not pacientes:
+                    return
+                for p in pacientes:
+                    clave_oferta = self._ultima_plantilla_ofertada(cur, p["id"])
+                    for sql, params in (
+                        (f"UPDATE {p['tabla']} SET no_interesado = 1, interesado = 0 WHERE {match}", (telefono,)),
+                        (f"UPDATE {p['tabla']} SET interes_plantilla_clave = %s, interes_fecha = NOW() WHERE {match}",
+                         (clave_oferta, telefono)),
+                    ):
+                        try:
+                            cur.execute(sql, params)
+                        except Exception:
+                            pass  # esquema sin esa columna
+                # Una sola fila descriptiva (log_envios no distingue ambiente;
+                # mismo criterio que _registrar_respuesta).
+                p0 = pacientes[0]
+                clave_oferta0 = self._ultima_plantilla_ofertada(cur, p0["id"])
+                cur.execute(
+                    "INSERT INTO log_envios (envio_id, paciente_id, nombre_paciente, numero_telefono,"
+                    " mensaje, plantilla_clave, estado_envio, respuesta, descripcion_error)"
+                    " VALUES (NULL, %s, %s, %s, %s, 'no_interes_boton', 'enviado', 'respondio', NULL)",
+                    (p0["id"], p0["nombre"], p0["telefono"],
+                     f"No interesado en la oferta del {_hoy_es()}, plantilla '{clave_oferta0 or '—'}'."),
+                )
+                conn.commit()
+        except Exception as e:
+            log_error(f"_registrar_no_interes({telefono})", e)
 
     def _actualizar_estado(self, message_id: str, estado: str, detalle_error: str | None = None) -> None:
         for ambiente in ("desarrollo", "produccion"):

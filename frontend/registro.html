@@ -224,7 +224,7 @@
         mostrar("Cuenta creada. Entrando…", "ok");
         setTimeout(() => {
           location.replace(data.rol === "administrador" || data.rol === "desarrollador"
-            ? "pacientes.html" : "mensajeria.html");
+            ? "administracion.html" : "mensajeria.html");
         }, 900);
       } catch (ex) {
         mostrar(ex.message, "error");

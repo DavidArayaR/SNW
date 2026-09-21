@@ -1,5 +1,5 @@
 {
-  "e53a08229b014e7e881e4eaeca008007": {
+  "e0d1820b43404af5821f6049ea91d99f": {
     "usuario": "admin",
     "rol": "administrador",
     "nombre": "Administrador",
@@ -14,12 +14,12 @@
       "call_center",
       "call_center_registro"
     ],
-    "creada": 1789573223.1837964,
-    "actividad": 1789573243.0610917,
-    "actividad_guardada": 1789573223.1837964,
+    "creada": 1789664064.8124747,
+    "actividad": 1789664537.1031034,
+    "actividad_guardada": 1789664531.9297023,
     "correo_recuperacion": ""
   },
-  "7435afa0fdbb40449457704ec07d11fb": {
+  "8d66776dccd34ad8a8e8fd42d6495307": {
     "usuario": "admin",
     "rol": "administrador",
     "nombre": "Administrador",
@@ -34,26 +34,172 @@
       "call_center",
       "call_center_registro"
     ],
-    "creada": 1789573327.1876466,
-    "actividad": 1789574626.2965562,
-    "actividad_guardada": 1789574605.6967902,
+    "creada": 1789666351.5705156,
+    "actividad": 1789666390.8380957,
+    "actividad_guardada": 1789666351.5705156,
     "correo_recuperacion": ""
   },
-  "f69a65ed85744153ab9fb9242c7f7228": {
-    "usuario": "prueba.auditoria@example.com",
-    "rol": "usuario",
-    "nombre": "prueba.auditoria",
+  "25dab83e83704ddab5a082e831edf024": {
+    "usuario": "admin",
+    "rol": "administrador",
+    "nombre": "Administrador",
     "permisos": [
+      "pacientes",
       "mensajeria",
       "historial",
       "estadisticas",
-      "plantillas_editar"
+      "plantillas_editar",
+      "envio_produccion",
+      "tarifas_editar",
+      "call_center",
+      "call_center_registro"
     ],
-    "creada": 1789582948.6037672,
-    "actividad": 1789582948.6037672,
-    "actividad_guardada": 1789582948.6037672
+    "creada": 1789671320.1870034,
+    "actividad": 1789671320.2780046,
+    "actividad_guardada": 1789671320.1870034,
+    "correo_recuperacion": ""
   },
-  "41ad8aa9f1b740bca801b77c5751e433": {
+  "f335bd4bd17d4a59bead5cf29f7f608c": {
+    "usuario": "admin",
+    "rol": "administrador",
+    "nombre": "Administrador",
+    "permisos": [
+      "pacientes",
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar",
+      "envio_produccion",
+      "tarifas_editar",
+      "call_center",
+      "call_center_registro"
+    ],
+    "creada": 1789671966.9373984,
+    "actividad": 1789671967.1023943,
+    "actividad_guardada": 1789671966.9373984,
+    "correo_recuperacion": ""
+  },
+  "9f5add1090324487b2bbf0ba9f73d5ed": {
+    "usuario": "admin",
+    "rol": "administrador",
+    "nombre": "Administrador",
+    "permisos": [
+      "pacientes",
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar",
+      "envio_produccion",
+      "tarifas_editar",
+      "call_center",
+      "call_center_registro"
+    ],
+    "creada": 1789671975.113884,
+    "actividad": 1789671975.1788852,
+    "actividad_guardada": 1789671975.113884,
+    "correo_recuperacion": ""
+  },
+  "107c82a7e7fd4d40a329c38c7c159767": {
+    "usuario": "admin",
+    "rol": "administrador",
+    "nombre": "Administrador",
+    "permisos": [
+      "pacientes",
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar",
+      "envio_produccion",
+      "tarifas_editar",
+      "call_center",
+      "call_center_registro"
+    ],
+    "creada": 1789672061.0023186,
+    "actividad": 1789672061.058881,
+    "actividad_guardada": 1789672061.0023186,
+    "correo_recuperacion": ""
+  },
+  "59130afed25e4b04965d8ec67a84d5a6": {
+    "usuario": "admin",
+    "rol": "administrador",
+    "nombre": "Administrador",
+    "permisos": [
+      "pacientes",
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar",
+      "envio_produccion",
+      "tarifas_editar",
+      "call_center",
+      "call_center_registro"
+    ],
+    "creada": 1789672648.979009,
+    "actividad": 1789672654.3259985,
+    "actividad_guardada": 1789672648.979009,
+    "correo_recuperacion": ""
+  },
+  "6cbfa5ddf9b7469b846d8cd374f4cee7": {
+    "usuario": "admin",
+    "rol": "administrador",
+    "nombre": "Administrador",
+    "permisos": [
+      "pacientes",
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar",
+      "envio_produccion",
+      "tarifas_editar",
+      "call_center",
+      "call_center_registro"
+    ],
+    "creada": 1789672661.7418735,
+    "actividad": 1789672661.8020587,
+    "actividad_guardada": 1789672661.7418735,
+    "correo_recuperacion": ""
+  },
+  "f52361fe8ef046928ca807e8c43f09d8": {
+    "usuario": "admin",
+    "rol": "administrador",
+    "nombre": "Administrador",
+    "permisos": [
+      "pacientes",
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar",
+      "envio_produccion",
+      "tarifas_editar",
+      "call_center",
+      "call_center_registro"
+    ],
+    "creada": 1789673409.2706773,
+    "actividad": 1789673409.7842786,
+    "actividad_guardada": 1789673409.2706773,
+    "correo_recuperacion": ""
+  },
+  "8ff6b4775e674e50bf4d7820678498a9": {
+    "usuario": "admin",
+    "rol": "administrador",
+    "nombre": "Administrador",
+    "permisos": [
+      "pacientes",
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar",
+      "envio_produccion",
+      "tarifas_editar",
+      "call_center",
+      "call_center_registro"
+    ],
+    "creada": 1789673416.8846116,
+    "actividad": 1789673416.9346118,
+    "actividad_guardada": 1789673416.8846116,
+    "correo_recuperacion": ""
+  },
+  "c7c9f800a2e24fd7b117334f7f09a650": {
     "usuario": "dav.araya@duocuc.cl",
     "rol": "desarrollador",
     "nombre": "dav.araya",
@@ -68,8 +214,9 @@
       "call_center",
       "call_center_registro"
     ],
-    "creada": 1789587772.7390761,
-    "actividad": 1789587772.7390761,
-    "actividad_guardada": 1789587772.7390761
+    "creada": 1789674097.5019703,
+    "actividad": 1789674339.2523022,
+    "actividad_guardada": 1789674339.2523022,
+    "correo_recuperacion": "dav.araya@duocuc.cl"
   }
 }

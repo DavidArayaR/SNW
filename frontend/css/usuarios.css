@@ -1,7 +1,5 @@
 /* Página de gestión de usuarios (administrador / desarrollador) */
-
-/* .layout--ancho vive en pacientes.css; esta página no la carga. */
-.layout--ancho { max-width: 1100px; grid-template-columns: minmax(0, 1fr); }
+/* .layout--ancho vive en pacientes.css, que administracion.html ya carga. */
 
 .usr-intro {
   margin: 4px 0 16px;
@@ -61,7 +59,13 @@
   background: var(--surface-2);
   padding: 16px 16px 14px;
 }
-.usr-card--bloqueada { opacity: .72; }
+.usr-card + .usr-card { margin-top: 14px; }
+/* Solo se atenúa lo que realmente está bloqueado (no se puede editar esta
+   cuenta): la cabecera y los campos. «Envíos realizados» y «Actividad» son
+   de solo lectura y no dependen de poder gestionar la cuenta, así que se ven
+   siempre nítidos. */
+.usr-card--bloqueada .usr-card__cab,
+.usr-card--bloqueada .usr-grid { opacity: .72; }
 
 .usr-card__cab {
   display: flex;
@@ -88,6 +92,16 @@
 .usr-tag--desarrollador { background: var(--brand-tint); color: var(--brand-tint-fg); border-color: var(--brand-tint-bd); }
 .usr-tag--yo { background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-bd); }
 .usr-tag--inactivo { background: var(--danger-bg); color: var(--danger-fg); border-color: var(--danger-bd); }
+
+/* Acción en el historial de Actividad: un tono por categoría, para
+   distinguirlas de un vistazo (creación/positivo, cambio, seguridad, borrado). */
+.usr-tag--cuenta_creada,
+.usr-tag--plantilla_creada { background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-bd); }
+.usr-tag--invitar,
+.usr-tag--correo_recuperacion { background: var(--info-bg); color: var(--info-fg); border-color: var(--info-bd); }
+.usr-tag--editar { background: var(--brand-tint); color: var(--brand-tint-fg); border-color: var(--brand-tint-bd); }
+.usr-tag--reset_clave { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--warn-bd); }
+.usr-tag--eliminar { background: var(--danger-bg); color: var(--danger-fg); border-color: var(--danger-bd); }
 
 .usr-check {
   display: inline-flex;
@@ -168,12 +182,7 @@
   padding: 8px 11px;
 }
 
-.usr-envios {
-  margin-top: 18px;
-  padding-top: 14px;
-  border-top: 1px solid var(--borde);
-}
-.usr-envios h4 { margin: 0 0 10px; font-size: .84rem; font-weight: 700; color: var(--texto-suave); text-transform: uppercase; letter-spacing: .03em; }
+.usr-card--envios h4 { margin: 0 0 10px; font-size: .84rem; font-weight: 700; color: var(--texto-suave); text-transform: uppercase; letter-spacing: .03em; }
 .usr-envios__vacio { margin: 0; font-size: .86rem; color: var(--texto-suave); }
 .usr-envios__cont { overflow-x: auto; }
 .usr-envios__tabla {

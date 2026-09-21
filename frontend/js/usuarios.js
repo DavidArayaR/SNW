@@ -1,6 +1,5 @@
 /* Gestión de usuarios y permisos (administrador / desarrollador).
-   Pestaña «Usuarios» de administracion.html; todo va en un IIFE porque
-   configuracion.js se carga en la misma página (evita choques de nombres). */
+   Pestaña «Usuarios» de administracion.html*/
 (function () {
 const $ = (s) => document.querySelector(s);
 
@@ -16,19 +15,17 @@ const vacioEl = $("#vacio");
 const toastEl = $("#toast");
 
 const PERM_LABEL = {
-  pacientes: "Base de datos",
   mensajeria: "Mensajería",
   historial: "Historial",
   estadisticas: "Estadísticas",
   plantillas_editar: "Editar plantillas",
   envio_produccion: "Enviar en producción sin confirmación",
   tarifas_editar: "Administrar tarifas y costos",
-  call_center: "Plantillas de call center",
   call_center_registro: "Ver registro de respuestas de call center",
 };
 const _EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/;
-const PERM_PAGINAS = ["pacientes", "mensajeria", "historial", "estadisticas"];
-const PERM_ACCIONES = ["plantillas_editar", "envio_produccion", "tarifas_editar", "call_center", "call_center_registro"];
+const PERM_PAGINAS = ["mensajeria", "historial", "estadisticas"];
+const PERM_ACCIONES = ["plantillas_editar", "envio_produccion", "tarifas_editar", "call_center_registro"];
 const PERMISOS_BASICOS = ["mensajeria", "historial", "estadisticas", "plantillas_editar"];
 const ROL_LABEL = { usuario: "Usuario", administrador: "Administrador", desarrollador: "Desarrollador" };
 const ROLES_TOTALES = ["administrador", "desarrollador"];
@@ -120,20 +117,25 @@ const AUDITORIA_ACCION_LABEL = {
   correo_recuperacion: "Correo de recuperación asignado",
   reset_clave: "Cambio de contraseña activado",
   eliminar: "Cuenta eliminada",
+  plantilla_creada: "Plantilla creada",
 };
 
 function renderAuditoriaUsuario(lista) {
+  // Qué hizo esta cuenta (filtrado por actor en el backend), no qué le
+  // hicieron a ella: por eso la columna muestra el objetivo de cada acción
+  // (a quién invitó/editó/eliminó, o qué plantilla creó), no el actor —
+  // el actor ya es, siempre, la cuenta que se está mirando.
   if (!lista.length) return `<p class="usr-envios__vacio">Sin actividad registrada.</p>`;
   const filas = lista.map((a) => {
     return `<tr>` +
       `<td>${esc(a.fecha)}</td>` +
-      `<td>${esc(a.actor || "—")}</td>` +
-      `<td><span class="usr-tag">${esc(AUDITORIA_ACCION_LABEL[a.accion] || a.accion)}</span></td>` +
+      `<td><span class="usr-tag usr-tag--${esc(a.accion)}">${esc(AUDITORIA_ACCION_LABEL[a.accion] || a.accion)}</span></td>` +
+      `<td>${esc(a.objetivo || "—")}</td>` +
       `<td>${esc(a.detalle || "")}</td>` +
     `</tr>`;
   }).join("");
   return `<table class="usr-envios__tabla">` +
-    `<thead><tr><th>Fecha</th><th>Quién</th><th>Acción</th><th>Detalle</th></tr></thead>` +
+    `<thead><tr><th>Fecha</th><th>Acción</th><th>Objetivo</th><th>Detalle</th></tr></thead>` +
     `<tbody>${filas}</tbody></table>`;
 }
 
@@ -228,6 +230,8 @@ function renderDetalle() {
   if (!u) { detalleEl.innerHTML = ""; return; }
   const bloqueada = !u.editable;
   detalleEl.innerHTML =
+    // Card 1: la cuenta en sí (datos + permisos + acciones). Guardar/Eliminar
+    // quedan acá arriba, justo después de los campos, no al final de todo.
     `<div class="usr-card${bloqueada ? " usr-card--bloqueada" : ""}" data-correo="${esc(u.usuario)}">` +
       `<div class="usr-card__cab">` +
         `<span class="usr-card__correo">${esc(u.usuario)}</span>` +
@@ -261,20 +265,23 @@ function renderDetalle() {
           `</div>`
           : "") +
       `</div>` +
-      `<div class="usr-envios">` +
-        `<h4>Envíos realizados</h4>` +
-        `<div id="usrEnvios" class="usr-envios__cont">Cargando envíos…</div>` +
-      `</div>` +
-      `<div class="usr-envios">` +
-        `<h4>Actividad</h4>` +
-        `<div id="usrAuditoria" class="usr-envios__cont">Cargando actividad…</div>` +
-      `</div>` +
       `<div class="usr-card__pie">` +
         (bloqueada ? `<span class="usr-card__bloqueo">${esc(u.motivo_bloqueo || "No puedes gestionar esta cuenta.")}</span>` : "") +
         `<span class="usr-card__sep"></span>` +
         (u.editable ? `<button type="button" class="btn btn--danger-ghost" data-borrar>Eliminar</button>` : "") +
         (u.editable ? `<button type="button" class="btn btn--primary" data-guardar>Guardar cambios</button>` : "") +
       `</div>` +
+    `</div>` +
+    // Card 2: Envíos realizados (de solo lectura, siempre nítida).
+    `<div class="usr-card usr-card--envios">` +
+      `<h4>Envíos realizados</h4>` +
+      `<div id="usrEnvios" class="usr-envios__cont">Cargando envíos…</div>` +
+    `</div>` +
+    // Card 3: Actividad (de solo lectura, siempre nítida).
+    `<div class="usr-card usr-card--envios">` +
+      `<h4>Actividad</h4>` +
+      `<p class="usr-envios__vacio" style="margin-bottom: 8px;">Acciones que hizo esta cuenta (a quién invitó, editó, eliminó, qué plantilla creó...).</p>` +
+      `<div id="usrAuditoria" class="usr-envios__cont">Cargando actividad…</div>` +
     `</div>`;
 
   permWrapEditable = u.editable;

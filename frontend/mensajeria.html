@@ -34,7 +34,7 @@
       <div class="panel__head">
         <h2>Plantillas</h2>
         <div class="panel__actions">
-          <button id="btnSincronizarMeta" class="btn btn--ghost" type="button" data-perm="plantillas_editar" title="Trae los templates que existen en Meta: actualiza el estado de los que ya conoces e importa como plantilla nueva los que falten">Sincronizar</button>
+          <button id="btnSincronizarMeta" class="btn btn--ghost" type="button" title="Trae los templates que existen en Meta: actualiza el estado de los que ya conoces e importa como plantilla nueva los que falten">Sincronizar</button>
           <button id="btnRevisarTodos" class="btn btn--ghost" type="button" data-perm="plantillas_editar">Actualizar estados</button>
           <button id="btnNueva" class="btn btn--primary" type="button" data-perm="plantillas_editar">+ Nueva</button>
         </div>
@@ -62,6 +62,7 @@
           <input type="text" id="inpNombre" maxlength="60" placeholder="Ej: Recordatorio de cita médica" autocomplete="off">
           <p id="avisoNombrePermanente" class="warn warn--nombre">El nombre es permanente: una vez creada la plantilla no se puede cambiar. Para usar otro nombre hay que eliminar la plantilla y crear una nueva.</p>
           <p id="hintNombre" class="field__hint">Es el nombre que verás al elegir la plantilla antes de un envío.</p>
+          <p id="infoCreacion" class="field__hint" hidden></p>
         </div>
 
         <div class="field">
@@ -91,6 +92,7 @@
                 <div id="previewTexto"></div>
                 <span class="bubble__time" id="previewHora"></span>
               </div>
+              <div id="previewBotones" class="bubble__botones"></div>
             </div>
           </div>
         </div>
@@ -101,15 +103,12 @@
         <!-- Categoría del template: todas las plantillas son Marketing, no se
              elige ni se muestra. -->
         <input type="hidden" id="inpTemplateCategoria" value="MARKETING">
-
-        <div class="field">
-          <label for="inpTemplateLang">Idioma del template</label>
-          <select id="inpTemplateLang">
-            <option value="es">Español</option>
-            <option value="en">English</option>
-            <option value="pt_BR">Português (Brasil)</option>
-          </select>
-        </div>
+        <!-- Idioma del template: por defecto español al crear una plantilla
+             nueva. Una plantilla sincronizada desde Meta conserva el idioma
+             real que tiene allá (puede no ser ninguna de las 3 opciones fijas
+             que se ofrecían antes, ej. "en_US"), por eso no se elige ni se
+             muestra. -->
+        <input type="hidden" id="inpTemplateLang" value="es">
 
         <div class="field" id="bloqueEstadoMeta" hidden>
           <label>Estado en Meta</label>
@@ -130,8 +129,8 @@
       </form>
 
       <div id="estadoVacio" class="empty-state">
-        <h3>No hay plantilla seleccionada</h3>
-        <button type="button" class="btn btn--primary" id="btnNuevaEmpty">Crear plantilla</button>
+        <h3>Selecciona una plantilla o</h3>
+        <button type="button" class="btn btn--primary" id="btnNuevaEmpty">Crea una nueva</button>
       </div>
     </section>
 
