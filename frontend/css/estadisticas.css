@@ -1,5 +1,11 @@
 /* Página de Estadísticas */
 
+/* .panel no trae margen propio (otras pestañas solo usan una); acá hay 5
+   apiladas dentro de #tabEstadisticas y quedaban pegadas unas a otras. */
+#tabEstadisticas .panel + .panel {
+  margin-top: 20px;
+}
+
 .hero-grid {
   display: flex;
   flex-wrap: wrap;

@@ -13,7 +13,13 @@
   font-size: .85em;
 }
 
-.config-seccion { margin-bottom: 18px; }
+/* #secciones ahora es hermano del <section class="panel"> de cabecera
+   (ver administracion.html), no su hijo: este margen separa ambos, y el
+   margin-bottom de .config-seccion separa cada tarjeta de la siguiente —
+   mismo valor que el gap entre tarjetas de Estadísticas. */
+#secciones { margin-top: 20px; }
+.config-seccion { margin-bottom: 20px; }
+.config-seccion:last-child { margin-bottom: 0; }
 .config-seccion .panel__head h2 {
   display: flex;
   align-items: center;
