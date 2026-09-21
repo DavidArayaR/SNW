@@ -13,6 +13,7 @@ let config = null;
 let filtro = "";
 let filtroEstado = "todos";
 let filtroRespuesta = "todas";
+let filtroInteres = "todos";
 let seleccionados = new Set();
 let todoMarcado = false;
 
@@ -95,6 +96,7 @@ function render() {
     (p) =>
       (filtroEstado === "todos" || p.estado === filtroEstado) &&
       (filtroRespuesta === "todas" || resp(p) === filtroRespuesta) &&
+      (filtroInteres === "todos" || !!p.no_interesado) &&
       (!q ||
         [p.nombre, p.apellido, p.telefono]
           .filter(Boolean)
@@ -151,8 +153,16 @@ function render() {
           ` title="${escaparHtml(bajaBloqueada ? tituloResp : tituloResp + " · click para cambiar")}">` +
           `${bajaBloqueada ? '<i class="fa-solid fa-lock"></i> ' : ""}${escaparHtml(respuestaLabels[respuesta] ?? respuesta)}</span>` +
         `<select class="respuesta-select" data-id="${p.id}" hidden>` +
-          ["pendiente", "respondio", "baja"].map((v) =>
+          // "Respondió" no es una opción manual: solo la pone el propio
+          // paciente al contestar por WhatsApp, nunca un ajuste manual acá.
+          ["pendiente", "baja"].map((v) =>
             `<option value="${v}"${v === respuesta ? " selected" : ""}>${respuestaLabels[v]}</option>`).join("") +
+          // Si el valor actual ES "respondio" (vino de una respuesta real),
+          // se agrega como opción extra ya seleccionada, así el <select> no
+          // pierde silenciosamente el valor real al abrirlo.
+          (respuesta === "respondio"
+            ? `<option value="respondio" selected>${respuestaLabels.respondio}</option>`
+            : "") +
         `</select>` +
         subResp +
       `</td>` +
@@ -178,9 +188,11 @@ function render() {
     const r = p.respuesta || "pendiente";
     if (conteoResp[r] !== undefined) conteoResp[r]++;
   }
+  const conteoNoInteresados = pacientes.filter((p) => !!p.no_interesado).length;
 
-  const esActivoEstado = (estado) => filtroRespuesta === "todas" && filtroEstado === estado;
-  const esActivoResp = (resp) => filtroEstado === "todos" && filtroRespuesta === resp;
+  const esActivoEstado = (estado) => filtroRespuesta === "todas" && filtroInteres === "todos" && filtroEstado === estado;
+  const esActivoResp = (resp) => filtroEstado === "todos" && filtroInteres === "todos" && filtroRespuesta === resp;
+  const esActivoInteres = filtroEstado === "todos" && filtroRespuesta === "todas" && filtroInteres === "no_interesado";
   // Tarjeta con ícono en chip de color (mismo tono que usaban los puntitos
   // de antes), en vez de la píldora chica: mismo botón/atributos de
   // filtro, solo cambia cómo se ve.
@@ -196,7 +208,8 @@ function render() {
     statCard("danger", "fa-triangle-exclamation", esActivoEstado("error"), 'data-estado="error"', "Errores", conteo.error) +
     statCard("neutral", "fa-comment-slash", esActivoResp("pendiente"), 'data-respuesta="pendiente"', "Sin resp.", conteoResp.pendiente) +
     statCard("ok", "fa-comments", esActivoResp("respondio"), 'data-respuesta="respondio"', "Respondió", conteoResp.respondio) +
-    statCard("danger", "fa-user-slash", esActivoResp("baja"), 'data-respuesta="baja"', "Baja", conteoResp.baja);
+    statCard("danger", "fa-user-slash", esActivoResp("baja"), 'data-respuesta="baja"', "Baja", conteoResp.baja) +
+    statCard("info", "fa-thumbs-down", esActivoInteres, 'data-interes="no_interesado"', "No le interesa", conteoNoInteresados);
 
   refrescarSeleccion(visibles);
 }
@@ -205,7 +218,8 @@ function refrescarSeleccion(visibles = null) {
   visibles = visibles ?? pacientes.filter(
     (p) =>
       (filtroEstado === "todos" || p.estado === filtroEstado) &&
-      (filtroRespuesta === "todas" || (p.respuesta || "pendiente") === filtroRespuesta)
+      (filtroRespuesta === "todas" || (p.respuesta || "pendiente") === filtroRespuesta) &&
+      (filtroInteres === "todos" || !!p.no_interesado)
   );
 
   contadorSel.textContent =
@@ -226,6 +240,7 @@ function idsSeleccionables() {
         (p) =>
           (filtroEstado === "todos" || p.estado === filtroEstado) &&
           (filtroRespuesta === "todas" || (p.respuesta || "pendiente") === filtroRespuesta) &&
+          (filtroInteres === "todos" || !!p.no_interesado) &&
           (!q ||
             [p.nombre, p.apellido, p.telefono]
               .filter(Boolean)
@@ -407,9 +422,15 @@ statsEl.addEventListener("click", (e) => {
   if (btn.dataset.estado) {
     filtroEstado = btn.dataset.estado;
     filtroRespuesta = "todas";
+    filtroInteres = "todos";
   } else if (btn.dataset.respuesta) {
     filtroRespuesta = btn.dataset.respuesta;
     filtroEstado = "todos";
+    filtroInteres = "todos";
+  } else if (btn.dataset.interes) {
+    filtroInteres = btn.dataset.interes;
+    filtroEstado = "todos";
+    filtroRespuesta = "todas";
   }
   sincronizarSeleccionConFiltro();
   render();

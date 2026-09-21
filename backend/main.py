@@ -971,6 +971,10 @@ def expr_select_pacientes(ambiente: str) -> str:
         exprs.append("COALESCE(p.interesado, 0) AS interesado")
     else:
         exprs.append("0 AS interesado")
+    if "no_interesado" in cols:
+        exprs.append("COALESCE(p.no_interesado, 0) AS no_interesado")
+    else:
+        exprs.append("0 AS no_interesado")
     exprs.append("l.id AS ultimo_log_id")
     exprs.append("l.estado_envio AS ultimo_estado_envio")
     exprs.append("l.descripcion_error AS ultimo_error")
@@ -1061,8 +1065,10 @@ def actualizar_respuesta_pacientes(body: RespuestaPacientesBulkIn, ambiente: str
     que el ajuste individual: 'baja' activa el opt-out y quita el interés)."""
     if not body.pacientes:
         raise HTTPException(400, detail="No se seleccionó ningún paciente")
-    if body.respuesta not in ("pendiente", "respondio", "baja"):
-        raise HTTPException(400, detail="Respuesta inválida. Use: pendiente, respondio, baja")
+    # "respondio" no es un ajuste manual válido: solo la pone el paciente al
+    # contestar de verdad por WhatsApp (vía el webhook), nunca un admin a mano.
+    if body.respuesta not in ("pendiente", "baja"):
+        raise HTTPException(400, detail="Respuesta inválida. Use: pendiente, baja")
     t = tabla_pacientes(ambiente)
     tiene_manual = columna_existe(t, "respuesta_manual", ambiente)
     tiene_interesado = columna_existe(t, "interesado", ambiente)
@@ -1147,8 +1153,10 @@ def actualizar_respuesta_paciente(paciente_id: int, body: RespuestaIn,
                                   sesion: dict = Depends(exigir("pacientes"))):
     """Ajuste manual de la respuesta de un paciente (fallback si el webhook no
     llegó, o si el paciente avisó por otro canal). 'baja' activa el opt-out."""
-    if body.respuesta not in ("pendiente", "respondio", "baja"):
-        raise HTTPException(400, detail="Respuesta inválida. Use: pendiente, respondio, baja")
+    # "respondio" no es un ajuste manual válido: solo la pone el paciente al
+    # contestar de verdad por WhatsApp (vía el webhook), nunca un admin a mano.
+    if body.respuesta not in ("pendiente", "baja"):
+        raise HTTPException(400, detail="Respuesta inválida. Use: pendiente, baja")
     t = tabla_pacientes(ambiente)
     tiene_manual = columna_existe(t, "respuesta_manual", ambiente)
     with conectar(ambiente) as conn, conn.cursor() as cur:
@@ -2655,6 +2663,21 @@ def actualizar_estado_paciente(paciente_id: int, estado: str, ambiente: str) -> 
         conn.commit()
 
 
+def limpiar_interes_paciente(paciente_id: int, ambiente: str) -> None:
+    """Al mandarle una plantilla nueva a un paciente, su interés/desinterés
+    por la oferta ANTERIOR ya no aplica: queda «sin respuesta» hasta que
+    conteste esta nueva oferta."""
+    t = tabla_pacientes(ambiente)
+    cols = columnas_tabla(t, ambiente)
+    campos = [c for c in ("interesado", "no_interesado", "interes_plantilla_clave", "interes_fecha") if c in cols]
+    if not campos:
+        return
+    set_sql = ", ".join(f"{c} = NULL" if c in ("interes_plantilla_clave", "interes_fecha") else f"{c} = 0" for c in campos)
+    with conectar(ambiente) as conn, conn.cursor() as cur:
+        cur.execute(f"UPDATE {t} SET {set_sql} WHERE id = %s", (paciente_id,))
+        conn.commit()
+
+
 def actualizar_telefono(paciente_id: int, telefono: str, ambiente: str) -> None:
     t = tabla_pacientes(ambiente)
     if not columna_existe(t, "telefono", ambiente):
@@ -2802,6 +2825,8 @@ def _procesar_job(job_id: str) -> None:
             ok, message_id, error = False, None, f"Error inesperado: {e}"
 
         actualizar_estado_paciente(d["id"], "enviado" if ok else "error", amb)
+        if ok:
+            limpiar_interes_paciente(d["id"], amb)
 
         if ok:
             job["enviados"] += 1

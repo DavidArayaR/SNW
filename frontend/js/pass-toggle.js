@@ -26,13 +26,13 @@
     btn.className = "pass-toggle";
     btn.setAttribute("aria-label", "Mostrar contraseña");
     btn.tabIndex = -1;
-    btn.innerHTML = ICONO_OJO;
+    btn.innerHTML = ICONO_OJO_TACHADO;
     wrap.appendChild(btn);
 
     btn.addEventListener("click", () => {
       const mostrando = input.type === "text";
       input.type = mostrando ? "password" : "text";
-      btn.innerHTML = mostrando ? ICONO_OJO : ICONO_OJO_TACHADO;
+      btn.innerHTML = mostrando ? ICONO_OJO_TACHADO : ICONO_OJO;
       btn.setAttribute("aria-label", mostrando ? "Mostrar contraseña" : "Ocultar contraseña");
     });
   }
