@@ -912,9 +912,6 @@ async function actualizarBadgeMensajeria() {
     const r = await fetch(`api/configuracion?ambiente=${ambienteConf}`, { headers: authHeaders(), cache: "no-store" });
     if (!r.ok) return;
     const cfg = await r.json();
-    if (badgeEntornoMensajeria) {
-      badgeEntornoMensajeria.textContent = `Base de datos ${cfg.entorno === "produccion" ? "producción" : "desarrollo"} · ${cfg.base_datos ?? ""}`;
-    }
     if (typeof cfg.plantillas_badge_aprobada_minutos === "number") {
       MINUTOS_APROBADA_RECIENTE = cfg.plantillas_badge_aprobada_minutos;
     }

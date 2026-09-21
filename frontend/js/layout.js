@@ -125,6 +125,12 @@
 
   const sidebar = document.getElementById("sidebar");
   if (sidebar) {
+    const nombreUsuario = localStorage.getItem("snw_nombre") || "";
+    const escaparHtml = (t) => {
+      const d = document.createElement("div");
+      d.textContent = t;
+      return d.innerHTML;
+    };
     sidebar.innerHTML =
       `<a class="sidebar__brand" href="index.html" title="Notificaciones WhatsApp">` +
       `<i class="fa-brands fa-whatsapp"></i>` +
@@ -135,7 +141,7 @@
       `<button type="button" class="sidebar__tema" id="btnTema" title="Cambiar entre modo claro y oscuro">` +
       `<i class="fa-solid fa-moon"></i><span>Modo oscuro</span></button>` +
       `<button type="button" class="sidebar__salir" id="btnClavePropia" title="Mi cuenta: contraseña y correo de recuperación">` +
-      `<i class="fa-solid fa-circle-user"></i><span>Mi cuenta</span></button>` +
+      `<i class="fa-solid fa-circle-user"></i><span>${nombreUsuario ? `Mi cuenta - ${escaparHtml(nombreUsuario)}` : "Mi cuenta"}</span></button>` +
       `<button type="button" class="sidebar__salir" id="btnSalir" title="Cerrar sesión">` +
       `<i class="fa-solid fa-right-from-bracket"></i><span>Cerrar sesión</span></button>`;
 

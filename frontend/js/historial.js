@@ -35,7 +35,6 @@ async function cargar() {
     if (rh.status === 401 || rc.status === 401) { window.snwSesionExpirada(); return; }
     if (!rh.ok || !rc.ok) throw new Error();
     registros = await rh.json();
-    $("#badgeEntorno").textContent = "Todas las bases de datos";
     render();
   } catch {
     toast("Error al conectar con el servidor.", "error");

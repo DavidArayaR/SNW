@@ -1,5 +1,5 @@
 {
-  "cb63b8566cbb4dfca16259c1f2ef5aff": {
+  "6cc4b09e4578442f9e0bf0549ca67183": {
     "usuario": "dav.araya@duocuc.cl",
     "rol": "desarrollador",
     "nombre": "dav.araya",
@@ -14,9 +14,8 @@
       "call_center",
       "call_center_registro"
     ],
-    "creada": 1789996405.1493876,
-    "actividad": 1790003891.0026267,
-    "actividad_guardada": 1790003891.0026267,
-    "correo_recuperacion": "dav.araya@duocuc.cl"
+    "creada": 1790023146.465038,
+    "actividad": 1790023146.465038,
+    "actividad_guardada": 1790023146.465038
   }
 }
