@@ -26,10 +26,19 @@ snw/
 │                             la BD solo la primera vez, abre el navegador y levanta uvicorn
 ├── iniciar_snw.sh           Mismo arranque para Linux/macOS (chmod +x la primera vez)
 ├── backend/
-│   ├── main.py               API FastAPI: rutas, jobs de envío en background, confirmación
-│   │                          por correo, plantillas, pacientes, historial, configuración
+│   ├── main.py               API FastAPI: manejadores (envíos en background, confirmación por
+│   │                          correo, plantillas, pacientes, historial, configuración,
+│   │                          tarifas/costos, call center, webhook)
 │   ├── db.py                 Conexión MySQL (PyMySQL), entorno dev/prod, columnas dinámicas,
+│   │                          CONFIG_DEFAULTS, cuentas/invites/resets/auditoría,
 │   │                          log_error() (todo error queda en consola)
+│   ├── schemas.py            Modelos Pydantic de las peticiones (PlantillaIn, EnvioIn, ConfigIn…)
+│   ├── config_service.py     Vista de config para pantallas/motor (leer_config, url_base) y SMTP
+│   │                          (enviar_correo)
+│   ├── telefono.py           Normalización/validación de teléfonos chilenos → `+56 9 …`
+│   ├── routes/               Routers por dominio, cada uno llama a los handlers de main.py:
+│   │                          auth, usuarios, pacientes, plantillas, notificaciones,
+│   │                          estadisticas, configuracion (+ _registry)
 │   ├── whatsapp_service.py   Cliente Graph API + WhatsAppService (envío, templates,
 │   │                          webhook handler) — capa de integración con Meta
 │   ├── wa_rate_limit.py      Gobernador de límites de Meta: cuota de la Graph API,
@@ -49,16 +58,22 @@ snw/
 │   │                          Configuración (pestaña visible solo para desarrollador).
 │   │                          Exclusivo admin/dev
 │   ├── css/                   tema.css (paleta claro/oscuro), styles.css (compartido), layout.css (sidebar), pacientes.css, estadisticas.css, configuracion.css, usuarios.css
-│   ├── js/                    tema.js (modo claro/oscuro), layout.js (sidebar/sesión/permisos, común), app.js, pacientes.js, historial.js, estadisticas.js, configuracion.js, usuarios.js
+│   ├── js/                    tema.js (modo claro/oscuro), layout.js (sidebar/sesión/permisos, común), app.js, pacientes.js, historial.js, estadisticas.js, configuracion.js, usuarios.js, pass-toggle.js (ojito en campos de contraseña)
 │   └── vendor/bootstrap/     Bootstrap 5.3.3 (CSS + bundle JS) servido localmente
 ├── data/
 │   ├── plantillas.json        Plantillas de mensajes + metadata del template en Meta
 │   └── sesiones.json          Tokens de sesión activos
-│                                (las cuentas viven en la tabla `usuarios`)
+│                                (las cuentas viven en la tabla `usuarios`);
+│                                un `usuarios.json` antiguo se migra a la tabla y
+│                                se archiva como `usuarios.json.migrado`
 ├── sql/
 │   └── snw_base.sql           Crea la base snw_base, sus 10 tablas y siembra los 2
 │                                números autorizados y las cuentas admin/usuario/dev
-│                                (idempotente: IF NOT EXISTS / INSERT IGNORE)
+│                                (idempotente: IF NOT EXISTS / INSERT IGNORE). El backend
+│                                añade en el primer arranque las tablas `account_invites`
+│                                y `usuarios_auditoria` (y columnas/migraciones menores)
+├── documentacion/             CONTEXT.md (contexto, arquitectura y decisiones) y
+│                                FEATURES.md (funcionalidades y flujos del sistema)
 ├── backups/                   Volcados manuales (mysqldump) antes de operaciones destructivas
 ├── .env                       Solo credenciales de la BD (DB_*). No versionado.
 ├── .env.example                Plantilla del .env (solo DB_*)
@@ -116,11 +131,15 @@ el `entorno` activo, que las demás pantallas leen al cargar).
 | Call center | `call_center_url` (servicio que devuelve un número de call center; se consulta en cada respuesta y ese servicio reparte la carga), `call_center_numeros` (respaldo manual, uno o varios separados por coma, solo si la URL no responde), `call_center_boton_mensaje` / `call_center_boton_mensaje_oferta` (texto que autocompleta el botón; el de oferta se usa si la última plantilla enviada mencionaba un descuento o precio especial). El mensaje de call center y su espera (1s fija) no son configurables, ver [Mensaje de call center](#mensaje-de-call-center) |
 | Correo | `smtp_host`, `smtp_port`, `smtp_user`, `smtp_pass`, `smtp_tls`, `correo_emisor`, `correo_destino` |
 | WhatsApp / Meta | `wa_token`, `wa_phone_id`, `wa_business_account_id`, `wa_verify_token`, `wa_template_nombre`, `wa_template_lang`, `wa_webhook_path`, `wa_graph_version` (por defecto `v26.0`), `wa_moneda` (moneda de facturación de la cuenta, se autodetecta desde Meta al actualizar tarifas — por defecto `USD`), `plantillas_revision_minutos` (cada cuántos minutos se revisa sola en Meta el estado de las plantillas pendientes; 0 = desactivado; por defecto 2), `plantillas_badge_aprobada_minutos` (cuánto se muestra el aviso «Aprobada recientemente»; 0 = nunca; por defecto 10) |
-| Límites de envío Meta | `wa_rate_limit_activo` (frenado proactivo on/off), `wa_rate_limit_umbral_pct` (% de cuota a partir del cual se espera, 80), `wa_rate_limit_pausa_max_s` (espera entre mensajes al 100 % de cuota, 30), `wa_rate_limit_espera_defecto_s` (espera tras un 429 sin dato, 60), `wa_rate_limit_reintentos` (reintentos de una llamada tras un 429, 3), `wa_throughput_mps` (ritmo máximo de salida hacia Meta, msg/s; 0 = sin límite; 10), `wa_messaging_limit_24h` (usuarios únicos que se pueden contactar en 24 h antes de bloquear el envío masivo; 0 = ilimitado; 250) |
+| Límites de envío Meta | `wa_rate_limit_activo` (frenado proactivo on/off), `wa_rate_limit_umbral_pct` (% de cuota a partir del cual se espera, 80), `wa_rate_limit_pausa_max_s` (espera entre mensajes al 100 % de cuota, 30), `wa_rate_limit_espera_defecto_s` (espera tras un 429 sin dato, 60), `wa_rate_limit_reintentos` (reintentos de una llamada tras un 429, 3), `wa_throughput_mps` (ritmo máximo de salida hacia Meta, msg/s; 0 = sin límite; 10), `wa_messaging_limit_24h` (usuarios únicos que se pueden contactar en 24 h antes de bloquear el envío masivo; 0 = ilimitado; 2000) |
 
 ## Base de datos
 
-**Una sola base MySQL, `snw_base`**, con 10 tablas (ver `sql/snw_base.sql`).
+**Una sola base MySQL, `snw_base`**, con 10 tablas creadas por `sql/snw_base.sql`
+(pacientes_dev, pacientes_prod, envios, log_envios, whatsapp_eventos, configuracion,
+tarifas_whatsapp, call_center_log, usuarios, password_resets). Al primer arranque el
+**backend añade dos tablas más** (`account_invites` y `usuarios_auditoria`, ver abajo) y
+migraciones menores sobre las existentes.
 La tabla **`usuarios`** guarda las cuentas de la app (`usuario` correo, `nombre`, `rol`,
 `permisos` CSV, `clave_hash` SHA-256, `correo_recuperacion`) y **`password_resets`** los
 enlaces de «Olvidé mi contraseña» (token de 2 h, un solo uso). Las demás:
@@ -195,6 +214,17 @@ el enlace de «Olvidé mi contraseña»; se rellena solo si el `usuario` ya es u
 **`password_resets`** — enlaces de «Olvidé mi contraseña»: `token` (64 hex), `usuario`,
 `creado`, `expira` (2 h), `usado`. Un token activo por cuenta; al usarlo se marca `usado` y
 se cierran las sesiones de esa cuenta. Las filas viejas se limpian en cada arranque.
+
+**`account_invites`** — invitaciones para crear cuenta: `token` (64 hex), `correo`,
+`invitado_por` (quién la mandó), `creado`, `expira` (48 h), `usado`. Un enlace activo por
+correo; los vencidos/usados se limpian en cada arranque. Creada por el backend en el primer
+arranque (no está en `snw_base.sql`).
+
+**`usuarios_auditoria`** — trazabilidad de lo que un admin/dev hizo a cada cuenta (tabla
+`usuarios_auditoria`): `actor`, `accion` (`invito`, `permisos`, `rol`, `activo`,
+`correo_recuperacion`, `activar_cambio_clave`, `elimino`…), `objetivo` y `detalle`. Alimenta
+la sección «Actividad» del panel de una cuenta en Usuarios. También la crea el backend en el
+primer arranque.
 
 Las tablas de pacientes comparten `log_envios`, así que el backend siempre ubica el
 "último log" de un paciente con un `LEFT JOIN` correlacionado por `paciente_id`.
@@ -355,8 +385,8 @@ tiene template de Meta (va como texto libre, ventana de 24 h). No hay gestión d
 | Método | Endpoint | Descripción |
 |---|---|---|
 | GET | `/api/notificaciones/solicitud/{token}` | Estado de una solicitud pendiente (usado por polling del frontend) |
-| GET / POST | `/api/notificaciones/confirmar/{token}` | Confirmar envío (link del correo) |
-| GET / POST | `/api/notificaciones/rechazar/{token}` | Formulario y envío del rechazo, con comentario opcional (máximo 250 caracteres; 422 si se pasa) |
+| GET | `/api/notificaciones/confirmar/{token}` | Confirmar envío (link del correo) |
+| GET / POST | `/api/notificaciones/rechazar/{token}` | Formulario y envío del rechazo, con comentario opcional (máximo 255 caracteres; 422 si se pasa) |
 
 ### Historial
 
@@ -459,7 +489,7 @@ vez se turnan. Si aun así Meta devuelve `130429`, backoff como en el punto 3.
 
 **4 · [Messaging limit](https://developers.facebook.com/documentation/business-messaging/whatsapp/messaging-limits)**
 — usuarios únicos a los que el negocio puede escribir en una ventana móvil de 24 h
-(250 / 1K / 10K / 100K). Antes de un envío masivo en producción, `iniciar_envio` cuenta los
+(250 / 1K / 10K / 100K / ilimitado). Antes de un envío masivo en producción, `iniciar_envio` cuenta los
 teléfonos únicos con envío iniciado por el negocio en `log_envios` de las últimas 24 h: si ya
 se alcanzó `wa_messaging_limit_24h` responde **429**; si el lote lo va a superar, el envío
 sale igual pero con un aviso (`aviso_limite_mensajeria`).
