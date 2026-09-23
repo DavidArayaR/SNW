@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import csv as _csv
 import hashlib
 import math
@@ -43,36 +43,21 @@ import whatsapp_service
 from wa_rate_limit import gobernador as wa_gobernador
 from whatsapp_service import WhatsAppService, es_mensaje_interes
 from whatsapp_webhook import router as whatsapp_router
+from config_service import config_correo as _config_correo, enviar_correo as _enviar_correo, leer_config, url_base
+from schemas import (
+    ActivarCuentaIn, ClavePropiaIn, ConfigIn, ConfigTodoIn,
+    CorreoRecuperacionIn, EnvioIn, InvitarIn, LoginIn, OlvideIn,
+    PlantillaIn, PruebaWAIn, ResetIn, UsuarioUpdIn,
+)
+from telefono import normalizar_telefono
+from routes import auth, configuracion, estadisticas as rutas_estadisticas
+from routes import notificaciones, pacientes, plantillas, usuarios
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 DATA_FILE = BASE_DIR / "data" / "plantillas.json"
 FRONTEND_DIR = BASE_DIR / "frontend"
 
-
-def normalizar_telefono(crudo: str) -> str | None:
-    """Corrige variantes comunes de números móviles chilenos al formato +569XXXXXXXX."""
-    limpio = re.sub(r"[^\d+]", "", crudo.strip())
-    digitos = re.sub(r"\D", "", limpio)
-
-    if limpio.startswith("+"):
-        if len(digitos) == 11 and digitos.startswith("569"):
-            return "+" + digitos
-        if len(digitos) == 10 and digitos.startswith("56"):
-            return "+569" + digitos[2:]
-        if len(digitos) == 9 and digitos.startswith("9"):
-            return "+56" + digitos
-        return None
-
-    if len(digitos) == 11 and digitos.startswith("569"):
-        return "+" + digitos
-    if len(digitos) == 10 and digitos.startswith("56"):
-        return "+569" + digitos[2:]
-    if len(digitos) == 9 and digitos.startswith("9"):
-        return "+56" + digitos
-    if len(digitos) == 8 and digitos.startswith("9"):
-        return "+569" + digitos
-    return None
 
 app = FastAPI(title="SNW - API de Notificaciones WhatsApp")
 app.include_router(whatsapp_router)
@@ -133,84 +118,6 @@ CALL_CENTER_PLANTILLA_FIJA = {
     "cc_boton": True,
     "cc_boton_texto": "Ir al call center",
 }
-
-
-class PlantillaIn(BaseModel):
-    nombre: str
-    texto: str
-    clave: str | None = None
-    whatsapp_template_lang: str | None = None
-    whatsapp_template_categoria: str | None = None
-
-
-class EnvioIn(BaseModel):
-    pacientes: list[int] | None = None
-    plantilla_id: int
-    ambiente: str | None = None
-    limite: int | None = None  # solo producción: cuántos enviar de los pendientes
-
-
-class ConfigIn(BaseModel):
-    entorno: str | None = None
-    metodo_envio: str | None = None
-    numeros_prueba_dev: list[str] | None = None
-    numeros_prueba_prod: list[str] | None = None
-    intervalo_ms: int | None = None
-    url_base: str | None = None
-    smtp_host: str | None = None
-    smtp_port: int | None = None
-    smtp_user: str | None = None
-    smtp_pass: str | None = None
-    smtp_tls: bool | None = None
-    correo_emisor: str | None = None
-    correo_destino: str | None = None
-    wa_token: str | None = None
-    wa_phone_id: str | None = None
-    wa_business_account_id: str | None = None
-    wa_verify_token: str | None = None
-    wa_template_nombre: str | None = None
-    wa_template_lang: str | None = None
-    wa_webhook_path: str | None = None
-    wa_graph_version: str | None = None
-
-
-class LoginIn(BaseModel):
-    usuario: str
-    clave: str
-
-
-class InvitarIn(BaseModel):
-    correo: str
-
-
-class ActivarCuentaIn(BaseModel):
-    token: str
-    clave: str
-
-
-class UsuarioUpdIn(BaseModel):
-    rol: str | None = None
-    permisos: list[str] | None = None
-    nombre: str | None = None
-    activo: bool | None = None
-
-
-class ClavePropiaIn(BaseModel):
-    clave_actual: str
-    clave_nueva: str
-
-
-class OlvideIn(BaseModel):
-    correo: str
-
-
-class ResetIn(BaseModel):
-    token: str
-    clave_nueva: str
-
-
-class CorreoRecuperacionIn(BaseModel):
-    correo: str
 
 
 SESIONES_FILE = BASE_DIR / "data" / "sesiones.json"
@@ -374,7 +281,6 @@ def solo_dev(sesion: dict = Depends(sesion_actual)) -> dict:
     return sesion
 
 
-@app.post("/api/auth/login")
 def login(body: LoginIn):
     clave_hash = hashlib.sha256(body.clave.encode("utf-8")).hexdigest()
     usuario = usuario_buscar(body.usuario)
@@ -399,7 +305,6 @@ def login(body: LoginIn):
     return {"token": token, "rol": s["rol"], "nombre": s["nombre"], "permisos": s["permisos"]}
 
 
-@app.get("/api/auth/me")
 def auth_me(sesion: dict = Depends(sesion_actual)):
     """Rol y permisos vigentes de la sesión actual (para refrescar el cliente)."""
     return {
@@ -411,7 +316,6 @@ def auth_me(sesion: dict = Depends(sesion_actual)):
     }
 
 
-@app.put("/api/auth/clave")
 def cambiar_clave_propia(body: ClavePropiaIn, sesion: dict = Depends(sesion_actual)):
     """Cualquier cuenta puede cambiar su propia contraseña indicando la actual.
     Si la cuenta tiene un correo de recuperación guardado, se le avisa ahí."""
@@ -435,7 +339,6 @@ def cambiar_clave_propia(body: ClavePropiaIn, sesion: dict = Depends(sesion_actu
     return {"ok": True}
 
 
-@app.put("/api/auth/correo-recuperacion")
 def cambiar_correo_recuperacion(body: CorreoRecuperacionIn, sesion: dict = Depends(sesion_actual)):
     """La cuenta define a qué correo llegará el enlace de «Olvidé mi contraseña».
     Para las cuentas cuyo usuario ya es un correo suele ser el mismo; admin/dev
@@ -492,7 +395,6 @@ def _html_correo_reset(nombre: str, enlace: str) -> str:
     """
 
 
-@app.post("/api/auth/olvide")
 def olvide_clave(body: OlvideIn):
     """Pide un enlace de restablecimiento. Responde siempre igual (no revela si
     la cuenta existe). El enlace llega al correo de recuperación de la cuenta."""
@@ -512,7 +414,6 @@ def olvide_clave(body: OlvideIn):
     return {"ok": True}
 
 
-@app.get("/api/auth/reset/{token}")
 def reset_verificar(token: str):
     est = reset_estado(token)
     if est.get("estado") == "ok":
@@ -524,7 +425,6 @@ def reset_verificar(token: str):
     raise HTTPException(400, detail=detalle)
 
 
-@app.post("/api/auth/reset")
 def reset_aplicar(body: ResetIn):
     est = reset_estado(body.token)
     if est.get("estado") != "ok":
@@ -542,7 +442,6 @@ def reset_aplicar(body: ResetIn):
     return {"ok": True}
 
 
-@app.post("/api/auth/logout")
 def logout(request: Request):
     authz = request.headers.get("Authorization", "")
     token = authz[7:] if authz.startswith("Bearer ") else ""
@@ -551,7 +450,6 @@ def logout(request: Request):
     return {"ok": True}
 
 
-@app.post("/api/usuarios/invitar", status_code=201)
 def invitar_usuario(body: InvitarIn, sesion: dict = Depends(solo_admin)):
     """Un admin/dev invita a crear una cuenta: se le manda un correo con un
     enlace (48 h) para que la persona elija su propia contraseña. La cuenta
@@ -571,7 +469,6 @@ def invitar_usuario(body: InvitarIn, sesion: dict = Depends(solo_admin)):
     return {"ok": True, "correo_enviado": enviado}
 
 
-@app.get("/api/auth/invitacion/{token}")
 def invitacion_verificar(token: str):
     est = invite_estado(token)
     if est.get("estado") == "ok":
@@ -583,7 +480,6 @@ def invitacion_verificar(token: str):
     raise HTTPException(400, detail=detalle)
 
 
-@app.post("/api/auth/activar", status_code=201)
 def activar_cuenta(body: ActivarCuentaIn):
     """Último paso de la invitación: la persona invitada elige su contraseña,
     la cuenta se crea con rol `usuario` y permisos básicos, y queda con la
@@ -633,7 +529,6 @@ def _puede_gestionar(actor: dict, objetivo: dict) -> tuple[bool, str]:
     return True, ""
 
 
-@app.get("/api/usuarios")
 def listar_usuarios(sesion: dict = Depends(solo_admin)):
     yo = str(sesion.get("usuario", "")).strip().lower()
     filas = []
@@ -664,7 +559,6 @@ def listar_usuarios(sesion: dict = Depends(solo_admin)):
     }
 
 
-@app.put("/api/usuarios/{usuario}")
 def actualizar_usuario(usuario: str, body: UsuarioUpdIn, sesion: dict = Depends(solo_admin)):
     obj = usuario_buscar(usuario)
     if obj is None:
@@ -735,7 +629,6 @@ def actualizar_usuario(usuario: str, body: UsuarioUpdIn, sesion: dict = Depends(
             "permisos": permisos_efectivos(fresco), "activo": fresco.get("activo", True)}
 
 
-@app.put("/api/usuarios/{usuario}/correo-recuperacion")
 def asignar_correo_recuperacion(usuario: str, body: CorreoRecuperacionIn, sesion: dict = Depends(solo_admin)):
     """Un admin/dev le asigna (o cambia) el correo de recuperación a una cuenta
     que gestiona, típicamente para poder mandarle luego un enlace de cambio de
@@ -757,7 +650,6 @@ def asignar_correo_recuperacion(usuario: str, body: CorreoRecuperacionIn, sesion
     return {"ok": True, "correo_recuperacion": correo_rec}
 
 
-@app.post("/api/usuarios/{usuario}/enviar-cambio-clave")
 def enviar_cambio_clave(usuario: str, sesion: dict = Depends(solo_admin)):
     """Un admin/dev activa el cambio de contraseña de una cuenta que gestiona:
     le manda el mismo enlace de «Olvidé mi contraseña» al correo que la cuenta
@@ -783,7 +675,6 @@ def enviar_cambio_clave(usuario: str, sesion: dict = Depends(solo_admin)):
     return {"ok": True, "correo_enviado": enviado, "destino": destino}
 
 
-@app.get("/api/usuarios/{usuario}/envios")
 def envios_de_usuario(usuario: str, sesion: dict = Depends(solo_admin)):
     """Envíos masivos que inició esta cuenta: fecha, plantilla, estado
     (completado/cancelado/rechazado), cantidad de pacientes y costo
@@ -806,7 +697,6 @@ def envios_de_usuario(usuario: str, sesion: dict = Depends(solo_admin)):
     return filas
 
 
-@app.get("/api/usuarios/{usuario}/auditoria")
 def auditoria_de_usuario(usuario: str, sesion: dict = Depends(solo_admin)):
     """Trazabilidad de la cuenta: qué hizo (a quién invitó, a quién le cambió
     permisos/rol/acceso, a quién le asignó un correo de recuperación o le
@@ -824,7 +714,6 @@ def auditoria_de_usuario(usuario: str, sesion: dict = Depends(solo_admin)):
     return filas
 
 
-@app.delete("/api/usuarios/{usuario}")
 def eliminar_usuario(usuario: str, sesion: dict = Depends(solo_admin)):
     obj = usuario_buscar(usuario)
     if obj is None:
@@ -991,7 +880,6 @@ def expr_select_pacientes(ambiente: str) -> str:
     return ", ".join(exprs)
 
 
-@app.get("/api/pacientes")
 def listar_pacientes(q: str | None = Query(None), ambiente: str = Query("produccion"),
                      sesion: dict = Depends(exigir("pacientes"))):
     sql = "SELECT " + expr_select_pacientes(ambiente) + from_pacientes(ambiente)
@@ -1027,7 +915,6 @@ class EstadoPacientesBulkIn(BaseModel):
     estado: str
 
 
-@app.put("/api/pacientes/estado-masivo")
 def actualizar_estado_pacientes(body: EstadoPacientesBulkIn, ambiente: str = Query("produccion"),
                                 sesion: dict = Depends(exigir("pacientes"))):
     """Cambia el estado de varios pacientes de una sola vez (selección en
@@ -1058,7 +945,6 @@ class RespuestaPacientesBulkIn(BaseModel):
     respuesta: str
 
 
-@app.put("/api/pacientes/respuesta-masiva")
 def actualizar_respuesta_pacientes(body: RespuestaPacientesBulkIn, ambiente: str = Query("produccion"),
                                    sesion: dict = Depends(exigir("pacientes"))):
     """Ajuste manual de la respuesta de varios pacientes a la vez (mismo efecto
@@ -1123,7 +1009,6 @@ def actualizar_respuesta_pacientes(body: RespuestaPacientesBulkIn, ambiente: str
     return {"ok": True, "actualizados": len(encontrados), "bloqueados": len(bloqueados)}
 
 
-@app.put("/api/pacientes/{paciente_id}")
 def actualizar_paciente(paciente_id: int, body: EstadoPacienteIn,
                         ambiente: str = Query("produccion"),
                         sesion: dict = Depends(exigir("pacientes"))):
@@ -1147,7 +1032,6 @@ def actualizar_paciente(paciente_id: int, body: EstadoPacienteIn,
         return fila
 
 
-@app.put("/api/pacientes/{paciente_id}/respuesta")
 def actualizar_respuesta_paciente(paciente_id: int, body: RespuestaIn,
                                   ambiente: str = Query("produccion"),
                                   sesion: dict = Depends(exigir("pacientes"))):
@@ -1215,7 +1099,6 @@ def actualizar_respuesta_paciente(paciente_id: int, body: RespuestaIn,
     return fila
 
 
-@app.get("/api/pacientes/{paciente_id}/mensajes")
 def mensajes_paciente(paciente_id: int, ambiente: str = Query("produccion"),
                       sesion: dict = Depends(exigir("historial", "pacientes"))):
     """Todos los mensajes (entrantes y salientes) de un paciente, para revisar
@@ -1655,7 +1538,6 @@ def _registrar_template_meta(p: dict, nombre_anterior: str | None = None,
     return p
 
 
-@app.get("/api/plantillas")
 def listar_plantillas(sesion: dict = Depends(sesion_actual)):
     return sorted(leer_plantillas(), key=lambda p: p.get("actualizada", 0), reverse=True)
 
@@ -1701,7 +1583,6 @@ def _actualizar_estado_meta(p: dict) -> dict:
     return p
 
 
-@app.get("/api/plantillas/{plantilla_id}/estado-meta")
 def estado_plantilla_meta(plantilla_id: int, sesion: dict = Depends(sesion_actual)):
     plantillas = leer_plantillas()
     p = next((x for x in plantillas if x["id"] == plantilla_id), None)
@@ -1713,7 +1594,6 @@ def estado_plantilla_meta(plantilla_id: int, sesion: dict = Depends(sesion_actua
     return p
 
 
-@app.post("/api/plantillas/estado-meta/actualizar")
 def actualizar_todos_estados_meta(sesion: dict = Depends(sesion_actual)):
     plantillas = leer_plantillas()
     for p in plantillas:
@@ -1833,7 +1713,6 @@ def _clave_libre(base: str, ocupadas: set) -> str:
     return clave
 
 
-@app.post("/api/plantillas/sincronizar-meta")
 def sincronizar_plantillas_meta(sesion: dict = Depends(exigir("mensajeria"))):
     """Solo lee de Meta (no crea ni edita nada allá), así que no hace falta
     el permiso de edición de plantillas: alcanza con poder ver Mensajería.
@@ -1941,7 +1820,6 @@ def sincronizar_plantillas_meta(sesion: dict = Depends(exigir("mensajeria"))):
     }
 
 
-@app.post("/api/plantillas", status_code=201)
 def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(exigir("plantillas_editar"))):
     if not body.nombre.strip() or not body.texto.strip():
         raise HTTPException(400, detail="Nombre y mensaje son obligatorios")
@@ -1980,7 +1858,6 @@ def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(exigir("plantillas
     return nueva
 
 
-@app.put("/api/plantillas/{plantilla_id}")
 def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = Depends(exigir("plantillas_editar"))):
     if not body.nombre.strip() or not body.texto.strip():
         raise HTTPException(400, detail="Nombre y mensaje son obligatorios")
@@ -2049,7 +1926,6 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
     raise HTTPException(404, detail="Plantilla no encontrada")
 
 
-@app.delete("/api/plantillas/{plantilla_id}")
 def eliminar_plantilla(plantilla_id: int, sesion: dict = Depends(exigir("plantillas_editar"))):
     plantillas = leer_plantillas()
     objetivo = next((p for p in plantillas if p["id"] == plantilla_id), None)
@@ -2093,7 +1969,6 @@ def eliminar_plantilla(plantilla_id: int, sesion: dict = Depends(exigir("plantil
 # El mensaje de call center es fijo (CALL_CENTER_PLANTILLA_FIJA) y no se edita
 # desde la app; solo queda su historial de envíos acá.
 
-@app.get("/api/call-center/log")
 def obtener_call_center_log(sesion: dict = Depends(exigir("call_center_registro"))):
     """Últimas respuestas enviadas a pacientes interesados, con el número de
     call center asignado a cada una, y el contador de usos por número.
@@ -2119,7 +1994,7 @@ def obtener_call_center_log(sesion: dict = Depends(exigir("call_center_registro"
     return {"entradas": entradas, "contadores": _contadores_call_center()}
 
 
-def leer_config(ambiente: str | None = None) -> dict:
+def _leer_config_legacy(ambiente: str | None = None) -> dict:
     # Vista mínima de la config que necesitan las pantallas y el motor de envío.
     # Los secretos y el resto de claves se ven solo en /api/configuracion/todo.
     cfg = config_all()
@@ -2148,7 +2023,6 @@ def leer_config(ambiente: str | None = None) -> dict:
     }
 
 
-@app.get("/api/configuracion")
 def obtener_configuracion(ambiente: str | None = Query(None),
                           sesion: dict = Depends(sesion_actual)):
     try:
@@ -2157,7 +2031,6 @@ def obtener_configuracion(ambiente: str | None = Query(None),
         raise HTTPException(400, detail=str(e))
 
 
-@app.put("/api/configuracion")
 def actualizar_configuracion(body: ConfigIn, sesion: dict = Depends(solo_dev)):
     cambios: dict[str, str] = {}
 
@@ -2346,17 +2219,11 @@ def _config_valores() -> dict:
     return {c: ("" if cfg.get(c) is None else str(cfg.get(c))) for c in CONFIG_DEFAULTS}
 
 
-@app.get("/api/configuracion/todo")
 def obtener_configuracion_completa(sesion: dict = Depends(solo_dev)):
     """Todas las claves de configuración con su valor real (incluye secretos)."""
     return {"secciones": _CONFIG_SECCIONES, "valores": _config_valores()}
 
 
-class ConfigTodoIn(BaseModel):
-    cambios: dict[str, str]
-
-
-@app.put("/api/configuracion/todo")
 def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends(solo_dev)):
     cambios: dict[str, str] = {}
     for clave, valor in (body.cambios or {}).items():
@@ -2390,12 +2257,6 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
     return {"valores": _config_valores()}
 
 
-class PruebaWAIn(BaseModel):
-    telefono: str
-    mensaje: str = "Mensaje de prueba del sistema SNW"
-
-
-@app.post("/api/notificaciones/prueba-wa")
 def probar_api_wa(body: PruebaWAIn, sesion: dict = Depends(solo_dev)):
     """Envía un mensaje real vía la API oficial para validar las credenciales de WhatsApp."""
     cfg = leer_config()
@@ -2422,7 +2283,6 @@ def probar_api_wa(body: PruebaWAIn, sesion: dict = Depends(solo_dev)):
     return {"ok": ok, "telefono": telefono, "error": error, "message_id": message_id}
 
 
-@app.get("/api/whatsapp/rate-limit")
 def estado_rate_limit(sesion: dict = Depends(solo_dev)):
     """Consumo de cuota de la Graph API visto en la última respuesta de Meta y
     la espera que el sistema está aplicando (si la hay)."""
@@ -2474,7 +2334,6 @@ def _estado_limite_mensajeria() -> dict:
     }
 
 
-@app.get("/api/whatsapp/messaging-limit")
 def estado_messaging_limit(sesion: dict = Depends(solo_admin)):
     """Cuántos usuarios únicos se contactaron en las últimas 24 h frente al
     límite de mensajería configurado (Meta: 250 / 1K / 10K / 100K / ilimitado)."""
@@ -2485,12 +2344,12 @@ JOBS: dict = {}
 PENDIENTES: dict = {}
 
 
-def url_base() -> str:
+def _url_base_legacy() -> str:
     base = (config_get("url_base") or "").strip().rstrip("/")
     return base or "http://localhost:8000"
 
 
-def _config_correo() -> dict:
+def _config_correo_legacy() -> dict:
     """Parámetros de correo/SMTP desde la tabla `configuracion`."""
     emisor = (config_get("correo_emisor") or "").strip()
     try:
@@ -2508,7 +2367,7 @@ def _config_correo() -> dict:
     }
 
 
-def _enviar_correo(destino: str, subject: str, html: str) -> bool:
+def _enviar_correo_legacy(destino: str, subject: str, html: str) -> bool:
     """Envía un correo HTML usando la configuración SMTP. Devuelve True si se
     entregó (o si no hay SMTP y solo se registró en consola)."""
     c = _config_correo()
@@ -2850,7 +2709,6 @@ def _procesar_job(job_id: str) -> None:
         actualizar_envio_batch(envio_id, amb, enviados=job["enviados"], fallidos=job["fallidos"])
 
 
-@app.post("/api/notificaciones/enviar", status_code=202)
 def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
                   sesion: dict = Depends(exigir("mensajeria"))):
     try:
@@ -3089,7 +2947,6 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
             "ambiente": amb, "rechazados": rechazados, "aviso_limite_mensajeria": aviso_limite}
 
 
-@app.get("/api/notificaciones/solicitud/{token}")
 def estado_solicitud(token: str, sesion: dict = Depends(sesion_actual)):
     pend = PENDIENTES.get(token)
     if not pend:
@@ -3099,7 +2956,6 @@ def estado_solicitud(token: str, sesion: dict = Depends(sesion_actual)):
             "comentario": pend.get("comentario", "")}
 
 
-@app.get("/api/notificaciones/rechazar/{token}")
 def formulario_rechazo(token: str):
     pend = PENDIENTES.get(token)
     if not pend:
@@ -3129,7 +2985,6 @@ def formulario_rechazo(token: str):
 """)
 
 
-@app.post("/api/notificaciones/rechazar/{token}")
 def rechazar_envio(token: str, comentario: str = Form("")):
     pend = PENDIENTES.get(token)
     if not pend:
@@ -3173,7 +3028,6 @@ def rechazar_envio(token: str, comentario: str = Form("")):
 """)
 
 
-@app.get("/api/notificaciones/confirmar/{token}")
 def confirmar_envio(token: str, background_tasks: BackgroundTasks):
     pend = PENDIENTES.get(token)
     if not pend:
@@ -3217,7 +3071,6 @@ class DestinosIn(BaseModel):
     plantilla_id: int | None = None
 
 
-@app.post("/api/notificaciones/destinatarios")
 def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensajeria"))):
     try:
         amb = entorno_valido(body.ambiente)
@@ -3257,7 +3110,6 @@ def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensaj
     }
 
 
-@app.get("/api/notificaciones/jobs/{job_id}")
 def estado_job(job_id: str, sesion: dict = Depends(exigir("mensajeria"))):
     job = JOBS.get(job_id)
     if job is None:
@@ -3266,7 +3118,6 @@ def estado_job(job_id: str, sesion: dict = Depends(exigir("mensajeria"))):
     return {k: v for k, v in job.items() if k != "destinatarios"}
 
 
-@app.post("/api/notificaciones/jobs/{job_id}/cancelar")
 def cancelar_job(job_id: str, sesion: dict = Depends(exigir("mensajeria"))):
     job = JOBS.get(job_id)
     if job is None:
@@ -3277,7 +3128,6 @@ def cancelar_job(job_id: str, sesion: dict = Depends(exigir("mensajeria"))):
     return {"ok": True, "estado": "cancelado"}
 
 
-@app.post("/api/notificaciones/jobs/{job_id}/pausa")
 def pausar_job(job_id: str, sesion: dict = Depends(exigir("mensajeria"))):
     job = JOBS.get(job_id)
     if job is None:
@@ -3288,7 +3138,6 @@ def pausar_job(job_id: str, sesion: dict = Depends(exigir("mensajeria"))):
     return {"ok": True, "estado": "pausado"}
 
 
-@app.post("/api/notificaciones/jobs/{job_id}/reanudar")
 def reanudar_job(job_id: str, sesion: dict = Depends(exigir("mensajeria"))):
     job = JOBS.get(job_id)
     if job is None:
@@ -3299,7 +3148,6 @@ def reanudar_job(job_id: str, sesion: dict = Depends(exigir("mensajeria"))):
     return {"ok": True, "estado": "en_proceso"}
 
 
-@app.get("/api/notificaciones/historial")
 def listar_historial(q: str | None = Query(None), estado: str | None = Query(None),
                      ambiente: str = Query("produccion"), sesion: dict = Depends(exigir("historial"))):
     com_col = "comentario" if "comentario" in columnas_tabla("envios", "produccion") else "NULL AS comentario"
@@ -3333,7 +3181,6 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
     return filas
 
 
-@app.get("/api/notificaciones/historial/{envio_id}/detalle")
 def detalle_historial(envio_id: int, ambiente: str = Query("produccion"),
                       sesion: dict = Depends(exigir("historial"))):
     # log_envios es única para todo el sistema; el detalle se busca por envio_id.
@@ -3373,7 +3220,6 @@ def detalle_historial(envio_id: int, ambiente: str = Query("produccion"),
     return filas
 
 
-@app.put("/api/notificaciones/historial/{registro_id}/respuesta")
 def actualizar_respuesta(registro_id: int, body: EstadoPacienteIn,
                          ambiente: str = Query("produccion"),
                          sesion: dict = Depends(exigir("historial"))):
@@ -3413,7 +3259,6 @@ def _pacientes_por_respuesta(ambiente: str) -> dict:
 _SOLO_PROD = "envio_id IN (SELECT id FROM envios WHERE base_datos = 'pacientes_prod')"
 
 
-@app.get("/api/estadisticas")
 def estadisticas(sesion: dict = Depends(exigir("estadisticas"))):
     """Resumen de envíos para la página de Estadísticas (solo producción)."""
     with conectar() as conn, conn.cursor() as cur:
@@ -3460,7 +3305,6 @@ def estadisticas(sesion: dict = Depends(exigir("estadisticas"))):
     }
 
 
-@app.get("/api/estadisticas/envios")
 def estadisticas_envios(granularidad: str = Query("mes"), sesion: dict = Depends(exigir("estadisticas"))):
     """Mensajes enviados agrupados por periodo (para el gráfico de barras)."""
     if granularidad not in ("dia", "mes", "anio"):
@@ -3684,7 +3528,6 @@ def _obtener_moneda_meta() -> str | None:
     return None
 
 
-@app.get("/api/tarifas")
 def obtener_tarifas(sesion: dict = Depends(exigir("tarifas_editar"))):
     moneda = _moneda_cuenta()
     tarifas = _tarifas_guardadas(moneda) or _tarifas_guardadas("USD")
@@ -3705,7 +3548,6 @@ def obtener_tarifas(sesion: dict = Depends(exigir("tarifas_editar"))):
     }
 
 
-@app.post("/api/tarifas/actualizar")
 def actualizar_tarifas(sesion: dict = Depends(exigir("tarifas_editar"))):
     try:
         encontradas = _fetch_tarifas_meta()
@@ -3753,7 +3595,6 @@ def actualizar_tarifas(sesion: dict = Depends(exigir("tarifas_editar"))):
     }
 
 
-@app.get("/api/tarifas/chile.csv")
 def descargar_tarifa_csv(sesion: dict = Depends(exigir("tarifas_editar"))):
     moneda = _moneda_cuenta()
     with conectar() as conn, conn.cursor() as cur:
@@ -3791,7 +3632,6 @@ def _categorias_por_clave() -> dict:
     return m
 
 
-@app.get("/api/estadisticas/costos")
 def estadisticas_costos(granularidad: str = Query("mes"), sesion: dict = Depends(exigir("tarifas_editar"))):
     if granularidad not in ("dia", "mes", "anio"):
         raise HTTPException(400, detail="granularidad debe ser dia, mes o anio")
@@ -3853,6 +3693,14 @@ def estadisticas_costos(granularidad: str = Query("mes"), sesion: dict = Depends
                   "excluidos": excluidos, "por_categoria": tot["por_categoria"]},
     }
 
+
+# Cada módulo mantiene el contrato HTTP de su dominio. `main.py` conserva los
+# manejadores mientras su lógica de negocio se migra paulatinamente a servicios.
+for registrar in (
+    auth.registrar, usuarios.registrar, pacientes.registrar, plantillas.registrar,
+    configuracion.registrar, notificaciones.registrar, rutas_estadisticas.registrar,
+):
+    app.include_router(registrar(globals()))
 
 app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="static")
 
