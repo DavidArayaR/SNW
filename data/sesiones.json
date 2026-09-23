@@ -1,1 +1,16 @@
-{}
+{
+  "6a75125f9d8e4e738a69558c91b9060a": {
+    "usuario": "usuario",
+    "rol": "usuario",
+    "nombre": "Usuario Final",
+    "permisos": [
+      "mensajeria",
+      "historial",
+      "estadisticas"
+    ],
+    "creada": 1790085911.7709076,
+    "actividad": 1790086215.290887,
+    "actividad_guardada": 1790086215.290887,
+    "correo_recuperacion": "d4vid.arayar@gmail.com"
+  }
+}
