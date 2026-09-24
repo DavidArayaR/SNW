@@ -194,6 +194,35 @@ CREATE TABLE IF NOT EXISTS usuarios (
   UNIQUE KEY uq_usuario (usuario)
 ) CHARACTER SET utf8mb4;
 
+-- Multi-especialidad (Fase 1): cada especialidad vive en UNA sola tabla
+-- `pacientes_<slug>` (sin sufijo de entorno), creada por el backend al crear
+-- la especialidad. Cada instancia tiene su propio rol y los usuarios se
+-- vinculan a esos roles sin tocar el rol global de `usuarios`.
+CREATE TABLE IF NOT EXISTS especialidades (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  nombre_visible VARCHAR(150) NOT NULL,
+  nombre_tabla_base VARCHAR(64) NOT NULL,
+  fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_tabla_base (nombre_tabla_base)
+) CHARACTER SET utf8mb4;
+
+CREATE TABLE IF NOT EXISTS roles_especialidad (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  especialidad_id INT NOT NULL,
+  nombre VARCHAR(150) NOT NULL,
+  descripcion VARCHAR(255) NOT NULL DEFAULT '',
+  UNIQUE KEY uq_especialidad (especialidad_id),
+  INDEX idx_rol_nombre (nombre)
+) CHARACTER SET utf8mb4;
+
+CREATE TABLE IF NOT EXISTS usuario_especialidad_roles (
+  usuario_id INT NOT NULL,
+  rol_id INT NOT NULL,
+  creado DATETIME DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (usuario_id, rol_id),
+  INDEX idx_uer_rol (rol_id)
+) CHARACTER SET utf8mb4;
+
 -- Cuentas por defecto (clave = SHA-256). El backend además garantiza `dev`
 -- en cada arranque si falta. Máximo 4 cuentas de rol `desarrollador`.
 -- admin/dev no tienen correo de recuperación: lo cargan desde «Mi cuenta».

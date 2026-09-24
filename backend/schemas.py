@@ -92,3 +92,19 @@ class ConfigTodoIn(BaseModel):
 class PruebaWAIn(BaseModel):
     telefono: str
     mensaje: str = "Mensaje de prueba del sistema SNW"
+
+
+class EspecialidadIn(BaseModel):
+    nombre: str
+    # preguntar: si el nombre visible ya existe, no crea nada y devuelve las
+    # coincidencias para que la UI pregunte. reutilizar: usa la existente.
+    # nueva: crea una instancia nueva (pacientes_<slug><n>).
+    modo: str | None = "preguntar"
+
+
+class EspecialidadRenombrarIn(BaseModel):
+    nombre_visible: str
+
+
+class RolEspecialidadIn(BaseModel):
+    usuario: str

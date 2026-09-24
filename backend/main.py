@@ -21,7 +21,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 import httpx
-from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Query, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -46,12 +46,15 @@ from whatsapp_webhook import router as whatsapp_router
 from config_service import config_correo as _config_correo, enviar_correo as _enviar_correo, leer_config, url_base
 from schemas import (
     ActivarCuentaIn, ClavePropiaIn, ConfigIn, ConfigTodoIn,
-    CorreoRecuperacionIn, EnvioIn, InvitarIn, LoginIn, OlvideIn,
-    PlantillaIn, PruebaWAIn, ResetIn, UsuarioUpdIn,
+    CorreoRecuperacionIn, EnvioIn, EspecialidadIn, EspecialidadRenombrarIn,
+    InvitarIn, LoginIn, OlvideIn,
+    PlantillaIn, PruebaWAIn, ResetIn, RolEspecialidadIn, UsuarioUpdIn,
 )
 from telefono import normalizar_telefono
+import servicio_especialidades
+from servicio_especialidades import CSV_MAX_BYTES
 from routes import auth, configuracion, estadisticas as rutas_estadisticas
-from routes import notificaciones, pacientes, plantillas, usuarios
+from routes import notificaciones, pacientes, plantillas, usuarios, especialidades
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -729,6 +732,164 @@ def eliminar_usuario(usuario: str, sesion: dict = Depends(solo_admin)):
             SESIONES.pop(tk, None)
     guardar_sesiones()
     return {"ok": True}
+
+
+# ===========================================================================
+#  Especialidades y roles dinámicos (Fase 1 multi-especialidad)
+# ===========================================================================
+
+# Cada especialidad vive en UNA sola tabla `pacientes_<slug>` (sin sufijo de
+# entorno). El rol global de `usuarios` no se toca: el acceso por especialidad
+# va en `roles_especialidad` / `usuario_especialidad_roles`.
+
+_ERRORES_ESPECIALIDAD = {
+    "nombre_vacio": (422, "Escribe el nombre de la especialidad."),
+    "nombre_largo": (422, "El nombre no puede superar los 150 caracteres."),
+    "slug_vacio": (422, "El nombre no genera un identificador técnico válido."),
+    "slug_invalido": (422, "El nombre no genera un identificador técnico válido."),
+    "modo_invalido": (422, "Modo inválido. Usa: preguntar, reutilizar o nueva."),
+    "no_existe": (404, "Especialidad no encontrada."),
+    "nombre_duplicado": (409, "Ya existe otra especialidad con ese nombre visible."),
+    "tabla_larga": (409, "El nombre genera una tabla demasiado larga."),
+    "tabla_invalida": (500, "La tabla registrada de la especialidad no es válida."),
+    "sin_sufijo_libre": (409, "No se encontró un sufijo numérico libre para la tabla."),
+    "codificacion": (422, "El archivo debe estar en UTF-8."),
+    "csv_vacio": (422, "El archivo CSV está vacío."),
+}
+
+
+def _error_especialidad(codigo: str) -> HTTPException:
+    if codigo.startswith("columnas:"):
+        faltan = codigo.split(":", 1)[1]
+        return HTTPException(422, detail=f"Faltan columnas obligatorias en el CSV: {faltan}.")
+    estado, detalle = _ERRORES_ESPECIALIDAD.get(codigo, (500, "Error en la especialidad."))
+    return HTTPException(estado, detail=detalle)
+
+
+def listar_especialidades(sesion: dict = Depends(solo_admin)):
+    """Todas las especialidades con su tabla y rol (solo admin/dev)."""
+    return servicio_especialidades.listar_especialidades()
+
+
+def mis_especialidades(sesion: dict = Depends(sesion_actual)):
+    """Especialidades visibles para la sesión: todas si es privilegiada, solo
+    las asignadas en caso contrario."""
+    if sesion.get("rol") in ROLES_PRIVILEGIADOS:
+        return servicio_especialidades.listar_especialidades()
+    uid = servicio_especialidades.usuario_id_por_correo(sesion.get("usuario", ""))
+    if not uid:
+        return []
+    return servicio_especialidades.especialidades_de_usuario(uid)
+
+
+def crear_especialidad(body: EspecialidadIn, sesion: dict = Depends(solo_admin)):
+    """Crea una especialidad con su tabla `pacientes_<slug>` y su rol.
+
+    Si el nombre visible ya existe y no se indicó `modo`, no crea nada y
+    responde 409 con las coincidencias para que la UI pregunte
+    «utilizar existente / crear nueva».
+    """
+    try:
+        prep = servicio_especialidades.preparar_especialidad(body.nombre, body.modo)
+    except ValueError as e:
+        raise _error_especialidad(str(e))
+    if prep["decision"] == "preguntar":
+        raise HTTPException(409, detail={
+            "mensaje": "Ya existe una especialidad con este nombre. ¿Qué deseas hacer?",
+            "existentes": prep["existentes"],
+        })
+    if prep["decision"] == "reutilizar":
+        esp = prep["especialidad"]
+        auditoria_registrar(sesion.get("usuario", ""), "especialidad_reutilizar",
+                            esp["nombre_visible"], f"Tabla {esp['nombre_tabla_base']}")
+        return {"reutilizada": True, "especialidad": esp}
+    try:
+        esp = servicio_especialidades.crear_especialidad(prep["nombre"], prep["slug"])
+    except ValueError as e:
+        raise _error_especialidad(str(e))
+    auditoria_registrar(sesion.get("usuario", ""), "especialidad_crear",
+                        esp["nombre_visible"], f"Tabla {esp['nombre_tabla_base']}")
+    return {"creada": True, "especialidad": esp}
+
+
+def renombrar_especialidad(especialidad_id: int, body: EspecialidadRenombrarIn,
+                           sesion: dict = Depends(solo_admin)):
+    """Cambia el nombre visible (y el del rol). La tabla física NO cambia."""
+    try:
+        esp = servicio_especialidades.renombrar_especialidad(especialidad_id, body.nombre_visible)
+    except ValueError as e:
+        raise _error_especialidad(str(e))
+    auditoria_registrar(sesion.get("usuario", ""), "especialidad_renombrar",
+                        esp.get("nombre_visible", ""), f"Tabla {esp.get('nombre_tabla_base', '')}")
+    return {"ok": True, "especialidad": esp}
+
+
+def asignar_rol_especialidad(especialidad_id: int, body: RolEspecialidadIn,
+                             sesion: dict = Depends(solo_admin)):
+    """Da a una cuenta el rol de la especialidad (acceso a su tabla)."""
+    obj = usuario_buscar(body.usuario)
+    if obj is None:
+        raise HTTPException(404, detail="Usuario no encontrado.")
+    puede, motivo = _puede_gestionar(sesion, obj)
+    if not puede:
+        raise HTTPException(403, detail=motivo)
+    uid = servicio_especialidades.usuario_id_por_correo(obj["usuario"])
+    if not uid:
+        raise HTTPException(404, detail="Usuario no encontrado.")
+    try:
+        rol = servicio_especialidades.asignar_rol_especialidad(especialidad_id, uid)
+    except ValueError as e:
+        raise _error_especialidad(str(e))
+    auditoria_registrar(sesion.get("usuario", ""), "especialidad_rol_asignar",
+                        obj["usuario"], f"Rol «{rol['rol']}» asignado")
+    return {"ok": True, **rol}
+
+
+def retirar_rol_especialidad(especialidad_id: int, usuario: str,
+                             sesion: dict = Depends(solo_admin)):
+    """Quita a una cuenta el rol de la especialidad."""
+    obj = usuario_buscar(usuario)
+    if obj is None:
+        raise HTTPException(404, detail="Usuario no encontrado.")
+    puede, motivo = _puede_gestionar(sesion, obj)
+    if not puede:
+        raise HTTPException(403, detail=motivo)
+    uid = servicio_especialidades.usuario_id_por_correo(obj["usuario"])
+    if not uid:
+        raise HTTPException(404, detail="Usuario no encontrado.")
+    retirado = servicio_especialidades.retirar_rol_especialidad(especialidad_id, uid)
+    if retirado:
+        auditoria_registrar(sesion.get("usuario", ""), "especialidad_rol_retirar",
+                            obj["usuario"], f"Rol de especialidad {especialidad_id} retirado")
+    return {"ok": True, "retirado": retirado}
+
+
+async def importar_pacientes_csv(especialidad_id: int, archivo: UploadFile = File(...),
+                                 sesion: dict = Depends(sesion_actual)):
+    """Carga pacientes vía CSV en la tabla de la especialidad.
+
+    En esta fase: admin/dev (acceso global) o cuentas con el rol de la
+    especialidad asignado. La apertura a supervisores/usuarios con permiso de
+    mensajería se completa en la Fase 2 junto al resto de la autorización.
+    """
+    esp = servicio_especialidades.obtener_especialidad(especialidad_id)
+    if not esp:
+        raise HTTPException(404, detail="Especialidad no encontrada.")
+    privilegiado = sesion.get("rol") in ROLES_PRIVILEGIADOS
+    uid = servicio_especialidades.usuario_id_por_correo(sesion.get("usuario", ""))
+    if not servicio_especialidades.puede_acceder_especialidad(privilegiado, uid, especialidad_id):
+        raise HTTPException(403, detail="No tienes acceso a esta especialidad.")
+    datos = await archivo.read()
+    if len(datos) > CSV_MAX_BYTES:
+        raise HTTPException(413, detail="El archivo supera los 5 MB.")
+    try:
+        informe = servicio_especialidades.importar_pacientes_csv(especialidad_id, datos)
+    except ValueError as e:
+        raise _error_especialidad(str(e))
+    auditoria_registrar(sesion.get("usuario", ""), "especialidad_csv",
+                        esp["nombre_visible"],
+                        f"{informe['insertados']} insertados de {informe['procesados']} procesados")
+    return {"ok": True, "especialidad": esp, "informe": informe}
 
 
 def _plantilla_valida(p) -> bool:
@@ -3849,6 +4010,7 @@ def estadisticas_costos(granularidad: str = Query("mes"), sesion: dict = Depends
 for registrar in (
     auth.registrar, usuarios.registrar, pacientes.registrar, plantillas.registrar,
     configuracion.registrar, notificaciones.registrar, rutas_estadisticas.registrar,
+    especialidades.registrar,
 ):
     app.include_router(registrar(globals()))
 

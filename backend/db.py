@@ -383,6 +383,12 @@ def asegurar_tabla_config() -> None:
                 )
             cur.execute("DELETE FROM configuracion WHERE clave = 'call_center_numero'")
 
+            # Modelo multi-especialidad (Fase 1): tablas `especialidades`,
+            # `roles_especialidad` y `usuario_especialidad_roles`. Import
+            # diferido porque servicio_especialidades importa este módulo.
+            from servicio_especialidades import asegurar_tablas_especialidades
+            asegurar_tablas_especialidades(cur)
+
             conn.commit()
     except Exception as e:
         log_error("asegurar_tabla_config", e)
@@ -686,8 +692,17 @@ def usuario_cambiar_clave(correo: str, clave_hash: str) -> None:
 def usuario_borrar(correo: str) -> None:
     correo = (correo or "").strip().lower()
     with conectar() as conn, conn.cursor() as cur:
+        cur.execute("SELECT id FROM usuarios WHERE usuario = %s", (correo,))
+        fila = cur.fetchone()
         cur.execute("DELETE FROM usuarios WHERE usuario = %s", (correo,))
         cur.execute("DELETE FROM password_resets WHERE usuario = %s", (correo,))
+        if fila:
+            # Limpia los roles de especialidad de la cuenta eliminada.
+            try:
+                cur.execute("DELETE FROM usuario_especialidad_roles WHERE usuario_id = %s",
+                            (int(fila["id"]),))
+            except Exception as e:
+                log_error("usuario_borrar: roles de especialidad", e)
         conn.commit()
 
 

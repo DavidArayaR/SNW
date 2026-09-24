@@ -421,6 +421,20 @@ tiene template de Meta (va como texto libre, ventana de 24 h). No hay gestión d
 | GET | `/api/whatsapp/messaging-limit` | (admin / dev) `{tier, usados_24h, disponibles, ventana_horas}` — usuarios únicos contactados (mensajes iniciados por el negocio) en las últimas 24 h frente al `wa_messaging_limit_24h` |
 | PUT | `/api/whatsapp/messaging-limit` | (admin / dev) `{limite: int}` — actualiza `wa_messaging_limit_24h` (0 = ilimitado) para ajustarlo a lo que indique el dashboard de Meta; devuelve el estado actualizado |
 
+### Especialidades — Fase 1 (multi-especialidad)
+
+Cada especialidad vive en **una sola tabla** `pacientes_<slug>` dentro de `snw_base` (**sin** sufijo `_dev`/`_prod`). El slug se genera del nombre visible en minúsculas, sin acentos, espacios ni caracteres especiales (`Kinesiología Sede Maipú` → `pacientes_kinesiologiasedemaipu`). El rol global de `usuarios` no se toca: el acceso por especialidad va en `roles_especialidad` / `usuario_especialidad_roles`.
+
+| Método | Endpoint | Descripción |
+|---|---|---|
+| GET | `/api/especialidades` | (admin / dev) Todas las especialidades con su tabla y rol |
+| GET | `/api/especialidades/mias` | Especialidades visibles para la sesión (todas si es admin/dev, solo asignadas si no) |
+| POST | `/api/especialidades` | (admin / dev) `{nombre, modo}` — `preguntar` (por defecto): si el nombre visible ya existe responde 409 con las coincidencias sin crear nada; `reutilizar`: usa la existente; `nueva`: crea `pacientes_<slug><n>` con el primer sufijo libre (con base, 2 y 4 ocupados usa 3) |
+| PUT | `/api/especialidades/{id}` | (admin / dev) `{nombre_visible}` — renombra especialidad y rol; la tabla física **no** cambia |
+| POST | `/api/especialidades/{id}/roles` | (admin / dev) `{usuario}` — asigna a la cuenta el rol de la especialidad |
+| DELETE | `/api/especialidades/{id}/roles/{usuario}` | (admin / dev) — retira el rol de la especialidad |
+| POST | `/api/especialidades/{id}/pacientes/csv` | Carga CSV (`nombre, apellido, telefono`, UTF-8, máx. 5 MB) en la tabla de la especialidad; normaliza a `+569XXXXXXXX` e informa `{procesados, insertados, duplicados, rechazados, errores}`. Admin/dev o cuentas con el rol asignado |
+
 ### Webhook de WhatsApp (Meta)
 
 | Método | Endpoint | Descripción |
