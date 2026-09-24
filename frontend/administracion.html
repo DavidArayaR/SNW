@@ -238,12 +238,9 @@
             <div class="panel__head">
               <h2 id="tituloPacientes">Pacientes</h2>
               <div class="panel__actions">
-                <select id="selEspecialidadPac" class="badge badge--select" aria-label="Especialidad">
-                  <option value="">Bases desarrollo/producci&oacute;n</option>
-                </select>
-                <select id="selAmbiente" class="badge badge--select" aria-label="Base de datos">
-                  <option value="desarrollo">Base de datos desarrollo</option>
-                  <option value="produccion">Base de datos producci&oacute;n</option>
+                <select id="selBasePac" class="badge badge--select" aria-label="Base de datos">
+                  <option value="dev">Base de datos desarrollo (pacientes_dev)</option>
+                  <option value="prod">Base de datos producción (pacientes_prod)</option>
                 </select>
                 <button id="btnToggleFiltros" class="btn btn--ghost" type="button" aria-expanded="true">
                   <i class="fa-solid fa-sliders"></i> <span>Ocultar filtros</span>
@@ -304,6 +301,19 @@
                 <tbody></tbody>
               </table>
               <p id="tablaVacia" class="tabla-vacia" hidden>Sin resultados.</p>
+            </div>
+
+            <div class="usr-paginador" id="paginadorPac">
+              <span id="pagInfoPac"></span>
+              <button type="button" class="btn btn--ghost" id="pagAntPac">&laquo; Anterior</button>
+              <button type="button" class="btn btn--ghost" id="pagSigPac">Siguiente &raquo;</button>
+              <label for="selPageSizePac">Por p&aacute;gina:</label>
+              <select id="selPageSizePac" aria-label="Pacientes por página">
+                <option value="10">10</option>
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+              </select>
             </div>
           </section>
         </div>

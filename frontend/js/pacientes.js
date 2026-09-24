@@ -11,13 +11,53 @@ let _ambienteInicializado = false;
 let pacientes = [];
 let config = null;
 let especialidades = [];
-let especialidadSel = localStorage.getItem("snw_esp_pacientes") || "";
 let filtro = "";
 let filtroEstado = "todos";
 let filtroRespuesta = "todas";
 let filtroInteres = "todos";
 let seleccionados = new Set();
 let todoMarcado = false;
+
+// Paginación de la tabla: 10 a 100 pacientes por página.
+let paginaPac = 1;
+let pageSizePac = Math.min(100, Math.max(10, Number(localStorage.getItem("snw_page_size_pac")) || 10));
+
+function filtradosPac() {
+  const q = filtro.trim().toLowerCase();
+  return pacientes.filter(
+    (p) =>
+      (filtroEstado === "todos" || p.estado === filtroEstado) &&
+      (filtroRespuesta === "todas" || (p.respuesta || "pendiente") === filtroRespuesta) &&
+      (filtroInteres === "todos" || !!p.no_interesado) &&
+      (!q ||
+        [p.nombre, p.apellido, p.telefono]
+          .filter(Boolean)
+          .some((v) => v.toLowerCase().includes(q)))
+  );
+}
+
+function totalPaginasPac(n) {
+  return Math.max(1, Math.ceil(n / pageSizePac));
+}
+
+function itemsPaginaPac(visibles) {
+  const total = totalPaginasPac(visibles.length);
+  if (paginaPac > total) paginaPac = total;
+  if (paginaPac < 1) paginaPac = 1;
+  return visibles.slice((paginaPac - 1) * pageSizePac, paginaPac * pageSizePac);
+}
+
+function pintarPaginadorPac(total) {
+  const info = $("#pagInfoPac");
+  const btnAnt = $("#pagAntPac");
+  const btnSig = $("#pagSigPac");
+  const selTam = $("#selPageSizePac");
+  const paginas = totalPaginasPac(total);
+  if (info) info.textContent = `Página ${paginaPac} de ${paginas} · ${total} paciente${total === 1 ? "" : "s"}`;
+  if (btnAnt) btnAnt.disabled = paginaPac <= 1;
+  if (btnSig) btnSig.disabled = paginaPac >= paginas;
+  if (selTam && selTam.value !== String(pageSizePac)) selTam.value = String(pageSizePac);
+}
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -28,38 +68,41 @@ const statsEl = $("#stats");
 const chkTodos = $("#chkTodos");
 const contadorSel = $("#contadorSel");
 const toastEl = $("#toast");
-const selAmbiente = $("#selAmbiente");
-const selEspecialidad = $("#selEspecialidadPac");
+const selBasePac = $("#selBasePac");
 const toolbarMasivo = $("#toolbarMasivo");
 const selEstadoMasivo = $("#selEstadoMasivo");
 const selRespuestaMasivo = $("#selRespuestaMasivo");
 
-if (ambienteAdmin) selAmbiente.value = ambienteAdmin;
-selAmbiente.addEventListener("change", async () => {
-  ambienteAdmin = selAmbiente.value;
-  localStorage.setItem("snw_ambiente_admin", ambienteAdmin);
-  cargar();
-});
-
-function ambienteActual() {
-  return selAmbiente.value;
+// Selector único de base de datos: legacy (dev/prod) o especialidad, siempre
+// mostrando el nombre físico de la tabla. Valores: "dev" | "prod" | "esp:<id>".
+function basePacActual() {
+  return (selBasePac && selBasePac.value) || "dev";
 }
 
-// Especialidad (Fase 3): "" = bases legacy desarrollo/producción; con id se
-// lee la tabla pacientes_<slug> (el backend responde 403 si no está asignada).
-function especialidadActual() {
-  const v = selEspecialidad ? selEspecialidad.value : "";
-  return v ? Number(v) : null;
+function espPacId() {
+  const v = basePacActual();
+  if (!v.startsWith("esp:")) return null;
+  const id = Number(v.slice(4));
+  return Number.isFinite(id) ? id : null;
+}
+
+function tablaPacActual() {
+  const esp = espPacId();
+  if (esp != null) {
+    const e = especialidades.find((x) => x.id === esp);
+    return e ? e.nombre_tabla_base : null;
+  }
+  return basePacActual() === "prod" ? "pacientes_prod" : "pacientes_dev";
 }
 
 function qsBase() {
-  const amb = ambienteActual() || ambienteAdmin || "desarrollo";
-  const esp = especialidadActual();
-  return `ambiente=${encodeURIComponent(amb)}` + (esp ? `&especialidad_id=${esp}` : "");
+  const esp = espPacId();
+  if (esp != null) return `ambiente=produccion&especialidad_id=${esp}`;
+  return `ambiente=${basePacActual() === "prod" ? "produccion" : "desarrollo"}`;
 }
 
-async function cargarEspecialidades() {
-  if (!selEspecialidad) return;
+async function cargarBasesPac() {
+  if (!selBasePac) return;
   try {
     const r = await fetch("api/especialidades/mias", { headers: authHeaders(), cache: "no-store" });
     if (!r.ok) throw new Error();
@@ -67,45 +110,62 @@ async function cargarEspecialidades() {
   } catch {
     especialidades = [];
   }
-  const actual = especialidadActual();
-  selEspecialidad.innerHTML =
-    `<option value="">Bases desarrollo/producción</option>` +
-    especialidades.map((e) => `<option value="${e.id}">${escaparHtml(e.nombre_visible)}</option>`).join("");
-  if (actual && especialidades.some((e) => e.id === actual)) {
-    selEspecialidad.value = String(actual);
+  selBasePac.innerHTML =
+    `<option value="dev">Base de datos desarrollo (pacientes_dev)</option>` +
+    `<option value="prod">Base de datos producción (pacientes_prod)</option>` +
+    especialidades.map((e) => `<option value="esp:${e.id}">${escaparHtml(e.nombre_visible)} (${escaparHtml(e.nombre_tabla_base)})</option>`).join("");
+  // Restaura la última usada si sigue disponible; si no, la primera.
+  const valores = [...selBasePac.options].map((o) => o.value);
+  const guardadaEsp = localStorage.getItem("snw_esp_pacientes") || "";
+  let elegido = null;
+  if (guardadaEsp && valores.includes(`esp:${guardadaEsp}`)) {
+    elegido = `esp:${guardadaEsp}`;
   } else {
-    especialidadSel = "";
+    const amb = ambienteAdmin === "produccion" ? "prod" : "dev";
+    elegido = valores.includes(amb) ? amb : valores[0];
     localStorage.removeItem("snw_esp_pacientes");
   }
-  aplicarModoEspecialidad();
+  selBasePac.value = elegido;
+  if (elegido.startsWith("esp:")) {
+    localStorage.setItem("snw_esp_pacientes", elegido.slice(4));
+  } else if (localStorage.getItem("snw_ambiente_admin")) {
+    ambienteAdmin = elegido === "prod" ? "produccion" : "desarrollo";
+    localStorage.setItem("snw_ambiente_admin", ambienteAdmin);
+  } else {
+    ambienteAdmin = null; // lo define cargar() desde el entorno global
+  }
+  aplicarModoBase();
 }
 
-function aplicarModoEspecialidad() {
-  const esp = especialidadActual();
-  selAmbiente.disabled = !!esp;
+function aplicarModoBase() {
+  const esp = espPacId();
+  const tabla = tablaPacActual();
   const csvBloque = $("#csvCarga");
   if (csvBloque) {
-    csvBloque.hidden = !esp;
+    csvBloque.hidden = esp == null;
     const dest = $("#csvDestino");
-    if (dest && esp) {
+    if (dest && esp != null) {
       const e = especialidades.find((x) => x.id === esp);
-      dest.textContent = e ? e.nombre_visible : "especialidad";
+      dest.textContent = e ? `${e.nombre_visible} (${e.nombre_tabla_base})` : "especialidad";
     }
   }
   const tituloEl = $("#tituloPacientes");
-  if (tituloEl && esp) {
-    const e = especialidades.find((x) => x.id === esp);
-    tituloEl.textContent = `Pacientes · ${e ? e.nombre_visible : "especialidad"}`;
-  }
+  if (tituloEl && tabla) tituloEl.textContent = `Pacientes · ${tabla}`;
 }
 
-if (selEspecialidad) selEspecialidad.addEventListener("change", async () => {
-  especialidadSel = selEspecialidad.value;
-  if (especialidadSel) localStorage.setItem("snw_esp_pacientes", especialidadSel);
-  else localStorage.removeItem("snw_esp_pacientes");
+if (selBasePac) selBasePac.addEventListener("change", async () => {
+  const v = selBasePac.value;
+  if (v.startsWith("esp:")) {
+    localStorage.setItem("snw_esp_pacientes", v.slice(4));
+  } else {
+    localStorage.removeItem("snw_esp_pacientes");
+    ambienteAdmin = v === "prod" ? "produccion" : "desarrollo";
+    localStorage.setItem("snw_ambiente_admin", ambienteAdmin);
+  }
   seleccionados = new Set();
   todoMarcado = false;
-  aplicarModoEspecialidad();
+  paginaPac = 1;
+  aplicarModoBase();
   cargar();
 });
 
@@ -124,14 +184,17 @@ async function cargar() {
         if (r0.ok) {
           const c0 = await r0.json();
           ambienteAdmin = c0.entorno;
-          selAmbiente.value = ambienteAdmin;
-          localStorage.setItem("snw_ambiente_admin", ambienteAdmin);
+          if (selBasePac && espPacId() == null) {
+            selBasePac.value = ambienteAdmin === "produccion" ? "prod" : "dev";
+            localStorage.setItem("snw_ambiente_admin", ambienteAdmin);
+            aplicarModoBase();
+          }
         }
       } catch {}
       _ambienteInicializado = true;
     }
-    const amb = ambienteActual() || ambienteAdmin || "desarrollo";
-    const esp = especialidadActual();
+    const esp = espPacId();
+    const amb = esp != null ? "produccion" : (basePacActual() === "prod" ? "produccion" : "desarrollo");
     const [rp, rc] = await Promise.all([
       fetch(`${API_PACIENTES}?${qsBase()}`, { headers: authHeaders(), cache: "no-store" }),
       fetch(`api/configuracion?ambiente=${amb}`, { headers: authHeaders(), cache: "no-store" }),
@@ -150,11 +213,7 @@ async function cargar() {
     }));
     config = await rc.json();
 
-    const tituloEl = $("#tituloPacientes");
-    if (tituloEl) {
-      const entornoLabel = config.entorno === "produccion" ? "producción" : "desarrollo";
-      tituloEl.textContent = `Pacientes ${entornoLabel}`;
-    }
+    aplicarModoBase();
 
     render();
   } catch {
@@ -163,22 +222,12 @@ async function cargar() {
 }
 
 function render() {
-  const q = filtro.trim().toLowerCase();
-  const resp = (p) => p.respuesta || "pendiente";
-  const visibles = pacientes.filter(
-    (p) =>
-      (filtroEstado === "todos" || p.estado === filtroEstado) &&
-      (filtroRespuesta === "todas" || resp(p) === filtroRespuesta) &&
-      (filtroInteres === "todos" || !!p.no_interesado) &&
-      (!q ||
-        [p.nombre, p.apellido, p.telefono]
-          .filter(Boolean)
-          .some((v) => v.toLowerCase().includes(q)))
-  );
+  const visibles = filtradosPac();
+  const enPagina = itemsPaginaPac(visibles);
 
   tbodyEl.innerHTML = "";
 
-  for (const p of visibles) {
+  for (const p of enPagina) {
     const nombreCompleto = [p.nombre, p.apellido].filter(Boolean).join(" ");
     const tr = document.createElement("tr");
     const respuesta = p.respuesta || "pendiente";
@@ -250,6 +299,7 @@ function render() {
   }
 
   vacioEl.hidden = visibles.length > 0;
+  pintarPaginadorPac(visibles.length);
 
   const conteo = { total: pacientes.length, pendiente: 0, enviado: 0, error: 0 };
   for (const p of pacientes) {
@@ -284,16 +334,13 @@ function render() {
     statCard("danger", "fa-user-slash", esActivoResp("baja"), 'data-respuesta="baja"', "Baja", conteoResp.baja) +
     statCard("info", "fa-thumbs-down", esActivoInteres, 'data-interes="no_interesado"', "No le interesa", conteoNoInteresados);
 
-  refrescarSeleccion(visibles);
+  refrescarSeleccion(enPagina);
 }
 
 function refrescarSeleccion(visibles = null) {
-  visibles = visibles ?? pacientes.filter(
-    (p) =>
-      (filtroEstado === "todos" || p.estado === filtroEstado) &&
-      (filtroRespuesta === "todas" || (p.respuesta || "pendiente") === filtroRespuesta) &&
-      (filtroInteres === "todos" || !!p.no_interesado)
-  );
+  // Sin argumento: la página actual. El "seleccionar todos" opera sobre la
+  // página visible, no sobre todo el filtro.
+  visibles = visibles ?? itemsPaginaPac(filtradosPac());
 
   contadorSel.textContent =
     seleccionados.size > 0 ? `${seleccionados.size} seleccionado${seleccionados.size === 1 ? "" : "s"}` : "";
@@ -304,23 +351,10 @@ function refrescarSeleccion(visibles = null) {
     visibles.length > 0 && visibles.every((p) => seleccionados.has(p.id));
 }
 
-// Devuelve el Set de ids de los pacientes visibles con el filtro actual.
+// Devuelve los ids de la página actual (el "seleccionar todos" opera sobre
+// la página visible, no sobre todo el filtro).
 function idsSeleccionables() {
-  const q = filtro.trim().toLowerCase();
-  return new Set(
-    pacientes
-      .filter(
-        (p) =>
-          (filtroEstado === "todos" || p.estado === filtroEstado) &&
-          (filtroRespuesta === "todas" || (p.respuesta || "pendiente") === filtroRespuesta) &&
-          (filtroInteres === "todos" || !!p.no_interesado) &&
-          (!q ||
-            [p.nombre, p.apellido, p.telefono]
-              .filter(Boolean)
-              .some((v) => v.toLowerCase().includes(q)))
-      )
-      .map((p) => p.id)
-  );
+  return new Set(itemsPaginaPac(filtradosPac()).map((p) => p.id));
 }
 
 // Mantiene la selección coherente con el filtro actual:
@@ -483,6 +517,7 @@ document.addEventListener("click", (e) => {
 
 buscadorEl.addEventListener("input", () => {
   filtro = buscadorEl.value;
+  paginaPac = 1;
   sincronizarSeleccionConFiltro();
   render();
 });
@@ -503,11 +538,31 @@ statsEl.addEventListener("click", (e) => {
     filtroEstado = "todos";
     filtroRespuesta = "todas";
   }
+  paginaPac = 1;
   sincronizarSeleccionConFiltro();
   render();
 });
 
 window.snwConCooldown($("#btnActualizar"), cargar);
+
+// --- Paginación: Anterior/Siguiente y tamaño de página (10–100) ------------
+const pagAntPac = $("#pagAntPac");
+const pagSigPac = $("#pagSigPac");
+const selPageSizePac = $("#selPageSizePac");
+if (selPageSizePac) selPageSizePac.value = String(pageSizePac);
+if (pagAntPac) pagAntPac.addEventListener("click", () => {
+  if (paginaPac > 1) { paginaPac -= 1; render(); }
+});
+if (pagSigPac) pagSigPac.addEventListener("click", () => {
+  paginaPac += 1;
+  render();
+});
+if (selPageSizePac) selPageSizePac.addEventListener("change", () => {
+  pageSizePac = Math.min(100, Math.max(10, Number(selPageSizePac.value) || 10));
+  localStorage.setItem("snw_page_size_pac", String(pageSizePac));
+  paginaPac = 1;
+  render();
+});
 
 // --- Edición masiva: cambiar estado o respuesta de todos los seleccionados --
 const ESTADO_LABEL = { pendiente: "pendiente", enviado: "enviado", error: "error" };
@@ -570,13 +625,13 @@ let yaCargada = false;
 window.snwCargarPacientes = function () {
   if (yaCargada) return;
   yaCargada = true;
-  (async () => { await cargarEspecialidades(); cargar(); })();
+  (async () => { await cargarBasesPac(); cargar(); })();
 };
 
 // --- Carga CSV en la especialidad seleccionada (Fase 3) ---------------------
 const csvInput = $("#csvArchivo");
 if (csvInput) csvInput.addEventListener("change", async () => {
-  const esp = especialidadActual();
+  const esp = espPacId();
   const archivo = csvInput.files && csvInput.files[0];
   csvInput.value = "";
   if (!esp || !archivo) return;
