@@ -193,16 +193,18 @@ function construirOpcionesBaseConf(forzarEspId) {
   const restringido = usuarioRestringidoADesarrollo();
   let html = "";
   if (forzarEspId != null) {
-    const nombre = nombreEspecialidad(forzarEspId) || "Especialidad";
-    html = `<option value="esp:${forzarEspId}">${escaparHtml(nombre)}</option>`;
+    const espForzada = misEspecialidades.find((e) => e.id === forzarEspId);
+    const nombre = espForzada ? espForzada.nombre_visible : (nombreEspecialidad(forzarEspId) || "Especialidad");
+    const tabla = espForzada ? espForzada.nombre_tabla_base : "";
+    html = `<option value="esp:${forzarEspId}">${escaparHtml(nombre)}${tabla ? ` (${escaparHtml(tabla)})` : ""}</option>`;
   } else {
     html = `<optgroup label="Bases">` +
-      `<option value="desarrollo">Base de datos desarrollo</option>` +
-      (restringido ? "" : `<option value="produccion">Base de datos producción</option>`) +
+      `<option value="desarrollo">Desarrollo (pacientes_dev)</option>` +
+      (restringido ? "" : `<option value="produccion">Producción (pacientes_prod)</option>`) +
       `</optgroup>`;
     if (misEspecialidades.length) {
       html += `<optgroup label="Especialidades">` +
-        misEspecialidades.map((e) => `<option value="esp:${e.id}">${escaparHtml(e.nombre_visible)}</option>`).join("") +
+        misEspecialidades.map((e) => `<option value="esp:${e.id}">${escaparHtml(e.nombre_visible)} (${escaparHtml(e.nombre_tabla_base)})</option>`).join("") +
         `</optgroup>`;
     }
   }

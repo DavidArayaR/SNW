@@ -12,8 +12,23 @@ let ambienteDetalle = "produccion";
 let especialidadDetalle = null; // especialidad del envío abierto (para sus mensajes)
 let pacienteMsgActual = null; // { id, ambiente, interesado }
 
+const $ = (sel) => document.querySelector(sel);
+
 let especialidadesHist = [];
 const selEspecialidadHist = $("#selEspecialidadHist");
+const selBaseHist = $("#selBaseHist");
+if (selBaseHist) {
+  selBaseHist.value = localStorage.getItem("snw_base_historial") || "todos";
+}
+
+// Solo admin/dev eligen base de datos (dev/prod/todas). El usuario normal
+// solo ve sus especialidades asignadas: se le oculta ese selector.
+const ES_PRIV_HIST = !!window.snwEsPrivilegiado;
+if (!ES_PRIV_HIST && selBaseHist) {
+  selBaseHist.hidden = true;
+  const lblBase = document.querySelector('label[for="selBaseHist"]');
+  if (lblBase) lblBase.hidden = true;
+}
 
 function especialidadHistActual() {
   const v = selEspecialidadHist ? selEspecialidadHist.value : "";
@@ -31,8 +46,8 @@ async function cargarEspecialidadesHist() {
   }
   const guardada = localStorage.getItem("snw_esp_historial") || "";
   selEspecialidadHist.innerHTML =
-    `<option value="">Todas</option>` +
-    especialidadesHist.map((e) => `<option value="${e.id}">${escaparHtml(e.nombre_visible)}</option>`).join("");
+    `<option value="">${ES_PRIV_HIST ? "Todas" : "Mis especialidades"}</option>` +
+    especialidadesHist.map((e) => `<option value="${e.id}">${escaparHtml(e.nombre_visible)} (${escaparHtml(e.nombre_tabla_base)})</option>`).join("");
   if (guardada && especialidadesHist.some((e) => String(e.id) === guardada)) {
     selEspecialidadHist.value = guardada;
   } else {
@@ -43,12 +58,33 @@ async function cargarEspecialidadesHist() {
 
 if (selEspecialidadHist) selEspecialidadHist.addEventListener("change", () => {
   const v = selEspecialidadHist.value;
-  if (v) localStorage.setItem("snw_esp_historial", v);
-  else localStorage.removeItem("snw_esp_historial");
+  if (v) {
+    localStorage.setItem("snw_esp_historial", v);
+    // La especialidad trae su propia base: se vuelve a "Todas".
+    if (selBaseHist) {
+      selBaseHist.value = "todos";
+      localStorage.removeItem("snw_base_historial");
+    }
+  } else {
+    localStorage.removeItem("snw_esp_historial");
+  }
   cargar();
 });
 
-const $ = (sel) => document.querySelector(sel);
+if (selBaseHist) selBaseHist.addEventListener("change", () => {
+  const v = selBaseHist.value;
+  if (v && v !== "todos") {
+    localStorage.setItem("snw_base_historial", v);
+    // Una base concreta excluye especialidades: se limpia ese filtro.
+    if (selEspecialidadHist) {
+      selEspecialidadHist.value = "";
+      localStorage.removeItem("snw_esp_historial");
+    }
+  } else {
+    localStorage.removeItem("snw_base_historial");
+  }
+  cargar();
+});
 
 const tbodyEl = $("#tablaHistorial tbody");
 const vacioEl = $("#tablaVacia");
@@ -66,7 +102,8 @@ function escaparHtml(texto) {
 async function cargar() {
   try {
     const esp = especialidadHistActual();
-    const qs = "ambiente=todos" + (esp ? `&especialidad_id=${esp}` : "");
+    const base = (ES_PRIV_HIST && selBaseHist && selBaseHist.value) || "todos";
+    const qs = `ambiente=${base}` + (esp ? `&especialidad_id=${esp}` : "");
     const [rh, rc] = await Promise.all([
       fetch(`${API_HISTORIAL}?${qs}`, { headers: authHeaders(), cache: "no-store" }),
       fetch(`api/configuracion?ambiente=produccion`, { headers: authHeaders(), cache: "no-store" }),
