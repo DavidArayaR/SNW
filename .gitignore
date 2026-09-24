@@ -31,8 +31,8 @@ desktop.ini
 dump_*.sql
 backup_*.sql
 
-# Cuentas: migradas a la tabla `usuarios` de la BD
-data/usuarios.json
-data/usuarios.json.migrado
+
+data/sesiones.json
 
 documentacion/
+AGENTS.md
