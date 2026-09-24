@@ -49,6 +49,7 @@ from schemas import (
     CorreoRecuperacionIn, EnvioIn, EspecialidadIn, EspecialidadRenombrarIn,
     InvitarIn, LoginIn, OlvideIn,
     PlantillaIn, PruebaWAIn, ResetIn, RolEspecialidadIn, UsuarioUpdIn,
+    RechazoPlantillaIn,
 )
 from telefono import normalizar_telefono
 import servicio_especialidades
@@ -1842,11 +1843,19 @@ def _registrar_template_meta(p: dict, nombre_anterior: str | None = None,
 
 def listar_plantillas(sesion: dict = Depends(sesion_actual)):
     plantillas = leer_plantillas()
-    if not _es_privilegiado(sesion):
-        # Solo las globales (sin especialidad) y las de sus especialidades.
-        permitidas = set(sesion.get("especialidad_ids") or [])
+    if _es_privilegiado(sesion):
+        return sorted(plantillas, key=lambda p: p.get("actualizada", 0), reverse=True)
+    # Alcance por especialidad para el resto.
+    permitidas = set(sesion.get("especialidad_ids") or [])
+    plantillas = [p for p in plantillas
+                  if p.get("especialidad_id") is None or p.get("especialidad_id") in permitidas]
+    if sesion.get("rol") != "supervisor":
+        # Cuentas normales: solo las aprobadas, más las propias pendientes o
+        # rechazadas (para corregirlas o eliminarlas).
+        yo = (sesion.get("usuario") or "").strip().lower()
         plantillas = [p for p in plantillas
-                      if p.get("especialidad_id") is None or p.get("especialidad_id") in permitidas]
+                      if _aprobacion_plantilla(p) == "aprobada"
+                      or (p.get("creado_por") or "").strip().lower() == yo]
     return sorted(plantillas, key=lambda p: p.get("actualizada", 0), reverse=True)
 
 
@@ -1896,6 +1905,8 @@ def estado_plantilla_meta(plantilla_id: int, sesion: dict = Depends(sesion_actua
     p = next((x for x in plantillas if x["id"] == plantilla_id), None)
     if p is None:
         raise HTTPException(404, detail="Plantilla no encontrada")
+    if _aprobacion_plantilla(p) != "aprobada":
+        raise HTTPException(400, detail="Aún no se envía a Meta: falta la aprobación interna.")
 
     p = _actualizar_estado_meta(p)
     escribir_plantillas(plantillas)
@@ -2128,6 +2139,23 @@ def sincronizar_plantillas_meta(sesion: dict = Depends(exigir("mensajeria"))):
     }
 
 
+# --- Aprobación interna de plantillas (previa a Meta) ------------------------
+# Un usuario normal puede crear plantillas, pero nacen "pendientes" y NO se
+# registran en Meta hasta que un administrador, desarrollador o supervisor las
+# aprueba. Las plantillas antiguas (sin el campo) cuentan como "aprobadas".
+def _aprobacion_plantilla(p: dict) -> str:
+    return p.get("aprobacion_estado") or "aprobada"
+
+
+def _puede_aprobar_plantillas(sesion: dict) -> bool:
+    return _es_privilegiado(sesion) or sesion.get("rol") == "supervisor"
+
+
+def _es_creador_plantilla(p: dict, sesion: dict) -> bool:
+    yo = (sesion.get("usuario") or "").strip().lower()
+    return bool(yo) and (p.get("creado_por") or "").strip().lower() == yo
+
+
 def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(exigir("plantillas_editar"))):
     if not body.nombre.strip() or not body.texto.strip():
         raise HTTPException(400, detail="Nombre y mensaje son obligatorios")
@@ -2142,6 +2170,8 @@ def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(exigir("plantillas
     if clave == CALL_CENTER_CLAVE or any(p["clave"] == clave for p in plantillas):
         raise HTTPException(409, detail="Ya existe una plantilla con esa clave")
 
+    ahora_ms = int(time.time() * 1000)
+    preaprobada = _puede_aprobar_plantillas(sesion)
     nueva = {
         "id": max((p["id"] for p in plantillas), default=0) + 1,
         "clave": clave,
@@ -2153,18 +2183,32 @@ def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(exigir("plantillas
         "whatsapp_template": slug(body.nombre) or None,
         "whatsapp_template_lang": (body.whatsapp_template_lang or "").strip() or None,
         "whatsapp_template_categoria": categoria,
-        "actualizada": int(time.time() * 1000),
+        "actualizada": ahora_ms,
         "creado_por": sesion.get("usuario", ""),
-        "creada_en": int(time.time() * 1000),
+        "creada_en": ahora_ms,
+        # Aprobación interna previa a Meta: quien puede aprobar nace aprobada
+        # y se registra en Meta de inmediato; el resto nace pendiente y SIN
+        # template (el cron de Meta la ignora hasta que se apruebe).
+        "aprobacion_estado": "aprobada" if preaprobada else "pendiente",
+        "aprobada_por": sesion.get("usuario", "") if preaprobada else None,
+        "aprobada_en": ahora_ms if preaprobada else None,
+        "rechazo_motivo": None,
     }
-    nueva = _registrar_template_meta(nueva)
+    if preaprobada:
+        nueva = _registrar_template_meta(nueva)
+    else:
+        nueva["whatsapp_template"] = None
+        nueva["whatsapp_template_id"] = None
+        nueva["whatsapp_template_status"] = None
+        nueva["whatsapp_template_error"] = None
     plantillas.append(nueva)
     escribir_plantillas(plantillas)
     # Trazabilidad: queda en la Actividad de quien la creó (Usuarios ->
     # cuenta -> Actividad, filtrado por actor), igual que las acciones sobre
     # cuentas. Acá el "objetivo" es la plantilla, no otra cuenta.
     auditoria_registrar(sesion.get("usuario", ""), "plantilla_creada", nueva["clave"],
-                        f"Creó la plantilla «{nueva['nombre']}»")
+                        f"Creó la plantilla «{nueva['nombre']}»" +
+                        ("" if preaprobada else " (pendiente de aprobación interna)"))
     return nueva
 
 
@@ -2185,6 +2229,31 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
                     400,
                     detail="El mensaje de call center no es editable.",
                 )
+            if _aprobacion_plantilla(p) != "aprobada":
+                # Pendiente/rechazada: aún no existe en Meta. La edita su
+                # creador o quien puede aprobar; si la edita alguien sin ese
+                # poder, una rechazada vuelve a pendiente (pide revisión).
+                if not (_es_creador_plantilla(p, sesion) or _puede_aprobar_plantillas(sesion)):
+                    raise HTTPException(
+                        403,
+                        detail="Solo su creador o un aprobador (admin/supervisor) puede editarla.",
+                    )
+                categoria = _validar_categoria_template(body.whatsapp_template_categoria)
+                if body.nombre.strip() != p.get("nombre", ""):
+                    raise HTTPException(
+                        400,
+                        detail="El nombre de la plantilla no se puede cambiar. Elimínala y crea una nueva.",
+                    )
+                p["texto"] = body.texto
+                p["especialidad_id"] = _validar_plantilla_especialidad(sesion, body.especialidad_id)
+                p["whatsapp_template_lang"] = (body.whatsapp_template_lang or "").strip() or None
+                p["whatsapp_template_categoria"] = categoria
+                p["actualizada"] = int(time.time() * 1000)
+                if _aprobacion_plantilla(p) == "rechazada" and not _puede_aprobar_plantillas(sesion):
+                    p["aprobacion_estado"] = "pendiente"
+                    p["rechazo_motivo"] = None
+                escribir_plantillas(plantillas)
+                return p
             # Mientras esté pendiente de revisión en Meta la plantilla queda de
             # solo lectura (ver también DELETE y el envío); aprobada o
             # rechazada sí se puede editar (una rechazada, para corregirla).
@@ -2247,6 +2316,17 @@ def eliminar_plantilla(plantilla_id: int, sesion: dict = Depends(exigir("plantil
             400,
             detail="El mensaje de call center no se puede eliminar desde acá.",
         )
+    if _aprobacion_plantilla(objetivo) != "aprobada":
+        # Sin template en Meta: la borra su creador o un aprobador, sin más.
+        if not (_es_creador_plantilla(objetivo, sesion) or _puede_aprobar_plantillas(sesion)):
+            raise HTTPException(
+                403,
+                detail="Solo su creador o un aprobador (admin/supervisor) puede eliminarla.",
+            )
+        escribir_plantillas([p for p in plantillas if p["id"] != plantilla_id])
+        auditoria_registrar(sesion.get("usuario", ""), "plantilla_eliminada", objetivo.get("clave", ""),
+                            f"Eliminó la plantilla pendiente «{objetivo.get('nombre', '')}»")
+        return {"ok": True, "meta_borrado": False, "meta_advertencia": None}
     if objetivo.get("whatsapp_template_status") not in ESTADOS_TEMPLATE_EDITABLES:
         raise HTTPException(
             400,
@@ -2274,6 +2354,56 @@ def eliminar_plantilla(plantilla_id: int, sesion: dict = Depends(exigir("plantil
 
     escribir_plantillas([p for p in plantillas if p["id"] != plantilla_id])
     return {"ok": True, "meta_borrado": borrado_meta, "meta_advertencia": aviso_meta}
+
+
+def _exigir_aprobador(sesion: dict = Depends(sesion_actual)) -> dict:
+    """Aprobación interna de plantillas: admin, desarrollador o supervisor."""
+    if not _puede_aprobar_plantillas(sesion):
+        raise HTTPException(403, detail="Solo un administrador o supervisor puede aprobar plantillas.")
+    return sesion
+
+
+def aprobar_plantilla(plantilla_id: int, sesion: dict = Depends(_exigir_aprobador)):
+    """Aprueba una plantilla pendiente y la registra en Meta. Idempotente: si
+    ya estaba aprobada, la devuelve tal cual."""
+    plantillas = leer_plantillas()
+    p = next((x for x in plantillas if x["id"] == plantilla_id), None)
+    if p is None:
+        raise HTTPException(404, detail="Plantilla no encontrada")
+    if p.get("especial"):
+        raise HTTPException(400, detail="El mensaje de call center no necesita aprobación.")
+    if _aprobacion_plantilla(p) == "aprobada":
+        return p
+    p["aprobacion_estado"] = "aprobada"
+    p["aprobada_por"] = sesion.get("usuario", "")
+    p["aprobada_en"] = int(time.time() * 1000)
+    p["rechazo_motivo"] = None
+    p = _registrar_template_meta(p)
+    escribir_plantillas(plantillas)
+    auditoria_registrar(sesion.get("usuario", ""), "plantilla_aprobada", p.get("clave", ""),
+                        f"Aprobó la plantilla «{p.get('nombre', '')}» (ahora va a Meta)")
+    return p
+
+
+def rechazar_plantilla(plantilla_id: int, body: RechazoPlantillaIn, sesion: dict = Depends(_exigir_aprobador)):
+    """Rechaza una plantilla pendiente (no va a Meta). Su creador puede
+    corregirla: al editarla vuelve a pendiente."""
+    plantillas = leer_plantillas()
+    p = next((x for x in plantillas if x["id"] == plantilla_id), None)
+    if p is None:
+        raise HTTPException(404, detail="Plantilla no encontrada")
+    if p.get("especial"):
+        raise HTTPException(400, detail="El mensaje de call center no necesita aprobación.")
+    if _aprobacion_plantilla(p) == "aprobada":
+        raise HTTPException(409, detail="Ya está aprobada y en Meta: elimínala si no corresponde.")
+    p["aprobacion_estado"] = "rechazada"
+    p["rechazo_motivo"] = (body.motivo or "").strip()[:255] or None
+    p["actualizada"] = int(time.time() * 1000)
+    escribir_plantillas(plantillas)
+    auditoria_registrar(sesion.get("usuario", ""), "plantilla_rechazada", p.get("clave", ""),
+                        f"Rechazó la plantilla «{p.get('nombre', '')}»" +
+                        (f": {p['rechazo_motivo']}" if p["rechazo_motivo"] else ""))
+    return p
 
 
 # --- Registro de respuestas de call center (solo lectura) ----------------------
@@ -3213,6 +3343,18 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
             400,
             detail="Esta plantilla todavía no fue aprobada por Meta: no se puede usar para enviar "
                    "hasta que se apruebe.",
+        )
+    # Aprobación interna previa a Meta: sin ella no sale ningún envío.
+    if _aprobacion_plantilla(plantilla) == "pendiente":
+        raise HTTPException(
+            400,
+            detail="Esta plantilla está pendiente de aprobación interna (admin/supervisor): "
+                   "no se puede usar hasta que se apruebe.",
+        )
+    if _aprobacion_plantilla(plantilla) == "rechazada":
+        raise HTTPException(
+            400,
+            detail="Esta plantilla fue rechazada en la revisión interna: no se puede usar.",
         )
     # La plantilla asociada a una especialidad solo se usa en esa especialidad.
     tpl_esp = plantilla.get("especialidad_id")

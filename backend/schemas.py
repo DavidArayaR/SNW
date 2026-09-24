@@ -110,3 +110,7 @@ class EspecialidadRenombrarIn(BaseModel):
 
 class RolEspecialidadIn(BaseModel):
     usuario: str
+
+
+class RechazoPlantillaIn(BaseModel):
+    motivo: str | None = None

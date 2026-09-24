@@ -328,7 +328,9 @@ contraseña?» en el login (`/api/auth/olvide`) — mismo mecanismo, pero autose
 | Método | Endpoint | Descripción |
 |---|---|---|
 | GET | `/api/plantillas` | Lista de plantillas (incluye las de call center; el frontend de Mensajería las filtra). Cuentas no privilegiadas solo ven las globales y las de sus especialidades |
-| POST | `/api/plantillas` | Crear `{nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, especialidad_id?}`. `whatsapp_template_categoria` es obligatoria (`UTILITY` / `MARKETING` / `AUTHENTICATION`); sin ella → 400. `especialidad_id` asocia la plantilla (404 si no existe, 403 si no está asignada) |
+| POST | `/api/plantillas` | Crear `{nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, especialidad_id?}`. `whatsapp_template_categoria` es obligatoria (`UTILITY` / `MARKETING` / `AUTHENTICATION`); sin ella → 400. `especialidad_id` asocia la plantilla (404 si no existe, 403 si no está asignada). **Aprobación interna**: lo creado por admin/dev/supervisor nace `aprobada` y va a Meta de inmediato; lo creado por un `usuario` nace `pendiente` y **no se registra en Meta** hasta que se aprueba |
+| POST | `/api/plantillas/{id}/aprobar` | (admin/dev/supervisor) Aprueba una pendiente y la registra en Meta |
+| POST | `/api/plantillas/{id}/rechazar` | (admin/dev/supervisor) `{motivo?}` Rechaza una pendiente (no va a Meta); su creador puede corregirla y vuelve a pendiente |
 | PUT | `/api/plantillas/{id}` | Actualizar `{nombre, texto, ...}` — rechaza (400) si `nombre` cambió, si falta `whatsapp_template_categoria`, si es una plantilla de call center, o si el estado en Meta no es `APPROVED` ni `REJECTED` (pendiente de revisión). Acepta cambiar `especialidad_id` con la misma validación que al crear |
 | DELETE | `/api/plantillas/{id}` | Eliminar. Borra también el template en Meta (`DELETE /{waba_id}/message_templates?name=…`); si Meta falla la plantilla local se borra igual y la respuesta trae `meta_advertencia`. Rechaza (400) las de call center o las que no estén `APPROVED` ni `REJECTED` en Meta |
 | GET | `/api/plantillas/{id}/estado-meta` | Consulta en Meta el estado real de un template |

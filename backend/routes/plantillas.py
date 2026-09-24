@@ -6,6 +6,8 @@ RUTAS = (
     ("/api/plantillas/sincronizar-meta", "POST", "sincronizar_plantillas_meta", None),
     ("/api/plantillas", "POST", "crear_plantilla", 201), ("/api/plantillas/{plantilla_id}", "PUT", "actualizar_plantilla", None),
     ("/api/plantillas/{plantilla_id}", "DELETE", "eliminar_plantilla", None),
+    ("/api/plantillas/{plantilla_id}/aprobar", "POST", "aprobar_plantilla", None),
+    ("/api/plantillas/{plantilla_id}/rechazar", "POST", "rechazar_plantilla", None),
 )
 
 def registrar(handlers): return crear_router("Plantillas", handlers, RUTAS)
