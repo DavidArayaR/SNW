@@ -259,6 +259,17 @@ Reglas del editor:
     enviar; no aparece ningún botón de acción, solo el aviso del estado. Así no se toca algo
     que Meta está evaluando en ese momento.
 
+- **Aprobación interna previa a Meta** (campo `aprobacion_estado`): lo que crea un `usuario`
+  nace `pendiente` (badge «⏳ Por aprobar») y **no se registra en Meta** —ni siquiera el cron
+  la toca— hasta que un admin/desarrollador/supervisor la aprueba (botón «Aprobar y enviar a
+  Meta», con modal de confirmación) o la rechaza con motivo (modal con campo de motivo, lo ve
+  quien la creó). Corregir una rechazada la devuelve a `pendiente`. Sin aprobación interna no
+  se puede enviar (400) ni consultar su estado Meta. Lo creado por admin/dev/supervisor nace
+  `aprobada` y va a Meta de inmediato. Además **solo el creador edita o elimina sus
+  plantillas** (admin/dev, cualquiera; 403 si no) y el **usuario normal no puede crear
+  plantillas globales** (422): siempre una de sus especialidades asignadas (si no tiene
+  ninguna, el editor le indica que pida una a un administrador).
+
   Esto se valida también en el servidor (`PUT`/`DELETE /api/plantillas/{id}` devuelven 400
   si el estado no es `APPROVED` ni `REJECTED`; `POST /api/notificaciones/enviar` devuelve 400
   si no es `APPROVED`), así que no se puede saltar desde la API.
@@ -331,8 +342,8 @@ contraseña?» en el login (`/api/auth/olvide`) — mismo mecanismo, pero autose
 | POST | `/api/plantillas` | Crear `{nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, especialidad_id?}`. `whatsapp_template_categoria` es obligatoria (`UTILITY` / `MARKETING` / `AUTHENTICATION`); sin ella → 400. `especialidad_id` asocia la plantilla (404 si no existe, 403 si no está asignada). **El usuario normal no puede crear plantillas globales** (422): siempre una de sus especialidades. **Aprobación interna**: lo creado por admin/dev/supervisor nace `aprobada` y va a Meta de inmediato; lo creado por un `usuario` nace `pendiente` y **no se registra en Meta** hasta que se aprueba |
 | POST | `/api/plantillas/{id}/aprobar` | (admin/dev/supervisor) Aprueba una pendiente y la registra en Meta |
 | POST | `/api/plantillas/{id}/rechazar` | (admin/dev/supervisor) `{motivo?}` Rechaza una pendiente (no va a Meta); su creador puede corregirla y vuelve a pendiente |
-| PUT | `/api/plantillas/{id}` | Actualizar `{nombre, texto, ...}` — rechaza (400) si `nombre` cambió, si falta `whatsapp_template_categoria`, si es una plantilla de call center, o si el estado en Meta no es `APPROVED` ni `REJECTED` (pendiente de revisión). Acepta cambiar `especialidad_id` con la misma validación que al crear |
-| DELETE | `/api/plantillas/{id}` | Eliminar. Borra también el template en Meta (`DELETE /{waba_id}/message_templates?name=…`); si Meta falla la plantilla local se borra igual y la respuesta trae `meta_advertencia`. Rechaza (400) las de call center o las que no estén `APPROVED` ni `REJECTED` en Meta |
+| PUT | `/api/plantillas/{id}` | Actualizar `{nombre, texto, ...}` — rechaza (400) si `nombre` cambió, si falta `whatsapp_template_categoria`, si es una plantilla de call center, o si el estado en Meta no es `APPROVED` ni `REJECTED` (pendiente de revisión). **Solo el creador** (admin/dev, cualquiera; 403 si no). Acepta cambiar `especialidad_id` con la misma validación que al crear |
+| DELETE | `/api/plantillas/{id}` | Eliminar. **Solo el creador** (admin/dev, cualquiera; 403 si no). Borra también el template en Meta (`DELETE /{waba_id}/message_templates?name=…`); si Meta falla la plantilla local se borra igual y la respuesta trae `meta_advertencia`. Rechaza (400) las de call center o las que no estén `APPROVED` ni `REJECTED` en Meta |
 | GET | `/api/plantillas/{id}/estado-meta` | Consulta en Meta el estado real de un template |
 | POST | `/api/plantillas/estado-meta/actualizar` | Refresca el estado de todas las plantillas con template |
 | POST | `/api/plantillas/sincronizar-meta` | Lee los templates que existen en Meta: actualiza estado/id de los conocidos e **importa como plantilla nueva** los que falten (no crea/edita nada en Meta, solo lee). Cada cuenta solo recibe en la respuesta las plantillas de su alcance |
@@ -406,9 +417,9 @@ Las cuentas `usuario` y `supervisor` reciben 403 en estos endpoints (y la migrac
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/estadisticas` | Resumen para Estadísticas (**solo envíos de producción**): mensajes `enviado` del mes, desglose, totales, `pacientes_por_respuesta` (cuántos pacientes de producción respondieron / se dieron de baja / no han respondido) y `webhook` (cuándo llegó el último evento de Meta — sirve para detectar que el webhook dejó de recibir) |
-| GET | `/api/estadisticas/envios?granularidad=dia\|mes\|anio` | Mensajes enviados de producción agrupados por periodo, para el gráfico de barras (día = últimos 30, mes = últimos 12, año = últimos 6) |
-| GET | `/api/estadisticas/costos?granularidad=dia\|mes\|anio` | (permiso `tarifas_editar`) Costo estimado agrupado por periodo. **Solo cuenta los mensajes de plantilla iniciados por la empresa** (la plantilla tiene un template Meta configurado y categoría Marketing / Utility / Authentication), aplicando la tarifa de `tarifas_whatsapp` vigente en su fecha. Los envíos de texto libre (respuestas dentro de la ventana de 24 h) son gratuitos y se devuelven aparte en `excluidos` |
+| GET | `/api/estadisticas` | Resumen para Estadísticas (**solo envíos de producción**): mensajes `enviado` del mes, desglose, totales, `pacientes_por_respuesta` (cuántos pacientes de producción respondieron / se dieron de baja / no han respondido) y `webhook` (cuándo llegó el último evento de Meta — sirve para detectar que el webhook dejó de recibir). Con `?especialidad_id=` filtra a esa especialidad |
+| GET | `/api/estadisticas/envios?granularidad=dia\|mes\|anio` | Mensajes enviados de producción agrupados por periodo, para el gráfico de barras (día = últimos 30, mes = últimos 12, año = últimos 6). Acepta `&especialidad_id=` |
+| GET | `/api/estadisticas/costos?granularidad=dia\|mes\|anio` | (permiso `tarifas_editar`) Costo estimado agrupado por periodo. Acepta `&especialidad_id`. **Solo cuenta los mensajes de plantilla iniciados por la empresa** (la plantilla tiene un template Meta configurado y categoría Marketing / Utility / Authentication), aplicando la tarifa de `tarifas_whatsapp` vigente en su fecha. Los envíos de texto libre (respuestas dentro de la ventana de 24 h) son gratuitos y se devuelven aparte en `excluidos` |
 | GET | `/api/tarifas` | (permiso `tarifas_editar`) Tarifas guardadas: `vigente`, `proxima` (tarifa futura ya publicada por Meta), `usd_vigente`, `historial`, moneda de la cuenta y fecha de la última descarga |
 | POST | `/api/tarifas/actualizar` | (permiso `tarifas_editar`) Descarga la página de precios de Meta y sus CSV, guarda los rate cards nuevos de Chile (`INSERT IGNORE` por hash), autodetecta la moneda de facturación (`GET {waba}?fields=currency` → `wa_moneda`) y devuelve si hubo cambio |
 | GET | `/api/tarifas/chile.csv` | (permiso `tarifas_editar`) Descarga el CSV original del rate card de Chile (prefiere la moneda de la cuenta, si no USD) |
@@ -451,12 +462,13 @@ Cada especialidad vive en **una sola tabla** `pacientes_<slug>` dentro de `snw_b
 ### Especialidades — Fase 3 (frontend + supervisión)
 
 - **Pestaña Especialidades** (administración, admin/dev): crear (con flujo duplicado: usar existente o crear `Kinesiología 2`), renombrar (la tabla no cambia), asignar/retirar roles por cuenta.
-- **Usuarios** muestra el rol `supervisor` y las especialidades asignadas de cada cuenta.
-- **Pacientes**: selector de especialidad + **carga CSV** en su tabla (informe de insertados/duplicados/rechazados).
-- **Mensajería**: asociación de plantilla a especialidad (badge en la lista) y **selector único de base de datos** en el modal (bases disponibles + una opción por especialidad; si hay una sola disponible, queda esa seleccionada; las plantillas de especialidad fuerzan su base), con conteo, slider y cupo diario.
-- **Historial**: filtro por especialidad (asignadas, o todas para admin/dev) y «Ver mensajes» con la tabla correcta.
+- **Usuarios** muestra el rol `supervisor` y las especialidades asignadas de cada cuenta; «Envíos realizados» y «Actividad» paginan de a 10.
+- **Pacientes**: **selector único de base de datos** (desarrollo/producción/especialidades, siempre con el nombre físico de la tabla), **carga CSV** en la tabla de la especialidad (informe de insertados/duplicados/rechazados) y **paginación** (10 a 100 por página, se recuerda).
+- **Mensajería**: especialidad por plantilla (badge en la lista + campo en el editor), **filtro «Filtrar por especialidad»** (Todas/Globales/cada una) y **selector único de base de datos** en el modal (bases disponibles + una opción por especialidad; si hay una sola disponible, queda esa seleccionada; las plantillas de especialidad fuerzan su base), con conteo, slider y cupo diario. Modales de confirmación al aprobar y de motivo al rechazar.
+- **Historial**: filtros **Base** (Todas/Desarrollo/Producción, solo admin/dev) y **Especialidad** (con su tabla; «Mis especialidades» para el resto) y «Ver mensajes» con la tabla correcta.
 - **Estadísticas** (admin/dev): selector de especialidad o «Todas» en resumen, gráfico y costos.
 - **Confirmación de supervisor**: el correo de solicitud llega también a los supervisores activos de la especialidad (con su nombre en el mensaje); los enlaces por token sirven para cualquiera de los destinatarios.
+- **Estilo unificado de selects**: todos los desplegables de todas las vistas comparten el verde pastel corporativo (distinto del sólido de los botones).
 
 ### Webhook de WhatsApp (Meta)
 
@@ -762,15 +774,16 @@ Las cuentas viven en la tabla **`usuarios`** de `snw_base` (`usuario` = correo,
 pública: un administrador o desarrollador invita a una persona desde la pestaña **Usuarios** de
 **`administracion.html`** («Crear usuario», solo el correo); le llega un correo con un enlace de
 48 h a **`registro.html?token=`** donde elige su propia contraseña. La cuenta nace con rol
-`usuario` y acceso básico. Un administrador o desarrollador ajusta nombre, permisos y rol desde
+`usuario` y acceso básico (Mensajería, Historial y edición de plantillas). Un administrador o desarrollador ajusta nombre, permisos y rol desde
 esa misma pestaña (una cuenta por vez, elegida en un desplegable).
 
 **Roles:**
 
 | Rol | Alcance | Puede gestionar |
 |---|---|---|
-| `usuario` | Solo lo que tenga en `permisos` | — |
-| `administrador` | Todo **salvo la página Configuración** | Permisos, activar/desactivar y ascender a `administrador` en cuentas de rol `usuario` (nunca toca otro admin/dev ni la suya) |
+| `usuario` | Solo lo que tenga en `permisos`, acotado a sus especialidades asignadas. Solo crea/edita/elimina las plantillas que él creó y solo en sus especialidades (sin globales) | — |
+| `supervisor` | Como `usuario`, más aprobar plantillas y confirmar envíos en producción de sus especialidades. Sin Estadísticas | — |
+| `administrador` | Todo **salvo la página Configuración** | Permisos, activar/desactivar y rol (`usuario`/`supervisor`/`administrador`) en cuentas de rol `usuario` o `supervisor` (nunca toca otro admin/dev ni la suya) |
 | `desarrollador` | Acceso total, **incluida Configuración** | Rol (cualquiera), permisos y activar/desactivar de cualquier cuenta salvo la suya |
 
 **Activar / desactivar cuentas.** Además de editar permisos y rol, un admin/dev puede desmarcar
@@ -789,7 +802,7 @@ contraseña?» pero disparado por un admin/dev en vez de por la propia cuenta.
 `envios`, columna `usuario`, agregada cuando se sumó esta sección — los envíos anteriores quedan
 con ese campo vacío y no aparecen aquí): fecha, plantilla, estado (Aprobado/Rechazado/Cancelado),
 cantidad de pacientes y costo aproximado. Es de solo lectura y no depende de si la cuenta se puede
-editar o no.
+editar o no. Muestra **10 registros por página** con botones Anterior/Siguiente.
 
 **Actividad (trazabilidad).** Debajo de «Envíos realizados», la sección «Actividad» muestra el
 historial de acciones que un admin/dev hizo sobre esa cuenta (tabla `usuarios_auditoria`): quién
@@ -797,7 +810,7 @@ la invitó y cuándo se activó (con el correo de quien mandó la invitación), 
 permisos (detalle tipo «Permisos: +tarifas_editar; -pacientes»), activar/desactivar el acceso,
 asignar un correo de recuperación, activar un cambio de contraseña, y la eliminación de la cuenta
 (el registro se conserva aunque la cuenta ya no exista). Igual que «Envíos realizados», es de solo
-lectura y no depende de si la cuenta se puede editar.
+lectura y no depende de si la cuenta se puede editar. También pagina de a **10 registros**.
 
 **Permisos** (campo `permisos` de la tabla; los roles privilegiados los tienen todos de forma implícita):
 
@@ -887,9 +900,13 @@ claro** de la sidebar, o con el botón flotante en la portada y el login (págin
   contraseña (pide la actual); si la cuenta tiene correo de recuperación, avisa el cambio
   ahí. No tiene campo para fijar ese correo (ver «Contraseñas» más arriba).
 - **Mensajería y plantillas** (`mensajeria.html`, permiso `mensajeria`): editor de plantillas con vista
-  previa estilo WhatsApp (formato `*negrita*`/`_cursiva_`/`~tachado~`), nombre y template
-  de Meta permanentes, botón **Sincronizar** con Meta, y envío directo a todos los
-  pendientes. Sin el permiso `plantillas_editar` el editor queda de solo lectura.
+  previa estilo WhatsApp (formato `*negrita*`/`_cursiva_`/`~tachado~`), campo de especialidad
+  (el usuario normal solo las suyas; sin asignadas se le indica pedir una), filtro
+  «Filtrar por especialidad» (Todas/Globales/cada una), nombre y template
+  de Meta permanentes, botón **Sincronizar** con Meta (cada cuenta solo recibe su alcance),
+  badges de aprobación interna («⏳ Por aprobar»/«Rechazada») con botones de aprobar (con
+  confirmación) y rechazar (con motivo) para admin/dev/supervisor, y envío directo a todos los
+  pendientes con selector único de base de datos. Sin el permiso `plantillas_editar` el editor queda de solo lectura; las ajenas también (solo su creador las edita, salvo admin/dev).
 - **Administración** (`administracion.html`, rol admin/desarrollador): página con pestañas.
   La pestaña **Usuarios** (admin/desarrollador): arriba, **«Crear usuario»** manda
   la invitación por correo (solo el correo, sin permisos ni rol — esos se ajustan después de
@@ -897,17 +914,20 @@ claro** de la sidebar, o con el botón flotante en la portada y el login (págin
   datos: nombre, permisos, rol (solo el desarrollador), envíos realizados, actividad
   (trazabilidad) y eliminar. Máximo 4 desarrolladores. Aquí no se cambian contraseñas — cada
   cuenta usa «Mi cuenta» o «¿Olvidaste tu contraseña?».
-- **Pacientes** (pestaña de `administracion.html`, exclusiva admin/dev): tabla con estado
+- **Pacientes** (pestaña de `administracion.html`, exclusiva admin/dev): **selector único
+  de base de datos** (desarrollo/producción/especialidades con su tabla), tabla con estado
   editable en línea, columna **Error** (motivo del último fallo), columna **Respuesta** con
   la señal de WhatsApp (Respondió / Se dio de baja / Sin respuesta) y su fecha, filtros por
-  estado/respuesta, y selección múltiple para editar **estado o respuesta de varios
+  estado/respuesta, **paginación** (10 a 100 por página) y **carga CSV** en la especialidad elegida, y selección múltiple para editar **estado o respuesta de varios
   pacientes a la vez** (barra «Con los seleccionados», aparece al marcar alguno; pide
   confirmación con la cantidad antes de aplicar). Un badge de «Se dio de baja» con
   &#128274; no se puede editar (ni uno por uno ni en bloque): esa baja la pidió el propio
   paciente por WhatsApp (ver «Baja explícita» en «Sistema de baja»). Aquí se ve **quiénes**
   respondieron o se dieron de baja — **no se envían mensajes desde esta página** (ver
   «Módulo de envío»).
-- **Historial** (`historial.html`): envíos de ambas bases (o filtrado por una), detalle
+- **Historial** (`historial.html`): filtros **Base** (Todas/Desarrollo/Producción, admin/dev;
+  el usuario normal solo ve sus especialidades) y **Especialidad** (con su tabla),
+  envíos de ambas bases (o filtrado por una), detalle
   individual por paciente con estado, respuesta y error de cada mensaje.
 - **Estadísticas** (pestaña de `administracion.html`, exclusiva admin/dev, **solo cuenta
   envíos de producción**): mensajes enviados en el mes con su desglose; panel **"Respuestas
