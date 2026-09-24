@@ -2259,16 +2259,18 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
                     400,
                     detail="El mensaje de call center no es editable.",
                 )
+            # Solo el creador edita sus plantillas; admin/dev, cualquiera.
+            # (Aprobar/rechazar es otro permiso y va por sus endpoints.)
+            if not (_es_privilegiado(sesion) or _es_creador_plantilla(p, sesion)):
+                raise HTTPException(
+                    403,
+                    detail="Solo puedes editar las plantillas que tú creaste.",
+                )
             _exigir_plantilla_en_alcance(sesion, p)
             if _aprobacion_plantilla(p) != "aprobada":
-                # Pendiente/rechazada: aún no existe en Meta. La edita su
-                # creador o quien puede aprobar; si la edita alguien sin ese
-                # poder, una rechazada vuelve a pendiente (pide revisión).
-                if not (_es_creador_plantilla(p, sesion) or _puede_aprobar_plantillas(sesion)):
-                    raise HTTPException(
-                        403,
-                        detail="Solo su creador o un aprobador (admin/supervisor) puede editarla.",
-                    )
+                # Pendiente/rechazada: aún no existe en Meta. Si la edita su
+                # creador y estaba rechazada, vuelve a pendiente (pide revisión
+                # de nuevo).
                 categoria = _validar_categoria_template(body.whatsapp_template_categoria)
                 if body.nombre.strip() != p.get("nombre", ""):
                     raise HTTPException(
@@ -2280,7 +2282,7 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
                 p["whatsapp_template_lang"] = (body.whatsapp_template_lang or "").strip() or None
                 p["whatsapp_template_categoria"] = categoria
                 p["actualizada"] = int(time.time() * 1000)
-                if _aprobacion_plantilla(p) == "rechazada" and not _puede_aprobar_plantillas(sesion):
+                if _aprobacion_plantilla(p) == "rechazada":
                     p["aprobacion_estado"] = "pendiente"
                     p["rechazo_motivo"] = None
                 escribir_plantillas(plantillas)
@@ -2347,14 +2349,15 @@ def eliminar_plantilla(plantilla_id: int, sesion: dict = Depends(exigir("plantil
             400,
             detail="El mensaje de call center no se puede eliminar desde acá.",
         )
+    # Solo el creador elimina las suyas; admin/dev, cualquiera.
+    if not (_es_privilegiado(sesion) or _es_creador_plantilla(objetivo, sesion)):
+        raise HTTPException(
+            403,
+            detail="Solo puedes eliminar las plantillas que tú creaste.",
+        )
     _exigir_plantilla_en_alcance(sesion, objetivo)
     if _aprobacion_plantilla(objetivo) != "aprobada":
-        # Sin template en Meta: la borra su creador o un aprobador, sin más.
-        if not (_es_creador_plantilla(objetivo, sesion) or _puede_aprobar_plantillas(sesion)):
-            raise HTTPException(
-                403,
-                detail="Solo su creador o un aprobador (admin/supervisor) puede eliminarla.",
-            )
+        # Sin template en Meta: se borra directo.
         escribir_plantillas([p for p in plantillas if p["id"] != plantilla_id])
         auditoria_registrar(sesion.get("usuario", ""), "plantilla_eliminada", objetivo.get("clave", ""),
                             f"Eliminó la plantilla pendiente «{objetivo.get('nombre', '')}»")

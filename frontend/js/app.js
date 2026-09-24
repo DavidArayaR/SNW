@@ -17,6 +17,18 @@ let snapshot = null;
 // una (envío solo a su tabla) o quedar globales.
 let misEspecialidades = [];
 
+// Usuario actual (para saber si creó cada plantilla: solo el creador la
+// edita/elimina; admin/dev, cualquiera; el backend lo exige igual).
+let miUsuario = "";
+async function cargarMiUsuario() {
+  try {
+    const res = await fetch("api/auth/me", { headers: authHeaders(), cache: "no-store" });
+    if (res.ok) miUsuario = ((await res.json()).usuario || "").toLowerCase();
+  } catch { /* sin dato: el backend exige igual */ }
+}
+const esCreador = (p) => !!p && !!miUsuario && (p.creado_por || "").toLowerCase() === miUsuario;
+const puedeEditarEsta = (p) => !p || !!window.snwEsPrivilegiado || esCreador(p);
+
 function nombreEspecialidad(id) {
   const e = misEspecialidades.find((x) => x.id === id);
   return e ? e.nombre_visible : null;
@@ -631,8 +643,9 @@ function actualizarBotonesSegunEstado(p) {
   const enviable = p && aprobada && ap === "aprobada";
   // Meta limita la edición a una vez cada 24h, pero no el borrado: Eliminar
   // sigue disponible aunque Guardar esté bloqueado por el enfriamiento.
-  const puedeGuardar = PUEDE_EDITAR_PLANTILLAS && editable && !enEnfriamiento;
-  const puedeEliminar = PUEDE_EDITAR_PLANTILLAS && editable;
+  // Además solo el creador edita/elimina las suyas (admin/dev, cualquiera).
+  const puedeGuardar = PUEDE_EDITAR_PLANTILLAS && puedeEditarEsta(p) && editable && !enEnfriamiento;
+  const puedeEliminar = PUEDE_EDITAR_PLANTILLAS && puedeEditarEsta(p) && editable;
   const puedeRevisar = p && ap !== "aprobada" && puedeAprobarPlantillas();
   btnGuardar.hidden = !puedeGuardar;
   const btnAprobar = $("#btnAprobar");
@@ -712,7 +725,7 @@ function actualizarBloqueoCampos() {
   if (avisoNombrePermanente) avisoNombrePermanente.hidden = esExistente;
   if (hintNombre) hintNombre.hidden = esExistente;
 
-  if (!PUEDE_EDITAR_PLANTILLAS || (p && (!esPlantillaEditable(p) || editadaRecientemente(p)))) {
+  if (!PUEDE_EDITAR_PLANTILLAS || (p && (!esPlantillaEditable(p) || editadaRecientemente(p) || !puedeEditarEsta(p)))) {
     formEl.querySelectorAll("input, textarea, select").forEach((el) => { el.disabled = true; });
     return;
   }
@@ -870,6 +883,7 @@ formEl.addEventListener("submit", async (e) => {
   if (activaId) {
     const activa = plantillas.find((x) => x.id === activaId);
     if (!esPlantillaEditable(activa) || editadaRecientemente(activa)) return;
+    if (!puedeEditarEsta(activa)) return toast("Solo puedes editar las plantillas que tú creaste.", "error");
   }
 
   const nombre = inpNombre.value.trim();
@@ -1825,6 +1839,7 @@ if (btnSincronizarMeta) {
 
 aplicarModoSoloLecturaPlantillas();
 modoVacia();
+cargarMiUsuario();
 cargarEspecialidades();
 cargar();
 setInterval(revisarPlantillasEnSegundoPlano, 30000);
