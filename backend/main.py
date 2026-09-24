@@ -1859,23 +1859,29 @@ def _registrar_template_meta(p: dict, nombre_anterior: str | None = None,
     return p
 
 
-def listar_plantillas(sesion: dict = Depends(sesion_actual)):
-    plantillas = leer_plantillas()
+def _plantillas_visibles(sesion: dict, plantillas: list) -> list:
+    """Subconjunto que la sesión puede ver: admin todo; supervisor su alcance
+    (incluye pendientes por revisar); usuario normal las globales aprobadas,
+    las de sus especialidades asignadas y sus propias pendientes/rechazadas
+    previas."""
     if _es_privilegiado(sesion):
-        return sorted(plantillas, key=lambda p: p.get("actualizada", 0), reverse=True)
-    # Alcance por especialidad para el resto.
+        return list(plantillas)
     permitidas = set(sesion.get("especialidad_ids") or [])
     plantillas = [p for p in plantillas
                   if p.get("especialidad_id") is None or p.get("especialidad_id") in permitidas]
     if sesion.get("rol") != "supervisor":
-        # Cuentas normales: solo plantillas de sus especialidades asignadas,
-        # en cualquier estado; más sus propias pendientes/rechazadas previas
-        # (para asignarles especialidad o eliminarlas).
         yo = (sesion.get("usuario") or "").strip().lower()
         plantillas = [p for p in plantillas
-                      if p.get("especialidad_id") in permitidas
+                      if (p.get("especialidad_id") is None
+                          and _aprobacion_plantilla(p) == "aprobada")
+                      or p.get("especialidad_id") in permitidas
                       or (_aprobacion_plantilla(p) != "aprobada"
                           and (p.get("creado_por") or "").strip().lower() == yo)]
+    return plantillas
+
+
+def listar_plantillas(sesion: dict = Depends(sesion_actual)):
+    plantillas = _plantillas_visibles(sesion, leer_plantillas())
     return sorted(plantillas, key=lambda p: p.get("actualizada", 0), reverse=True)
 
 
@@ -1939,7 +1945,9 @@ def actualizar_todos_estados_meta(sesion: dict = Depends(sesion_actual)):
         if (p.get("whatsapp_template") or "").strip():
             _actualizar_estado_meta(p)
     escribir_plantillas(plantillas)
-    return sorted(plantillas, key=lambda p: p.get("actualizada", 0), reverse=True)
+    # Se actualiza todo, pero cada cuenta solo recibe lo de su alcance.
+    visibles = _plantillas_visibles(sesion, plantillas)
+    return sorted(visibles, key=lambda p: p.get("actualizada", 0), reverse=True)
 
 
 # --- Revisión automática del estado en Meta (cron) --------------------------
@@ -2155,7 +2163,9 @@ def sincronizar_plantillas_meta(sesion: dict = Depends(exigir("mensajeria"))):
         "creadas": creadas,
         "actualizadas": actualizadas,
         "total_meta": len(templates_meta),
-        "plantillas": sorted(plantillas, key=lambda p: p.get("actualizada", 0), reverse=True),
+        # Cada cuenta solo recibe las plantillas de su alcance.
+        "plantillas": sorted(_plantillas_visibles(sesion, plantillas),
+                             key=lambda p: p.get("actualizada", 0), reverse=True),
     }
 
 
