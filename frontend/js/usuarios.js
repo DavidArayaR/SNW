@@ -57,6 +57,34 @@ function fmtMoneda(monto, moneda) {
 
 const ENVIO_ESTADO_LABEL = { completado: "Aprobado", rechazado: "Rechazado", cancelado: "Cancelado" };
 
+// Paginación de las tablas «Envíos realizados» y «Actividad»: máximo 10
+// registros por página, con botones Anterior/Siguiente.
+const PAGE_SIZE = 10;
+
+function renderPaginado(contenedor, lista, renderTabla, vacioTxt) {
+  const total = lista.length;
+  const paginas = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  let pagina = contenedor._pagina || 1;
+  if (pagina > paginas) pagina = paginas;
+  if (pagina < 1) pagina = 1;
+  contenedor._pagina = pagina;
+  const parte = lista.slice((pagina - 1) * PAGE_SIZE, pagina * PAGE_SIZE);
+  contenedor.innerHTML =
+    (parte.length ? renderTabla(parte) : `<p class="usr-envios__vacio">${vacioTxt}</p>`) +
+    (paginas > 1
+      ? `<div class="usr-paginador">` +
+        `<button type="button" class="btn btn--ghost" data-pag="ant"${pagina <= 1 ? " disabled" : ""}>&laquo; Anterior</button>` +
+        `<span>P&aacute;gina ${pagina} de ${paginas}</span>` +
+        `<button type="button" class="btn btn--ghost" data-pag="sig"${pagina >= paginas ? " disabled" : ""}>Siguiente &raquo;</button>` +
+        `</div>`
+      : "");
+  contenedor.querySelectorAll("[data-pag]").forEach((b) =>
+    b.addEventListener("click", () => {
+      contenedor._pagina = pagina + (b.dataset.pag === "sig" ? 1 : -1);
+      renderPaginado(contenedor, lista, renderTabla, vacioTxt);
+    }));
+}
+
 function renderEnviosUsuario(lista) {
   if (!lista.length) return `<p class="usr-envios__vacio">Sin envíos registrados.</p>`;
   const filas = lista.map((e) => {
@@ -84,7 +112,8 @@ async function cargarEnviosUsuario(correo, contenedor) {
     if (!r.ok) throw new Error();
     const lista = await r.json();
     if (seleccion !== correo) return;   // la selección cambió mientras cargaba
-    contenedor.innerHTML = renderEnviosUsuario(lista);
+    contenedor._pagina = 1;
+    renderPaginado(contenedor, Array.isArray(lista) ? lista : [], renderEnviosUsuario, "Sin envíos registrados.");
   } catch (e) {
     if (seleccion === correo) contenedor.innerHTML = `<p class="usr-envios__vacio">No se pudieron cargar los envíos.</p>`;
   }
@@ -125,7 +154,8 @@ async function cargarAuditoriaUsuario(correo, contenedor) {
     if (!r.ok) throw new Error();
     const lista = await r.json();
     if (seleccion !== correo) return;
-    contenedor.innerHTML = renderAuditoriaUsuario(lista);
+    contenedor._pagina = 1;
+    renderPaginado(contenedor, Array.isArray(lista) ? lista : [], renderAuditoriaUsuario, "Sin actividad registrada.");
   } catch (e) {
     if (seleccion === correo) contenedor.innerHTML = `<p class="usr-envios__vacio">No se pudo cargar la actividad.</p>`;
   }
