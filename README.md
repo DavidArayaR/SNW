@@ -327,7 +327,7 @@ contraseña?» en el login (`/api/auth/olvide`) — mismo mecanismo, pero autose
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/plantillas` | Lista de plantillas (incluye las de call center; el frontend de Mensajería las filtra). Cuentas no privilegiadas solo ven las globales y las de sus especialidades |
+| GET | `/api/plantillas` | Lista de plantillas (incluye las de call center; el frontend de Mensajería las filtra). Cada cuenta recibe solo su alcance: el usuario normal ve las globales aprobadas, las de sus especialidades y sus propias pendientes/rechazadas |
 | POST | `/api/plantillas` | Crear `{nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, especialidad_id?}`. `whatsapp_template_categoria` es obligatoria (`UTILITY` / `MARKETING` / `AUTHENTICATION`); sin ella → 400. `especialidad_id` asocia la plantilla (404 si no existe, 403 si no está asignada). **El usuario normal no puede crear plantillas globales** (422): siempre una de sus especialidades. **Aprobación interna**: lo creado por admin/dev/supervisor nace `aprobada` y va a Meta de inmediato; lo creado por un `usuario` nace `pendiente` y **no se registra en Meta** hasta que se aprueba |
 | POST | `/api/plantillas/{id}/aprobar` | (admin/dev/supervisor) Aprueba una pendiente y la registra en Meta |
 | POST | `/api/plantillas/{id}/rechazar` | (admin/dev/supervisor) `{motivo?}` Rechaza una pendiente (no va a Meta); su creador puede corregirla y vuelve a pendiente |
@@ -335,7 +335,7 @@ contraseña?» en el login (`/api/auth/olvide`) — mismo mecanismo, pero autose
 | DELETE | `/api/plantillas/{id}` | Eliminar. Borra también el template en Meta (`DELETE /{waba_id}/message_templates?name=…`); si Meta falla la plantilla local se borra igual y la respuesta trae `meta_advertencia`. Rechaza (400) las de call center o las que no estén `APPROVED` ni `REJECTED` en Meta |
 | GET | `/api/plantillas/{id}/estado-meta` | Consulta en Meta el estado real de un template |
 | POST | `/api/plantillas/estado-meta/actualizar` | Refresca el estado de todas las plantillas con template |
-| POST | `/api/plantillas/sincronizar-meta` | Lee los templates que existen en Meta: actualiza estado/id de los conocidos e **importa como plantilla nueva** los que falten (no crea/edita nada en Meta, solo lee) |
+| POST | `/api/plantillas/sincronizar-meta` | Lee los templates que existen en Meta: actualiza estado/id de los conocidos e **importa como plantilla nueva** los que falten (no crea/edita nada en Meta, solo lee). Cada cuenta solo recibe en la respuesta las plantillas de su alcance |
 
 #### Mensaje de call center
 

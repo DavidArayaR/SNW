@@ -191,6 +191,17 @@ function poblarSelectEspecialidad() {
   } else if (esUsuario && misEspecialidades.length) {
     inpEspecialidad.value = String(misEspecialidades[0].id);
   }
+  refrescarAvisoSinEspecialidad();
+}
+
+// Sin especialidades asignadas el usuario no puede crear plantillas: se le
+// indica que pida una a un administrador, en vez de dejar un select vacío.
+function refrescarAvisoSinEspecialidad() {
+  const hint = $("#hintSinEspecialidad");
+  if (!hint) return;
+  const sinAsignadas = (window.snwRol || "") === "usuario" && !misEspecialidades.length;
+  hint.hidden = !sinAsignadas;
+  if (inpEspecialidad) inpEspecialidad.disabled = sinAsignadas;
 }
 
 // Selector único de base de datos del modal de envío (Fase 3): lista solo
@@ -769,6 +780,7 @@ function abrir(id) {
   inpMensaje.classList.remove("invalido");
   if (hayTemplateMeta) { inpTemplate.classList.remove("invalido"); inpTemplateCategoria.classList.remove("invalido"); }
   actualizarBloqueoCampos();
+  refrescarAvisoSinEspecialidad();
   refrescarEditor();
   marcarSnapshot();
   renderLista(buscadorEl.value);
@@ -810,6 +822,7 @@ function modoNueva() {
   inpMensaje.classList.remove("invalido");
   if (hayTemplateMeta) { inpTemplate.classList.remove("invalido"); inpTemplateCategoria.classList.remove("invalido"); }
   actualizarBloqueoCampos();
+  refrescarAvisoSinEspecialidad();
   refrescarEditor();
   marcarSnapshot();
   renderLista(buscadorEl.value);
