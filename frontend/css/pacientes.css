@@ -108,17 +108,8 @@
   color: var(--texto-suave);
 }
 .toolbar-masivo__campo select {
-  border: 1px solid var(--borde);
-  border-radius: 8px;
-  padding: 6px 10px;
-  font: inherit;
   font-size: .85rem;
-  background: var(--surface-2);
-  color: var(--texto);
-  cursor: pointer;
 }
-.toolbar-masivo__campo select:focus { border-color: var(--verde); outline: none; }
-
 .col-check { width: 36px; text-align: center; }
 .col-check input { width: 17px; height: 17px; accent-color: var(--verde); cursor: pointer; }
 
@@ -390,12 +381,13 @@ td.campo-id { color: var(--texto-suave); font-family: Consolas, monospace; }
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: .04em;
-  border: 1px solid var(--borde);
-  background: var(--surface-2);
+  border: 1.5px solid var(--brand-tint-bd);
+  background: var(--brand-tint);
+  color: var(--brand-tint-fg);
   cursor: pointer;
   outline: none;
 }
-.estado-select:focus { border-color: var(--verde); }
+.estado-select:focus { border-color: var(--verde); box-shadow: 0 0 0 3px rgba(18, 140, 126, .25); }
 .campo-estado { position: relative; white-space: nowrap; }
 
 .campo-error {
@@ -571,10 +563,6 @@ td.campo-id { color: var(--texto-suave); font-family: Consolas, monospace; }
 .msg-interes-estado--si i { color: var(--ok-fg); }
 .msg-cc-envio { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .msg-cc-envio select {
-  border: 1px solid var(--borde);
-  border-radius: 8px;
-  padding: 8px 10px;
-  font: inherit;
   font-size: .85rem;
   max-width: 200px;
 }
@@ -660,12 +648,13 @@ tr.es-baja .col-check input[type=checkbox] { cursor: not-allowed; }
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: .04em;
-  border: 1px solid var(--borde);
-  background: var(--surface-2);
+  border: 1.5px solid var(--brand-tint-bd);
+  background: var(--brand-tint);
+  color: var(--brand-tint-fg);
   cursor: pointer;
   outline: none;
 }
-.respuesta-select:focus { border-color: var(--verde); }
+.respuesta-select:focus { border-color: var(--verde); box-shadow: 0 0 0 3px rgba(18, 140, 126, .25); }
 .campo-respuesta { position: relative; white-space: nowrap; }
 .respuesta-fecha {
   display: block;

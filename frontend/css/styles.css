@@ -27,37 +27,43 @@ button { font: inherit; cursor: pointer; }
   font-weight: 600;
 }
 
-/* Selects unificados en toda la app (mismo estilo neutro en paneles,
-   modales, barras y paginadores, en modo claro y oscuro). */
+/* Selects unificados en toda la app: verde pastel (distinto del verde
+   sólido de los botones), en modo claro y oscuro. */
 select {
   appearance: auto;
-  background: var(--surface-2);
-  color: var(--texto);
-  border: 1px solid var(--borde);
+  background: var(--brand-tint);
+  color: var(--brand-tint-fg);
+  border: 1.5px solid var(--brand-tint-bd);
   border-radius: 10px;
   padding: 9px 14px;
   font: inherit;
   font-size: .9rem;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
   max-width: 100%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .12);
+  transition: filter .15s, box-shadow .15s;
+}
+select:hover { filter: brightness(1.03); }
+select:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(18, 140, 126, .35);
 }
 
 select.badge--select {
   appearance: auto;
-  border: 1px solid var(--borde);
+  border: 1.5px solid var(--brand-tint-bd);
   font-family: inherit;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
-  background: var(--surface-2);
-  color: var(--texto);
+  background: var(--brand-tint);
+  color: var(--brand-tint-fg);
   padding: 9px 14px;
   font-size: .9rem;
   border-radius: 10px;
-  transition: filter .15s;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .12);
+  transition: filter .15s, box-shadow .15s;
 }
-select.badge--select:hover,
-select.badge--select:focus { filter: brightness(1.12); }
 .badge--bd {
   background: rgba(255, 255, 255, .18);
   color: #fff;

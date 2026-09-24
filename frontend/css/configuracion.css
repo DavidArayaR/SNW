@@ -40,8 +40,7 @@
 }
 
 /* styles.css solo estiliza input[type=text]; aquí cubrimos number/password. */
-.config-campo input:not([type="checkbox"]),
-.config-campo select {
+.config-campo input:not([type="checkbox"]) {
   width: 100%;
   border: 1.5px solid var(--borde);
   border-radius: 10px;
@@ -51,8 +50,11 @@
   color: var(--texto);
   background: var(--surface-2);
 }
-.config-campo input:not([type="checkbox"]):focus,
-.config-campo select:focus { border-color: var(--verde); outline: none; }
+.config-campo select {
+  width: 100%;
+  font-size: .93rem;
+}
+.config-campo input:not([type="checkbox"]):focus { border-color: var(--verde); outline: none; }
 .config-clave {
   font-family: Consolas, monospace;
   font-size: .72rem;
