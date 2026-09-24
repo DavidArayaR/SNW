@@ -26,6 +26,8 @@ const $ = (sel) => document.querySelector(sel);
 
 const listaEl = $("#listaPlantillas");
 const buscadorEl = $("#buscador");
+const selFiltroEspecialidad = $("#selFiltroEspecialidad");
+let filtroEspecialidad = localStorage.getItem("snw_filtro_tpl") || "todas";
 const formEl = $("#formPlantilla");
 const inpNombre = $("#inpNombre");
 const inpMensaje = $("#inpMensaje");
@@ -155,7 +157,25 @@ async function cargarEspecialidades() {
     misEspecialidades = [];
   }
   poblarSelectEspecialidad();
+  poblarFiltroEspecialidad();
 }
+
+function poblarFiltroEspecialidad() {
+  if (!selFiltroEspecialidad) return;
+  selFiltroEspecialidad.innerHTML =
+    `<option value="todas">Todas</option>` +
+    `<option value="global">Globales (sin especialidad)</option>` +
+    misEspecialidades.map((e) => `<option value="${e.id}">${escaparHtml(e.nombre_visible)}</option>`).join("");
+  const vals = ["todas", "global", ...misEspecialidades.map((e) => String(e.id))];
+  if (!vals.includes(filtroEspecialidad)) filtroEspecialidad = "todas";
+  selFiltroEspecialidad.value = filtroEspecialidad;
+}
+
+if (selFiltroEspecialidad) selFiltroEspecialidad.addEventListener("change", () => {
+  filtroEspecialidad = selFiltroEspecialidad.value;
+  localStorage.setItem("snw_filtro_tpl", filtroEspecialidad);
+  renderLista(buscadorEl.value);
+});
 
 function poblarSelectEspecialidad() {
   if (!inpEspecialidad) return;
@@ -409,13 +429,16 @@ function crearItemPlantilla(p) {
 
 function renderLista(filtro = "") {
   const q = filtro.trim().toLowerCase();
+  const fEsp = filtroEspecialidad;
   const visibles = [...plantillas]
     .sort((a, b) => (b.actualizada || 0) - (a.actualizada || 0))
     .filter(
       (p) =>
-        !q ||
-        String(p.nombre || "").toLowerCase().includes(q) ||
-        String(p.texto || "").toLowerCase().includes(q)
+        (fEsp === "todas" ||
+          (fEsp === "global" ? p.especialidad_id == null : String(p.especialidad_id) === fEsp)) &&
+        (!q ||
+          String(p.nombre || "").toLowerCase().includes(q) ||
+          String(p.texto || "").toLowerCase().includes(q))
     );
 
   listaEl.innerHTML = "";
