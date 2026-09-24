@@ -225,4 +225,4 @@
   .usr-grid { grid-template-columns: 1fr; }
   .usr-grid > label { padding-top: 0; }
 }
-.usr-paginador { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 8px; font-size: .85rem; color: var(--texto-suave); }
+.usr-paginador { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin: 14px 4px 4px; font-size: .85rem; color: var(--texto-suave); }
