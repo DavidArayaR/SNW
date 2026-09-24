@@ -164,16 +164,6 @@
     .stat-card.activo .stat-card__texto span { color: var(--verde-oscuro); }
     .stat-card.activo .stat-card__icono { filter: saturate(1.1); }
 
-    /* La tarjeta entera de Pacientes mantiene siempre el mismo alto total
-       (cabecera + estadísticas + buscador + tabla), sin importar cuántas
-       filas deje el filtro aplicado ni si aparece la barra de edición en
-       bloque al seleccionar filas: así el resto de la página no salta de
-       arriba a abajo. La tabla es lo único que se estira o encoge (con
-       scroll interno) para absorber esa diferencia. Solo la de Pacientes
-       (#tabPacientes): el resto de las tablas de la app siguen
-       ajustándose a su contenido, como antes. max-height: none anula el
-       tope de 55vh de pacientes.css (.tabla-wrap): con flex: 1 la tabla
-       usa todo el alto que deja libre la tarjeta. */
     #tabPacientes .panel {
       display: flex;
       flex-direction: column;
@@ -441,14 +431,14 @@
         </div>
 
       </main>
+    </div>
+  </div>
 
-      <div class="config-guardar-fijo" id="barraGuardar" hidden>
-        <span id="cambiosResumen">Sin cambios</span>
-        <div class="config-guardar-fijo__btns">
-          <button id="btnDescartar" class="btn btn--ghost" type="button">Descartar</button>
-          <button id="btnGuardarFijo" class="btn btn--primary" type="button">Guardar cambios</button>
-        </div>
-      </div>
+  <div class="config-guardar-fijo" id="barraGuardar" hidden>
+    <span id="cambiosResumen">Sin cambios</span>
+    <div class="config-guardar-fijo__btns">
+      <button id="btnDescartar" class="btn btn--ghost" type="button">Descartar</button>
+      <button id="btnGuardarFijo" class="btn btn--primary" type="button">Guardar cambios</button>
     </div>
   </div>
 
@@ -518,8 +508,6 @@
           });
           destino.hidden = false;
           destino.classList.add("admin-panel--entrada");
-          // Doble rAF: el navegador aplica el opacity 0 inicial antes de
-          // quitarlo y disparar la transición hacia opacity 1.
           requestAnimationFrame(() =>
             requestAnimationFrame(() => destino.classList.remove("admin-panel--entrada"))
           );
@@ -530,11 +518,6 @@
         botones[clave].addEventListener("click", () => activar(clave));
       }
 
-      // Móvil: ocultar/mostrar los filtros (stat-card) de la base de datos
-      // para que la tabla use toda la pantalla. El botón muestra cuántos
-      // filtros reales quedaron aplicados cuando están ocultos. Se anima
-      // con la clase .cerrado en el wrapper (collapsible de grilla), nunca
-      // con hidden, para que la transición de altura se vea.
       const statsFiltros = document.getElementById("stats");
       const filtrosWrap = document.getElementById("filtrosWrap");
       const btnFiltros = document.getElementById("btnToggleFiltros");
