@@ -15,8 +15,19 @@
   <link rel="stylesheet" href="css/estadisticas.css">
   <script src="js/tema.js"></script>
   <style>
+    /* Fundido suave al cambiar de pestaña: el panel que se va se desvanece
+       (--salida) y el nuevo entra de opacity 0 a 1 (--entrada). El cambio
+       de hidden se hace después del fade-out, ver activar() abajo. */
+    .admin-panel { transition: opacity .16s ease; }
+    .admin-panel--salida { opacity: 0; }
+    .admin-panel--entrada { opacity: 0; }
+    @media (prefers-reduced-motion: reduce) {
+      .admin-panel { transition: none; }
+    }
+
     .admin-tabs {
       display: flex;
+      flex-wrap: wrap;
       gap: 4px;
     }
     .admin-tab {
@@ -71,6 +82,28 @@
     body[data-pagina="administracion"] .modal__card { border-radius: 22px; }
     body[data-pagina="administracion"] .panel__head h2 { font-size: 1.15rem; font-weight: 700; }
 
+    /* Botón para ocultar/mostrar los filtros (stat-card) de la base de
+       datos: solo existe en móvil, donde los filtros se comen la pantalla.
+       En escritorio sobra espacio y no hace falta ocultarlos. */
+    #btnToggleFiltros { display: none; }
+
+    /* Animación de abrir/cerrar: el wrapper es una grilla de una fila que
+       se colapsa de 1fr a 0fr (la altura real de las tarjetas), con el
+       contenido en overflow:hidden para que no estire su propio alto. */
+    #tabPacientes .filtros-wrap {
+      display: grid;
+      grid-template-rows: 1fr;
+      transition: grid-template-rows .28s ease;
+    }
+    #tabPacientes .filtros-wrap.cerrado { grid-template-rows: 0fr; }
+    #tabPacientes .filtros-wrap .stats {
+      overflow: hidden;
+      min-height: 0;
+      opacity: 1;
+      transition: opacity .22s ease;
+    }
+    #tabPacientes .filtros-wrap.cerrado .stats { opacity: 0; }
+
     /* Tarjetas de estadísticas con ícono en chip de color, en vez de la
        píldora chica con puntito (mismo botón/filtro de siempre, solo
        cambia cómo se ve). */
@@ -85,7 +118,18 @@
       gap: 12px;
       padding: 14px 16px;
       border-radius: 16px;
+      transition: background-color .15s ease, border-color .15s ease,
+        transform .1s ease, box-shadow .15s ease;
     }
+    /* Hover (no activo): además del fondo, un leve despegue y sombra para
+       que se lea como botón clickeable. */
+    .stat-card:hover {
+      background: var(--hover);
+      border-color: var(--verde);
+      box-shadow: 0 3px 10px rgba(0, 0, 0, .07);
+      transform: translateY(-1px);
+    }
+    .stat-card:active { transform: translateY(0) scale(.97); }
     .stat-card::before { display: none; }
     .stat-card__icono {
       display: flex;
@@ -96,6 +140,7 @@
       border-radius: 12px;
       font-size: 1rem;
       flex-shrink: 0;
+      transition: background-color .15s ease, color .15s ease;
     }
     .stat-card__texto { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.3; }
     .stat-card__texto strong { font-size: 1.1rem; color: var(--texto); }
@@ -105,7 +150,19 @@
     .stat-card--ok .stat-card__icono { background: var(--ok-bg); color: var(--ok-fg); }
     .stat-card--danger .stat-card__icono { background: var(--danger-bg); color: var(--danger-fg); }
     .stat-card--info .stat-card__icono { background: var(--info-bg); color: var(--info-fg); }
-    .stat-card.activo { border-color: var(--verde); background: var(--brand-tint); }
+    /* Filtro aplicado: anillo interior verde = «activo», distinto del
+       hover (que solo despega la tarjeta). El click vuelve a «todos». */
+    .stat-card.activo,
+    .stat-card.activo:hover {
+      border-color: var(--verde);
+      background: var(--brand-tint);
+      box-shadow: inset 0 0 0 1.5px var(--verde);
+      transform: none;
+    }
+    .stat-card.activo:active { transform: scale(.97); }
+    .stat-card.activo .stat-card__texto strong,
+    .stat-card.activo .stat-card__texto span { color: var(--verde-oscuro); }
+    .stat-card.activo .stat-card__icono { filter: saturate(1.1); }
 
     /* La tarjeta entera de Pacientes mantiene siempre el mismo alto total
        (cabecera + estadísticas + buscador + tabla), sin importar cuántas
@@ -114,7 +171,9 @@
        arriba a abajo. La tabla es lo único que se estira o encoge (con
        scroll interno) para absorber esa diferencia. Solo la de Pacientes
        (#tabPacientes): el resto de las tablas de la app siguen
-       ajustándose a su contenido, como antes. */
+       ajustándose a su contenido, como antes. max-height: none anula el
+       tope de 55vh de pacientes.css (.tabla-wrap): con flex: 1 la tabla
+       usa todo el alto que deja libre la tarjeta. */
     #tabPacientes .panel {
       display: flex;
       flex-direction: column;
@@ -123,6 +182,41 @@
     #tabPacientes .tabla-wrap {
       flex: 1;
       min-height: 0;
+      max-height: none;
+    }
+
+    
+    @media (max-width: 900px) {
+      .admin-tabs {
+        flex: 1 1 100%;
+        order: 10;
+        gap: 6px;
+      }
+      .admin-tab {
+        flex: 1 1 auto;
+        min-width: fit-content;
+        padding: 8px 12px;
+        font-size: .86rem;
+      }
+    }
+
+    @media (max-width: 760px) {
+      #tabPacientes .stats { gap: 8px; padding: 12px 12px 0; }
+      #btnToggleFiltros { display: inline-flex; align-items: center; gap: 6px; }
+      #tabPacientes .stat-card {
+        flex: 1 1 calc(50% - 8px);
+        min-width: 0;
+        padding: 9px 12px;
+        gap: 10px;
+      }
+      #tabPacientes .stat-card__icono {
+        width: 32px;
+        height: 32px;
+        border-radius: 10px;
+        font-size: .85rem;
+      }
+      #tabPacientes .stat-card__texto strong { font-size: 1rem; }
+      #tabPacientes .stat-card__texto span { font-size: .72rem; }
     }
   </style>
 </head>
@@ -157,11 +251,16 @@
                   <option value="desarrollo">Base de datos desarrollo</option>
                   <option value="produccion">Base de datos producci&oacute;n</option>
                 </select>
+                <button id="btnToggleFiltros" class="btn btn--ghost" type="button" aria-expanded="true">
+                  <i class="fa-solid fa-sliders"></i> <span>Ocultar filtros</span>
+                </button>
                 <button id="btnActualizar" class="btn btn--ghost" type="button">Actualizar</button>
               </div>
             </div>
 
-            <div class="stats" id="stats"></div>
+            <div class="filtros-wrap" id="filtrosWrap">
+              <div class="stats" id="stats"></div>
+            </div>
 
             <div class="toolbar-pacientes">
               <input type="search" id="buscador" placeholder="Buscar por nombre, tel&eacute;fono o info..." autocomplete="off">
@@ -176,7 +275,6 @@
                   <option value="" selected>— cambiar a —</option>
                   <option value="pendiente">Pendiente</option>
                   <option value="enviado">Enviado</option>
-                  <option value="error">Error</option>
                 </select>
               </label>
               <label class="toolbar-masivo__campo">
@@ -343,14 +441,14 @@
         </div>
 
       </main>
-    </div>
-  </div>
 
-  <div class="config-guardar-fijo" id="barraGuardar" hidden>
-    <span id="cambiosResumen">Sin cambios</span>
-    <div class="config-guardar-fijo__btns">
-      <button id="btnDescartar" class="btn btn--ghost" type="button">Descartar</button>
-      <button id="btnGuardarFijo" class="btn btn--primary" type="button">Guardar cambios</button>
+      <div class="config-guardar-fijo" id="barraGuardar" hidden>
+        <span id="cambiosResumen">Sin cambios</span>
+        <div class="config-guardar-fijo__btns">
+          <button id="btnDescartar" class="btn btn--ghost" type="button">Descartar</button>
+          <button id="btnGuardarFijo" class="btn btn--primary" type="button">Guardar cambios</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -398,16 +496,69 @@
       if (window.snwEsDev) botones.configuracion.hidden = false;
 
       function activar(tab) {
+        const destino = paneles[tab];
+        if (!destino || !destino.hidden) return;
         for (const clave of Object.keys(botones)) {
           const activo = clave === tab;
           botones[clave].classList.toggle("active", activo);
           botones[clave].setAttribute("aria-selected", String(activo));
-          paneles[clave].hidden = !activo;
         }
         if (cargas[tab]) cargas[tab]();
+
+        // Fundido: se desvanecen los paneles visibles, y recién entonces se
+        // oculta el anterior, se muestra el nuevo y entra con fade-in.
+        const miToken = ++activar.token;
+        const visibles = Array.from(document.querySelectorAll(".admin-panel:not([hidden])"));
+        visibles.forEach((p) => p.classList.add("admin-panel--salida"));
+        window.setTimeout(() => {
+          if (miToken !== activar.token) return; // se eligió otra pestaña en el ínterin
+          visibles.forEach((p) => {
+            p.classList.remove("admin-panel--salida");
+            p.hidden = true;
+          });
+          destino.hidden = false;
+          destino.classList.add("admin-panel--entrada");
+          // Doble rAF: el navegador aplica el opacity 0 inicial antes de
+          // quitarlo y disparar la transición hacia opacity 1.
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => destino.classList.remove("admin-panel--entrada"))
+          );
+        }, 160);
       }
+      activar.token = 0;
       for (const clave of Object.keys(botones)) {
         botones[clave].addEventListener("click", () => activar(clave));
+      }
+
+      // Móvil: ocultar/mostrar los filtros (stat-card) de la base de datos
+      // para que la tabla use toda la pantalla. El botón muestra cuántos
+      // filtros reales quedaron aplicados cuando están ocultos. Se anima
+      // con la clase .cerrado en el wrapper (collapsible de grilla), nunca
+      // con hidden, para que la transición de altura se vea.
+      const statsFiltros = document.getElementById("stats");
+      const filtrosWrap = document.getElementById("filtrosWrap");
+      const btnFiltros = document.getElementById("btnToggleFiltros");
+      if (btnFiltros && statsFiltros && filtrosWrap) {
+        const filtrosActivos = () =>
+          [...statsFiltros.querySelectorAll(".stat-card.activo")]
+            .filter((c) => c.dataset.estado !== "todos").length;
+        const pintarBtnFiltros = () => {
+          const abierto = !filtrosWrap.classList.contains("cerrado");
+          const n = filtrosActivos();
+          btnFiltros.setAttribute("aria-expanded", String(abierto));
+          btnFiltros.querySelector("span").textContent =
+            abierto ? "Ocultar filtros" : (n ? `Mostrar filtros (${n})` : "Mostrar filtros");
+        };
+        btnFiltros.addEventListener("click", () => {
+          filtrosWrap.classList.toggle("cerrado");
+          pintarBtnFiltros();
+        });
+        // Cuando pacientes.js vuelve a pintar las tarjetas (cambia el filtro
+        // aplicado o la base), se refresca el contador del botón.
+        new MutationObserver(() => pintarBtnFiltros()).observe(
+          statsFiltros, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] }
+        );
+        pintarBtnFiltros();
       }
     })();
   </script>

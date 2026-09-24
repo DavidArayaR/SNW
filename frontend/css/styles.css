@@ -430,16 +430,73 @@ button:disabled:hover { outline: none; }
 }
 .empty-state h3 { margin: 0; color: var(--texto); }
 
+/* Estados vacíos de tablas y listas: un ícono pequeño y discreto arriba
+   del texto gris, en vez del plano «No hay...». Cada clase elige su
+   ícono; el resto (familia, tamaño, opacidad, margen) es común. */
+.tabla-vacia::before,
+.tpl-list__vacio::before,
+.usr-envios__vacio::before,
+.msg-vacio::before {
+  font-family: "Font Awesome 6 Free";
+  font-weight: 900;
+  display: block;
+  font-size: 1.45rem;
+  line-height: 1;
+  opacity: .5;
+  margin-bottom: 10px;
+}
+.tabla-vacia::before { content: "\f0ce"; }        /* fa-table */
+.tpl-list__vacio::before { content: "\f15b"; }    /* fa-file-lines */
+.usr-envios__vacio::before { content: "\f49e"; }  /* fa-box-open */
+.msg-vacio::before { content: "\f4b3"; }          /* fa-comment-slash */
+
 .modal {
   position: fixed;
   inset: 0;
   display: grid;
   place-items: center;
   background: var(--overlay);
-  z-index: 50;
+  z-index: 1050;
   padding: 20px;
+  opacity: 1;
+  /* Cierre animado: al poner [hidden], el display pasa a none recién al
+     final de la transición (transition-behavior: allow-discrete), así el
+     overlay y la tarjeta alcanzan a desvanecerse/escalarse antes de
+     desaparecer. La apertura la hacen las animaciones de abajo. */
+  transition: opacity .18s ease, display .18s allow-discrete;
+  transition-behavior: allow-discrete;
 }
-.modal[hidden] { display: none; }
+.modal[hidden] {
+  display: none;
+  opacity: 0;
+}
+.modal[hidden] .modal__card {
+  opacity: 0;
+  transform: translateY(8px) scale(.97);
+}
+
+/* Animación de entrada: fundido del overlay + la tarjeta entra con un
+   pequeño desplazamiento y escala (como el toast). Las animaciones se
+   vuelven a ejecutar cada vez que el modal pasa de display:none a grid,
+   así que no hacen falta cambios de JS en cada página. Fill-mode
+   backwards (no both): al terminar, la tarjeta deja de ser controlada
+   por la animación y la transición de cierre puede correr. */
+.modal:not([hidden]) { animation: modal-overlay .18s ease backwards; }
+.modal:not([hidden]) .modal__card { animation: modal-tarjeta .18s ease backwards; }
+@keyframes modal-overlay {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes modal-tarjeta {
+  from { opacity: 0; transform: translateY(8px) scale(.97); }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .modal:not([hidden]),
+  .modal:not([hidden]) .modal__card { animation: none; }
+  .modal,
+  .modal__card { transition: none; }
+}
 
 .modal__card {
   width: 100%;
@@ -449,6 +506,7 @@ button:disabled:hover { outline: none; }
   border-radius: 14px;
   padding: 24px;
   box-shadow: 0 18px 50px rgba(0, 0, 0, .25);
+  transition: opacity .18s ease, transform .18s ease;
 }
 .modal__card h3 { margin: 0 0 20px; }
 .modal__actions { display: flex; justify-content: flex-end; gap: 10px; }
@@ -466,7 +524,7 @@ button:disabled:hover { outline: none; }
   box-shadow: 0 8px 24px rgba(0, 0, 0, .3);
   opacity: 0;
   transition: opacity .25s, transform .25s;
-  z-index: 60;
+  z-index: 1060;
 }
 .toast.visible { opacity: 1; transform: translateX(-50%) translateY(0); }
 .toast--error { background: #c0504e; color: #fff; }

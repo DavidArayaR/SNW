@@ -974,6 +974,7 @@ function abrirModalConf() {
   });
   refrescarAvisoDevConf();
   refrescarAvisoAdminConf();
+  cargarLimiteAdminConf();
   actualizarResumenConf();
 
   $("#confProgreso").hidden = true;
@@ -1038,26 +1039,52 @@ function refrescarAvisoAdminConf() {
 function limiteEnvioConf() {
   const fila = $("#filaLimiteConf");
   if (!fila || fila.hidden) return null;
-  const n = parseInt($("#limiteNumConf").value, 10);
+  const numEl = $("#limiteNumConf");
+  if (numEl.disabled) return null;
+  const n = parseInt(numEl.value, 10);
   return Number.isFinite(n) ? n : null;
 }
 
-function configurarLimiteConf(max) {
+// Configura el slider de cuántos enviar. `max` es el menor entre los pendientes
+// y los usuarios que aún permite contactar el límite diario de WhatsApp (si
+// aplica). Muestra cuántos quedan disponibles hoy y nunca deja superar el cupo.
+function configurarLimiteConf(pendientes, lim) {
   const fila = $("#filaLimiteConf");
   const range = $("#limiteRangeConf");
   const num = $("#limiteNumConf");
+  const nota = $("#limiteNotaConf");
   const esProd = ambienteConf === "produccion";
 
-  if (!esProd || max <= 0) {
+  if (!esProd || pendientes <= 0) {
     fila.hidden = true;
     return;
   }
+  const disponibles = (lim && lim.disponibles != null) ? lim.disponibles : pendientes;
+  const max = Math.max(0, Math.min(pendientes, disponibles));
+
   fila.hidden = false;
-  range.max = num.max = String(max);
+  const techo = Math.max(1, max);
+  range.max = num.max = String(techo);
   range.min = num.min = "1";
+  range.disabled = num.disabled = max <= 0;
+  // Por defecto se envían todos los que permite el cupo de hoy.
+  range.value = num.value = String(techo);
   $("#limiteMaxConf").textContent = max;
-  // Por defecto se envían todos los pendientes.
-  range.value = num.value = String(max);
+
+  if (nota) {
+    if (lim && lim.tier) {
+      nota.hidden = false;
+      const extra = pendientes > max
+        ? ` · ${pendientes - max} quedan para más adelante`
+        : "";
+      nota.textContent =
+        `${lim.disponibles} de ${lim.tier} disponibles hoy y disponibles en base de datos: ` +
+        `${pendientes}${extra}.`;
+    } else {
+      nota.hidden = false;
+      nota.textContent = `Disponibles en base de datos: ${pendientes}.`;
+    }
+  }
 }
 
 (function sincronizarLimiteConf() {
@@ -1079,6 +1106,70 @@ function fmtMoneda(monto, moneda) {
   return `${s} ${moneda}`;
 }
 
+// Editor del límite diario (wa_messaging_limit_24h) para admin/dev. Se muestra
+// dentro del modal de envío para ajustarlo a lo que indique el dashboard de Meta.
+function cargarLimiteAdminConf() {
+  const fila = $("#filaLimiteAdminConf");
+  if (!fila) return;
+  if (!window.snwEsPrivilegiado) {
+    fila.hidden = true;
+    return;
+  }
+  fila.hidden = false;
+  fetch("api/whatsapp/messaging-limit", { headers: authHeaders(), cache: "no-store" })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((data) => {
+      if (!data || data.tier == null) return;
+      $("#limiteAdminNumConf").value = String(data.tier);
+    })
+    .catch(() => {});
+}
+
+const btnGuardarLimiteConf = $("#btnGuardarLimiteConf");
+if (btnGuardarLimiteConf) {
+  btnGuardarLimiteConf.addEventListener("click", async () => {
+    const input = $("#limiteAdminNumConf");
+    const valor = parseInt(input.value, 10);
+    if (!Number.isFinite(valor) || valor < 0) {
+      return toast("Escribe un número válido (0 = ilimitado).", "error");
+    }
+    btnGuardarLimiteConf.disabled = true;
+    try {
+      const res = await fetch("api/whatsapp/messaging-limit", {
+        method: "PUT",
+        headers: authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ limite: valor }),
+      });
+      if (res.status === 401) { window.snwSesionExpirada(); return; }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail ?? `Error ${res.status}`);
+      input.value = String(data.tier);
+      toast("Límite diario actualizado.");
+      actualizarResumenConf();
+    } catch (e) {
+      toast(e.message || "No se pudo guardar el límite.", "error");
+    } finally {
+      btnGuardarLimiteConf.disabled = false;
+    }
+  });
+}
+
+// Aviso del límite diario de WhatsApp alcanzado. En producción bloquea el
+// envío; en desarrollo solo se indica (el envío no se bloquea).
+function mostrarAvisoLimiteConf(lim, esProd) {
+  const box = $("#confAvisoLimite");
+  if (!box) return;
+  if (!lim || lim.disponibles > 0) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  box.textContent =
+    `Límite diario de WhatsApp alcanzado: en las últimas 24 h ya se contactó a ` +
+    `${lim.usados_24h} usuarios únicos (límite ${lim.tier}).` +
+    (esProd ? "" : " En desarrollo el envío no se bloquea, pero en producción se rechazaría.");
+}
+
 async function actualizarResumenConf() {
   const dd = $("#confDestinatarios");
   const filaCosto = $("#filaCostoConf");
@@ -1095,9 +1186,19 @@ async function actualizarResumenConf() {
     });
     if (res.status === 401) { window.snwSesionExpirada(); return; }
     const data = await res.json();
+    const lim = data.limite_mensajeria || null;
+    const esProd = ambienteConf === "produccion";
+    const sinCupo = !!(lim && lim.disponibles <= 0);
     dd.textContent = `${data.pendientes} pendiente(s) · base: ${data.base_datos}`;
-    configurarLimiteConf(data.pendientes || 0);
-    $("#btnLanzarConf").disabled = data.pendientes === 0;
+    configurarLimiteConf(data.pendientes || 0, lim);
+    // En producción el cupo diario bloquea el envío; en desarrollo solo se avisa.
+    $("#btnLanzarConf").disabled = data.pendientes === 0 || (sinCupo && esProd);
+    mostrarAvisoLimiteConf(lim, esProd);
+    if (sinCupo && esProd) {
+      dd.textContent =
+        `Sin cupo hoy: ${data.pendientes} pendiente(s) · límite de WhatsApp alcanzado ` +
+        `(${lim.usados_24h}/${lim.tier} usuarios en 24 h).`;
+    }
 
     if (data.costo) {
       ddCosto.textContent =
@@ -1110,6 +1211,7 @@ async function actualizarResumenConf() {
   } catch {
     dd.textContent = "No se pudieron contar.";
     configurarLimiteConf(0);
+    mostrarAvisoLimiteConf(null, false);
   }
 }
 

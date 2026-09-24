@@ -213,7 +213,11 @@
       window.snwSalir();
     });
 
-    document.getElementById("btnClavePropia").addEventListener("click", abrirModalClave);
+    document.getElementById("btnClavePropia").addEventListener("click", () => {
+      // En móvil la sidebar queda encima del modal; se cierra primero.
+      cerrarMovil();
+      abrirModalClave();
+    });
   }
 
   // ----- Modal "Mi cuenta": cambiar la propia contraseña -----

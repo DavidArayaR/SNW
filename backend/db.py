@@ -42,6 +42,12 @@ CONFIG_DEFAULTS = {
     # Sesiones: horas de INACTIVIDAD tras las que una sesión expira sola
     # (se renueva con cada acción; 0 = no expiran).
     "sesion_expira_horas": "5",
+    # Anti flip-flop: si el paciente se da de baja y luego se reintegra (por
+    # retractación o interés), no puede volver a darse de baja hasta que pasen
+    # 24 h. Evita que juegue con los botones de baja/reintegrarse. En producción
+    # está SIEMPRE activo; `anti_flip_flop_dev` decide si también aplica en la
+    # base de desarrollo (desactivarlo permite probar el flujo sin límite).
+    "anti_flip_flop_dev": "true",
     "intervalo_ms": "1000",
     "url_base": "",
     # Call center: el número al que lleva el botón de las plantillas de call
@@ -277,8 +283,11 @@ def asegurar_tabla_config() -> None:
                     "       AND COLUMN_NAME = 'interes_plantilla_clave') AS col_iplant,"
                     "  (SELECT COUNT(*) FROM information_schema.COLUMNS"
                     "     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s"
-                    "       AND COLUMN_NAME = 'interes_fecha') AS col_ifecha",
-                    (tp, tp, tp, tp, tp, tp, tp),
+                    "       AND COLUMN_NAME = 'interes_fecha') AS col_ifecha,"
+                    "  (SELECT COUNT(*) FROM information_schema.COLUMNS"
+                    "     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s"
+                    "       AND COLUMN_NAME = 'ultimo_reintegro') AS col_ureint",
+                    (tp, tp, tp, tp, tp, tp, tp, tp),
                 )
                 fila = cur.fetchone() or {}
                 if not fila.get("tabla"):
@@ -312,6 +321,12 @@ def asegurar_tabla_config() -> None:
                     cur.execute(f"ALTER TABLE {tp} ADD COLUMN interes_plantilla_clave VARCHAR(50) NULL")
                 if not fila.get("col_ifecha"):
                     cur.execute(f"ALTER TABLE {tp} ADD COLUMN interes_fecha DATETIME NULL")
+                if not fila.get("col_ureint"):
+                    # Fecha de la última vez que el paciente volvió desde estar de
+                    # baja (retractación o interés). En producción se usa para
+                    # impedir la alternancia baja -> reintegración repetida
+                    # (máximo una vez cada 24 h); en desarrollo no aplica.
+                    cur.execute(f"ALTER TABLE {tp} ADD COLUMN ultimo_reintegro DATETIME NULL")
                 cur.execute(f"UPDATE {tp} SET respuesta_manual = 'respondio' WHERE respuesta_manual = 'click'")
 
             # El tipo de respuesta 'click' se eliminó: quita el valor del ENUM

@@ -349,7 +349,9 @@ tiene template de Meta (va como texto libre, ventana de 24 h). No hay gestión d
   envío de plantilla y el paciente vuelve a mostrar interés, se le manda otro; si ya lo
   recibió después del último envío de plantilla, no se repite (aunque mande varios mensajes
   de interés seguidos — hay además un guard por número mientras hay un envío programado). No
-  hay envío manual.
+  hay envío manual. Si el paciente venía de baja y se reactiva con ese mismo interés, esta es
+  la **única** respuesta que recibe: no se suma el aviso de «¡Bienvenido/a de vuelta!» (ver
+  «Avisos automáticos» en «Sistema de baja»).
 - **Botón:** el mensaje incluye un botón CTA que abre el chat del call center
   (`https://wa.me/<número>`, mensaje interactivo `cta_url`). El número se pide en cada
   respuesta a **`call_center_url`** (configurado en **Configuración → Call center**), un
@@ -374,7 +376,7 @@ tiene template de Meta (va como texto libre, ventana de 24 h). No hay gestión d
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| POST | `/api/notificaciones/enviar` | Inicia el envío `{pacientes: [ids] \| null, plantilla_id, ambiente, limite?}`. `pacientes: null` = todos los elegibles (usado desde Mensajería). `limite` (solo producción) recorta cuántos pendientes entran en esta tanda; el resto quedan pendientes. Rechaza (400) si la plantilla no está `APPROVED` en Meta |
+| POST | `/api/notificaciones/enviar` | Inicia el envío `{pacientes: [ids] \| null, plantilla_id, ambiente, limite?}`. `pacientes: null` = todos los elegibles (usado desde Mensajería). `limite` (solo producción) recorta cuántos pendientes entran en esta tanda; el resto quedan pendientes. Rechaza (400) si la plantilla no está `APPROVED` en Meta; 409 si en ese momento hay **otro envío en curso en esa misma base** |
 | POST | `/api/notificaciones/destinatarios` | Cuenta pacientes totales/pendientes de un ambiente. Con `plantilla_id`, agrega `costo` (aproximado, mismo cálculo que el correo de confirmación del supervisor) para mostrarlo en el modal antes de enviar; `null` si no hay tarifas cargadas, la plantilla no se factura, o la cuenta no tiene el permiso `tarifas_editar` (admin/dev sí lo ven siempre) |
 | GET | `/api/notificaciones/jobs/{job_id}` | Progreso en vivo del envío en curso |
 | POST | `/api/notificaciones/jobs/{job_id}/pausa` \| `/reanudar` \| `/cancelar` | Control del job en curso |
@@ -385,7 +387,7 @@ tiene template de Meta (va como texto libre, ventana de 24 h). No hay gestión d
 | Método | Endpoint | Descripción |
 |---|---|---|
 | GET | `/api/notificaciones/solicitud/{token}` | Estado de una solicitud pendiente (usado por polling del frontend) |
-| GET | `/api/notificaciones/confirmar/{token}` | Confirmar envío (link del correo) |
+| GET | `/api/notificaciones/confirmar/{token}` | Confirmar envío (link del correo). 409 y página HTML si para entonces ya hay un envío en curso en **esa misma base**: la solicitud queda `pendiente` hasta que haya lugar |
 | GET / POST | `/api/notificaciones/rechazar/{token}` | Formulario y envío del rechazo, con comentario opcional (máximo 255 caracteres; 422 si se pasa) |
 
 ### Historial
@@ -417,6 +419,7 @@ tiene template de Meta (va como texto libre, ventana de 24 h). No hay gestión d
 | PUT | `/api/configuracion/todo` | `{cambios: {clave: valor, …}}` — valida clave conocida, enums (`entorno`, `metodo_envio`) y enteros (`intervalo_ms`, `smtp_port`, `wa_rate_limit_*`, `wa_throughput_mps`, `wa_messaging_limit_24h`); `call_center_numeros` (respaldo) se normaliza a lista de solo-dígitos separada por coma; persiste con `config_set` |
 | GET | `/api/whatsapp/rate-limit` | (solo `desarrollador`) Consumo de cuota de la Graph API visto en la última respuesta de Meta y la espera que el sistema aplica: `{activo, uso_pct, bloqueado, bloqueado_segundos, pausa_sugerida_s, throughput_mps, ultimo_motivo, cabecera_hace_s}` |
 | GET | `/api/whatsapp/messaging-limit` | (admin / dev) `{tier, usados_24h, disponibles, ventana_horas}` — usuarios únicos contactados (mensajes iniciados por el negocio) en las últimas 24 h frente al `wa_messaging_limit_24h` |
+| PUT | `/api/whatsapp/messaging-limit` | (admin / dev) `{limite: int}` — actualiza `wa_messaging_limit_24h` (0 = ilimitado) para ajustarlo a lo que indique el dashboard de Meta; devuelve el estado actualizado |
 
 ### Webhook de WhatsApp (Meta)
 
@@ -491,8 +494,15 @@ vez se turnan. Si aun así Meta devuelve `130429`, backoff como en el punto 3.
 — usuarios únicos a los que el negocio puede escribir en una ventana móvil de 24 h
 (250 / 1K / 10K / 100K / ilimitado). Antes de un envío masivo en producción, `iniciar_envio` cuenta los
 teléfonos únicos con envío iniciado por el negocio en `log_envios` de las últimas 24 h: si ya
-se alcanzó `wa_messaging_limit_24h` responde **429**; si el lote lo va a superar, el envío
-sale igual pero con un aviso (`aviso_limite_mensajeria`).
+se alcanzó `wa_messaging_limit_24h` responde **429**; si el lote lo va a superar, se **recorta**
+a los usuarios que quedan disponibles hoy (el resto queda pendiente para otra tanda) y devuelve
+un aviso (`aviso_limite_mensajeria`). El selector «Cuántos enviar» del envío masivo en producción
+limita su máximo a `min(pendientes, disponibles_hoy)`, muestra cuántos usuarios únicos quedan
+disponibles en la ventana de 24 h y nunca permite superar el cupo. En **desarrollo** el cupo no
+bloquea el envío, pero si el límite diario ya se alcanzó se muestra un aviso (el cupo es de la
+cuenta, compartido por ambos entornos). El **admin/dev** puede ajustar `wa_messaging_limit_24h`
+desde el propio modal de envío (campo «Límite diario (Meta)», `PUT /api/whatsapp/messaging-limit`)
+para ponerlo como diga el dashboard de WhatsApp Business, sin depender de Configuración (dev).
 
 En el envío masivo (`_procesar_job`), si hay que esperar ≥ 1 s el job muestra «Esperando por
 el límite de la API de Meta (~N s)» y la espera es cancelable. `GET /api/whatsapp/rate-limit`
@@ -539,6 +549,39 @@ La detección (`_es_baja` en `whatsapp_service.py`) reconoce: palabras sueltas (
 recibir`, `no molestar`, `borrame`…) y el botón nativo de Meta en templates de marketing
 (`Detener promociones` / `Stop promotions`, incluido su `payload`). Meta no manda un evento
 explícito de baja.
+
+**Avisos automáticos.** El webhook responde al paciente con dos mensajes fijos de texto
+libre, dentro de la ventana de 24 h (ver `_enviar_mensaje_directo` en `main.py`):
+«Lamentamos que te vayas…» al darse de baja, y «¡Bienvenido/a de vuelta! Ya reactivamos tus
+notificaciones» al reactivarse. Ambos se deciden **al cierre del evento**
+(`_procesar_mensajes` en `whatsapp_service.py`), con el estado opt-out con que ese evento
+termina, no mensaje a mensaje:
+
+- **El evento termina de baja habiéndolo estado al inicio** (el paciente ya estaba de baja y
+  vuelve a escribir que se quiere dar de baja — incluye una reactivación seguida de una baja
+  en el mismo evento): **ninguna respuesta**. Evita el «bienvenido + lamentamos» seguido.
+- **El evento termina de baja sin estarlo al inicio** (baja nueva): «Lamentamos que te
+  vayas…», **una sola vez**. El aviso se manda a una única base (producción, y solo como
+  respaldo desarrollo), así un paciente que existe en ambas no lo recibe doble.
+- **El evento termina reactivado** por un mensaje sin interés (una baja puesta a mano por un
+  admin/dev, y el paciente escribe «hola», «quiero volver»…): «¡Bienvenido/a de vuelta!».
+  Si ese mensaje expresa **interés**, no se suma el aviso de reactivación: la única respuesta
+  es la de call center (ver «Mensaje de call center»).
+
+Un aviso nunca se reenvía por un webhook repetido ni por un segundo mensaje del paciente que
+no cambie el estado final.
+
+**Anti flip-flop (baja ↔ reintegración).** Para que un paciente no juegue con los botones, un
+paciente que **se dio de baja y se reintegra** no puede volver a darse de baja hasta que pasen
+**24 h** desde la reintegración: solo se permite un ciclo baja → reintegración cada 24 h. Al
+reactivarse (por retractación o por interés) se guarda la fecha en `pacientes.ultimo_reintegro`;
+si intenta darse de baja otra vez dentro de esas 24 h, la baja **se ignora** (no se marca el
+opt-out ni se manda la despedida). Un interés de alguien que nunca estuvo de baja no cuenta
+como reintegración, así que no le impide darse de baja después. La restricción está **siempre
+activa en producción**; en **desarrollo** se controla con la opción Configuración → **Bajas y
+reactivaciones** → *«Aplicar el límite también en desarrollo»* (`anti_flip_flop_dev`; por
+defecto activada). Desactívala para probar el flujo de baja/reintegración sin límite en
+desarrollo.
 
 **Mensajes de interés:** el texto literal de cada respuesta del paciente se guarda en
 `log_envios.mensaje`. En el **detalle de un envío del Historial** aparece bajo la respuesta
@@ -664,6 +707,14 @@ propagar como error 500.
 - **Cola en background**: cada envío corre como `BackgroundTask` de FastAPI con
   progreso en vivo (`GET /jobs/{id}`), y se puede pausar/reanudar/cancelar a mitad de
   camino.
+- **Un solo envío a la vez por base de datos**: mientras hay un envío en curso
+  (`en_proceso` o `pausado`) sobre una base, iniciar otro en **esa misma base** responde
+  **409** — da igual quién lo haya iniciado; el mensaje indica quién lo inició, con qué
+  plantilla y en qué base (`JOBS_LOCK` + `_envio_en_curso(ambiente)` en `main.py`). Producción
+  y desarrollo son independientes: un envío activo en una no bloquea a la otra, y pueden
+  correr en paralelo (cada uno respeta su propio `wa_rate_limit`). Se valida con el candado
+  antes de encolar y también al confirmar por correo (ver `/api/notificaciones/enviar` y
+  `/confirmar/{token}` más arriba).
 - **Historial batch**: cada envío se registra en `envios` (una fila por "Iniciar envío"),
   y cada mensaje individual en `log_envios`.
 

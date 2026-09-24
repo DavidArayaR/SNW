@@ -255,7 +255,7 @@ function renderDetalle() {
     // Card 3: Actividad (de solo lectura).
     `<div class="usr-card usr-card--envios">` +
       `<h4>Actividad</h4>` +
-      `<p class="usr-envios__vacio" style="margin-bottom: 8px;">Acciones que hizo esta cuenta (a quién invitó, editó, eliminó, qué plantilla creó...).</p>` +
+      `<p style="margin: 0 0 8px; font-size: .84rem; color: var(--texto-suave);">Acciones que hizo esta cuenta (a quién invitó, editó, eliminó, qué plantilla creó...).</p>` +
       `<div id="usrAuditoria" class="usr-envios__cont">Cargando actividad…</div>` +
     `</div>`;
 

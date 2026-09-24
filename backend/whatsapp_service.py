@@ -46,9 +46,9 @@ BAJA_FRASES = (
     "dar de baja", "darme de baja", "darse de baja", "me doy de baja", "de baja",
     "quiero darme de baja", "quiero que me den de baja", "deseo darme de baja",
     "no quiero recibir", "no deseo recibir", "no quiero mas mensajes",
-    "no me manden", "no me envien", "no enviar mas", "dejen de enviar",
+    "no me manden", "no me envien","no me envíen", "no enviar mas", "dejen de enviar",
     "dejar de recibir", "dejen de mandar", "no molestar", "no me contacten",
-    "ya no quiero", "no quiero saber", "borrame", "borrenme",
+    "ya no quiero", "no quiero saber", "borrame", "borrenme", "borrarme",
     "sacame de", "sacarme de", "no quiero que me escriban",
     "quitar de la lista", "sacar de la lista", "borrar mi numero", "eliminar mi numero",
     "detener promociones", "detener promo", "stop promotions", "no promociones",
@@ -778,11 +778,21 @@ class WhatsAppService:
         return accion
 
     def _procesar_mensajes(self, valor: dict) -> list[str]:
-        """Mensajes entrantes del cliente (respuestas, bajas, etc.)."""
+        """Mensajes entrantes del cliente (respuestas, bajas, etc.).
+
+        Los avisos de reactivación ("bienvenido de vuelta") y de despedida se
+        deciden al final, con el estado opt-out con que termina el evento, no
+        mensaje a mensaje: así un paciente ya de baja que escribe de nuevo una
+        baja (o una retractación seguida de una baja en el mismo evento) no
+        recibe "bienvenido" + "lamentamos", sino ninguna respuesta."""
         acciones = []
         # Meta manda el wa_id sin '+' (ej. "56993921740"); lo normalizamos.
         crudo = (valor.get("contacts") or [{}])[0].get("wa_id", "")
         telefono = _normalizar_telefono(crudo) or crudo
+        opt_out_inicial = self._estaba_opt_out(telefono)
+        hubo_retract = False
+        hubo_baja = False
+        hubo_interes = False
         for mensaje in valor.get("messages", []):
             tipo = mensaje.get("type", "")
             texto = ""
@@ -802,22 +812,38 @@ class WhatsAppService:
                 continue
             cuerpo = texto or extra
 
+            # Los 3 botones de la plantilla normal se identifican por su texto
+            # exacto; el resto pasa por los clasificadores de texto libre.
+            es_boton = tipo in ("button", "interactive")
+            boton = (texto or "").strip().casefold()
+            interes = es_mensaje_interes(cuerpo)
+            baja = self._es_baja(texto) or self._es_baja(extra)
+            fue_interes = interes or (es_boton and boton == BOTON_TEXTO_INTERES.casefold())
+            fue_baja = baja or (es_boton and boton == BOTON_TEXTO_BAJA.casefold())
+            # "no me interesa" / "no estoy interesada"…: NO es una baja, el
+            # paciente sigue pudiendo recibir futuras plantillas. Una baja
+            # explícita en el mismo mensaje gana sobre esto.
+            no_interes = (not interes) and (not baja) and (
+                es_mensaje_no_interes(texto) or es_mensaje_no_interes(extra)
+            )
+
             # Si el paciente escribe estando dado de baja (sea explícita o
             # puesta a mano), se le reactivan las notificaciones antes de
-            # clasificar este mismo mensaje.
-            if self._estaba_opt_out(telefono):
-                self._registrar_retractacion(telefono)
+            # clasificar este mismo mensaje. El aviso se decide al final del
+            # evento: si este termina de nuevo de baja, no sale ninguna
+            # respuesta (la baja pesa más que la reactivación inmediata).
+            estaba_opt_out = self._estaba_opt_out(telefono)
+            if estaba_opt_out and not fue_interes and not fue_baja:
+                self._registrar_retractacion(telefono, aviso=False)
+                hubo_retract = True
                 acciones.append("retractacion")
 
             info = self._registrar_respuesta(telefono, cuerpo, mensaje.get("timestamp"))
             acciones.append(f"respuesta_{info}")
 
-            # Los 3 botones de la plantilla normal se identifican por su texto
-            # exacto, ANTES de pasar por los clasificadores de texto libre.
-            es_boton = tipo in ("button", "interactive")
-            boton = (texto or "").strip().casefold()
             if es_boton and boton == BOTON_TEXTO_INTERES.casefold():
                 self._registrar_interes(telefono)
+                hubo_interes = True
                 acciones.append("interes_boton")
                 if callable(al_detectar_interes):
                     try:
@@ -830,23 +856,16 @@ class WhatsAppService:
                 acciones.append("no_interes_boton")
                 continue
             if es_boton and boton == BOTON_TEXTO_BAJA.casefold():
-                self._registrar_baja(telefono)
+                self._registrar_baja(telefono, aviso=False)
+                hubo_baja = True
                 acciones.append("baja_boton")
                 continue
-
-            interes = es_mensaje_interes(cuerpo)
-            baja = self._es_baja(texto) or self._es_baja(extra)
-            # "no me interesa" / "no estoy interesada"…: NO es una baja, el
-            # paciente sigue pudiendo recibir futuras plantillas. Una baja
-            # explícita en el mismo mensaje gana sobre esto.
-            no_interes = (not interes) and (not baja) and (
-                es_mensaje_no_interes(texto) or es_mensaje_no_interes(extra)
-            )
 
             if interes:
                 # El interés manda: si el paciente se había dado de baja y ahora
                 # dice que le interesa, se revierte la baja.
                 self._registrar_interes(telefono)
+                hubo_interes = True
                 acciones.append("interes")
                 if callable(al_detectar_interes):
                     try:
@@ -854,11 +873,33 @@ class WhatsAppService:
                     except Exception as e:
                         log_error(f"al_detectar_interes({telefono})", e)
             elif baja:
-                self._registrar_baja(telefono)
+                self._registrar_baja(telefono, aviso=False)
+                hubo_baja = True
                 acciones.append("baja")
             elif no_interes:
                 self._registrar_no_interes(telefono)
                 acciones.append("no_interes")
+
+        # Avisos decididos con el estado opt-out FINAL del evento:
+        #  - termina de baja habiéndolo estado al inicio   -> nada (baja repetida).
+        #  - termina de baja sin estarlo al inicio         -> despedida (baja nueva).
+        #  - termina reactivado tras una retractación      -> "bienvenido de vuelta".
+        #  - algún interés en el evento                    -> solo la respuesta de
+        #    call center (ya programada arriba), sin avisos.
+        opt_out_final = self._estaba_opt_out(telefono)
+        if opt_out_final:
+            if not opt_out_inicial and hubo_baja:
+                if callable(al_detectar_baja):
+                    try:
+                        al_detectar_baja(telefono)
+                    except Exception as e:
+                        log_error(f"al_detectar_baja({telefono})", e)
+        elif hubo_retract and not hubo_interes:
+            if callable(al_detectar_retractacion):
+                try:
+                    al_detectar_retractacion(telefono)
+                except Exception as e:
+                    log_error(f"al_detectar_retractacion({telefono})", e)
         return acciones
 
     @staticmethod
@@ -990,7 +1031,32 @@ class WhatsAppService:
             log_error(f"_registrar_respuesta({telefono})", e)
             return "error"
 
-    def _registrar_baja(self, telefono: str) -> None:
+    def _reintegro_reciente(self, cur, p: dict) -> bool:
+        """True si el paciente se reintegró (una retractación o interés volvió
+        a activar sus notificaciones) hace menos de 24 h. Se usa para impedir
+        la alternancia baja -> reintegración repetida: el paciente que se dio
+        de baja y volvió no puede darse de baja otra vez hasta que pasen 24 h."""
+        try:
+            cur.execute(f"SELECT ultimo_reintegro FROM {p['tabla']} WHERE id = %s", (p["id"],))
+            ultimo = (cur.fetchone() or {}).get("ultimo_reintegro")
+        except Exception:
+            return False  # esquema sin la columna: nunca bloquea
+        if not ultimo:
+            return False
+        cur.execute("SELECT %s >= (NOW() - INTERVAL 24 HOUR) AS reciente", (ultimo,))
+        return bool((cur.fetchone() or {}).get("reciente"))
+
+    def _bloquea_flip_flop(self, cur, p: dict) -> bool:
+        """Anti flip-flop: en producción SIEMPRE; en la base de desarrollo solo
+        si la opción `anti_flip_flop_dev` está activa (desactivarla permite
+        probar el flujo de baja/reintegración sin límite en desarrollo)."""
+        if p["tabla"] != tabla_pacientes("produccion"):
+            valor = str(config_get("anti_flip_flop_dev", "true")).strip().lower()
+            if valor not in ("true", "1", "on", "si", "sí"):
+                return False
+        return self._reintegro_reciente(cur, p)
+
+    def _registrar_baja(self, telefono: str, aviso: bool | None = None) -> None:
         match = _TEL_MATCH.format(col="telefono")
         try:
             with conectar() as conn, conn.cursor() as cur:
@@ -999,10 +1065,19 @@ class WhatsAppService:
                     return
                 # Si ya estaba de baja, esto es un webhook repetido (Meta
                 # garantiza entrega "al menos una vez", no exactamente una) o
-                # un segundo mensaje del mismo paciente — no es una baja
-                # nueva, así que no se reenvía el aviso de despedida.
+                # una baja repetida — no es una baja nueva, así que por defecto
+                # no se reenvía el aviso de despedida.
                 ya_de_baja = all(p.get("whatsapp_opt_out") for p in pacientes)
                 for p in pacientes:
+                    # Anti flip-flop: si el paciente apenas se reintegró (últimas
+                    # 24 h), no puede darse de baja otra vez. Solo una baja por
+                    # cada 24 h desde su último regreso.
+                    if self._bloquea_flip_flop(cur, p):
+                        log_error(
+                            f"_registrar_baja({telefono}): baja ignorada, se reintegró"
+                            f" hace menos de 24 h (tabla {p['tabla']})"
+                        )
+                        continue
                     cur.execute(f"UPDATE {p['tabla']} SET whatsapp_opt_out = 1 WHERE {match}", (telefono,))
                     # Baja pedida con sus propias palabras por WhatsApp: queda
                     # bloqueada para edición manual hasta que el paciente se
@@ -1025,15 +1100,19 @@ class WhatsAppService:
         except Exception as e:
             log_error(f"_registrar_baja({telefono})", e)
             return
-        if ya_de_baja:
-            return
-        if callable(al_detectar_baja):
+        if aviso is True:
+            enviar = True
+        elif aviso is False:
+            enviar = False
+        else:
+            enviar = not ya_de_baja
+        if enviar and callable(al_detectar_baja):
             try:
                 al_detectar_baja(telefono)
             except Exception as e:
                 log_error(f"al_detectar_baja({telefono})", e)
 
-    def _registrar_retractacion(self, telefono: str) -> None:
+    def _registrar_retractacion(self, telefono: str, aviso: bool | None = None) -> None:
         """El paciente escribe estando dado de baja: se reactivan sus
         notificaciones (sin tocar interesado/no_interesado), sin importar si
         la baja fue explícita o puesta a mano por un admin/dev."""
@@ -1053,6 +1132,14 @@ class WhatsAppService:
                         cur.execute(f"UPDATE {p['tabla']} SET opt_out_explicito = 0 WHERE {match}", (telefono,))
                     except Exception:
                         pass  # esquema sin la columna
+                    # Marca la fecha del regreso: da pie al anti flip-flop de
+                    # 24 h (producción siempre; desarrollo según la opción). Solo
+                    # en la fila que realmente estaba de baja.
+                    if p.get("whatsapp_opt_out"):
+                        try:
+                            cur.execute(f"UPDATE {p['tabla']} SET ultimo_reintegro = NOW() WHERE {match}", (telefono,))
+                        except Exception:
+                            pass  # esquema sin la columna
                     cur.execute(
                         "UPDATE log_envios SET respuesta = 'respondio'"
                         " WHERE paciente_id = %s AND respuesta = 'baja'",
@@ -1062,9 +1149,13 @@ class WhatsAppService:
         except Exception as e:
             log_error(f"_registrar_retractacion({telefono})", e)
             return
-        if nadie_de_baja:
-            return
-        if callable(al_detectar_retractacion):
+        if aviso is True:
+            enviar = True
+        elif aviso is False:
+            enviar = False
+        else:
+            enviar = not nadie_de_baja
+        if enviar and callable(al_detectar_retractacion):
             try:
                 al_detectar_retractacion(telefono)
             except Exception as e:
@@ -1083,6 +1174,7 @@ class WhatsAppService:
                     return
                 for p in pacientes:
                     clave_oferta = self._ultima_plantilla_ofertada(cur, p["id"])
+                    venia_de_baja = bool(p.get("whatsapp_opt_out"))
                     for sql, params in (
                         (f"UPDATE {p['tabla']} SET interesado = 1, no_interesado = 0 WHERE {match}", (telefono,)),
                         (f"UPDATE {p['tabla']} SET whatsapp_opt_out = 0 WHERE {match}", (telefono,)),
@@ -1095,6 +1187,14 @@ class WhatsAppService:
                             cur.execute(sql, params)
                         except Exception:
                             pass  # esquema sin esa columna
+                    # Anti flip-flop: solo cuenta como "regreso" si el paciente
+                    # realmente venía de baja; un interés de alguien que nunca se
+                    # dio de baja no le impide luego darse de baja.
+                    if venia_de_baja:
+                        try:
+                            cur.execute(f"UPDATE {p['tabla']} SET ultimo_reintegro = NOW() WHERE {match}", (telefono,))
+                        except Exception:
+                            pass  # esquema sin la columna
                     # Anula la señal 'pegajosa' de baja del historial del paciente.
                     cur.execute(
                         "UPDATE log_envios SET respuesta = 'respondio'"

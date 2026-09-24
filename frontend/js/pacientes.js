@@ -202,7 +202,7 @@ function render() {
       `<span class="stat-card__texto"><strong>${numero}</strong><span>${etiqueta}</span></span>` +
     `</button>`;
   statsEl.innerHTML =
-    statCard("neutral", "fa-users", esActivoEstado("todos") || (filtroEstado === "todos" && filtroRespuesta === "todas"), 'data-estado="todos"', "Total", conteo.total) +
+    statCard("neutral", "fa-users", esActivoEstado("todos"), 'data-estado="todos"', "Total", conteo.total) +
     statCard("warn", "fa-clock", esActivoEstado("pendiente"), 'data-estado="pendiente"', "Pendientes", conteo.pendiente) +
     statCard("ok", "fa-paper-plane", esActivoEstado("enviado"), 'data-estado="enviado"', "Enviados", conteo.enviado) +
     statCard("danger", "fa-triangle-exclamation", esActivoEstado("error"), 'data-estado="error"', "Errores", conteo.error) +

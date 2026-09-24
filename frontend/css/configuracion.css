@@ -120,11 +120,16 @@
 }
 .config-switch input { width: 18px; height: 18px; accent-color: var(--verde); }
 
-/* Barra flotante de guardar */
+/* Barra flotante de guardar: fija abajo, arranca a la derecha de la sidebar
+   (que es fixed) para que no quede por detrás de ella. Al vivir dentro de
+   .app-shell hereda --sidebar-ancho también en estado colapsado. */
 .config-guardar-fijo {
-  position: sticky;
-  bottom: 14px;
-  margin-top: 8px;
+  position: fixed;
+  left: calc(var(--sidebar-ancho) + 18px);
+  right: 18px;
+  bottom: 18px;
+  z-index: 1030;
+  margin: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -135,6 +140,12 @@
   color: var(--btn-primary-fg);
   border-radius: 12px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, .28);
+}
+/* El display:flex de arriba pisaría el atributo [hidden]; esto lo respeta. */
+.config-guardar-fijo[hidden] { display: none; }
+@media (max-width: 991.98px) {
+  /* En móvil la sidebar es un cajón: la barra ocupa todo el ancho. */
+  .config-guardar-fijo { left: 12px; right: 12px; bottom: 12px; }
 }
 .config-guardar-fijo #cambiosResumen {
   font-size: .82rem;

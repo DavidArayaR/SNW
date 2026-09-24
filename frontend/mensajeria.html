@@ -178,13 +178,25 @@
             <input type="range" id="limiteRangeConf" min="1" value="1" step="1">
             <div class="conf-limite__abajo">
               <input type="number" id="limiteNumConf" min="1" value="1" step="1">
-              <span>de <strong id="limiteMaxConf">0</strong> pendientes</span>
+              <span>de <strong id="limiteMaxConf">0</strong> a enviar</span>
             </div>
+            <p class="conf-limite__nota" id="limiteNotaConf" hidden></p>
+          </dd>
+        </div>
+        <div class="detalle-fila conf-limite-fila" id="filaLimiteAdminConf" hidden>
+          <dt>L&iacute;mite diario (Meta)</dt>
+          <dd class="conf-limite">
+            <div class="conf-limite__abajo">
+              <input type="number" id="limiteAdminNumConf" min="0" step="1000" value="0">
+              <button type="button" class="btn btn--ghost" id="btnGuardarLimiteConf">Guardar</button>
+            </div>
+            <p class="field__hint">Usuarios &uacute;nicos que se pueden contactar cada 24 h, seg&uacute;n el dashboard de Meta (250, 1000, 2000, 10000, 100000). 0 = ilimitado. Es de la cuenta: aplica a producci&oacute;n y desarrollo.</p>
           </dd>
         </div>
       </dl>
 
       <div class="aviso-dev" id="confAvisoDev" hidden></div>
+      <div class="aviso-limite" id="confAvisoLimite" hidden></div>
       <div class="aviso-admin" id="confAvisoAdmin" hidden></div>
 
       <div id="confProgreso" hidden>

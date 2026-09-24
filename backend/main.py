@@ -1343,10 +1343,11 @@ def _enviar_call_center_auto(tel: str) -> None:
     """Timer: envía el mensaje fijo de call center al paciente interesado cuyo
     número coincide, en la(s) base(s) donde esté marcado como interesado.
 
-    Se manda **una vez por cada plantilla que se le envía**: si desde el último
-    call center hubo un nuevo envío de plantilla y el paciente vuelve a mostrar
-    interés, se le manda otro. Si ya recibió el call center después del último
-    envío de plantilla, no se repite."""
+    Se manda UNA vez por cada plantilla enviada (una ronda): si el paciente
+    responde interés a una plantilla nueva, se le manda el call center; si
+    vuelve a escribir «me interesa» sin que haya una plantilla nueva de por
+    medio, no se repite. Una baja y reintegración en cualquier momento lo
+    vuelven elegible (si vuelve a estar `interesado`)."""
     try:
         match = "REPLACE(REPLACE(telefono, '+', ''), ' ', '') = REPLACE(REPLACE(%s, '+', ''), ' ', '')"
         for amb in ("produccion", "desarrollo"):
@@ -1359,11 +1360,20 @@ def _enviar_call_center_auto(tel: str) -> None:
                     pac = cur.fetchone()
                     if not pac:
                         continue
+                    # Un call center por cada plantilla REAL enviada (ronda).
+                    # La exclusión es la lista canónica de plantillas "de
+                    # sistema" (misma que usa _ultima_plantilla_ofertada): los
+                    # marcadores que inserta el webhook (interes_boton,
+                    # no_interes_boton, respuesta, bajas, avisos y ajustes)
+                    # NO cuentan como plantilla, así que repetir interés en la
+                    # misma ronda no re-dispara el envío.
                     cur.execute(
                         "SELECT"
                         "  (SELECT MAX(id) FROM log_envios WHERE paciente_id = %s"
                         "     AND estado_envio = 'enviado'"
-                        "     AND COALESCE(plantilla_clave, '') NOT IN ('respuesta', 'call_center', 'ajuste_manual')"
+                        "     AND COALESCE(plantilla_clave, '') NOT IN"
+                        "      ('respuesta', 'ajuste_manual', 'call_center', 'interes_boton',"
+                        "       'no_interes_boton', 'baja_aviso', 'retractacion_aviso')"
                         "  ) AS ult_plantilla,"
                         "  (SELECT MAX(id) FROM log_envios WHERE paciente_id = %s"
                         "     AND plantilla_clave = %s AND estado_envio = 'enviado') AS ult_cc",
@@ -1371,8 +1381,9 @@ def _enviar_call_center_auto(tel: str) -> None:
                     )
                     d = cur.fetchone() or {}
                     ult_plantilla, ult_cc = d.get("ult_plantilla"), d.get("ult_cc")
-                    # Ya se le mandó el call center para esta ronda (después del
-                    # último envío de plantilla): no se repite.
+                    # Si ya se le mandó el call center después de la última
+                    # plantilla, no hubo plantilla nueva en el medio: el interés
+                    # repetido no se responde otra vez.
                     if ult_cc is not None and (ult_plantilla is None or ult_cc > ult_plantilla):
                         continue
                 res = _despachar_call_center(pac, amb)
@@ -1419,10 +1430,14 @@ _MENSAJE_BIENVENIDA_DEVUELTA = "¡Bienvenido/a de vuelta! Ya reactivamos tus not
 
 def _enviar_mensaje_directo(telefono_evento: str, texto: str, clave_log: str) -> None:
     """Manda un mensaje de texto libre (respuesta inmediata, dentro de la
-    ventana de 24h) al paciente que coincide con este teléfono, en la(s)
-    base(s) donde exista. Se usa para los avisos automáticos de baja y
-    retractación: no dependen de un template aprobado por Meta porque son
-    respuesta inmediata a un mensaje del propio paciente."""
+    ventana de 24h) al paciente que coincide con este teléfono. Se usa para
+    los avisos automáticos de baja y retractación: no dependen de un template
+    aprobado por Meta porque son respuesta inmediata a un mensaje del propio
+    paciente.
+
+    El mensaje sale UNA sola vez: se busca en producción y, si el paciente
+    existe ahí, es el único envío. Desarrollo solo se usa como respaldo
+    cuando el paciente no está en producción."""
     tel = normalizar_telefono(telefono_evento) or telefono_evento
     match = "REPLACE(REPLACE(telefono, '+', ''), ' ', '') = REPLACE(REPLACE(%s, '+', ''), ' ', '')"
     for amb in ("produccion", "desarrollo"):
@@ -1451,6 +1466,7 @@ def _enviar_mensaje_directo(telefono_evento: str, texto: str, clave_log: str) ->
             registrar_historial(pac.get("id"), nombre, tel, clave_log, texto,
                                 "enviado" if ok else "error", error, ambiente=amb,
                                 whatsapp_message_id=message_id)
+            break
         except Exception as e:
             log_error(f"_enviar_mensaje_directo({telefono_evento}, {amb})", e)
 
@@ -2188,6 +2204,16 @@ _CONFIG_SECCIONES = [
         ],
     },
     {
+        "id": "bajas", "titulo": "Bajas y reactivaciones", "icono": "fa-user-slash",
+        "campos": [
+            {"clave": "anti_flip_flop_dev", "etiqueta": "Aplicar el límite también en desarrollo", "tipo": "bool",
+             "ayuda": "En producción, el paciente que se da de baja y se reintegra no puede volver a "
+                      "darse de baja hasta que pasen 24 h (siempre activo). Con esto activado, la "
+                      "restricción también aplica en la base de desarrollo; desactívalo para probar "
+                      "el flujo de baja/reintegración sin límite en desarrollo."},
+        ],
+    },
+    {
         "id": "call_center", "titulo": "Call center", "icono": "fa-headset",
         "campos": [
             {"clave": "call_center_url", "etiqueta": "URL de teléfonos del call center", "tipo": "text",
@@ -2248,7 +2274,7 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
         if clave == "call_center_numeros":
             partes = [re.sub(r"\D", "", p) for p in v.split(",")]
             v = ", ".join(dict.fromkeys(p for p in partes if p))
-        if clave in ("smtp_tls", "wa_rate_limit_activo"):
+        if clave in ("smtp_tls", "wa_rate_limit_activo", "anti_flip_flop_dev"):
             v = "true" if v.lower() in ("true", "1", "on", "si", "sí") else "false"
         cambios[clave] = v
 
@@ -2334,14 +2360,94 @@ def _estado_limite_mensajeria() -> dict:
     }
 
 
+def _limite_mensajeria_actual() -> dict | None:
+    """Cupo de messaging limit de Meta (compartido por entorno). None si no hay
+    límite configurado. `disponibles` = usuarios únicos que aún se pueden
+    contactar dentro de la ventana de 24 h."""
+    tier = _limite_mensajeria_tier()
+    if not tier:
+        return None
+    usados = _uso_mensajeria_24h()
+    return {"tier": tier, "usados_24h": usados, "disponibles": max(0, tier - usados)}
+
+
+def _limite_mensajeria_info(amb: str) -> dict | None:
+    """Info del cupo para APLICARLO (enforcement): solo producción con la API
+    oficial. None en cualquier otro caso."""
+    if amb != "produccion" or config_get("metodo_envio", "").strip() != "api_oficial":
+        return None
+    return _limite_mensajeria_actual()
+
+
+def _limite_mensajeria_aviso(amb: str) -> dict | None:
+    """Info del cupo para MOSTRARLO. En producción se muestra siempre que aplique
+    (API oficial); en desarrollo solo si el límite diario ya se alcanzó, para
+    poder indicarlo sin bloquear el envío."""
+    info = _limite_mensajeria_actual()
+    if not info:
+        return None
+    if amb == "desarrollo":
+        return info if info["disponibles"] <= 0 else None
+    if amb == "produccion" and config_get("metodo_envio", "").strip() == "api_oficial":
+        return info
+    return None
+
+
 def estado_messaging_limit(sesion: dict = Depends(solo_admin)):
     """Cuántos usuarios únicos se contactaron en las últimas 24 h frente al
     límite de mensajería configurado (Meta: 250 / 1K / 10K / 100K / ilimitado)."""
     return _estado_limite_mensajeria()
 
 
+class MessagingLimitIn(BaseModel):
+    limite: int
+
+
+def actualizar_messaging_limit(body: MessagingLimitIn, sesion: dict = Depends(solo_admin)):
+    """El admin ajusta el límite diario de Meta (`wa_messaging_limit_24h`) según
+    lo que indique el dashboard de WhatsApp Business. 0 = ilimitado."""
+    valor = max(0, int(body.limite))
+    config_set({"wa_messaging_limit_24h": str(valor)})
+    return _estado_limite_mensajeria()
+
+
 JOBS: dict = {}
 PENDIENTES: dict = {}
+
+# Un solo envío a la vez en toda la aplicación: mientras un job está en curso
+# (en proceso o pausado), ningún otro usuario puede iniciar/confirmar otro.
+# La consulta bajo el lock garantiza que dos peticiones simultáneas no pasen
+# el chequeo las dos a la vez.
+JOBS_LOCK = threading.Lock()
+ESTADOS_ENVIO_EN_CURSO = ("en_proceso", "pausado")
+
+
+def _envio_en_curso(ambiente: str) -> dict | None:
+    """Primer envío activo (en proceso o pausado) sobre esa base de datos, o
+    None si no hay ninguno. El bloqueo es POR BASE: un envío en producción no
+    impide iniciar otro en desarrollo (y al revés). Se llama SIEMPRE bajo JOBS_LOCK."""
+    for job in JOBS.values():
+        if job.get("estado") in ESTADOS_ENVIO_EN_CURSO and job.get("ambiente") == ambiente:
+            return job
+    return None
+
+
+def _error_envio_en_curso(job: dict | None) -> HTTPException:
+    """Mensaje para el usuario que intenta iniciar/confirmar un envío mientras
+    hay otro en curso. Indica quién lo inició y qué se está enviando."""
+    if job is None:
+        return HTTPException(409, detail="Ya hay un envío en curso. Espera a que termine antes de iniciar otro.")
+    quien = (job.get("nombre_enviador") or "").strip() or "otro usuario"
+    plantilla = (job.get("plantilla") or {}).get("nombre") or ""
+    ambiente = "producción" if job.get("ambiente") == "produccion" else "desarrollo"
+    partes = ["Ya hay un envío en curso"]
+    if quien:
+        partes.append(f"iniciado por {quien}")
+    if plantilla:
+        partes.append(f"con la plantilla «{plantilla}»")
+    partes.append(f"en la base de {ambiente}.")
+    partes.append("Espera a que termine antes de iniciar otro.")
+    return HTTPException(409, detail=" ".join(partes))
 
 
 def _url_base_legacy() -> str:
@@ -2722,6 +2828,14 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
     if entorno_global == "desarrollo" and not tiene_permiso(sesion, "envio_produccion"):
         amb = "desarrollo"
 
+    # Un solo envío a la vez POR BASE: si ya hay uno en curso en esa misma base
+    # (iniciado por este u otro usuario), se rechaza de inmediato con el detalle
+    # de quién y qué se envía. Una base con un envío activo no bloquea a la otra.
+    with JOBS_LOCK:
+        job_en_curso = _envio_en_curso(amb)
+    if job_en_curso is not None:
+        raise _error_envio_en_curso(job_en_curso)
+
     if not body.pacientes and body.pacientes is not None:
         raise HTTPException(400, detail="No se seleccionaron pacientes")
 
@@ -2840,6 +2954,29 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         n = max(1, min(int(body.limite), len(destinatarios)))
         destinatarios = destinatarios[:n]
 
+    # Messaging limit de Meta: usuarios ÚNICOS contactados (mensajes iniciados
+    # por el negocio) en una ventana móvil de 24 h. No se permite superar el
+    # cupo diario: si el lote es mayor que los usuarios que quedan disponibles,
+    # se recorta (el resto queda pendiente para más adelante).
+    aviso_limite = None
+    info_limite = _limite_mensajeria_info(amb)
+    if info_limite:
+        tier = info_limite["tier"]
+        usados = info_limite["usados_24h"]
+        disponibles = info_limite["disponibles"]
+        if disponibles <= 0:
+            raise HTTPException(429, detail=(
+                f"Límite diario de WhatsApp alcanzado: en las últimas 24 h ya se contactó a "
+                f"{usados} usuarios únicos (límite {tier}). Espera a que avance la ventana de "
+                f"24 h o sube el límite en Configuración."))
+        if len(destinatarios) > disponibles:
+            recortados = len(destinatarios) - disponibles
+            destinatarios = destinatarios[:disponibles]
+            aviso_limite = (
+                f"El límite diario de WhatsApp es {tier} usuarios únicos en 24 h y ya se "
+                f"contactó a {usados}: el envío se recortó a {disponibles} mensaje(s). Los "
+                f"{recortados} restantes quedan pendientes para más adelante.")
+
     if not destinatarios:
         # Aunque no salga ningún mensaje, si hubo rechazados se deja constancia
         # del intento en el historial (0 enviados, N inválidos).
@@ -2856,26 +2993,6 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
                                         r.get("motivo"), ambiente=amb, envio_id=envio_id)
         return {"iniciado": False, "total": 0, "rechazados": rechazados,
                 "requiere_confirmacion": False, "envio_id": envio_id}
-
-    # Messaging limit de Meta: usuarios ÚNICOS contactados (mensajes iniciados
-    # por el negocio) en una ventana móvil de 24 h. Si ya se alcanzó, no se deja
-    # iniciar otro envío en producción; si el lote lo va a superar, se avisa.
-    aviso_limite = None
-    if amb == "produccion" and config_get("metodo_envio", "").strip() == "api_oficial":
-        tier = _limite_mensajeria_tier()
-        if tier:
-            usados = _uso_mensajeria_24h()
-            if usados >= tier:
-                raise HTTPException(429, detail=(
-                    f"Límite de mensajería de WhatsApp alcanzado: en las últimas 24 h ya se "
-                    f"contactó a {usados} usuarios únicos (límite {tier}). Espera a que avance "
-                    f"la ventana de 24 h o sube el límite en Configuración."))
-            if usados + len(destinatarios) > tier:
-                sobran = usados + len(destinatarios) - tier
-                aviso_limite = (
-                    f"Este envío llega a {usados + len(destinatarios)} usuarios únicos en 24 h y el "
-                    f"límite de WhatsApp es {tier}: Meta podría rechazar los últimos ~{sobran} "
-                    f"hasta que avance la ventana.")
 
     # En producción se requiere confirmación por correo del supervisor, salvo
     # que la cuenta tenga el permiso de envío directo en producción.
@@ -2896,6 +3013,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
             "job_id": None,
             "envio_id": envio_id,
             "creado": time.time(),
+            "usuario": sesion.get("usuario", ""),
             "nombre_enviador": sesion.get("nombre", "Usuario"),
         }
         if envio_id:
@@ -2927,20 +3045,29 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
                                 r.get("motivo"), ambiente=amb, envio_id=envio_id)
 
     job_id = uuid.uuid4().hex[:8]
-    JOBS[job_id] = {
-        "estado": "en_proceso",
-        "total": len(destinatarios),
-        "enviados": 0,
-        "fallidos": 0,
-        "actual": "",
-        "errores": [],
-        "detalle": "",
-        "ambiente": amb,
-        "plantilla": plantilla,
-        "destinatarios": destinatarios,
-        "envio_id": envio_id,
-        "pausado": False,
-    }
+    # Chequeo atómico: entre el chequeo rápido de arriba y acá pudo arrancar
+    # otro envío EN ESTA MISMA BASE; bajo el lock se vuelve a verificar y se
+    # reserva el job.
+    with JOBS_LOCK:
+        job_en_curso = _envio_en_curso(amb)
+        if job_en_curso is not None:
+            raise _error_envio_en_curso(job_en_curso)
+        JOBS[job_id] = {
+            "estado": "en_proceso",
+            "total": len(destinatarios),
+            "enviados": 0,
+            "fallidos": 0,
+            "actual": "",
+            "errores": [],
+            "detalle": "",
+            "ambiente": amb,
+            "plantilla": plantilla,
+            "destinatarios": destinatarios,
+            "envio_id": envio_id,
+            "pausado": False,
+            "usuario": sesion.get("usuario", ""),
+            "nombre_enviador": sesion.get("nombre", "Usuario"),
+        }
 
     background_tasks.add_task(procesar_job, job_id)
     return {"requiere_confirmacion": False, "iniciado": True, "job_id": job_id, "total": len(destinatarios),
@@ -3038,21 +3165,43 @@ def confirmar_envio(token: str, background_tasks: BackgroundTasks):
         return HTMLResponse("<html><body style='font-family:Arial; text-align:center; padding:40px;'><h2>Este envío ya fue rechazado</h2></body></html>")
     pend["estado"] = "confirmado"
     job_id = uuid.uuid4().hex[:8]
-    pend["job_id"] = job_id
-    JOBS[job_id] = {
-        "estado": "en_proceso",
-        "total": len(pend["destinatarios"]),
-        "enviados": 0,
-        "fallidos": 0,
-        "actual": "",
-        "errores": [],
-        "detalle": "",
-        "ambiente": pend["ambiente"],
-        "plantilla": pend["plantilla"],
-        "destinatarios": pend["destinatarios"],
-        "envio_id": pend.get("envio_id"),
-        "pausado": False,
-    }
+    # Un solo envío a la vez POR BASE: si mientras la solicitud esperaba
+    # confirmación arrancó otro envío en esa misma base (de la misma u otra
+    # solicitud), se rechaza la confirmación y se muestra al supervisor quién y
+    # qué está en curso. Una base libre no bloquea a la otra.
+    with JOBS_LOCK:
+        job_en_curso = _envio_en_curso(pend["ambiente"])
+        if job_en_curso is not None:
+            exc = _error_envio_en_curso(job_en_curso)
+            pend["estado"] = "pendiente"
+            detalle = _html.escape(exc.detail)
+            return HTMLResponse(f"""
+<html><head><meta charset='utf-8'><title>Envío no confirmado</title></head>
+<body style='font-family: Segoe UI, Arial; text-align:center; padding:40px; background:#f0f2f5;'>
+<div style='background:#fff; max-width:520px; margin:40px auto; padding:32px; border-radius:14px; box-shadow:0 4px 20px rgba(0,0,0,0.1);'>
+<h2 style='color:#b23b37; margin-top:0;'>Ya hay un envío en curso</h2>
+<p>{detalle}</p>
+<p style='color:#66757f; font-size:14px;'>Puedes cerrar esta ventana e intentar confirmarlo de nuevo cuando el envío termine.</p>
+</div>
+</body></html>
+""", status_code=409)
+        pend["job_id"] = job_id
+        JOBS[job_id] = {
+            "estado": "en_proceso",
+            "total": len(pend["destinatarios"]),
+            "enviados": 0,
+            "fallidos": 0,
+            "actual": "",
+            "errores": [],
+            "detalle": "",
+            "ambiente": pend["ambiente"],
+            "plantilla": pend["plantilla"],
+            "destinatarios": pend["destinatarios"],
+            "envio_id": pend.get("envio_id"),
+            "pausado": False,
+            "usuario": pend.get("usuario", ""),
+            "nombre_enviador": pend.get("nombre_enviador", "Usuario"),
+        }
     background_tasks.add_task(procesar_job, job_id)
     return HTMLResponse(f"""
 <html><head><meta charset='utf-8'><title>Envío confirmado</title></head>
@@ -3107,6 +3256,7 @@ def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensaj
         "pendientes": elegibles,
         "base_datos": nombre_base(amb),
         "costo": costo,
+        "limite_mensajeria": _limite_mensajeria_aviso(amb),
     }
 
 

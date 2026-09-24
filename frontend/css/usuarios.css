@@ -199,6 +199,12 @@
 }
 .usr-envios__tabla th { color: var(--texto-suave); font-weight: 600; font-size: .76rem; text-transform: uppercase; letter-spacing: .02em; }
 .usr-envios__tabla tbody tr:last-child td { border-bottom: none; }
+/* Tablas de solo lectura (envíos y actividad de la cuenta): el hover se
+   declara acá explícitamente para no depender de la regla global de
+   pacientes.css, y no se sugieren como clicables (cursor por defecto y
+   texto seleccionable). */
+.usr-envios__tabla tbody tr { cursor: default; user-select: text; transition: background-color .15s ease; }
+.usr-envios__tabla tbody tr:hover { background: var(--hover); }
 .usr-tag--envio-completado { background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-bd); }
 .usr-tag--envio-rechazado { background: var(--danger-bg); color: var(--danger-fg); border-color: var(--danger-bd); }
 .usr-tag--envio-cancelado { background: var(--neutral-bg); color: var(--neutral-fg); border-color: var(--neutral-bd); }

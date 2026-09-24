@@ -1,3 +1,22 @@
 {
-
+  "deb12aaeb3cb4211b4b44b92e4241845": {
+    "usuario": "dav.araya@duocuc.cl",
+    "rol": "desarrollador",
+    "nombre": "dav.araya",
+    "permisos": [
+      "pacientes",
+      "mensajeria",
+      "historial",
+      "estadisticas",
+      "plantillas_editar",
+      "envio_produccion",
+      "tarifas_editar",
+      "call_center",
+      "call_center_registro"
+    ],
+    "creada": 1790267933.6221557,
+    "actividad": 1790268216.6360984,
+    "actividad_guardada": 1790268216.6360984,
+    "correo_recuperacion": "dav.araya@duocuc.cl"
+  }
 }

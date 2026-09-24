@@ -25,13 +25,27 @@
   color: var(--texto-suave);
   background: var(--surface-2);
   cursor: pointer;
-  transition: all .15s;
+  transition: background-color .15s ease, color .15s ease,
+    border-color .15s ease, transform .1s ease, box-shadow .15s ease;
 }
-.stat:hover { background: var(--hover); color: var(--texto); }
+/* Hover: el borde pasa a verde (igual que .btn--ghost) para que se lea
+   claramente como filtro clickeable, también en modo oscuro donde
+   --surface-2 y --hover apenas se diferencian. */
+.stat:hover { background: var(--hover); color: var(--texto); border-color: var(--verde); }
+.stat:active { transform: scale(.96); }
 .stat.activo {
   border-color: var(--verde);
   background: var(--brand-tint);
   color: var(--verde-oscuro);
+}
+/* El filtro ya aplicado se ve distinto al hover: mismo fondo tintado y
+   borde verde, pero más el anillo interior agrega en .stat-card. El
+   cursor se mantiene para indicar que el click vuelve a «todos». */
+.stat.activo:hover {
+  border-color: var(--verde-oscuro);
+  background: var(--brand-tint);
+  color: var(--verde-oscuro);
+  transform: none;
 }
 .stat strong { color: var(--texto); font-size: .95rem; }
 .stat::before {
@@ -149,6 +163,16 @@
   margin-top: 10px;
 }
 
+.aviso-limite {
+  margin-top: 10px;
+  padding: 11px 15px;
+  border-radius: 10px;
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-bd);
+  color: var(--warn-fg);
+  font-size: .85rem;
+}
+
 .progreso-info {
   display: flex;
   justify-content: space-between;
@@ -226,10 +250,48 @@
   font-weight: 400;
 }
 .conf-limite input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
   width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-3);
   accent-color: var(--verde);
   cursor: pointer;
+  outline: none;
 }
+.conf-limite input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-3);
+}
+.conf-limite input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -6px;
+  border-radius: 50%;
+  background: var(--verde);
+  border: 2px solid var(--panel);
+  box-shadow: var(--sombra);
+  cursor: pointer;
+}
+.conf-limite input[type="range"]::-moz-range-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-3);
+}
+.conf-limite input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--verde);
+  border: 2px solid var(--panel);
+  cursor: pointer;
+}
+.conf-limite input[type="range"]:disabled::-webkit-slider-thumb { background: var(--texto-suave); }
+.conf-limite input[type="range"]:disabled::-moz-range-thumb { background: var(--texto-suave); }
 .conf-limite__abajo { display: flex; align-items: center; gap: 10px; }
 .conf-limite__abajo input[type="number"] {
   width: 88px;
@@ -243,6 +305,13 @@
 }
 .conf-limite__abajo input[type="number"]:focus { border-color: var(--verde); outline: none; }
 .conf-limite__abajo span { color: var(--texto-suave); font-size: .85rem; }
+.conf-limite__nota {
+  margin: 0;
+  color: var(--texto-suave);
+  font-size: .82rem;
+  line-height: 1.4;
+}
+.conf-limite input:disabled { opacity: .55; cursor: not-allowed; }
 
 .tabla-wrap {
   overflow: auto;
@@ -281,7 +350,7 @@ tbody td {
   vertical-align: top;
 }
 
-tbody tr { cursor: pointer; user-select: none; }
+tbody tr { cursor: pointer; user-select: none; transition: background-color .15s ease; }
 tbody tr:hover { background: var(--hover); }
 tbody tr:last-child td { border-bottom: none; }
 
@@ -423,6 +492,11 @@ td.campo-id { color: var(--texto-suave); font-family: Consolas, monospace; }
 .btn--sm { padding: 4px 10px; font-size: .78rem; border-radius: 6px; }
 
 #tablaHistorial tbody tr { cursor: pointer; }
+
+/* La tabla de pacientes de un envío (modal de detalle) no es clicable en
+   toda la fila: solo el botón «Ver mensajes» responde al clic. Con cursor
+   por defecto no parece interactiva de más. El hover sí se mantiene. */
+#modalDetalle table tbody tr { cursor: default; user-select: text; }
 
 /* Etiqueta "interesado" y botón "Ver mensajes" en el detalle del historial */
 .hist-tag-interes {
