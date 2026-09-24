@@ -17,7 +17,7 @@ button { font: inherit; cursor: pointer; }
 /* La barra de navegación vive ahora en la sidebar — ver css/layout.css. */
 
 @media (max-width: 760px) {
-  .badge--bd, select.badge--select { font-size: .68rem; padding: 4px 9px; }
+  .badge--bd, select.badge--select { font-size: .8rem; padding: 8px 12px; }
 }
 
 .badge {
@@ -27,16 +27,33 @@ button { font: inherit; cursor: pointer; }
   font-weight: 600;
 }
 
-select.badge--select {
-  appearance: none;
-  -webkit-appearance: none;
-  border: none;
-  font-family: inherit;
-  font-weight: 700;
+/* Selects unificados en toda la app (mismo estilo neutro en paneles,
+   modales, barras y paginadores, en modo claro y oscuro). */
+select {
+  appearance: auto;
+  background: var(--surface-2);
+  color: var(--texto);
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+  padding: 9px 14px;
+  font: inherit;
+  font-size: .9rem;
+  font-weight: 600;
   cursor: pointer;
-  background: var(--btn-primary-bg);
-  color: var(--btn-primary-fg);
-  padding-right: 26px;
+  max-width: 100%;
+}
+
+select.badge--select {
+  appearance: auto;
+  border: 1px solid var(--borde);
+  font-family: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  background: var(--surface-2);
+  color: var(--texto);
+  padding: 9px 14px;
+  font-size: .9rem;
+  border-radius: 10px;
   transition: filter .15s;
 }
 select.badge--select:hover,

@@ -190,9 +190,9 @@
   white-space: nowrap;
 }
 .app-topbar select.badge--select {
-  background: var(--btn-primary-bg);
-  color: var(--btn-primary-fg);
-  border-color: var(--btn-primary-bg);
+  background: var(--surface-2);
+  color: var(--texto);
+  border-color: var(--borde);
   min-width: 0;
   max-width: 60vw;
   overflow: hidden;
