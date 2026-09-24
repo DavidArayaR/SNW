@@ -17,6 +17,7 @@ from datetime import datetime
 import httpx
 
 from db import conectar, config_get, log_error, tabla_pacientes
+import servicio_especialidades
 from wa_rate_limit import (
     gobernador, es_error_throttle, clasificar_error, reintentos_throttle, TOPE_ESPERA_S,
 )
@@ -957,19 +958,40 @@ class WhatsAppService:
                 log_error(f"_guardar_evento({ambiente})", e)
 
     # ---------- Registro de respuestas y estados ----------
-    _TABLAS_PAC = (tabla_pacientes("desarrollo"), tabla_pacientes("produccion"))
+    @staticmethod
+    def _tablas_pac() -> tuple:
+        """Tablas legacy (dev + prod) más las de especialidades registradas."""
+        base = (tabla_pacientes("desarrollo"), tabla_pacientes("produccion"))
+        try:
+            extra = tuple(r["nombre_tabla_base"]
+                          for r in servicio_especialidades.listar_tablas_especialidades())
+        except Exception as e:
+            log_error("_tablas_pac: especialidades", e)
+            extra = ()
+        return base + extra
+
+    @staticmethod
+    def _cond_tabla(tabla: str, alias: str = "") -> tuple[str, tuple]:
+        """Aísla filas de log_envios por tabla de origen (ver main.py)."""
+        pref = f"{alias}." if alias else ""
+        if tabla in ("pacientes_dev", "pacientes_prod"):
+            return f"AND COALESCE({pref}tabla_pacientes, '') IN ('', %s)", (tabla,)
+        return f"AND {pref}tabla_pacientes = %s", (tabla,)
 
     def _pacientes_con_tel(self, cur, telefono: str) -> list[dict]:
         """Filas (id, nombre, telefono, whatsapp_opt_out, tabla) de los
-        pacientes cuyo teléfono coincide, en ambas tablas (dev + prod).
-        log_envios es compartida."""
+        pacientes cuyo teléfono coincide, en las tablas legacy y en las de
+        especialidades. log_envios es compartida."""
         match = _TEL_MATCH.format(col="telefono")
         hallados = []
-        for t in self._TABLAS_PAC:
-            cur.execute(
-                f"SELECT id, nombre, telefono, whatsapp_opt_out FROM {t} WHERE {match} LIMIT 1",
-                (telefono,),
-            )
+        for t in self._tablas_pac():
+            try:
+                cur.execute(
+                    f"SELECT id, nombre, telefono, whatsapp_opt_out FROM {t} WHERE {match} LIMIT 1",
+                    (telefono,),
+                )
+            except Exception:
+                continue  # tabla aún no creada o sin la columna
             row = cur.fetchone()
             if row:
                 row["tabla"] = t
@@ -985,17 +1007,19 @@ class WhatsAppService:
             log_error(f"_estaba_opt_out({telefono})", e)
             return False
 
-    def _ultima_plantilla_ofertada(self, cur, paciente_id) -> str | None:
+    def _ultima_plantilla_ofertada(self, cur, paciente_id, tabla=None) -> str | None:
         """Clave de la última plantilla normal (no de sistema) que se le envió
         realmente al paciente; sirve para registrar a qué oferta respondió."""
+        cond_t, args_t = self._cond_tabla(tabla, "") if tabla else ("", ())
         cur.execute(
             "SELECT plantilla_clave FROM log_envios WHERE paciente_id = %s"
+            f"  {cond_t}"
             "  AND estado_envio = 'enviado'"
             "  AND COALESCE(plantilla_clave, '') NOT IN"
             "      ('respuesta', 'ajuste_manual', 'call_center', 'interes_boton',"
             "       'no_interes_boton', 'baja_aviso', 'retractacion_aviso')"
             " ORDER BY id DESC LIMIT 1",
-            (paciente_id,),
+            (paciente_id, *args_t),
         )
         fila = cur.fetchone()
         return (fila or {}).get("plantilla_clave") or None
@@ -1019,11 +1043,14 @@ class WhatsAppService:
                     except Exception:
                         pass  # esquema sin la columna
                 p0 = pacientes[0]
+                esp0 = servicio_especialidades.especialidad_por_tabla(p0["tabla"])
                 cur.execute(
                     "INSERT INTO log_envios (envio_id, paciente_id, nombre_paciente, numero_telefono,"
-                    " mensaje, plantilla_clave, estado_envio, respuesta, descripcion_error)"
-                    " VALUES (NULL, %s, %s, %s, %s, 'respuesta', 'enviado', 'respondio', NULL)",
-                    (p0["id"], p0["nombre"], p0["telefono"], (texto or "")[:2000]),
+                    " mensaje, plantilla_clave, estado_envio, respuesta, descripcion_error,"
+                    " especialidad_id, tabla_pacientes)"
+                    " VALUES (NULL, %s, %s, %s, %s, 'respuesta', 'enviado', 'respondio', NULL, %s, %s)",
+                    (p0["id"], p0["nombre"], p0["telefono"], (texto or "")[:2000],
+                     esp0["id"] if esp0 else None, p0["tabla"] if esp0 else None),
                 )
                 conn.commit()
             return "registrada"
@@ -1047,10 +1074,10 @@ class WhatsAppService:
         return bool((cur.fetchone() or {}).get("reciente"))
 
     def _bloquea_flip_flop(self, cur, p: dict) -> bool:
-        """Anti flip-flop: en producción SIEMPRE; en la base de desarrollo solo
-        si la opción `anti_flip_flop_dev` está activa (desactivarla permite
-        probar el flujo de baja/reintegración sin límite en desarrollo)."""
-        if p["tabla"] != tabla_pacientes("produccion"):
+        """Anti flip-flop: en producción y en especialidades SIEMPRE; en la
+        base de desarrollo legacy solo si la opción `anti_flip_flop_dev` está
+        activa (desactivarla permite probar el flujo sin límite en desarrollo)."""
+        if p["tabla"] == tabla_pacientes("desarrollo"):
             valor = str(config_get("anti_flip_flop_dev", "true")).strip().lower()
             if valor not in ("true", "1", "on", "si", "sí"):
                 return False
@@ -1091,10 +1118,11 @@ class WhatsAppService:
                         cur.execute(f"UPDATE {p['tabla']} SET interesado = 0, no_interesado = 0 WHERE {match}", (telefono,))
                     except Exception:
                         pass  # esquema sin la columna
+                    cond_t, args_t = self._cond_tabla(p["tabla"])
                     cur.execute(
                         "UPDATE log_envios SET respuesta = 'baja'"
-                        " WHERE paciente_id = %s ORDER BY id DESC LIMIT 1",
-                        (p["id"],),
+                        f" WHERE paciente_id = %s {cond_t} ORDER BY id DESC LIMIT 1",
+                        (p["id"], *args_t),
                     )
                 conn.commit()
         except Exception as e:
@@ -1142,8 +1170,8 @@ class WhatsAppService:
                             pass  # esquema sin la columna
                     cur.execute(
                         "UPDATE log_envios SET respuesta = 'respondio'"
-                        " WHERE paciente_id = %s AND respuesta = 'baja'",
-                        (p["id"],),
+                        f" WHERE paciente_id = %s AND respuesta = 'baja' {self._cond_tabla(p['tabla'])[0]}",
+                        (p["id"], *self._cond_tabla(p["tabla"])[1]),
                     )
                 conn.commit()
         except Exception as e:
@@ -1173,7 +1201,7 @@ class WhatsAppService:
                 if not pacientes:
                     return
                 for p in pacientes:
-                    clave_oferta = self._ultima_plantilla_ofertada(cur, p["id"])
+                    clave_oferta = self._ultima_plantilla_ofertada(cur, p["id"], p["tabla"])
                     venia_de_baja = bool(p.get("whatsapp_opt_out"))
                     for sql, params in (
                         (f"UPDATE {p['tabla']} SET interesado = 1, no_interesado = 0 WHERE {match}", (telefono,)),
@@ -1196,22 +1224,26 @@ class WhatsAppService:
                         except Exception:
                             pass  # esquema sin la columna
                     # Anula la señal 'pegajosa' de baja del historial del paciente.
+                    cond_t, args_t = self._cond_tabla(p["tabla"])
                     cur.execute(
                         "UPDATE log_envios SET respuesta = 'respondio'"
-                        " WHERE paciente_id = %s AND respuesta = 'baja'",
-                        (p["id"],),
+                        f" WHERE paciente_id = %s AND respuesta = 'baja' {cond_t}",
+                        (p["id"], *args_t),
                     )
                 # Una sola fila descriptiva (log_envios no distingue ambiente;
                 # mismo criterio que _registrar_respuesta, que también solo
                 # inserta con los datos del primer paciente encontrado).
                 p0 = pacientes[0]
-                clave_oferta0 = self._ultima_plantilla_ofertada(cur, p0["id"])
+                clave_oferta0 = self._ultima_plantilla_ofertada(cur, p0["id"], p0["tabla"])
+                esp0 = servicio_especialidades.especialidad_por_tabla(p0["tabla"])
                 cur.execute(
                     "INSERT INTO log_envios (envio_id, paciente_id, nombre_paciente, numero_telefono,"
-                    " mensaje, plantilla_clave, estado_envio, respuesta, descripcion_error)"
-                    " VALUES (NULL, %s, %s, %s, %s, 'interes_boton', 'enviado', 'respondio', NULL)",
+                    " mensaje, plantilla_clave, estado_envio, respuesta, descripcion_error,"
+                    " especialidad_id, tabla_pacientes)"
+                    " VALUES (NULL, %s, %s, %s, %s, 'interes_boton', 'enviado', 'respondio', NULL, %s, %s)",
                     (p0["id"], p0["nombre"], p0["telefono"],
-                     f"Interesado en la oferta del {_hoy_es()}, plantilla '{clave_oferta0 or '—'}'."),
+                     f"Interesado en la oferta del {_hoy_es()}, plantilla '{clave_oferta0 or '—'}'.",
+                     esp0["id"] if esp0 else None, p0["tabla"] if esp0 else None),
                 )
                 conn.commit()
         except Exception as e:
@@ -1228,7 +1260,7 @@ class WhatsAppService:
                 if not pacientes:
                     return
                 for p in pacientes:
-                    clave_oferta = self._ultima_plantilla_ofertada(cur, p["id"])
+                    clave_oferta = self._ultima_plantilla_ofertada(cur, p["id"], p["tabla"])
                     for sql, params in (
                         (f"UPDATE {p['tabla']} SET no_interesado = 1, interesado = 0 WHERE {match}", (telefono,)),
                         (f"UPDATE {p['tabla']} SET interes_plantilla_clave = %s, interes_fecha = NOW() WHERE {match}",
@@ -1241,13 +1273,16 @@ class WhatsAppService:
                 # Una sola fila descriptiva (log_envios no distingue ambiente;
                 # mismo criterio que _registrar_respuesta).
                 p0 = pacientes[0]
-                clave_oferta0 = self._ultima_plantilla_ofertada(cur, p0["id"])
+                clave_oferta0 = self._ultima_plantilla_ofertada(cur, p0["id"], p0["tabla"])
+                esp0 = servicio_especialidades.especialidad_por_tabla(p0["tabla"])
                 cur.execute(
                     "INSERT INTO log_envios (envio_id, paciente_id, nombre_paciente, numero_telefono,"
-                    " mensaje, plantilla_clave, estado_envio, respuesta, descripcion_error)"
-                    " VALUES (NULL, %s, %s, %s, %s, 'no_interes_boton', 'enviado', 'respondio', NULL)",
+                    " mensaje, plantilla_clave, estado_envio, respuesta, descripcion_error,"
+                    " especialidad_id, tabla_pacientes)"
+                    " VALUES (NULL, %s, %s, %s, %s, 'no_interes_boton', 'enviado', 'respondio', NULL, %s, %s)",
                     (p0["id"], p0["nombre"], p0["telefono"],
-                     f"No interesado en la oferta del {_hoy_es()}, plantilla '{clave_oferta0 or '—'}'."),
+                     f"No interesado en la oferta del {_hoy_es()}, plantilla '{clave_oferta0 or '—'}'.",
+                     esp0["id"] if esp0 else None, p0["tabla"] if esp0 else None),
                 )
                 conn.commit()
         except Exception as e:

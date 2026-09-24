@@ -287,7 +287,7 @@ Reglas del editor:
 | POST | `/api/auth/login` | `{usuario, clave}` → `{token, rol, nombre, permisos}`. 403 si la cuenta está desactivada (`activo=false`) |
 | GET | `/api/auth/invitacion/{token}` | Verifica un enlace de invitación (48 h) → `{ok, correo}`. Usado por `registro.html` para mostrar el correo al que se le manda la invitación |
 | POST | `/api/auth/activar` | Último paso de una invitación `{token, clave}`. `clave` ≥ 8 con minúscula, mayúscula y número. Nace con rol `usuario` y permisos básicos (`mensajeria`, `historial`) |
-| GET | `/api/auth/me` | Rol, permisos y `correo_recuperacion` vigentes de la sesión (el frontend lo usa para refrescarse si un admin cambió los permisos) |
+| GET | `/api/auth/me` | Rol, permisos, especialidades asignadas y `correo_recuperacion` vigentes de la sesión (el frontend lo usa para refrescarse si un admin cambió los permisos) |
 | PUT | `/api/auth/clave` | Cambiar **la propia** contraseña estando dentro: `{clave_actual, clave_nueva}`. Valida la actual y la fuerza de la nueva (botón «Mi cuenta» de la barra lateral); si la cuenta tiene correo de recuperación, le manda un aviso de confirmación |
 | PUT | `/api/auth/correo-recuperacion` | Define a qué correo llega el enlace de «Olvidé mi contraseña» y el aviso de cambio de contraseña: `{correo}`. **Sin campo en la interfaz** (se quitó de «Mi cuenta»); solo queda como endpoint. 409 si el correo es el usuario de otra cuenta |
 | POST | `/api/auth/olvide` | **Pública.** `{correo}` → si hay una cuenta con ese correo (login o de recuperación) se le manda un enlace con un token de **2 horas** desde `correo_emisor`. Responde siempre `{ok: true}` (no revela si existe) |
@@ -299,9 +299,9 @@ Reglas del editor:
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/usuarios` | Cuentas con `rol`, `permisos`, `editable`/`motivo_bloqueo` según quién pregunta, más `desarrolladores`/`max_desarrolladores` |
+| GET | `/api/usuarios` | Cuentas con `rol`, `permisos`, `especialidades` asignadas, `editable`/`motivo_bloqueo` según quién pregunta, más `desarrolladores`/`max_desarrolladores` |
 | POST | `/api/usuarios/invitar` | `{correo}`. Manda un correo de invitación (enlace de 48 h a `registro.html?token=`) para que la persona cree su propia cuenta con contraseña propia; 409 si ya existe una cuenta con ese correo |
-| PUT | `/api/usuarios/{correo}` | `{permisos?, nombre?, rol?, activo?}`. `rol`: un desarrollador lo cambia a cualquier valor (promover a `desarrollador` da 409 si ya hay 4); un administrador solo puede ascender una cuenta `usuario` a `administrador` (nunca a `desarrollador`). `activo=false` desactiva la cuenta (no puede iniciar sesión) y cierra sus sesiones abiertas al instante; `activo=true` la reactiva. Nadie modifica su propia cuenta; un administrador solo toca cuentas de rol `usuario`. Si `permisos` incluye `tarifas_editar`, se agrega `estadisticas` automáticamente |
+| PUT | `/api/usuarios/{correo}` | `{permisos?, nombre?, rol?, activo?}`. `rol`: un desarrollador lo cambia a cualquier valor (promover a `desarrollador` da 409 si ya hay 4); un administrador gestiona cuentas `usuario` y `supervisor` y puede darles rol `usuario`, `supervisor` o `administrador` (nunca `desarrollador`). `activo=false` desactiva la cuenta (no puede iniciar sesión) y cierra sus sesiones abiertas al instante; `activo=true` la reactiva. Nadie modifica su propia cuenta; un administrador solo toca cuentas de rol `usuario` o `supervisor`. Si `permisos` incluye `tarifas_editar`, se agrega `estadisticas` automáticamente |
 | DELETE | `/api/usuarios/{correo}` | Elimina la cuenta y cierra sus sesiones (mismas reglas que PUT) |
 | PUT | `/api/usuarios/{correo}/correo-recuperacion` | `{correo}`. Asigna o cambia el correo de recuperación de una cuenta que se gestiona (mismas reglas de quién puede tocar a quién que PUT). 409 si ese correo ya es el usuario o el correo de recuperación de otra cuenta |
 | POST | `/api/usuarios/{correo}/enviar-cambio-clave` | Le manda a la cuenta el mismo enlace de «Olvidé mi contraseña» (2 h) a su correo de recuperación (o al propio `usuario` si ya es un correo). 400 si la cuenta todavía no tiene ningún correo asignado |
@@ -316,8 +316,8 @@ contraseña?» en el login (`/api/auth/olvide`) — mismo mecanismo, pero autose
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/pacientes?q=&ambiente=` | Lista con respuesta y error del último `log_envios` |
-| PUT | `/api/pacientes/{id}?ambiente=` | Cambiar `estado` (`pendiente`/`enviado`/`error`) de **un** paciente |
+| GET | `/api/pacientes?q=&ambiente=&especialidad_id=` | Lista con respuesta y error del último `log_envios`. Con `especialidad_id` lee la tabla `pacientes_<slug>` (403 si no está asignada) |
+| PUT | `/api/pacientes/{id}?ambiente=&especialidad_id=` | Cambiar `estado` (`pendiente`/`enviado`/`error`) de **un** paciente |
 | PUT | `/api/pacientes/estado-masivo?ambiente=` | `{pacientes: [ids], estado}` — igual que arriba pero para **varios** pacientes a la vez (selección en la pestaña Pacientes) |
 | PUT | `/api/pacientes/{id}/respuesta?ambiente=` | Ajuste manual de la respuesta (`pendiente`/`respondio`/`baja`) de **un** paciente; `baja` activa el opt-out. 409 si el paciente pidió la baja explícitamente por WhatsApp y se intenta poner algo distinto de `baja` (ver `opt_out_explicito`) |
 | PUT | `/api/pacientes/respuesta-masiva?ambiente=` | `{pacientes: [ids], respuesta}` — igual que arriba pero para **varios** pacientes a la vez. Los que tengan la baja bloqueada se saltan (no fallan los demás); responde `{actualizados, bloqueados}`; 409 solo si **todos** los seleccionados están bloqueados |
@@ -327,9 +327,9 @@ contraseña?» en el login (`/api/auth/olvide`) — mismo mecanismo, pero autose
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/plantillas` | Lista de plantillas (incluye las de call center; el frontend de Mensajería las filtra) |
-| POST | `/api/plantillas` | Crear `{nombre, texto, whatsapp_template_lang, whatsapp_template_categoria}`. `whatsapp_template_categoria` es obligatoria (`UTILITY` / `MARKETING` / `AUTHENTICATION`); sin ella → 400 |
-| PUT | `/api/plantillas/{id}` | Actualizar `{nombre, texto, ...}` — rechaza (400) si `nombre` cambió, si falta `whatsapp_template_categoria`, si es una plantilla de call center, o si el estado en Meta no es `APPROVED` ni `REJECTED` (pendiente de revisión) |
+| GET | `/api/plantillas` | Lista de plantillas (incluye las de call center; el frontend de Mensajería las filtra). Cuentas no privilegiadas solo ven las globales y las de sus especialidades |
+| POST | `/api/plantillas` | Crear `{nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, especialidad_id?}`. `whatsapp_template_categoria` es obligatoria (`UTILITY` / `MARKETING` / `AUTHENTICATION`); sin ella → 400. `especialidad_id` asocia la plantilla (404 si no existe, 403 si no está asignada) |
+| PUT | `/api/plantillas/{id}` | Actualizar `{nombre, texto, ...}` — rechaza (400) si `nombre` cambió, si falta `whatsapp_template_categoria`, si es una plantilla de call center, o si el estado en Meta no es `APPROVED` ni `REJECTED` (pendiente de revisión). Acepta cambiar `especialidad_id` con la misma validación que al crear |
 | DELETE | `/api/plantillas/{id}` | Eliminar. Borra también el template en Meta (`DELETE /{waba_id}/message_templates?name=…`); si Meta falla la plantilla local se borra igual y la respuesta trae `meta_advertencia`. Rechaza (400) las de call center o las que no estén `APPROVED` ni `REJECTED` en Meta |
 | GET | `/api/plantillas/{id}/estado-meta` | Consulta en Meta el estado real de un template |
 | POST | `/api/plantillas/estado-meta/actualizar` | Refresca el estado de todas las plantillas con template |
@@ -370,14 +370,14 @@ tiene template de Meta (va como texto libre, ventana de 24 h). No hay gestión d
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/call-center/log` | (permiso `call_center_registro`) `{entradas, contadores}` — últimas 200 respuestas de call center + usos por número. Es el panel *Registro de respuestas de call center* del Historial. `numero_paciente` viene `null` si quien pregunta no es admin/dev |
+| GET | `/api/call-center/log` | (permiso `call_center_registro`) `{entradas, contadores}` — últimas 200 respuestas de call center + usos por número. Es el panel *Registro de respuestas de call center* del Historial. `numero_paciente` viene `null` si quien pregunta no es admin/dev. Cuentas no privilegiadas solo ven filas de sus especialidades |
 
 ### Envíos
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| POST | `/api/notificaciones/enviar` | Inicia el envío `{pacientes: [ids] \| null, plantilla_id, ambiente, limite?}`. `pacientes: null` = todos los elegibles (usado desde Mensajería). `limite` (solo producción) recorta cuántos pendientes entran en esta tanda; el resto quedan pendientes. Rechaza (400) si la plantilla no está `APPROVED` en Meta; 409 si en ese momento hay **otro envío en curso en esa misma base** |
-| POST | `/api/notificaciones/destinatarios` | Cuenta pacientes totales/pendientes de un ambiente. Con `plantilla_id`, agrega `costo` (aproximado, mismo cálculo que el correo de confirmación del supervisor) para mostrarlo en el modal antes de enviar; `null` si no hay tarifas cargadas, la plantilla no se factura, o la cuenta no tiene el permiso `tarifas_editar` (admin/dev sí lo ven siempre) |
+| POST | `/api/notificaciones/enviar` | Inicia el envío `{pacientes: [ids] \| null, plantilla_id, ambiente, limite?, especialidad_id?}`. `pacientes: null` = todos los elegibles (usado desde Mensajería). `limite` (solo producción y especialidades) recorta cuántos pendientes entran en esta tanda; el resto quedan pendientes. Con `especialidad_id` envía a la tabla `pacientes_<slug>` (403 si no está asignada; una plantilla de otra especialidad da 400). Rechaza (400) si la plantilla no está `APPROVED` en Meta; 409 si en ese momento hay **otro envío en curso en esa misma base** |
+| POST | `/api/notificaciones/destinatarios` | Cuenta pacientes totales/pendientes de un ambiente (o de una especialidad con `especialidad_id`). Con `plantilla_id`, agrega `costo` (aproximado, mismo cálculo que el correo de confirmación del supervisor) para mostrarlo en el modal antes de enviar; `null` si no hay tarifas cargadas, la plantilla no se factura, o la cuenta no tiene el permiso `tarifas_editar` (admin/dev sí lo ven siempre) |
 | GET | `/api/notificaciones/jobs/{job_id}` | Progreso en vivo del envío en curso |
 | POST | `/api/notificaciones/jobs/{job_id}/pausa` \| `/reanudar` \| `/cancelar` | Control del job en curso |
 | POST | `/api/notificaciones/prueba-wa` | (solo desarrollador) Envía un mensaje de prueba real vía API oficial |
@@ -394,11 +394,13 @@ tiene template de Meta (va como texto libre, ventana de 24 h). No hay gestión d
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/notificaciones/historial?ambiente=todos` | Envíos batch (`ambiente=todos` junta ambas bases) |
-| GET | `/api/notificaciones/historial/{id}/detalle?ambiente=` | Pacientes individuales de un envío. `numero_telefono` viene `null` si quien pregunta no es admin/dev |
+| GET | `/api/notificaciones/historial?ambiente=todos&especialidad_id=` | Envíos batch (`ambiente=todos` junta ambas bases). Cuentas no privilegiadas solo ven sus especialidades (las filas legacy las ven solo admin/dev); con `especialidad_id` filtra (403 si no está asignada) |
+| GET | `/api/notificaciones/historial/{id}/detalle?ambiente=` | Pacientes individuales de un envío (une la tabla que corresponda: legacy o `pacientes_<slug>`). `numero_telefono` viene `null` si quien pregunta no es admin/dev. Envíos de especialidad: 403 si no está asignada; legacy: solo admin/dev |
 | PUT | `/api/notificaciones/historial/{id}/respuesta?ambiente=` | Corregir la respuesta de un registro |
 
-### Estadísticas
+### Estadísticas (solo `administrador` / `desarrollador`)
+
+Las cuentas `usuario` y `supervisor` reciben 403 en estos endpoints (y la migración les retira los permisos `estadisticas`/`tarifas_editar` si los tenían).
 
 | Método | Endpoint | Descripción |
 |---|---|---|
@@ -433,7 +435,17 @@ Cada especialidad vive en **una sola tabla** `pacientes_<slug>` dentro de `snw_b
 | PUT | `/api/especialidades/{id}` | (admin / dev) `{nombre_visible}` — renombra especialidad y rol; la tabla física **no** cambia |
 | POST | `/api/especialidades/{id}/roles` | (admin / dev) `{usuario}` — asigna a la cuenta el rol de la especialidad |
 | DELETE | `/api/especialidades/{id}/roles/{usuario}` | (admin / dev) — retira el rol de la especialidad |
-| POST | `/api/especialidades/{id}/pacientes/csv` | Carga CSV (`nombre, apellido, telefono`, UTF-8, máx. 5 MB) en la tabla de la especialidad; normaliza a `+569XXXXXXXX` e informa `{procesados, insertados, duplicados, rechazados, errores}`. Admin/dev o cuentas con el rol asignado |
+| POST | `/api/especialidades/{id}/pacientes/csv` | Carga CSV (`nombre, apellido, telefono`, UTF-8, máx. 5 MB) en la tabla de la especialidad; normaliza a `+569XXXXXXXX` e informa `{procesados, insertados, duplicados, rechazados, errores}`. Admin/dev o cuentas con permiso de mensajería y el rol asignado |
+
+### Especialidades — Fase 2 (autorización en backend)
+
+- **Sesión enriquecida**: `login`, `/api/auth/me` y `/api/auth/activar` devuelven `especialidades` (todas si es admin/dev, solo asignadas si no); cada petición refresca `especialidad_ids` junto a rol y permisos.
+- **Rol global `supervisor`**: como `usuario` pero pensado para aprobar envíos de sus especialidades (el enrutado de la confirmación por especialidad llega en Fase 3). El administrador gestiona cuentas `usuario` y `supervisor`.
+- **Pacientes/envíos/historial/plantillas** aceptan `especialidad_id`: 404 si no existe, **403** si no está asignada. Las plantillas pueden asociarse a una especialidad y solo se envían en ella.
+- **`envios` y `log_envios`** guardan `especialidad_id` + `tabla_pacientes` (NULL = fila legacy); los historiales no mezclan tablas con IDs coincidentes.
+- **Estadísticas y tarifas**: solo admin/dev (403 para el resto).
+- **Webhook**: busca pacientes también en `pacientes_<slug>`, etiqueta sus filas de log y el call center automático también responde en especialidades (anti flip-flop siempre activo ahí).
+- Pendiente Fase 3: pestaña Especialidades, selectores por especialidad, ocultar Estadísticas a usuario/supervisor, estadísticas por especialidad y confirmación del supervisor por especialidad.
 
 ### Webhook de WhatsApp (Meta)
 

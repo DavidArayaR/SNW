@@ -13,6 +13,7 @@ class PlantillaIn(BaseModel):
     clave: str | None = None
     whatsapp_template_lang: str | None = None
     whatsapp_template_categoria: str | None = None
+    especialidad_id: int | None = None
 
 
 class EnvioIn(BaseModel):
@@ -20,6 +21,7 @@ class EnvioIn(BaseModel):
     plantilla_id: int
     ambiente: str | None = None
     limite: int | None = None
+    especialidad_id: int | None = None
 
 
 class ConfigIn(BaseModel):

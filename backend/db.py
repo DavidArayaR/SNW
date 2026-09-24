@@ -389,6 +389,56 @@ def asegurar_tabla_config() -> None:
             from servicio_especialidades import asegurar_tablas_especialidades
             asegurar_tablas_especialidades(cur)
 
+            # Rol global `supervisor`: acceso acotado a sus especialidades,
+            # sin Estadísticas (igual que `usuario`).
+            cur.execute(
+                "SELECT COLUMN_TYPE AS t FROM information_schema.COLUMNS"
+                " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'usuarios'"
+                "   AND COLUMN_NAME = 'rol'"
+            )
+            if "'supervisor'" not in ((cur.fetchone() or {}).get("t") or ""):
+                cur.execute(
+                    "ALTER TABLE usuarios MODIFY COLUMN rol"
+                    " ENUM('usuario','supervisor','administrador','desarrollador')"
+                    " NOT NULL DEFAULT 'usuario'"
+                )
+
+            # Trazabilidad por especialidad en el historial (Fase 2). NULL =
+            # fila legacy (tablas pacientes_dev/prod, anteriores al modelo).
+            for _ht, _hidx in (("envios", "idx_envios_especialidad"),
+                               ("log_envios", "idx_log_especialidad")):
+                cur.execute(
+                    "SELECT COLUMN_NAME FROM information_schema.COLUMNS"
+                    " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s"
+                    "   AND COLUMN_NAME IN ('especialidad_id', 'tabla_pacientes')",
+                    (_ht,),
+                )
+                _tiene = {r["COLUMN_NAME"] for r in cur.fetchall()}
+                if "especialidad_id" not in _tiene:
+                    cur.execute(f"ALTER TABLE {_ht} ADD COLUMN especialidad_id INT NULL")
+                if "tabla_pacientes" not in _tiene:
+                    cur.execute(f"ALTER TABLE {_ht} ADD COLUMN tabla_pacientes VARCHAR(64) NULL")
+                cur.execute(
+                    "SELECT COUNT(*) AS n FROM information_schema.STATISTICS"
+                    " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND INDEX_NAME = %s",
+                    (_ht, _hidx),
+                )
+                if not (cur.fetchone() or {}).get("n"):
+                    cur.execute(f"ALTER TABLE {_ht} ADD INDEX {_hidx} (especialidad_id)")
+
+            # Estadísticas (y costos) son exclusivas de admin/dev: se retiran
+            # esos permisos de las cuentas no privilegiadas que los tuvieran.
+            cur.execute(
+                "SELECT usuario, permisos FROM usuarios"
+                " WHERE rol NOT IN ('administrador', 'desarrollador')"
+            )
+            for _u in cur.fetchall():
+                _perms = [p for p in ((_u.get("permisos") or "").split(",")) if p]
+                _recorte = [p for p in _perms if p not in ("estadisticas", "tarifas_editar")]
+                if _recorte != _perms:
+                    cur.execute("UPDATE usuarios SET permisos = %s WHERE usuario = %s",
+                                (",".join(_recorte), _u["usuario"]))
+
             conn.commit()
     except Exception as e:
         log_error("asegurar_tabla_config", e)
@@ -401,7 +451,7 @@ def asegurar_tabla_config() -> None:
 # ---------------------------------------------------------------------------
 USUARIOS_JSON = BASE_DIR / "data" / "usuarios.json"
 
-ROLES_USUARIO = ("usuario", "administrador", "desarrollador")
+ROLES_USUARIO = ("usuario", "supervisor", "administrador", "desarrollador")
 MAX_DESARROLLADORES = 4
 
 # La página de Configuración es exclusiva del rol `desarrollador`:

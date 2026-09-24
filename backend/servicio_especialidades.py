@@ -385,3 +385,65 @@ def importar_pacientes_csv(especialidad_id: int, datos: bytes) -> dict:
     return {"procesados": procesados, "insertados": insertados,
             "duplicados": duplicados, "rechazados": len(errores),
             "errores": errores}
+
+
+def listar_tablas_especialidades() -> list[dict]:
+    """[{id, nombre_tabla_base}] para construir listas blancas (webhook, etc.)."""
+    try:
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute("SELECT id, nombre_tabla_base FROM especialidades ORDER BY id")
+            return cur.fetchall()
+    except Exception as e:
+        log_error("listar_tablas_especialidades", e)
+        return []
+
+
+def ids_de_especialidades() -> list[int]:
+    return [int(r["id"]) for r in listar_tablas_especialidades()]
+
+
+def especialidad_por_tabla(tabla: str) -> dict | None:
+    """Especialidad registrada para una tabla física (None si no es de
+    especialidad: tablas legacy u otras)."""
+    if not tabla_valida(tabla):
+        return None
+    try:
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT e.id, e.nombre_visible, e.nombre_tabla_base,"
+                "       r.id AS rol_id, r.nombre AS rol_nombre"
+                " FROM especialidades e"
+                " LEFT JOIN roles_especialidad r ON r.especialidad_id = e.id"
+                " WHERE e.nombre_tabla_base = %s",
+                (tabla,),
+            )
+            return cur.fetchone()
+    except Exception as e:
+        log_error("especialidad_por_tabla", e)
+        return None
+
+
+def especialidades_ids_de_usuario(usuario_id: int) -> list[int]:
+    return [int(e["id"]) for e in especialidades_de_usuario(usuario_id)]
+
+
+def especialidades_por_usuarios() -> dict:
+    """{login: [{id, nombre_visible}]} para enriquecer el listado de cuentas."""
+    try:
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT u.usuario, e.id, e.nombre_visible"
+                " FROM usuario_especialidad_roles uer"
+                " JOIN roles_especialidad r ON r.id = uer.rol_id"
+                " JOIN especialidades e ON e.id = r.especialidad_id"
+                " JOIN usuarios u ON u.id = uer.usuario_id"
+                " ORDER BY u.usuario, e.nombre_visible"
+            )
+            out: dict = {}
+            for r in cur.fetchall():
+                out.setdefault(r["usuario"], []).append(
+                    {"id": int(r["id"]), "nombre_visible": r["nombre_visible"]})
+            return out
+    except Exception as e:
+        log_error("especialidades_por_usuarios", e)
+        return {}

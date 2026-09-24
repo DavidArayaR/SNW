@@ -126,11 +126,13 @@ CALL_CENTER_PLANTILLA_FIJA = {
 SESIONES_FILE = BASE_DIR / "data" / "sesiones.json"
 
 # --- Roles y permisos --------------------------------------------------------
-# Hay tres roles. `administrador` y `desarrollador` tienen TODOS los permisos de
-# forma implícita; la lista `permisos` solo se consulta para el rol `usuario`.
-#   - usuario:       solo ve/hace lo que tenga en `permisos`.
-#   - administrador: acceso total; puede editar los permisos de las cuentas de
-#                    rol `usuario` (nunca las de otro admin/dev ni las propias).
+# Hay cuatro roles. `administrador` y `desarrollador` tienen TODOS los permisos de
+# forma implícita; la lista `permisos` solo se consulta para `usuario` y `supervisor`.
+#   - usuario:       solo ve/hace lo que tenga en `permisos`, acotado a sus especialidades.
+#   - supervisor:    como `usuario`, más la aprobación de envíos en producción de
+#                    sus especialidades (el enrutado por especialidad llega en Fase 3).
+#   - administrador: acceso total; puede editar las cuentas de rol `usuario` y
+#                    `supervisor` (nunca las de otro admin/dev ni las propias).
 #   - desarrollador: acceso total; puede editar rol y permisos de cualquier
 #                    cuenta excepto la suya. Máximo MAX_DESARROLLADORES cuentas.
 # Las cuentas viven en la tabla `usuarios` (ver db.py).
@@ -249,6 +251,19 @@ def sesion_actual(request: Request) -> dict:
         sesion["rol"] = u.get("rol", "usuario")
         sesion["permisos"] = permisos_efectivos(u)
         sesion["correo_recuperacion"] = u.get("correo_recuperacion", "")
+        # Especialidades visibles (Fase 2): todas si es privilegiada, solo las
+        # asignadas si no. Se refrescan en cada petición, igual que rol y
+        # permisos, para que los cambios del administrador apliquen al instante.
+        try:
+            if sesion["rol"] in ROLES_PRIVILEGIADOS:
+                sesion["especialidad_ids"] = servicio_especialidades.ids_de_especialidades()
+            else:
+                _uid = servicio_especialidades.usuario_id_por_correo(correo)
+                sesion["especialidad_ids"] = (
+                    servicio_especialidades.especialidades_ids_de_usuario(_uid) if _uid else [])
+        except Exception as e:
+            log_error("sesion_actual: especialidades", e)
+            sesion["especialidad_ids"] = []
     else:
         sesion.setdefault("permisos", list(PERMISOS_VALIDOS)
                           if sesion.get("rol") in ROLES_PRIVILEGIADOS else [])
@@ -284,6 +299,76 @@ def solo_dev(sesion: dict = Depends(sesion_actual)) -> dict:
     return sesion
 
 
+def _es_privilegiado(sesion: dict) -> bool:
+    return sesion.get("rol") in ROLES_PRIVILEGIADOS
+
+
+def _exigir_especialidad(sesion: dict, especialidad_id: int) -> dict:
+    """Devuelve la especialidad si la sesión puede operar en ella (404 si no
+    existe, 403 si no está asignada). Admin/dev acceden a todas."""
+    try:
+        esp_id = int(especialidad_id)
+    except (TypeError, ValueError):
+        raise HTTPException(422, detail="Especialidad inválida.")
+    esp = servicio_especialidades.obtener_especialidad(esp_id)
+    if not esp:
+        raise HTTPException(404, detail="Especialidad no encontrada.")
+    if not _es_privilegiado(sesion) and esp_id not in (sesion.get("especialidad_ids") or []):
+        raise HTTPException(403, detail="No tienes acceso a esta especialidad.")
+    return esp
+
+
+def _resolver_tabla_pacientes(sesion: dict, ambiente: str,
+                              especialidad_id: int | None) -> tuple[str, dict | None]:
+    """Tabla de pacientes a usar: la de la especialidad (autorizada) o la
+    legacy del entorno. Devuelve (tabla, especialidad|None)."""
+    if especialidad_id is None:
+        return tabla_pacientes(ambiente), None
+    esp = _exigir_especialidad(sesion, especialidad_id)
+    tabla = esp["nombre_tabla_base"]
+    if not servicio_especialidades.tabla_valida(tabla):
+        raise HTTPException(500, detail="La tabla registrada de la especialidad no es válida.")
+    return tabla, esp
+
+
+def _cond_tabla_log(tabla: str | None) -> tuple[str, tuple]:
+    """Fragmento SQL para aislar filas de log_envios por tabla de origen.
+
+    Las filas legacy tienen `tabla_pacientes` NULL; las de especialidad llevan
+    su tabla. Así no se mezclan historiales entre tablas con IDs coincidentes.
+    """
+    if not tabla:
+        return "AND tabla_pacientes IS NULL", ()
+    if tabla in ("pacientes_dev", "pacientes_prod"):
+        return "AND COALESCE(tabla_pacientes, '') IN ('', %s)", (tabla,)
+    return "AND tabla_pacientes = %s", (tabla,)
+
+
+def _cond_tabla_log_segura(tabla: str | None, ambiente: str) -> tuple[str, tuple]:
+    """Igual que `_cond_tabla_log`, pero no filtra nada si la base aún no
+    tiene la columna (migración pendiente): nunca rompe una base antigua."""
+    if "tabla_pacientes" not in columnas_tabla("log_envios", ambiente):
+        return "", ()
+    return _cond_tabla_log(tabla)
+
+
+def _validar_plantilla_especialidad(sesion: dict, especialidad_id: int | None) -> int | None:
+    """Valida la asociación plantilla -> especialidad (404/403). None = global."""
+    if especialidad_id is None:
+        return None
+    return int(_exigir_especialidad(sesion, especialidad_id)["id"])
+
+
+def _especialidades_para_respuesta(sesion: dict) -> list[dict]:
+    """Lista de especialidades para respuestas de sesión (login/me)."""
+    if _es_privilegiado(sesion):
+        return servicio_especialidades.listar_especialidades()
+    uid = servicio_especialidades.usuario_id_por_correo(sesion.get("usuario", "") or "")
+    if not uid:
+        return []
+    return servicio_especialidades.especialidades_de_usuario(uid)
+
+
 def login(body: LoginIn):
     clave_hash = hashlib.sha256(body.clave.encode("utf-8")).hexdigest()
     usuario = usuario_buscar(body.usuario)
@@ -305,7 +390,8 @@ def login(body: LoginIn):
     }
     guardar_sesiones()
     s = SESIONES[token]
-    return {"token": token, "rol": s["rol"], "nombre": s["nombre"], "permisos": s["permisos"]}
+    return {"token": token, "rol": s["rol"], "nombre": s["nombre"], "permisos": s["permisos"],
+            "especialidades": _especialidades_para_respuesta(s)}
 
 
 def auth_me(sesion: dict = Depends(sesion_actual)):
@@ -315,6 +401,7 @@ def auth_me(sesion: dict = Depends(sesion_actual)):
         "nombre": sesion.get("nombre"),
         "rol": sesion.get("rol"),
         "permisos": sesion.get("permisos") or [],
+        "especialidades": _especialidades_para_respuesta(sesion),
         "correo_recuperacion": sesion.get("correo_recuperacion", ""),
     }
 
@@ -520,7 +607,8 @@ def activar_cuenta(body: ActivarCuentaIn):
     }
     guardar_sesiones()
     s = SESIONES[token]
-    return {"token": token, "rol": s["rol"], "nombre": s["nombre"], "permisos": s["permisos"]}
+    return {"token": token, "rol": s["rol"], "nombre": s["nombre"], "permisos": s["permisos"],
+            "especialidades": _especialidades_para_respuesta(s)}
 
 
 def _puede_gestionar(actor: dict, objetivo: dict) -> tuple[bool, str]:
@@ -534,6 +622,7 @@ def _puede_gestionar(actor: dict, objetivo: dict) -> tuple[bool, str]:
 
 def listar_usuarios(sesion: dict = Depends(solo_admin)):
     yo = str(sesion.get("usuario", "")).strip().lower()
+    esp_por_usuario = servicio_especialidades.especialidades_por_usuarios()
     filas = []
     for u in usuarios_listar():
         rol = u.get("rol", "usuario")
@@ -544,6 +633,7 @@ def listar_usuarios(sesion: dict = Depends(solo_admin)):
             "nombre": u.get("nombre") or "",
             "rol": rol,
             "permisos": permisos_efectivos(u),
+            "especialidades": esp_por_usuario.get(u.get("usuario"), []),
             "rol_total": rol in ROLES_PRIVILEGIADOS,
             "es_actual": es_actual,
             "editable": puede,
@@ -576,10 +666,10 @@ def actualizar_usuario(usuario: str, body: UsuarioUpdIn, sesion: dict = Depends(
             if body.rol not in ROLES:
                 raise HTTPException(422, detail="Rol no válido.")
         elif sesion.get("rol") == "administrador":
-            # Un administrador solo puede ascender una cuenta de rol «usuario»
-            # a «administrador» (nunca a «desarrollador»).
-            if body.rol != "administrador":
-                raise HTTPException(403, detail="Un administrador solo puede dar permisos de administrador.")
+            # Un administrador gestiona cuentas de rol «usuario» y
+            # «supervisor» (nunca «desarrollador», ni las puede crear).
+            if body.rol not in ("usuario", "supervisor", "administrador"):
+                raise HTTPException(403, detail="Un administrador solo puede dar permisos de usuario, supervisor o administrador.")
         else:
             raise HTTPException(403, detail="No puedes cambiar el rol de esta cuenta.")
         if body.rol == "desarrollador" and contar_desarrolladores(excluir=obj["usuario"]) >= MAX_DESARROLLADORES:
@@ -868,14 +958,15 @@ async def importar_pacientes_csv(especialidad_id: int, archivo: UploadFile = Fil
                                  sesion: dict = Depends(sesion_actual)):
     """Carga pacientes vía CSV en la tabla de la especialidad.
 
-    En esta fase: admin/dev (acceso global) o cuentas con el rol de la
-    especialidad asignado. La apertura a supervisores/usuarios con permiso de
-    mensajería se completa en la Fase 2 junto al resto de la autorización.
+    Admin/dev (acceso global) o cuentas con permiso de mensajería Y el rol de
+    la especialidad asignado.
     """
     esp = servicio_especialidades.obtener_especialidad(especialidad_id)
     if not esp:
         raise HTTPException(404, detail="Especialidad no encontrada.")
-    privilegiado = sesion.get("rol") in ROLES_PRIVILEGIADOS
+    privilegiado = _es_privilegiado(sesion)
+    if not privilegiado and not tiene_permiso(sesion, "mensajeria"):
+        raise HTTPException(403, detail="No tienes permiso para cargar pacientes.")
     uid = servicio_especialidades.usuario_id_por_correo(sesion.get("usuario", ""))
     if not servicio_especialidades.puede_acceder_especialidad(privilegiado, uid, especialidad_id):
         raise HTTPException(403, detail="No tienes acceso a esta especialidad.")
@@ -932,9 +1023,10 @@ def slug(texto: str) -> str:
     return t[:40] or "plantilla"
 
 
-def from_pacientes(ambiente: str) -> str:
-    """Cláusula FROM + LEFT JOIN sobre la tabla de pacientes del entorno."""
-    t = tabla_pacientes(ambiente)
+def from_pacientes(ambiente: str, tabla: str | None = None) -> str:
+    """Cláusula FROM + LEFT JOIN sobre la tabla de pacientes del entorno
+    (o la tabla explícita de una especialidad)."""
+    t = tabla or tabla_pacientes(ambiente)
     return (
         f" FROM {t} p"
         " LEFT JOIN log_envios l ON l.id = ("
@@ -945,7 +1037,7 @@ def from_pacientes(ambiente: str) -> str:
 
 
 def expr_respuesta_efectiva(alias: str = "p", tiene_opt_out: bool = True,
-                            tiene_manual: bool = False) -> str:
+                            tiene_manual: bool = False, tabla_log: str | None = None) -> str:
     """Respuesta de un paciente para saber quién interactuó por WhatsApp.
 
     Prioridad:
@@ -964,7 +1056,8 @@ def expr_respuesta_efectiva(alias: str = "p", tiene_opt_out: bool = True,
     ex = lambda r: (
         f"WHEN EXISTS(SELECT 1 FROM log_envios le WHERE le.paciente_id = {alias}.id"
         f" AND COALESCE(le.plantilla_clave, '') <> 'ajuste_manual'"
-        f" AND le.respuesta = '{r}') THEN '{r}' "
+        + (f" AND le.tabla_pacientes = '{tabla_log}'" if tabla_log else "")
+        + f" AND le.respuesta = '{r}') THEN '{r}' "
     )
     return (
         "(CASE "
@@ -991,10 +1084,13 @@ def _pacientes_baja_bloqueada(cur, tabla: str, ambiente: str, ids: list[int]) ->
     return {r["id"] for r in cur.fetchall()}
 
 
-def expr_select_pacientes(ambiente: str) -> str:
+def expr_select_pacientes(ambiente: str, tabla: str | None = None) -> str:
     """Genera las expresiones SELECT de la tabla pacientes adaptándose a las
-    columnas reales existentes (soporta bases con esquema mínimo)."""
-    cols = columnas_tabla(tabla_pacientes(ambiente), ambiente)
+    columnas reales existentes (soporta bases con esquema mínimo). Con `tabla`
+    se lee una tabla de especialidad en vez de la del entorno."""
+    t = tabla or tabla_pacientes(ambiente)
+    cols = columnas_tabla(t, ambiente)
+    log_tiene_tabla = "tabla_pacientes" in columnas_tabla("log_envios", ambiente)
     exprs = ["p.id", "p.nombre", "p.apellido", "p.telefono"]
     if "estado" in cols:
         exprs.append("COALESCE(NULLIF(p.estado, ''), 'pendiente') AS estado")
@@ -1005,7 +1101,8 @@ def expr_select_pacientes(ambiente: str) -> str:
     else:
         exprs.append("NULL AS fecha_actualizacion")
     exprs.append(
-        expr_respuesta_efectiva("p", "whatsapp_opt_out" in cols, "respuesta_manual" in cols)
+        expr_respuesta_efectiva("p", "whatsapp_opt_out" in cols, "respuesta_manual" in cols,
+                                tabla_log=t if (tabla and log_tiene_tabla) else None)
         + " AS respuesta"
     )
     exprs.append("COALESCE(l.respuesta, 'pendiente') AS respuesta_ultimo_envio")
@@ -1042,8 +1139,10 @@ def expr_select_pacientes(ambiente: str) -> str:
 
 
 def listar_pacientes(q: str | None = Query(None), ambiente: str = Query("produccion"),
+                     especialidad_id: int | None = Query(None),
                      sesion: dict = Depends(exigir("pacientes"))):
-    sql = "SELECT " + expr_select_pacientes(ambiente) + from_pacientes(ambiente)
+    t, _esp = _resolver_tabla_pacientes(sesion, ambiente, especialidad_id)
+    sql = "SELECT " + expr_select_pacientes(ambiente, tabla=t) + from_pacientes(ambiente, tabla=t)
     args: list = []
     if q and q.strip():
         like = f"%{q.strip()}%"
@@ -1077,6 +1176,7 @@ class EstadoPacientesBulkIn(BaseModel):
 
 
 def actualizar_estado_pacientes(body: EstadoPacientesBulkIn, ambiente: str = Query("produccion"),
+                                especialidad_id: int | None = Query(None),
                                 sesion: dict = Depends(exigir("pacientes"))):
     """Cambia el estado de varios pacientes de una sola vez (selección en
     Base de datos). Misma validación y permiso que el ajuste individual."""
@@ -1084,7 +1184,7 @@ def actualizar_estado_pacientes(body: EstadoPacientesBulkIn, ambiente: str = Que
         raise HTTPException(400, detail="No se seleccionó ningún paciente")
     if body.estado not in ("pendiente", "enviado", "error"):
         raise HTTPException(400, detail="Estado inválido. Use: pendiente, enviado o error")
-    t = tabla_pacientes(ambiente)
+    t, _esp = _resolver_tabla_pacientes(sesion, ambiente, especialidad_id)
     placeholders = ", ".join("%s" for _ in body.pacientes)
     with conectar(ambiente) as conn, conn.cursor() as cur:
         cur.execute(f"SELECT id FROM {t} WHERE id IN ({placeholders})", tuple(body.pacientes))
@@ -1107,6 +1207,7 @@ class RespuestaPacientesBulkIn(BaseModel):
 
 
 def actualizar_respuesta_pacientes(body: RespuestaPacientesBulkIn, ambiente: str = Query("produccion"),
+                                   especialidad_id: int | None = Query(None),
                                    sesion: dict = Depends(exigir("pacientes"))):
     """Ajuste manual de la respuesta de varios pacientes a la vez (mismo efecto
     que el ajuste individual: 'baja' activa el opt-out y quita el interés)."""
@@ -1116,7 +1217,7 @@ def actualizar_respuesta_pacientes(body: RespuestaPacientesBulkIn, ambiente: str
     # contestar de verdad por WhatsApp (vía el webhook), nunca un admin a mano.
     if body.respuesta not in ("pendiente", "baja"):
         raise HTTPException(400, detail="Respuesta inválida. Use: pendiente, baja")
-    t = tabla_pacientes(ambiente)
+    t, _esp = _resolver_tabla_pacientes(sesion, ambiente, especialidad_id)
     tiene_manual = columna_existe(t, "respuesta_manual", ambiente)
     tiene_interesado = columna_existe(t, "interesado", ambiente)
     placeholders = ", ".join("%s" for _ in body.pacientes)
@@ -1150,10 +1251,12 @@ def actualizar_respuesta_pacientes(body: RespuestaPacientesBulkIn, ambiente: str
                 (body.respuesta, *encontrados),
             )
         if body.respuesta == "pendiente":
+            cond_log, args_log = _cond_tabla_log_segura(t if _esp else None, ambiente)
             cur.execute(
                 "UPDATE log_envios SET respuesta = 'pendiente'"
-                f" WHERE paciente_id IN ({placeholders_enc}) AND respuesta = 'baja'",
-                tuple(encontrados),
+                f" WHERE paciente_id IN ({placeholders_enc}) AND respuesta = 'baja'"
+                f" {cond_log}",
+                (*encontrados, *args_log),
             )
         elif not tiene_manual:
             # Esquema antiguo sin columna: se conserva el mecanismo por log
@@ -1172,10 +1275,11 @@ def actualizar_respuesta_pacientes(body: RespuestaPacientesBulkIn, ambiente: str
 
 def actualizar_paciente(paciente_id: int, body: EstadoPacienteIn,
                         ambiente: str = Query("produccion"),
+                        especialidad_id: int | None = Query(None),
                         sesion: dict = Depends(exigir("pacientes"))):
     if body.estado not in ("pendiente", "enviado", "error"):
         raise HTTPException(400, detail="Estado inválido. Use: pendiente, enviado o error")
-    t = tabla_pacientes(ambiente)
+    t, _esp = _resolver_tabla_pacientes(sesion, ambiente, especialidad_id)
     with conectar(ambiente) as conn, conn.cursor() as cur:
         cur.execute(f"SELECT id FROM {t} WHERE id = %s", (paciente_id,))
         if not cur.fetchone():
@@ -1184,7 +1288,7 @@ def actualizar_paciente(paciente_id: int, body: EstadoPacienteIn,
             cur.execute(f"UPDATE {t} SET estado = %s WHERE id = %s", (body.estado, paciente_id))
             conn.commit()
         cur.execute(
-            "SELECT " + expr_select_pacientes(ambiente) + from_pacientes(ambiente) + " WHERE p.id = %s",
+            "SELECT " + expr_select_pacientes(ambiente, tabla=t) + from_pacientes(ambiente, tabla=t) + " WHERE p.id = %s",
             (paciente_id,),
         )
         fila = cur.fetchone()
@@ -1195,6 +1299,7 @@ def actualizar_paciente(paciente_id: int, body: EstadoPacienteIn,
 
 def actualizar_respuesta_paciente(paciente_id: int, body: RespuestaIn,
                                   ambiente: str = Query("produccion"),
+                                  especialidad_id: int | None = Query(None),
                                   sesion: dict = Depends(exigir("pacientes"))):
     """Ajuste manual de la respuesta de un paciente (fallback si el webhook no
     llegó, o si el paciente avisó por otro canal). 'baja' activa el opt-out."""
@@ -1202,7 +1307,7 @@ def actualizar_respuesta_paciente(paciente_id: int, body: RespuestaIn,
     # contestar de verdad por WhatsApp (vía el webhook), nunca un admin a mano.
     if body.respuesta not in ("pendiente", "baja"):
         raise HTTPException(400, detail="Respuesta inválida. Use: pendiente, baja")
-    t = tabla_pacientes(ambiente)
+    t, _esp = _resolver_tabla_pacientes(sesion, ambiente, especialidad_id)
     tiene_manual = columna_existe(t, "respuesta_manual", ambiente)
     with conectar(ambiente) as conn, conn.cursor() as cur:
         cur.execute(f"SELECT id FROM {t} WHERE id = %s", (paciente_id,))
@@ -1232,10 +1337,12 @@ def actualizar_respuesta_paciente(paciente_id: int, body: RespuestaIn,
             )
         # Deshace un 'baja' que el webhook hubiera marcado en el último envío.
         if body.respuesta == "pendiente":
+            cond_log, args_log = _cond_tabla_log_segura(t if _esp else None, ambiente)
             cur.execute(
                 "UPDATE log_envios SET respuesta = 'pendiente'"
-                " WHERE paciente_id = %s AND respuesta = 'baja'",
-                (paciente_id,),
+                " WHERE paciente_id = %s AND respuesta = 'baja'"
+                f" {cond_log}",
+                (paciente_id, *args_log),
             )
         elif not tiene_manual:
             # Esquema antiguo sin columna: se conserva el mecanismo por log.
@@ -1249,7 +1356,7 @@ def actualizar_respuesta_paciente(paciente_id: int, body: RespuestaIn,
         conn.commit()
 
         cur.execute(
-            "SELECT " + expr_select_pacientes(ambiente) + from_pacientes(ambiente) + " WHERE p.id = %s",
+            "SELECT " + expr_select_pacientes(ambiente, tabla=t) + from_pacientes(ambiente, tabla=t) + " WHERE p.id = %s",
             (paciente_id,),
         )
         fila = cur.fetchone()
@@ -1261,15 +1368,17 @@ def actualizar_respuesta_paciente(paciente_id: int, body: RespuestaIn,
 
 
 def mensajes_paciente(paciente_id: int, ambiente: str = Query("produccion"),
+                      especialidad_id: int | None = Query(None),
                       sesion: dict = Depends(exigir("historial", "pacientes"))):
     """Todos los mensajes (entrantes y salientes) de un paciente, para revisar
     a mano si su interés es real. Los entrantes se guardan tal cual los escribió.
     Accesible a cualquier usuario (solo lectura)."""
-    t = tabla_pacientes(ambiente)
+    t, _esp = _resolver_tabla_pacientes(sesion, ambiente, especialidad_id)
     cols = columnas_tabla(t, ambiente)
     tiene_opt = "whatsapp_opt_out" in cols
     tiene_int = "interesado" in cols
-    re_expr = expr_respuesta_efectiva("p", tiene_opt, "respuesta_manual" in cols)
+    re_expr = expr_respuesta_efectiva("p", tiene_opt, "respuesta_manual" in cols,
+                                      tabla_log=t if (_esp and "tabla_pacientes" in columnas_tabla("log_envios", ambiente)) else None)
     with conectar(ambiente) as conn, conn.cursor() as cur:
         cur.execute(
             f"SELECT p.id, p.nombre, p.apellido, p.telefono,"
@@ -1282,13 +1391,15 @@ def mensajes_paciente(paciente_id: int, ambiente: str = Query("produccion"),
         pac = cur.fetchone()
         if not pac:
             raise HTTPException(404, detail="Paciente no encontrado")
+        cond_log, args_log = _cond_tabla_log_segura(t if _esp else None, ambiente)
         cur.execute(
             "SELECT id, fecha_hora, mensaje, plantilla_clave, estado_envio, descripcion_error"
             " FROM log_envios WHERE paciente_id = %s"
             "   AND ((mensaje IS NOT NULL AND mensaje <> '') OR plantilla_clave = 'respuesta')"
             "   AND COALESCE(plantilla_clave, '') <> 'ajuste_manual'"
+            f"   {cond_log}"
             " ORDER BY id",
-            (paciente_id,),
+            (paciente_id, *args_log),
         )
         filas = cur.fetchall()
     pac["interesado"] = bool(pac.get("interesado"))
@@ -1456,19 +1567,25 @@ def _cc_datos_envio(pac: dict, ambiente: str) -> tuple[str, dict, str]:
     return texto, datos, numero
 
 
-def _despachar_call_center(pac: dict, ambiente: str) -> dict:
+def _despachar_call_center(pac: dict, ambiente: str, tabla: str | None = None) -> dict:
     """Envía el mensaje fijo de call center a un paciente y lo registra en el
-    historial y en call_center_log. Devuelve {ok, error, telefono}. No lanza."""
+    historial y en call_center_log. Devuelve {ok, error, telefono}. No lanza.
+    Con `tabla` (especialidad) se etiqueta esa tabla y se salta el filtro de
+    números autorizados de desarrollo."""
     telefono = normalizar_telefono((pac.get("telefono") or "").strip())
     if telefono is None:
         return {"ok": False, "error": "El teléfono del paciente no es válido", "telefono": None}
 
     cfg = leer_config(ambiente)
-    if entorno_valido(ambiente) == "desarrollo" and telefono not in set(cfg.get("numeros_autorizados", [])):
+    if tabla is None and entorno_valido(ambiente) == "desarrollo" and telefono not in set(cfg.get("numeros_autorizados", [])):
         return {"ok": False, "error": "El número no está autorizado en la base de desarrollo", "telefono": telefono}
 
     nombre = " ".join(x for x in [pac.get("nombre"), pac.get("apellido")] if x)
     texto, datos_plantilla, numero_cc = _cc_datos_envio(pac, ambiente)
+    esp_id = None
+    if tabla is not None:
+        _esp_cc = servicio_especialidades.especialidad_por_tabla(tabla)
+        esp_id = _esp_cc["id"] if _esp_cc else None
 
     canal = obtener_canal(cfg)
     try:
@@ -1484,11 +1601,12 @@ def _despachar_call_center(pac: dict, ambiente: str) -> dict:
 
     registrar_historial(pac.get("id"), nombre, telefono, CALL_CENTER_CLAVE, texto,
                         "enviado" if ok else "error", error, ambiente=ambiente,
-                        whatsapp_message_id=message_id)
+                        whatsapp_message_id=message_id,
+                        especialidad_id=esp_id, tabla_pacientes=tabla)
     if numero_cc:
         _registrar_call_center_log(
             pac.get("id"), nombre, telefono, numero_cc, CALL_CENTER_CLAVE,
-            True, "enviado" if ok else "error", error, nombre_base(ambiente),
+            True, "enviado" if ok else "error", error, tabla or nombre_base(ambiente),
         )
     return {"ok": ok, "error": error, "telefono": telefono, "numero_call_center": numero_cc}
 
@@ -1511,9 +1629,13 @@ def _enviar_call_center_auto(tel: str) -> None:
     vuelven elegible (si vuelve a estar `interesado`)."""
     try:
         match = "REPLACE(REPLACE(telefono, '+', ''), ' ', '') = REPLACE(REPLACE(%s, '+', ''), ' ', '')"
-        for amb in ("produccion", "desarrollo"):
+        # Bases legacy más cada tabla de especialidad (Fase 2).
+        objetivos = [("produccion", None), ("desarrollo", None)]
+        for _e in servicio_especialidades.listar_tablas_especialidades():
+            objetivos.append(("produccion", _e["nombre_tabla_base"]))
+        for amb, t_esp in objetivos:
             try:
-                t = tabla_pacientes(amb)
+                t = t_esp or tabla_pacientes(amb)
                 if "interesado" not in columnas_tabla(t, amb):
                     continue
                 with conectar(amb) as conn, conn.cursor() as cur:
@@ -1528,17 +1650,20 @@ def _enviar_call_center_auto(tel: str) -> None:
                     # no_interes_boton, respuesta, bajas, avisos y ajustes)
                     # NO cuentan como plantilla, así que repetir interés en la
                     # misma ronda no re-dispara el envío.
+                    cond_t, args_t = _cond_tabla_log(t)
                     cur.execute(
                         "SELECT"
                         "  (SELECT MAX(id) FROM log_envios WHERE paciente_id = %s"
+                        f"     {cond_t}"
                         "     AND estado_envio = 'enviado'"
                         "     AND COALESCE(plantilla_clave, '') NOT IN"
                         "      ('respuesta', 'ajuste_manual', 'call_center', 'interes_boton',"
                         "       'no_interes_boton', 'baja_aviso', 'retractacion_aviso')"
                         "  ) AS ult_plantilla,"
                         "  (SELECT MAX(id) FROM log_envios WHERE paciente_id = %s"
+                        f"     {cond_t}"
                         "     AND plantilla_clave = %s AND estado_envio = 'enviado') AS ult_cc",
-                        (pac["id"], pac["id"], CALL_CENTER_CLAVE),
+                        (pac["id"], *args_t, pac["id"], *args_t, CALL_CENTER_CLAVE),
                     )
                     d = cur.fetchone() or {}
                     ult_plantilla, ult_cc = d.get("ult_plantilla"), d.get("ult_cc")
@@ -1547,15 +1672,15 @@ def _enviar_call_center_auto(tel: str) -> None:
                     # repetido no se responde otra vez.
                     if ult_cc is not None and (ult_plantilla is None or ult_cc > ult_plantilla):
                         continue
-                res = _despachar_call_center(pac, amb)
+                res = _despachar_call_center(pac, amb, tabla=t_esp)
                 if res.get("ok"):
-                    print(f"[CALL-CENTER auto] enviado a {res['telefono']} ({amb})"
+                    print(f"[CALL-CENTER auto] enviado a {res['telefono']} ({t})"
                           + (f" · call center {res['numero_call_center']}" if res.get("numero_call_center") else ""),
                           flush=True)
                 else:
-                    log_error(f"_enviar_call_center_auto({tel}, {amb}): {res.get('error')}")
+                    log_error(f"_enviar_call_center_auto({tel}, {t}): {res.get('error')}")
             except Exception as e:
-                log_error(f"_enviar_call_center_auto({tel}, {amb})", e)
+                log_error(f"_enviar_call_center_auto({tel}, {t_esp or amb})", e)
     finally:
         with _cc_auto_lock:
             _cc_auto_pendientes.discard(tel)
@@ -1716,7 +1841,13 @@ def _registrar_template_meta(p: dict, nombre_anterior: str | None = None,
 
 
 def listar_plantillas(sesion: dict = Depends(sesion_actual)):
-    return sorted(leer_plantillas(), key=lambda p: p.get("actualizada", 0), reverse=True)
+    plantillas = leer_plantillas()
+    if not _es_privilegiado(sesion):
+        # Solo las globales (sin especialidad) y las de sus especialidades.
+        permitidas = set(sesion.get("especialidad_ids") or [])
+        plantillas = [p for p in plantillas
+                      if p.get("especialidad_id") is None or p.get("especialidad_id") in permitidas]
+    return sorted(plantillas, key=lambda p: p.get("actualizada", 0), reverse=True)
 
 
 def _actualizar_estado_meta(p: dict) -> dict:
@@ -2003,6 +2134,7 @@ def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(exigir("plantillas
     if len(body.texto) > MAX_TEXTO_PLANTILLA:
         raise HTTPException(400, detail=f"El mensaje supera el limite de {MAX_TEXTO_PLANTILLA} caracteres")
     categoria = _validar_categoria_template(body.whatsapp_template_categoria)
+    esp_id = _validar_plantilla_especialidad(sesion, body.especialidad_id)
 
     plantillas = leer_plantillas()
     clave = slug(body.clave or body.nombre)
@@ -2015,6 +2147,7 @@ def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(exigir("plantillas
         "clave": clave,
         "nombre": body.nombre.strip(),
         "texto": body.texto,
+        "especialidad_id": esp_id,
         # El nombre del template de Meta se deriva SIEMPRE del nombre de la
         # plantilla (no se acepta uno arbitrario desde el cliente).
         "whatsapp_template": slug(body.nombre) or None,
@@ -2091,6 +2224,7 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
             template_id_anterior = p.get("whatsapp_template_id")
 
             p["texto"] = body.texto
+            p["especialidad_id"] = _validar_plantilla_especialidad(sesion, body.especialidad_id)
             p["whatsapp_template"] = p.get("whatsapp_template") or (slug(p.get("nombre", "")) or None)
             p["whatsapp_template_lang"] = (body.whatsapp_template_lang or "").strip() or None
             p["whatsapp_template_categoria"] = categoria
@@ -2149,16 +2283,27 @@ def eliminar_plantilla(plantilla_id: int, sesion: dict = Depends(exigir("plantil
 def obtener_call_center_log(sesion: dict = Depends(exigir("call_center_registro"))):
     """Últimas respuestas enviadas a pacientes interesados, con el número de
     call center asignado a cada una, y el contador de usos por número.
-    Permiso propio: `call_center_registro` (admin/dev lo tienen de forma implícita)."""
+    Permiso propio: `call_center_registro` (admin/dev lo tienen de forma implícita).
+    No privilegiados: solo filas de sus especialidades asignadas."""
     entradas = []
     try:
+        where, args = "", ()
+        if not _es_privilegiado(sesion):
+            permitidas = {e["nombre_tabla_base"]
+                          for e in servicio_especialidades.listar_especialidades()
+                          if e["id"] in set(sesion.get("especialidad_ids") or [])}
+            if not permitidas:
+                return {"entradas": [], "contadores": {}}
+            placeholders = ", ".join("%s" for _ in permitidas)
+            where, args = f" WHERE base_datos IN ({placeholders})", tuple(permitidas)
         with conectar() as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT id, nombre_paciente, numero_paciente, numero_call_center,"
                 " plantilla_clave, automatico, estado, descripcion_error, base_datos, fecha_hora"
-                " FROM call_center_log ORDER BY id DESC LIMIT 200"
+                f" FROM call_center_log{where} ORDER BY id DESC LIMIT 200",
+                args or None,
             )
-            privilegiado = sesion.get("rol") in ROLES_PRIVILEGIADOS
+            privilegiado = _es_privilegiado(sesion)
             for r in cur.fetchall():
                 r["fecha"] = r.pop("fecha_hora").strftime("%d-%m-%Y %H:%M")
                 r["automatico"] = bool(r["automatico"])
@@ -2586,9 +2731,10 @@ ESTADOS_ENVIO_EN_CURSO = ("en_proceso", "pausado")
 def _envio_en_curso(ambiente: str) -> dict | None:
     """Primer envío activo (en proceso o pausado) sobre esa base de datos, o
     None si no hay ninguno. El bloqueo es POR BASE: un envío en producción no
-    impide iniciar otro en desarrollo (y al revés). Se llama SIEMPRE bajo JOBS_LOCK."""
+    impide iniciar otro en desarrollo (y al revés), y cada especialidad
+    (`pacientes_<slug>`) es su propia base. Se llama SIEMPRE bajo JOBS_LOCK."""
     for job in JOBS.values():
-        if job.get("estado") in ESTADOS_ENVIO_EN_CURSO and job.get("ambiente") == ambiente:
+        if job.get("estado") in ESTADOS_ENVIO_EN_CURSO and job.get("base", job.get("ambiente")) == ambiente:
             return job
     return None
 
@@ -2600,7 +2746,13 @@ def _error_envio_en_curso(job: dict | None) -> HTTPException:
         return HTTPException(409, detail="Ya hay un envío en curso. Espera a que termine antes de iniciar otro.")
     quien = (job.get("nombre_enviador") or "").strip() or "otro usuario"
     plantilla = (job.get("plantilla") or {}).get("nombre") or ""
-    ambiente = "producción" if job.get("ambiente") == "produccion" else "desarrollo"
+    base = job.get("base") or job.get("ambiente")
+    if base == "produccion":
+        ambiente = "producción"
+    elif base in ("desarrollo", "pacientes_dev"):
+        ambiente = "desarrollo"
+    else:
+        ambiente = f"la tabla {base}"
     partes = ["Ya hay un envío en curso"]
     if quien:
         partes.append(f"iniciado por {quien}")
@@ -2780,8 +2932,8 @@ def renderizar_mensaje(texto: str, paciente: dict) -> str:
     return texto
 
 
-def actualizar_estado_paciente(paciente_id: int, estado: str, ambiente: str) -> None:
-    t = tabla_pacientes(ambiente)
+def actualizar_estado_paciente(paciente_id: int, estado: str, ambiente: str, tabla: str | None = None) -> None:
+    t = tabla or tabla_pacientes(ambiente)
     if not columna_existe(t, "estado", ambiente):
         return
     with conectar(ambiente) as conn, conn.cursor() as cur:
@@ -2789,11 +2941,11 @@ def actualizar_estado_paciente(paciente_id: int, estado: str, ambiente: str) -> 
         conn.commit()
 
 
-def limpiar_interes_paciente(paciente_id: int, ambiente: str) -> None:
+def limpiar_interes_paciente(paciente_id: int, ambiente: str, tabla: str | None = None) -> None:
     """Al mandarle una plantilla nueva a un paciente, su interés/desinterés
     por la oferta ANTERIOR ya no aplica: queda «sin respuesta» hasta que
     conteste esta nueva oferta."""
-    t = tabla_pacientes(ambiente)
+    t = tabla or tabla_pacientes(ambiente)
     cols = columnas_tabla(t, ambiente)
     campos = [c for c in ("interesado", "no_interesado", "interes_plantilla_clave", "interes_fecha") if c in cols]
     if not campos:
@@ -2804,8 +2956,8 @@ def limpiar_interes_paciente(paciente_id: int, ambiente: str) -> None:
         conn.commit()
 
 
-def actualizar_telefono(paciente_id: int, telefono: str, ambiente: str) -> None:
-    t = tabla_pacientes(ambiente)
+def actualizar_telefono(paciente_id: int, telefono: str, ambiente: str, tabla: str | None = None) -> None:
+    t = tabla or tabla_pacientes(ambiente)
     if not columna_existe(t, "telefono", ambiente):
         return
     with conectar(ambiente) as conn, conn.cursor() as cur:
@@ -2814,28 +2966,43 @@ def actualizar_telefono(paciente_id: int, telefono: str, ambiente: str) -> None:
 
 
 def registrar_historial(paciente_id, nombre, telefono, clave_plantilla, mensaje, estado, error=None,
-                        ambiente="produccion", envio_id=None, whatsapp_message_id=None) -> None:
+                        ambiente="produccion", envio_id=None, whatsapp_message_id=None,
+                        especialidad_id=None, tabla_pacientes=None) -> None:
     try:
         with conectar(ambiente) as conn, conn.cursor() as cur:
+            cols = columnas_tabla("log_envios", ambiente)
+            extra_col, extra_val = "", ()
+            if "especialidad_id" in cols and "tabla_pacientes" in cols:
+                extra_col = ", especialidad_id, tabla_pacientes"
+                extra_val = (especialidad_id, tabla_pacientes)
             cur.execute(
                 "INSERT INTO log_envios (envio_id, paciente_id, nombre_paciente, numero_telefono, mensaje,"
-                " plantilla_clave, estado_envio, descripcion_error, whatsapp_message_id, estado_whatsapp)"
-                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                f" plantilla_clave, estado_envio, descripcion_error, whatsapp_message_id, estado_whatsapp{extra_col})"
+                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s" + ", %s, %s)" if extra_col else ")",
                 (envio_id, paciente_id, nombre, telefono, mensaje, clave_plantilla, estado, error,
-                 whatsapp_message_id, "sent" if estado == "enviado" and whatsapp_message_id else None),
+                 whatsapp_message_id, "sent" if estado == "enviado" and whatsapp_message_id else None,
+                 *extra_val),
             )
             conn.commit()
     except Exception as e:
         print(f"[HISTORIAL] No se pudo registrar: {e}")
 
 
-def crear_envio_batch(base_datos, plantilla_clave, plantilla_nombre, total, ambiente, usuario: str = "") -> int | None:
+def crear_envio_batch(base_datos, plantilla_clave, plantilla_nombre, total, ambiente, usuario: str = "",
+                      especialidad_id=None, tabla_pacientes=None) -> int | None:
     try:
         with conectar(ambiente) as conn, conn.cursor() as cur:
+            cols = columnas_tabla("envios", ambiente)
+            extra_col, extra_val = "", ()
+            if "especialidad_id" in cols and "tabla_pacientes" in cols:
+                extra_col = ", especialidad_id, tabla_pacientes"
+                extra_val = (especialidad_id, tabla_pacientes)
             cur.execute(
-                "INSERT INTO envios (base_datos, plantilla_clave, plantilla_nombre, total_pacientes, estado, usuario)"
-                " VALUES (%s, %s, %s, %s, 'completado', %s)",
-                (base_datos, plantilla_clave, plantilla_nombre, total, (usuario or "").strip().lower() or None),
+                "INSERT INTO envios (base_datos, plantilla_clave, plantilla_nombre, total_pacientes, estado, usuario"
+                f"{extra_col})"
+                " VALUES (%s, %s, %s, %s, 'completado', %s" + (", %s, %s)" if extra_col else ")"),
+                (base_datos, plantilla_clave, plantilla_nombre, total, (usuario or "").strip().lower() or None,
+                 *extra_val),
             )
             conn.commit()
             return cur.lastrowid
@@ -2882,6 +3049,8 @@ def procesar_job(job_id: str) -> None:
 def _procesar_job(job_id: str) -> None:
     job = JOBS[job_id]
     amb = job["ambiente"]
+    t_esp = job.get("tabla_especialidad")
+    esp_id = job.get("especialidad_id")
     cfg = leer_config()
     canal = obtener_canal(cfg)
     clave = job.get("plantilla", {}).get("clave")
@@ -2890,12 +3059,13 @@ def _procesar_job(job_id: str) -> None:
 
     if canal is None or not canal.disponible():
         for d in job["destinatarios"]:
-            actualizar_estado_paciente(d["id"], "error", amb)
+            actualizar_estado_paciente(d["id"], "error", amb, tabla=t_esp)
             job["fallidos"] += 1
             registrar_historial(d["id"], d["nombre"], d["telefono"], clave,
                                 d["mensaje"], "error",
                                 f"Canal no disponible: {canal.nombre if canal else 'desconocido'}",
-                                ambiente=amb, envio_id=envio_id)
+                                ambiente=amb, envio_id=envio_id,
+                                especialidad_id=esp_id, tabla_pacientes=t_esp)
         actualizar_envio_batch(envio_id, amb, fallidos=len(job["destinatarios"]))
         job["estado"] = "error"
         job["detalle"] = f"Canal de envío no disponible ({cfg.get('metodo_envio')})"
@@ -2950,9 +3120,9 @@ def _procesar_job(job_id: str) -> None:
             log_error(f"procesar_job {job_id}: fallo enviando a {d.get('telefono')}", e)
             ok, message_id, error = False, None, f"Error inesperado: {e}"
 
-        actualizar_estado_paciente(d["id"], "enviado" if ok else "error", amb)
+        actualizar_estado_paciente(d["id"], "enviado" if ok else "error", amb, tabla=t_esp)
         if ok:
-            limpiar_interes_paciente(d["id"], amb)
+            limpiar_interes_paciente(d["id"], amb, tabla=t_esp)
 
         if ok:
             job["enviados"] += 1
@@ -2965,7 +3135,8 @@ def _procesar_job(job_id: str) -> None:
         registrar_historial(d["id"], d["nombre"], d["telefono"], clave,
                             d["mensaje"], "enviado" if ok else "error", error,
                             ambiente=amb, envio_id=envio_id,
-                            whatsapp_message_id=message_id)
+                            whatsapp_message_id=message_id,
+                            especialidad_id=esp_id, tabla_pacientes=t_esp)
 
         if i < total - 1 and intervalo > 0:
             time.sleep(intervalo)
@@ -2989,11 +3160,21 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
     if entorno_global == "desarrollo" and not tiene_permiso(sesion, "envio_produccion"):
         amb = "desarrollo"
 
+    # Envío a especialidad (Fase 2): tabla única pacientes_<slug>, con
+    # autorización estricta (403 si no está asignada). Las reglas de
+    # elegibilidad son las de producción (solo pendientes, sin opt-out).
+    esp = None
+    t_esp = None
+    if body.especialidad_id is not None:
+        esp = _exigir_especialidad(sesion, body.especialidad_id)
+        t_esp = esp["nombre_tabla_base"]
+    base_job = t_esp or amb
+
     # Un solo envío a la vez POR BASE: si ya hay uno en curso en esa misma base
     # (iniciado por este u otro usuario), se rechaza de inmediato con el detalle
     # de quién y qué se envía. Una base con un envío activo no bloquea a la otra.
     with JOBS_LOCK:
-        job_en_curso = _envio_en_curso(amb)
+        job_en_curso = _envio_en_curso(base_job)
     if job_en_curso is not None:
         raise _error_envio_en_curso(job_en_curso)
 
@@ -3018,13 +3199,21 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
             detail="Esta plantilla todavía no fue aprobada por Meta: no se puede usar para enviar "
                    "hasta que se apruebe.",
         )
+    # La plantilla asociada a una especialidad solo se usa en esa especialidad.
+    tpl_esp = plantilla.get("especialidad_id")
+    if tpl_esp is not None and body.especialidad_id != tpl_esp:
+        raise HTTPException(
+            400,
+            detail="Esta plantilla pertenece a otra especialidad: no se puede usar en este envío.",
+        )
 
+    amb_q = "produccion" if t_esp else amb
     with conectar(amb) as conn, conn.cursor() as cur:
-        t = tabla_pacientes(amb)
-        tiene_opt_out = columna_existe(t, "whatsapp_opt_out", amb)
-        tiene_estado = columna_existe(t, "estado", amb)
+        t = t_esp or tabla_pacientes(amb)
+        tiene_opt_out = columna_existe(t, "whatsapp_opt_out", amb_q)
+        tiene_estado = columna_existe(t, "estado", amb_q)
 
-        base_select = "SELECT " + expr_select_pacientes(amb) + from_pacientes(amb)
+        base_select = "SELECT " + expr_select_pacientes(amb_q, tabla=t) + from_pacientes(amb_q, tabla=t)
 
         if body.pacientes:
             # Se traen TODOS los seleccionados (incluidos los de baja) para poder
@@ -3032,7 +3221,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
             placeholders = ", ".join("%s" for _ in body.pacientes)
             cur.execute(base_select + f" WHERE p.id IN ({placeholders})", tuple(body.pacientes))
         else:
-            if amb == "desarrollo":
+            if amb_q == "desarrollo":
                 # En desarrollo se puede reenviar sin importar el estado del paciente;
                 # la única restricción real sigue siendo el filtro de números autorizados,
                 # que se aplica más abajo en este mismo endpoint.
@@ -3046,8 +3235,8 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
                     partes_estado = ["p.estado = 'pendiente'"]
                     # Los que respondieron "me interesa" / "no me interesa" a una
                     # oferta vuelven a ser elegibles al cabo de una semana.
-                    if columna_existe(t, "interes_fecha", amb):
-                        cols_t = columnas_tabla(t, amb)
+                    if columna_existe(t, "interes_fecha", amb_q):
+                        cols_t = columnas_tabla(t, amb_q)
                         partes_interes = [c for c in ("interesado", "no_interesado") if c in cols_t]
                         if partes_interes:
                             partes_estado.append(
@@ -3081,16 +3270,17 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         if telefono is None:
             rechazados.append({"id": p["id"], "nombre": nombre_completo, "telefono": telefono_crudo,
                                "motivo": "Formato de teléfono inválido"})
-            actualizar_estado_paciente(p["id"], "error", amb)
+            actualizar_estado_paciente(p["id"], "error", amb, tabla=t_esp)
             registrar_historial(p["id"], nombre_completo, telefono_crudo, plantilla["clave"],
                                 "", "numero_invalido", f"Formato de teléfono inválido: '{telefono_crudo}'",
-                                ambiente=amb)
+                                ambiente=amb,
+                                especialidad_id=(esp["id"] if esp else None), tabla_pacientes=t_esp)
             continue
 
         if telefono != telefono_crudo:
-            actualizar_telefono(p["id"], telefono, amb)
+            actualizar_telefono(p["id"], telefono, amb, tabla=t_esp)
 
-        if amb == "desarrollo" and telefono not in autorizados:
+        if amb == "desarrollo" and t_esp is None and telefono not in autorizados:
             rechazados.append({"id": p["id"], "nombre": nombre_completo, "telefono": telefono,
                                "motivo": f"Número no autorizado en base {amb}"})
             registrar_historial(p["id"], nombre_completo, telefono, plantilla["clave"],
@@ -3109,9 +3299,10 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
             },
         })
 
-    # En producción se puede limitar cuántos se envían de esta tanda; el resto
-    # queda pendiente para un envío posterior. En desarrollo no aplica.
-    if amb == "produccion" and body.limite is not None and destinatarios:
+    # En producción (y en especialidades) se puede limitar cuántos se envían
+    # de esta tanda; el resto queda pendiente para un envío posterior.
+    # En desarrollo no aplica.
+    if (amb == "produccion" or t_esp) and body.limite is not None and destinatarios:
         n = max(1, min(int(body.limite), len(destinatarios)))
         destinatarios = destinatarios[:n]
 
@@ -3143,15 +3334,19 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         # del intento en el historial (0 enviados, N inválidos).
         envio_id = None
         if rechazados:
-            envio_id = crear_envio_batch(nombre_base(amb), plantilla["clave"],
+            envio_id = crear_envio_batch(t_esp or nombre_base(amb), plantilla["clave"],
                                          plantilla["nombre"], len(rechazados), amb,
-                                         usuario=sesion.get("usuario", ""))
+                                         usuario=sesion.get("usuario", ""),
+                                         especialidad_id=(esp["id"] if esp else None),
+                                         tabla_pacientes=t_esp)
             if envio_id:
                 actualizar_envio_batch(envio_id, amb, invalidos=len(rechazados))
                 for r in rechazados:
                     registrar_historial(r.get("id"), r.get("nombre"), r.get("telefono"),
                                         plantilla["clave"], "", "numero_invalido",
-                                        r.get("motivo"), ambiente=amb, envio_id=envio_id)
+                                        r.get("motivo"), ambiente=amb, envio_id=envio_id,
+                                        especialidad_id=(esp["id"] if esp else None),
+                                        tabla_pacientes=t_esp)
         return {"iniciado": False, "total": 0, "rechazados": rechazados,
                 "requiere_confirmacion": False, "envio_id": envio_id}
 
@@ -3164,6 +3359,9 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
                                      usuario=sesion.get("usuario", ""))
         PENDIENTES[token] = {
             "ambiente": amb,
+            "base": base_job,
+            "especialidad_id": (esp["id"] if esp else None),
+            "tabla_especialidad": t_esp,
             "plantilla": {"id": plantilla["id"], "clave": plantilla["clave"],
                           "nombre": plantilla["nombre"], "texto": plantilla["texto"],
                           "whatsapp_template": plantilla.get("whatsapp_template"),
@@ -3182,7 +3380,9 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
             for r in rechazados:
                 registrar_historial(r.get("id"), r.get("nombre"), r.get("telefono"),
                                     plantilla["clave"], "", "numero_invalido",
-                                    r.get("motivo"), ambiente=amb, envio_id=envio_id)
+                                    r.get("motivo"), ambiente=amb, envio_id=envio_id,
+                                    especialidad_id=(esp["id"] if esp else None),
+                                    tabla_pacientes=t_esp)
         nombre_sol = (sesion.get("nombre") or "").strip()
         correo_sol = (sesion.get("usuario") or "").strip()
         if nombre_sol and correo_sol and nombre_sol.lower() != correo_sol.lower():
@@ -3195,22 +3395,26 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
                 "ambiente": amb, "rechazados": rechazados, "aviso_limite_mensajeria": aviso_limite,
                 "confirm_url": f"{url_base()}/api/notificaciones/confirmar/{token}"}
 
-    envio_id = crear_envio_batch(nombre_base(amb), plantilla["clave"], plantilla["nombre"],
+    envio_id = crear_envio_batch(t_esp or nombre_base(amb), plantilla["clave"], plantilla["nombre"],
                                  len(destinatarios) + len(rechazados), amb,
-                                 usuario=sesion.get("usuario", ""))
+                                 usuario=sesion.get("usuario", ""),
+                                 especialidad_id=(esp["id"] if esp else None),
+                                 tabla_pacientes=t_esp)
     if envio_id:
         actualizar_envio_batch(envio_id, amb, invalidos=len(rechazados))
         for r in rechazados:
             registrar_historial(r.get("id"), r.get("nombre"), r.get("telefono"),
                                 plantilla["clave"], "", "numero_invalido",
-                                r.get("motivo"), ambiente=amb, envio_id=envio_id)
+                                r.get("motivo"), ambiente=amb, envio_id=envio_id,
+                                especialidad_id=(esp["id"] if esp else None),
+                                tabla_pacientes=t_esp)
 
     job_id = uuid.uuid4().hex[:8]
     # Chequeo atómico: entre el chequeo rápido de arriba y acá pudo arrancar
     # otro envío EN ESTA MISMA BASE; bajo el lock se vuelve a verificar y se
     # reserva el job.
     with JOBS_LOCK:
-        job_en_curso = _envio_en_curso(amb)
+        job_en_curso = _envio_en_curso(base_job)
         if job_en_curso is not None:
             raise _error_envio_en_curso(job_en_curso)
         JOBS[job_id] = {
@@ -3222,6 +3426,9 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
             "errores": [],
             "detalle": "",
             "ambiente": amb,
+            "base": base_job,
+            "especialidad_id": (esp["id"] if esp else None),
+            "tabla_especialidad": t_esp,
             "plantilla": plantilla,
             "destinatarios": destinatarios,
             "envio_id": envio_id,
@@ -3331,7 +3538,7 @@ def confirmar_envio(token: str, background_tasks: BackgroundTasks):
     # solicitud), se rechaza la confirmación y se muestra al supervisor quién y
     # qué está en curso. Una base libre no bloquea a la otra.
     with JOBS_LOCK:
-        job_en_curso = _envio_en_curso(pend["ambiente"])
+        job_en_curso = _envio_en_curso(pend.get("base", pend["ambiente"]))
         if job_en_curso is not None:
             exc = _error_envio_en_curso(job_en_curso)
             pend["estado"] = "pendiente"
@@ -3356,6 +3563,9 @@ def confirmar_envio(token: str, background_tasks: BackgroundTasks):
             "errores": [],
             "detalle": "",
             "ambiente": pend["ambiente"],
+            "base": pend.get("base", pend["ambiente"]),
+            "especialidad_id": pend.get("especialidad_id"),
+            "tabla_especialidad": pend.get("tabla_especialidad"),
             "plantilla": pend["plantilla"],
             "destinatarios": pend["destinatarios"],
             "envio_id": pend.get("envio_id"),
@@ -3379,6 +3589,7 @@ def confirmar_envio(token: str, background_tasks: BackgroundTasks):
 class DestinosIn(BaseModel):
     ambiente: str = "produccion"
     plantilla_id: int | None = None
+    especialidad_id: int | None = None
 
 
 def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensajeria"))):
@@ -3387,9 +3598,13 @@ def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensaj
     except ValueError:
         raise HTTPException(400, detail=f"Entorno inválido: '{body.ambiente}'")
 
-    t = tabla_pacientes(amb)
+    esp = None
+    if body.especialidad_id is not None:
+        esp = _exigir_especialidad(sesion, body.especialidad_id)
+    t = (esp["nombre_tabla_base"] if esp else tabla_pacientes(amb))
+    amb_q = "produccion" if esp else amb
     with conectar(amb) as conn, conn.cursor() as cur:
-        if columna_existe(t, "estado", amb):
+        if columna_existe(t, "estado", amb_q):
             cur.execute(
                 f"SELECT COUNT(*) AS total,"
                 f" SUM(estado = 'pendiente') AS pendientes"
@@ -3403,8 +3618,8 @@ def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensaj
 
     total = int(fila["total"] or 0)
     # En desarrollo se envía sin importar el estado, así que "elegibles" = todos los pacientes.
-    # En producción se respeta el filtro de solo pendientes.
-    elegibles = total if amb == "desarrollo" else int(fila["pendientes"] or 0)
+    # En producción (y en especialidades) se respeta el filtro de solo pendientes.
+    elegibles = total if amb_q == "desarrollo" else int(fila["pendientes"] or 0)
 
     costo = None
     if body.plantilla_id is not None and tiene_permiso(sesion, "tarifas_editar"):
@@ -3415,7 +3630,8 @@ def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensaj
     return {
         "total": total,
         "pendientes": elegibles,
-        "base_datos": nombre_base(amb),
+        "base_datos": t if esp else nombre_base(amb),
+        "especialidad_id": (esp["id"] if esp else None),
         "costo": costo,
         "limite_mensajeria": _limite_mensajeria_aviso(amb),
     }
@@ -3460,17 +3676,45 @@ def reanudar_job(job_id: str, sesion: dict = Depends(exigir("mensajeria"))):
 
 
 def listar_historial(q: str | None = Query(None), estado: str | None = Query(None),
-                     ambiente: str = Query("produccion"), sesion: dict = Depends(exigir("historial"))):
-    com_col = "comentario" if "comentario" in columnas_tabla("envios", "produccion") else "NULL AS comentario"
+                     ambiente: str = Query("produccion"),
+                     especialidad_id: int | None = Query(None),
+                     sesion: dict = Depends(exigir("historial"))):
+    cols_env = columnas_tabla("envios", "produccion")
+    com_col = "comentario" if "comentario" in cols_env else "NULL AS comentario"
+    esp_col = "especialidad_id" if "especialidad_id" in cols_env else "NULL AS especialidad_id"
+    tab_col = "tabla_pacientes" if "tabla_pacientes" in cols_env else "NULL AS tabla_pacientes"
     sql = ("SELECT id, base_datos, plantilla_clave, plantilla_nombre, total_pacientes,"
-           f" enviados, fallidos, invalidos, estado, {com_col}, fecha_hora FROM envios")
+           f" enviados, fallidos, invalidos, estado, {com_col}, {esp_col}, {tab_col}, fecha_hora FROM envios")
     condiciones: list[str] = []
     args: list = []
 
-    # envios es una única tabla; 'base_datos' guarda 'pacientes_dev' o 'pacientes_prod'.
+    # envios es una única tabla; 'base_datos' guarda 'pacientes_dev',
+    # 'pacientes_prod' o la tabla de una especialidad (con especialidad_id).
     if ambiente != "todos":
         condiciones.append("base_datos = %s")
         args.append(nombre_base(ambiente))
+
+    if _es_privilegiado(sesion):
+        if especialidad_id is not None:
+            _exigir_especialidad(sesion, especialidad_id)  # 404 si no existe
+            if "especialidad_id" in cols_env:
+                condiciones.append("especialidad_id = %s")
+                args.append(int(especialidad_id))
+    else:
+        permitidas = list(sesion.get("especialidad_ids") or [])
+        if especialidad_id is not None:
+            _exigir_especialidad(sesion, especialidad_id)  # 403 si no asignada
+            if "especialidad_id" in cols_env:
+                condiciones.append("especialidad_id = %s")
+                args.append(int(especialidad_id))
+        elif "especialidad_id" in cols_env:
+            # Sin filtro: solo sus especialidades. Las filas legacy (NULL, de
+            # las tablas compartidas dev/prod) las ven solo admin/dev.
+            if not permitidas:
+                return []
+            placeholders = ", ".join("%s" for _ in permitidas)
+            condiciones.append(f"especialidad_id IN ({placeholders})")
+            args.extend(permitidas)
 
     if q and q.strip():
         like = f"%{q.strip()}%"
@@ -3497,16 +3741,46 @@ def detalle_historial(envio_id: int, ambiente: str = Query("produccion"),
     # log_envios es única para todo el sistema; el detalle se busca por envio_id.
     # Para 'respuesta' se usa la señal EFECTIVA actual del paciente (respondió /
     # se dio de baja / sin respuesta), no el valor congelado en la fila de envío.
-    t = tabla_pacientes(ambiente)
+    # Autorización (Fase 2): el envío de una especialidad lo ve quien tenga esa
+    # especialidad (o admin/dev); los envíos legacy, solo admin/dev.
+    cols_env = columnas_tabla("envios", ambiente)
+    esp_id_env = None
+    tabla_env = None
+    if "especialidad_id" in cols_env or "tabla_pacientes" in cols_env:
+        sel = []
+        if "especialidad_id" in cols_env:
+            sel.append("especialidad_id")
+        if "tabla_pacientes" in cols_env:
+            sel.append("tabla_pacientes")
+        with conectar(ambiente) as conn, conn.cursor() as cur:
+            cur.execute(f"SELECT {', '.join(sel)} FROM envios WHERE id = %s", (envio_id,))
+            _e = cur.fetchone() or {}
+            esp_id_env = _e.get("especialidad_id")
+            tabla_env = _e.get("tabla_pacientes")
+    if esp_id_env is not None:
+        _exigir_especialidad(sesion, esp_id_env)
+    elif not _es_privilegiado(sesion):
+        raise HTTPException(403, detail="No tienes acceso a este envío.")
+    if tabla_env and servicio_especialidades.tabla_valida(tabla_env):
+        t = tabla_env
+    else:
+        t = tabla_pacientes(ambiente)
     tiene_opt = columna_existe(t, "whatsapp_opt_out", ambiente)
     tiene_int = columna_existe(t, "interesado", ambiente)
-    re_expr = expr_respuesta_efectiva("pac", tiene_opt, columna_existe(t, "respuesta_manual", ambiente))
+    re_expr = expr_respuesta_efectiva("pac", tiene_opt, columna_existe(t, "respuesta_manual", ambiente),
+                                      tabla_log=t if (tabla_env and "tabla_pacientes" in columnas_tabla("log_envios", ambiente)) else None)
     int_expr = "COALESCE(pac.interesado, 0)" if tiene_int else "0"
+    if "tabla_pacientes" in columnas_tabla("log_envios", ambiente):
+        cond_r, args_r = (("AND r.tabla_pacientes = %s", (tabla_env,)) if tabla_env
+                          else ("AND r.tabla_pacientes IS NULL", ()))
+    else:
+        cond_r, args_r = "", ()
     sql = (
         "SELECT le.id, le.paciente_id, le.nombre_paciente, le.numero_telefono, le.estado_envio,"
         " le.descripcion_error, le.fecha_hora,"
         "  (SELECT r.mensaje FROM log_envios r"
         "     WHERE r.paciente_id = le.paciente_id AND r.plantilla_clave = 'respuesta'"
+        f"       {cond_r}"
         "       AND r.fecha_hora >= le.fecha_hora"
         "     ORDER BY r.id DESC LIMIT 1) AS mensaje_respuesta,"
         f" {int_expr} AS interesado,"
@@ -3516,7 +3790,7 @@ def detalle_historial(envio_id: int, ambiente: str = Query("produccion"),
         " WHERE le.envio_id = %s ORDER BY le.id"
     )
     with conectar(ambiente) as conn, conn.cursor() as cur:
-        cur.execute(sql, (envio_id,))
+        cur.execute(sql, (*args_r, envio_id))
         filas = cur.fetchall()
     privilegiado = sesion.get("rol") in ROLES_PRIVILEGIADOS
     for f in filas:
@@ -3536,7 +3810,23 @@ def actualizar_respuesta(registro_id: int, body: EstadoPacienteIn,
                          sesion: dict = Depends(exigir("historial"))):
     if body.estado not in ("pendiente", "respondio", "baja"):
         raise HTTPException(400, detail="Respuesta inválida. Use: pendiente, respondio, baja")
+    cols_log = columnas_tabla("log_envios", ambiente)
+    cols_env = columnas_tabla("envios", ambiente)
     with conectar(ambiente) as conn, conn.cursor() as cur:
+        esp_id_reg = None
+        if "envio_id" in cols_log and "especialidad_id" in cols_env:
+            cur.execute(
+                "SELECT e.especialidad_id FROM log_envios le"
+                " JOIN envios e ON e.id = le.envio_id"
+                " WHERE le.id = %s",
+                (registro_id,),
+            )
+            _r = cur.fetchone() or {}
+            esp_id_reg = _r.get("especialidad_id")
+        if esp_id_reg is not None:
+            _exigir_especialidad(sesion, esp_id_reg)
+        elif not _es_privilegiado(sesion):
+            raise HTTPException(403, detail="No tienes acceso a este registro.")
         cur.execute("UPDATE log_envios SET respuesta = %s WHERE id = %s", (body.estado, registro_id))
         conn.commit()
     return {"ok": True}
@@ -3570,7 +3860,7 @@ def _pacientes_por_respuesta(ambiente: str) -> dict:
 _SOLO_PROD = "envio_id IN (SELECT id FROM envios WHERE base_datos = 'pacientes_prod')"
 
 
-def estadisticas(sesion: dict = Depends(exigir("estadisticas"))):
+def estadisticas(sesion: dict = Depends(solo_admin)):
     """Resumen de envíos para la página de Estadísticas (solo producción)."""
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(
@@ -3616,7 +3906,7 @@ def estadisticas(sesion: dict = Depends(exigir("estadisticas"))):
     }
 
 
-def estadisticas_envios(granularidad: str = Query("mes"), sesion: dict = Depends(exigir("estadisticas"))):
+def estadisticas_envios(granularidad: str = Query("mes"), sesion: dict = Depends(solo_admin)):
     """Mensajes enviados agrupados por periodo (para el gráfico de barras)."""
     if granularidad not in ("dia", "mes", "anio"):
         raise HTTPException(400, detail="granularidad debe ser dia, mes o anio")
@@ -3839,7 +4129,7 @@ def _obtener_moneda_meta() -> str | None:
     return None
 
 
-def obtener_tarifas(sesion: dict = Depends(exigir("tarifas_editar"))):
+def obtener_tarifas(sesion: dict = Depends(solo_admin)):
     moneda = _moneda_cuenta()
     tarifas = _tarifas_guardadas(moneda) or _tarifas_guardadas("USD")
     todas = _tarifas_guardadas()
@@ -3859,7 +4149,7 @@ def obtener_tarifas(sesion: dict = Depends(exigir("tarifas_editar"))):
     }
 
 
-def actualizar_tarifas(sesion: dict = Depends(exigir("tarifas_editar"))):
+def actualizar_tarifas(sesion: dict = Depends(solo_admin)):
     try:
         encontradas = _fetch_tarifas_meta()
     except Exception as e:
@@ -3906,7 +4196,7 @@ def actualizar_tarifas(sesion: dict = Depends(exigir("tarifas_editar"))):
     }
 
 
-def descargar_tarifa_csv(sesion: dict = Depends(exigir("tarifas_editar"))):
+def descargar_tarifa_csv(sesion: dict = Depends(solo_admin)):
     moneda = _moneda_cuenta()
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(
@@ -3943,7 +4233,7 @@ def _categorias_por_clave() -> dict:
     return m
 
 
-def estadisticas_costos(granularidad: str = Query("mes"), sesion: dict = Depends(exigir("tarifas_editar"))):
+def estadisticas_costos(granularidad: str = Query("mes"), sesion: dict = Depends(solo_admin)):
     if granularidad not in ("dia", "mes", "anio"):
         raise HTTPException(400, detail="granularidad debe ser dia, mes o anio")
     fmt = {"dia": "%Y-%m-%d", "mes": "%Y-%m", "anio": "%Y"}[granularidad]
