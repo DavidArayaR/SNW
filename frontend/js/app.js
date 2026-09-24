@@ -86,7 +86,16 @@ const etiquetaEstadoMeta = (status) => ETIQUETAS_ESTADO_META[status] || ETIQUETA
 // p == null (plantilla nueva, sin guardar todavía) no tiene restricción.
 const esPlantillaAprobada = (p) => !p || p.whatsapp_template_status === "APPROVED";
 const esPlantillaRechazada = (p) => !!p && p.whatsapp_template_status === "REJECTED";
-const esPlantillaEditable = (p) => !p || esPlantillaAprobada(p) || esPlantillaRechazada(p);
+// Aprobación interna previa a Meta: el usuario normal crea en "pendiente" y
+// solo se registra en Meta cuando un admin/dev/supervisor la aprueba. Las
+// antiguas (sin campo) cuentan como "aprobada".
+const aprobacionPlantilla = (p) => !p || p.aprobacion_estado || "aprobada";
+const puedeAprobarPlantillas = () => !!window.snwEsPrivilegiado || window.snwRol === "supervisor";
+const esPlantillaEditable = (p) => {
+  if (!p) return true;
+  if (aprobacionPlantilla(p) !== "aprobada") return true; // aún no existe en Meta
+  return esPlantillaAprobada(p) || esPlantillaRechazada(p);
+};
 // Meta solo permite editar un template una vez cada 24h (ver actualizar_plantilla
 // en el backend, que es quien de verdad lo exige). No afecta a Eliminar.
 const MS_24H = 24 * 3600 * 1000;
@@ -376,6 +385,12 @@ function crearItemPlantilla(p) {
   } else if (esRecienAprobada(p)) {
     estadoTag = ` <span class="tpl-item__estado tpl-item__estado--nueva">✨ Aprobada</span>`;
   }
+  const ap = p.aprobacion_estado || "aprobada";
+  if (ap === "pendiente") {
+    estadoTag += ` <span class="tpl-item__estado">⏳ Por aprobar</span>`;
+  } else if (ap === "rechazada") {
+    estadoTag += ` <span class="tpl-item__estado tpl-item__estado--rechazada">Rechazada</span>`;
+  }
   if (p.especialidad_id != null) {
     const nombreEsp = nombreEspecialidad(p.especialidad_id) || "Especialidad";
     estadoTag += ` <span class="tpl-item__estado">${escaparHtml(nombreEsp)}</span>`;
@@ -572,11 +587,19 @@ function actualizarBotonesSegunEstado(p) {
   const aprobada = esPlantillaAprobada(p);
   const editable = esPlantillaEditable(p);
   const enEnfriamiento = editable && editadaRecientemente(p);
+  const ap = aprobacionPlantilla(p);
+  // Solo se puede enviar lo aprobado por Meta Y por la revisión interna.
+  const enviable = p && aprobada && ap === "aprobada";
   // Meta limita la edición a una vez cada 24h, pero no el borrado: Eliminar
   // sigue disponible aunque Guardar esté bloqueado por el enfriamiento.
   const puedeGuardar = PUEDE_EDITAR_PLANTILLAS && editable && !enEnfriamiento;
   const puedeEliminar = PUEDE_EDITAR_PLANTILLAS && editable;
+  const puedeRevisar = p && ap !== "aprobada" && puedeAprobarPlantillas();
   btnGuardar.hidden = !puedeGuardar;
+  const btnAprobar = $("#btnAprobar");
+  const btnRechazar = $("#btnRechazar");
+  if (btnAprobar) btnAprobar.hidden = !puedeRevisar;
+  if (btnRechazar) btnRechazar.hidden = !(p && ap === "pendiente" && puedeAprobarPlantillas());
   // Cancelar no guarda nada, solo deselecciona: debe poder usarse para salir
   // de una plantilla aunque Guardar esté bloqueado (en enfriamiento, pendiente
   // de revisión, etc.) y también al estar creando una plantilla nueva
@@ -586,9 +609,22 @@ function actualizarBotonesSegunEstado(p) {
   if (btnCancelar) btnCancelar.hidden = formEl.style.display === "none";
   // Eliminar solo aplica si ya existe (tiene id) y se puede gestionar.
   btnEliminar.hidden = !(p && puedeEliminar);
-  if (btnEnviarActual) btnEnviarActual.hidden = !(p && aprobada);
+  if (btnEnviarActual) btnEnviarActual.hidden = !(p && enviable);
   if (avisoPendiente) {
-    if (p && !editable) {
+    if (p && ap === "pendiente") {
+      pararCuentaRegresiva();
+      avisoPendiente.textContent =
+        "Esta plantilla está pendiente de aprobación interna: todavía no se envió a Meta " +
+        "y no se puede usar para enviar mensajes hasta que un administrador o supervisor la apruebe.";
+      avisoPendiente.hidden = false;
+    } else if (p && ap === "rechazada") {
+      pararCuentaRegresiva();
+      avisoPendiente.textContent =
+        "Esta plantilla fue rechazada en la revisión interna" +
+        (p.rechazo_motivo ? `: «${p.rechazo_motivo}».` : ".") +
+        " Corrígela y guárdala para pedir revisión de nuevo.";
+      avisoPendiente.hidden = false;
+    } else if (p && !editable) {
       pararCuentaRegresiva();
       avisoPendiente.textContent =
         `Esta plantilla está ${etiquetaEstadoMeta(p.whatsapp_template_status).toLowerCase()} en Meta: ` +
@@ -917,6 +953,84 @@ $("#btnModalConfirmar").addEventListener("click", async () => {
 });
 
 $("#btnCancelar").addEventListener("click", cancelarEdicion);
+
+async function aprobarPlantillaActiva() {
+  if (!activaId) return;
+  const btn = $("#btnAprobar");
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch(`${API_URL}/${activaId}/aprobar`, {
+      method: "POST", headers: authHeaders(),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) { window.snwSesionExpirada(); return; }
+    if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : `Error ${res.status}`);
+    const i = plantillas.findIndex((x) => x.id === activaId);
+    if (i >= 0) plantillas[i] = data;
+    toast("Plantilla aprobada: ahora va a Meta para su revisión.", "ok");
+    abrir(activaId);
+  } catch (err) {
+    toast(`No se pudo aprobar: ${err.message}`, "error");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function rechazarPlantillaActiva(motivo) {
+  if (!activaId) return;
+  const btn = $("#btnRechazar");
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch(`${API_URL}/${activaId}/rechazar`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ motivo }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) { window.snwSesionExpirada(); return; }
+    if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : `Error ${res.status}`);
+    const i = plantillas.findIndex((x) => x.id === activaId);
+    if (i >= 0) plantillas[i] = data;
+    toast("Plantilla rechazada: no irá a Meta.", "ok");
+    abrir(activaId);
+  } catch (err) {
+    toast(`No se pudo rechazar: ${err.message}`, "error");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+const _btnAprobar = $("#btnAprobar");
+const _modalAprobar = $("#modalAprobar");
+if (_btnAprobar) _btnAprobar.addEventListener("click", () => {
+  if (!activaId) return;
+  const p = plantillas.find((x) => x.id === activaId);
+  $("#aprobarNombre").textContent = p?.nombre ?? "";
+  _modalAprobar.hidden = false;
+});
+const _btnRechazar = $("#btnRechazar");
+const _modalRechazar = $("#modalRechazar");
+if (_btnRechazar) _btnRechazar.addEventListener("click", () => {
+  if (!activaId) return;
+  const p = plantillas.find((x) => x.id === activaId);
+  $("#rechazarNombre").textContent = p?.nombre ?? "";
+  $("#rechazoMotivo").value = "";
+  _modalRechazar.hidden = false;
+  $("#rechazoMotivo").focus();
+});
+$("#btnCancelarAprobar").addEventListener("click", () => (_modalAprobar.hidden = true));
+_modalAprobar.addEventListener("click", (e) => { if (e.target === _modalAprobar) _modalAprobar.hidden = true; });
+$("#btnCancelarRechazar").addEventListener("click", () => (_modalRechazar.hidden = true));
+_modalRechazar.addEventListener("click", (e) => { if (e.target === _modalRechazar) _modalRechazar.hidden = true; });
+$("#btnConfirmarAprobar").addEventListener("click", () => {
+  _modalAprobar.hidden = true;
+  aprobarPlantillaActiva();
+});
+$("#btnConfirmarRechazar").addEventListener("click", () => {
+  const motivo = $("#rechazoMotivo").value.trim();
+  _modalRechazar.hidden = true;
+  rechazarPlantillaActiva(motivo);
+});
 
 document.querySelectorAll(".chip").forEach((chip) => {
   chip.addEventListener("click", () => {

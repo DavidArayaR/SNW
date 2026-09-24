@@ -129,6 +129,8 @@
 
         <div class="form-actions">
           <button type="submit" id="btnGuardar" class="btn btn--primary btn--lg">Guardar</button>
+          <button type="button" id="btnAprobar" class="btn btn--primary btn--lg" hidden>Aprobar y enviar a Meta</button>
+          <button type="button" id="btnRechazar" class="btn btn--danger btn--lg" hidden>Rechazar</button>
           <button type="button" id="btnCancelar" class="btn btn--ghost btn--lg">Cancelar</button>
           <button type="button" id="btnEnviarActual" class="btn btn--primary btn--lg" hidden>Enviar mensaje</button>
         </div>
@@ -152,6 +154,31 @@
       <div class="modal__actions">
         <button type="button" class="btn btn--ghost" id="btnModalCancelar">Cancelar</button>
         <button type="button" class="btn btn--danger" id="btnModalConfirmar">Eliminar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalAprobar" class="modal" hidden>
+    <div class="modal__card" role="dialog" aria-modal="true">
+      <h3>¿Aprobar "<span id="aprobarNombre"></span>"?</h3>
+      <p>La plantilla se registrar&aacute; en Meta para su revisi&oacute;n y quedar&aacute; disponible para env&iacute;os una vez aprobada all&aacute;.</p>
+      <div class="modal__actions">
+        <button type="button" class="btn btn--ghost" id="btnCancelarAprobar">Cancelar</button>
+        <button type="button" class="btn btn--primary" id="btnConfirmarAprobar">Aprobar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalRechazar" class="modal" hidden>
+    <div class="modal__card" role="dialog" aria-modal="true">
+      <h3>Rechazar "<span id="rechazarNombre"></span>"</h3>
+      <div class="field">
+        <label for="rechazoMotivo">Motivo del rechazo (opcional, lo ver&aacute; quien la cre&oacute;)</label>
+        <textarea id="rechazoMotivo" rows="3" maxlength="255" placeholder="Ej: falta el saludo inicial..."></textarea>
+      </div>
+      <div class="modal__actions">
+        <button type="button" class="btn btn--ghost" id="btnCancelarRechazar">Cancelar</button>
+        <button type="button" class="btn btn--danger" id="btnConfirmarRechazar">Rechazar</button>
       </div>
     </div>
   </div>
