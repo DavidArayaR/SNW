@@ -65,6 +65,14 @@
         </div>
 
         <div class="field">
+          <label for="inpEspecialidad">Especialidad</label>
+          <select id="inpEspecialidad">
+            <option value="">Global (todas las bases)</option>
+          </select>
+          <p class="field__hint">Vacía: se puede usar en desarrollo, producción y especialidades. Con especialidad, solo se puede enviar a su tabla.</p>
+        </div>
+
+        <div class="field">
           <label for="inpMensaje">Mensaje</label>
           <textarea id="inpMensaje" rows="7" placeholder="Escribe aquí el mensaje que recibirán los pacientes..."></textarea>
           <div class="field__foot">
@@ -167,10 +175,7 @@
         </div>
         <div class="detalle-fila">
           <dt>Base de datos</dt>
-          <dd class="conf-radios">
-            <label><input type="radio" name="ambienteConf" value="desarrollo"> Desarrollo</label>
-            <label><input type="radio" name="ambienteConf" value="produccion"> Producci&oacute;n</label>
-          </dd>
+          <dd><select id="selBaseConf" class="badge badge--select" aria-label="Base de datos"></select></dd>
         </div>
         <div class="detalle-fila conf-limite-fila" id="filaLimiteConf" hidden>
           <dt>Cu&aacute;ntos enviar</dt>

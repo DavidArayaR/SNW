@@ -9,7 +9,44 @@ if (!localStorage.getItem("snw_token")) location.replace("login.html");
 let registros = [];
 let filtro = "";
 let ambienteDetalle = "produccion";
+let especialidadDetalle = null; // especialidad del envío abierto (para sus mensajes)
 let pacienteMsgActual = null; // { id, ambiente, interesado }
+
+let especialidadesHist = [];
+const selEspecialidadHist = $("#selEspecialidadHist");
+
+function especialidadHistActual() {
+  const v = selEspecialidadHist ? selEspecialidadHist.value : "";
+  return v ? Number(v) : null;
+}
+
+async function cargarEspecialidadesHist() {
+  if (!selEspecialidadHist) return;
+  try {
+    const r = await fetch("api/especialidades/mias", { headers: authHeaders(), cache: "no-store" });
+    if (!r.ok) throw new Error();
+    especialidadesHist = await r.json();
+  } catch {
+    especialidadesHist = [];
+  }
+  const guardada = localStorage.getItem("snw_esp_historial") || "";
+  selEspecialidadHist.innerHTML =
+    `<option value="">Todas</option>` +
+    especialidadesHist.map((e) => `<option value="${e.id}">${escaparHtml(e.nombre_visible)}</option>`).join("");
+  if (guardada && especialidadesHist.some((e) => String(e.id) === guardada)) {
+    selEspecialidadHist.value = guardada;
+  } else {
+    localStorage.removeItem("snw_esp_historial");
+  }
+  if (selEspecialidadHist) selEspecialidadHist.hidden = !especialidadesHist.length;
+}
+
+if (selEspecialidadHist) selEspecialidadHist.addEventListener("change", () => {
+  const v = selEspecialidadHist.value;
+  if (v) localStorage.setItem("snw_esp_historial", v);
+  else localStorage.removeItem("snw_esp_historial");
+  cargar();
+});
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -28,8 +65,10 @@ function escaparHtml(texto) {
 
 async function cargar() {
   try {
+    const esp = especialidadHistActual();
+    const qs = "ambiente=todos" + (esp ? `&especialidad_id=${esp}` : "");
     const [rh, rc] = await Promise.all([
-      fetch(`${API_HISTORIAL}?ambiente=todos`, { headers: authHeaders(), cache: "no-store" }),
+      fetch(`${API_HISTORIAL}?${qs}`, { headers: authHeaders(), cache: "no-store" }),
       fetch(`api/configuracion?ambiente=produccion`, { headers: authHeaders(), cache: "no-store" }),
     ]);
     if (rh.status === 401 || rc.status === 401) { window.snwSesionExpirada(); return; }
@@ -57,6 +96,7 @@ function render() {
     tr.dataset.id = String(r.id);
     tr.dataset.amb = (r.base_datos ?? "").includes("prod") ? "produccion" : "desarrollo";
     tr.dataset.base = r.base_datos ?? "";
+    tr.dataset.esp = r.especialidad_id != null ? String(r.especialidad_id) : "";
     const total = r.total_pacientes ?? 0;
     const enviados = r.enviados ?? 0;
     const fallidos = r.fallidos ?? 0;
@@ -97,6 +137,7 @@ tbodyEl.addEventListener("click", async (e) => {
   const envio = registros.find((r) => String(r.id) === envioId && ((r.base_datos ?? "").includes("prod") ? "produccion" : "desarrollo") === amb)
     || registros.find((r) => String(r.id) === envioId);
   ambienteDetalle = amb;
+  especialidadDetalle = (envio && envio.especialidad_id != null) ? envio.especialidad_id : (tr.dataset.esp ? Number(tr.dataset.esp) : null);
 
   try {
     const r = await fetch(`api/notificaciones/historial/${envioId}/detalle?ambiente=${amb}`, {
@@ -184,7 +225,8 @@ $("#detalleBody").addEventListener("click", (e) => {
 
 async function abrirMensajes(pacienteId) {
   try {
-    const r = await fetch(`api/pacientes/${pacienteId}/mensajes?ambiente=${ambienteDetalle}`, {
+    const qsEsp = especialidadDetalle != null ? `&especialidad_id=${especialidadDetalle}` : "";
+    const r = await fetch(`api/pacientes/${pacienteId}/mensajes?ambiente=${ambienteDetalle}${qsEsp}`, {
       headers: authHeaders(), cache: "no-store",
     });
     if (r.status === 401) { window.snwSesionExpirada(); return; }
@@ -297,5 +339,6 @@ if (panelCCLogEl) {
   window.snwConCooldown($("#btnActualizarCCLog"), cargarLogCC);
 }
 
+cargarEspecialidadesHist();
 cargar();
 cargarLogCC();

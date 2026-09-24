@@ -25,7 +25,7 @@ const _EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/;
 const PERM_PAGINAS = ["mensajeria", "historial"];
 const PERM_ACCIONES = ["plantillas_editar", "envio_produccion", "call_center_registro"];
 const PERMISOS_BASICOS = ["mensajeria", "historial", "plantillas_editar"];
-const ROL_LABEL = { usuario: "Usuario", administrador: "Administrador", desarrollador: "Desarrollador" };
+const ROL_LABEL = { usuario: "Usuario", supervisor: "Supervisor", administrador: "Administrador", desarrollador: "Desarrollador" };
 const ROLES_TOTALES = ["administrador", "desarrollador"];
 
 let estado = { usuarios: [], roles: [], mi_rol: "", puede_cambiar_rol: false };
@@ -168,7 +168,7 @@ function permisosCheckboxes(rol, permisos, editable) {
 function rolControl(u) {
   if (estado.puede_cambiar_rol && u.editable) {
     // Un administrador solo puede ascender a «administrador»; nunca a «desarrollador».
-    let disponibles = estado.roles || ["usuario", "administrador", "desarrollador"];
+    let disponibles = estado.roles || ["usuario", "supervisor", "administrador", "desarrollador"];
     if (estado.mi_rol === "administrador") {
       disponibles = disponibles.filter((r) => r !== "desarrollador");
     }
@@ -220,6 +220,11 @@ function renderDetalle() {
         (estado.puede_cambiar_rol && u.editable ? `<label>Rol</label><div>${rolControl(u)}</div>` : "") +
         `<label>Permisos</label>` +
         `<div id="permWrap">${permisosCheckboxes(u.rol, u.permisos, u.editable)}</div>` +
+        `<label>Especialidades</label>` +
+        `<div>${(u.especialidades && u.especialidades.length ? u.especialidades.map((e) =>
+            `<span class="usr-tag">${esc(e.nombre_visible)}</span>`).join(" ")
+          : `<span class="field__hint">Sin especialidades asignadas.</span>`)}` +
+          `<p class="field__hint" style="margin:6px 0 0;">Se asignan en la pestaña Especialidades. Sin ellas, la cuenta solo usa las bases desarrollo/producción.</p></div>` +
         (u.editable ?
           `<label>Acceso</label>` +
           `<div><label class="usr-check"><input type="checkbox" data-activo${u.activo === false ? "" : " checked"}> Cuenta activa (puede iniciar sesión)</label></div>`

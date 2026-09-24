@@ -177,7 +177,7 @@ def asegurar_tabla_config() -> None:
                 "  id INT AUTO_INCREMENT PRIMARY KEY,"
                 "  usuario VARCHAR(150) NOT NULL,"
                 "  nombre VARCHAR(150) NOT NULL DEFAULT '',"
-                "  rol ENUM('usuario','administrador','desarrollador') NOT NULL DEFAULT 'usuario',"
+                "  rol ENUM('usuario','supervisor','administrador','desarrollador') NOT NULL DEFAULT 'usuario',"
                 "  permisos VARCHAR(500) NOT NULL DEFAULT '',"
                 "  clave_hash CHAR(64) NOT NULL,"
                 "  correo_recuperacion VARCHAR(150) NOT NULL DEFAULT '',"

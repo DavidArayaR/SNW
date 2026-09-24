@@ -2846,13 +2846,23 @@ def _costo_estimado_por_clave(clave: str, total: int) -> dict | None:
 
 
 def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, plantilla_texto: str,
-                                ambiente: str, plantilla_clave: str = "", solicitante: str = "") -> bool:
+                                ambiente: str, plantilla_clave: str = "", solicitante: str = "",
+                                destinos_extra: list | None = None,
+                                especialidad_nombre: str = "") -> bool:
     c = _config_correo()
     emisor, destino = c["emisor"], c["destino"]
     base = url_base()
     if not emisor or not destino:
         print(f"[CORREO] Emisor o destino no configurado. Token {token} -> {base}/api/notificaciones/confirmar/{token}")
         return False
+    # Supervisores de la especialidad (Fase 3): también reciben la solicitud.
+    # Los enlaces por token no requieren sesión, así que cualquiera de los
+    # destinatarios puede confirmar o rechazar.
+    destinos = [destino]
+    for d in destinos_extra or []:
+        d = (d or "").strip().lower()
+        if d and d not in destinos:
+            destinos.append(d)
     host, port, user, pwd, tls = c["host"], c["port"], c["user"], c["pwd"], c["tls"]
 
     costo = _costo_estimado_por_clave(plantilla_clave, total)
@@ -2870,6 +2880,10 @@ def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, p
     confirm_url = f"{base}/api/notificaciones/confirmar/{token}"
     reject_url = f"{base}/api/notificaciones/rechazar/{token}"
     subject = f"[SNW] {quien} pide confirmar un envío masivo - {total} destinatarios (~{costo_txt})"
+    linea_esp = ""
+    if (especialidad_nombre or "").strip():
+        esp_html = _html.escape(especialidad_nombre.strip())
+        linea_esp = f"<p>Especialidad: <strong>{esp_html}</strong>.</p>"
 
     if costo:
         bloque_costo = f"""
@@ -2888,6 +2902,7 @@ def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, p
     <html><body style="font-family: Arial, sans-serif; color: #24303c;">
       <h2>Solicitud de envío masivo</h2>
       <p><strong>{quien_html}</strong> solicitó enviar la plantilla <strong>{plantilla_nombre_html}</strong> a <strong>{total} personas</strong> desde la base de datos <strong>{ambiente}</strong>.</p>
+      {linea_esp}
       {bloque_costo}
       <div style="background:#f5f7f8; border-left:4px solid #128c7e; padding:14px 16px; margin:18px 0; border-radius:6px;">
         <p style="margin:0 0 6px; font-size:12px; color:#66757f; font-weight:bold;">Mensaje a enviar:</p>
@@ -2905,7 +2920,7 @@ def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, p
     try:
         msg = MIMEMultipart("alternative")
         msg["From"] = emisor
-        msg["To"] = destino
+        msg["To"] = ", ".join(destinos)
         msg["Subject"] = subject
         msg.attach(MIMEText(html, "html", "utf-8"))
         context = ssl.create_default_context()
@@ -2914,11 +2929,11 @@ def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, p
                 server.starttls(context=context)
             if user and pwd:
                 server.login(user, pwd)
-            server.sendmail(emisor, destino, msg.as_string())
-        print(f"[CORREO] Confirmación enviada a {destino} token {token}")
+            server.sendmail(emisor, destinos, msg.as_string())
+        print(f"[CORREO] Confirmación enviada a {', '.join(destinos)} token {token}")
         return True
     except Exception as e:
-        log_error(f"_enviar_correo_confirmacion a {destino}", e)
+        log_error(f"_enviar_correo_confirmacion a {', '.join(destinos)}", e)
         return False
 
 
@@ -3389,8 +3404,16 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
             solicitante = f"{nombre_sol} ({correo_sol})"
         else:
             solicitante = nombre_sol or correo_sol or "usuario desconocido"
+        # Supervisores de la especialidad también reciben la solicitud (Fase 3).
+        destinos_extra: list[str] = []
+        if esp:
+            for _sup in servicio_especialidades.correos_supervisores_especialidad(esp["id"]):
+                if _sup["correo"] not in destinos_extra:
+                    destinos_extra.append(_sup["correo"])
         _enviar_correo_confirmacion(token, len(destinatarios), plantilla["nombre"], plantilla["texto"],
-                                    amb, plantilla["clave"], solicitante)
+                                    amb, plantilla["clave"], solicitante,
+                                    destinos_extra=destinos_extra,
+                                    especialidad_nombre=(esp["nombre_visible"] if esp else ""))
         return {"requiere_confirmacion": True, "solicitud_id": token, "total": len(destinatarios),
                 "ambiente": amb, "rechazados": rechazados, "aviso_limite_mensajeria": aviso_limite,
                 "confirm_url": f"{url_base()}/api/notificaciones/confirmar/{token}"}
@@ -3832,15 +3855,18 @@ def actualizar_respuesta(registro_id: int, body: EstadoPacienteIn,
     return {"ok": True}
 
 
-def _pacientes_por_respuesta(ambiente: str) -> dict:
+def _pacientes_por_respuesta(ambiente: str, tabla: str | None = None) -> dict:
     """Cuántos pacientes hay en cada estado de respuesta de WhatsApp
     (pendiente / respondió / baja), usando la señal 'pegajosa'.
 
     Solo se cuentan los pacientes a los que YA se les envió un mensaje
-    (estado = 'enviado'); los pendientes y los que fallaron quedan fuera."""
-    t = tabla_pacientes(ambiente)
+    (estado = 'enviado'); los pendientes y los que fallaron quedan fuera.
+    Con `tabla` cuenta una especialidad en vez de la del entorno."""
+    t = tabla or tabla_pacientes(ambiente)
     tiene_opt = columna_existe(t, "whatsapp_opt_out", ambiente)
-    re_expr = expr_respuesta_efectiva("p", tiene_opt, columna_existe(t, "respuesta_manual", ambiente))
+    log_tiene_tabla = "tabla_pacientes" in columnas_tabla("log_envios", ambiente)
+    re_expr = expr_respuesta_efectiva("p", tiene_opt, columna_existe(t, "respuesta_manual", ambiente),
+                                      tabla_log=t if (tabla and log_tiene_tabla) else None)
     where = " WHERE p.estado = 'enviado'" if columna_existe(t, "estado", ambiente) else ""
     base = {"pendiente": 0, "respondio": 0, "baja": 0}
     try:
@@ -3860,8 +3886,20 @@ def _pacientes_por_respuesta(ambiente: str) -> dict:
 _SOLO_PROD = "envio_id IN (SELECT id FROM envios WHERE base_datos = 'pacientes_prod')"
 
 
-def estadisticas(sesion: dict = Depends(solo_admin)):
-    """Resumen de envíos para la página de Estadísticas (solo producción)."""
+def _filtro_esp_estadisticas(sesion: dict, especialidad_id: int | None) -> tuple[str, tuple, dict | None]:
+    """Filtro SQL por especialidad para estadísticas (solo admin/dev).
+    Devuelve (fragmento AND, params, especialidad|None)."""
+    if especialidad_id is None:
+        return "", (), None
+    esp = _exigir_especialidad(sesion, especialidad_id)
+    return (" AND envio_id IN (SELECT id FROM envios WHERE especialidad_id = %s)",
+            (esp["id"],), esp)
+
+
+def estadisticas(especialidad_id: int | None = Query(None), sesion: dict = Depends(solo_admin)):
+    """Resumen de envíos para la página de Estadísticas (solo producción, o una
+    especialidad con `especialidad_id`)."""
+    filtro_esp, args_esp, esp = _filtro_esp_estadisticas(sesion, especialidad_id)
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT"
@@ -3873,12 +3911,18 @@ def estadisticas(sesion: dict = Depends(solo_admin)):
             " FROM log_envios"
             " WHERE fecha_hora >= DATE_FORMAT(CURDATE(), '%Y-%m-01')"
             f"   AND {_SOLO_PROD}"
+            f"{filtro_esp}",
+            args_esp or None,
         )
         mes = cur.fetchone() or {}
 
-        cur.execute(f"SELECT COUNT(*) AS n FROM log_envios WHERE estado_envio = 'enviado' AND {_SOLO_PROD}")
+        cur.execute(f"SELECT COUNT(*) AS n FROM log_envios WHERE estado_envio = 'enviado' AND {_SOLO_PROD}{filtro_esp}",
+                    args_esp or None)
         total_enviados = int((cur.fetchone() or {}).get("n", 0))
-        cur.execute("SELECT COUNT(*) AS n FROM envios WHERE base_datos = 'pacientes_prod'")
+        if esp:
+            cur.execute("SELECT COUNT(*) AS n FROM envios WHERE especialidad_id = %s", (esp["id"],))
+        else:
+            cur.execute("SELECT COUNT(*) AS n FROM envios WHERE base_datos = 'pacientes_prod'")
         total_batches = int((cur.fetchone() or {}).get("n", 0))
 
         # Salud del webhook: cuándo llegó el último evento de Meta.
@@ -3894,6 +3938,7 @@ def estadisticas(sesion: dict = Depends(solo_admin)):
     enviados_mes = int(mes.get("enviados") or 0)
     return {
         "mes": time.strftime("%Y-%m"),
+        "especialidad": ({"id": esp["id"], "nombre_visible": esp["nombre_visible"]} if esp else None),
         "enviados_mes": enviados_mes,
         "fallidos_mes": int(mes.get("fallidos") or 0),
         "invalidos_mes": int(mes.get("invalidos") or 0),
@@ -3901,15 +3946,18 @@ def estadisticas(sesion: dict = Depends(solo_admin)):
         "baja_mes": int(mes.get("baja") or 0),
         "total_enviados_historico": total_enviados,
         "total_batches": total_batches,
-        "pacientes_por_respuesta": _pacientes_por_respuesta("produccion"),
+        "pacientes_por_respuesta": _pacientes_por_respuesta(
+            "produccion", tabla=(esp["nombre_tabla_base"] if esp else None)),
         "webhook": webhook,
     }
 
 
-def estadisticas_envios(granularidad: str = Query("mes"), sesion: dict = Depends(solo_admin)):
+def estadisticas_envios(granularidad: str = Query("mes"), especialidad_id: int | None = Query(None),
+                        sesion: dict = Depends(solo_admin)):
     """Mensajes enviados agrupados por periodo (para el gráfico de barras)."""
     if granularidad not in ("dia", "mes", "anio"):
         raise HTTPException(400, detail="granularidad debe ser dia, mes o anio")
+    filtro_esp, args_esp, esp = _filtro_esp_estadisticas(sesion, especialidad_id)
     # (formato de DATE_FORMAT, ventana hacia atrás)
     # Sin parámetros en execute(): PyMySQL no pasa por mogrify, así que '%' va simple.
     cfg = {
@@ -3925,12 +3973,15 @@ def estadisticas_envios(granularidad: str = Query("mes"), sesion: dict = Depends
             " WHERE estado_envio = 'enviado'"
             f"   AND fecha_hora >= {desde}"
             f"   AND {_SOLO_PROD}"
-            " GROUP BY periodo ORDER BY periodo"
+            f"{filtro_esp}"
+            " GROUP BY periodo ORDER BY periodo",
+            args_esp or None,
         )
         filas = [{"periodo": r["periodo"], "enviados": int(r["enviados"] or 0)}
                  for r in cur.fetchall()]
     return {
         "granularidad": granularidad,
+        "especialidad": ({"id": esp["id"], "nombre_visible": esp["nombre_visible"]} if esp else None),
         "filas": filas,
         "total": sum(f["enviados"] for f in filas),
     }
@@ -4233,10 +4284,12 @@ def _categorias_por_clave() -> dict:
     return m
 
 
-def estadisticas_costos(granularidad: str = Query("mes"), sesion: dict = Depends(solo_admin)):
+def estadisticas_costos(granularidad: str = Query("mes"), especialidad_id: int | None = Query(None),
+                        sesion: dict = Depends(solo_admin)):
     if granularidad not in ("dia", "mes", "anio"):
         raise HTTPException(400, detail="granularidad debe ser dia, mes o anio")
     fmt = {"dia": "%Y-%m-%d", "mes": "%Y-%m", "anio": "%Y"}[granularidad]
+    filtro_esp, args_esp, esp = _filtro_esp_estadisticas(sesion, especialidad_id)
 
     moneda = _moneda_cuenta()
     tarifas = _tarifas_guardadas(moneda) or _tarifas_guardadas("USD")
@@ -4249,7 +4302,9 @@ def estadisticas_costos(granularidad: str = Query("mes"), sesion: dict = Depends
             " WHERE estado_envio = 'enviado'"
             "   AND plantilla_clave NOT IN ('respuesta', 'ajuste_manual')"
             f"   AND {_SOLO_PROD}"
-            " GROUP BY periodo, plantilla_clave ORDER BY periodo"
+            f"{filtro_esp}"
+            " GROUP BY periodo, plantilla_clave ORDER BY periodo",
+            args_esp or None,
         )
         crudo = cur.fetchall()
 
@@ -4286,6 +4341,7 @@ def estadisticas_costos(granularidad: str = Query("mes"), sesion: dict = Depends
     vig = _tarifa_vigente(tarifas)
     return {
         "granularidad": granularidad,
+        "especialidad": ({"id": esp["id"], "nombre_visible": esp["nombre_visible"]} if esp else None),
         "moneda": (vig or {}).get("moneda") or moneda,
         "tarifa_vigente": vig,
         "sin_tarifas": not tarifas,

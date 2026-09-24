@@ -225,6 +225,7 @@
         <div class="admin-tabs" role="tablist">
           <button type="button" class="admin-tab active" id="tabBtnUsuarios" data-tab="usuarios" role="tab" aria-selected="true">Usuarios</button>
           <button type="button" class="admin-tab" id="tabBtnPacientes" data-tab="pacientes" role="tab" aria-selected="false">Base de datos</button>
+          <button type="button" class="admin-tab" id="tabBtnEspecialidades" data-tab="especialidades" role="tab" aria-selected="false">Especialidades</button>
           <button type="button" class="admin-tab" id="tabBtnEstadisticas" data-tab="estadisticas" role="tab" aria-selected="false">Estad&iacute;sticas</button>
           <button type="button" class="admin-tab" id="tabBtnConfiguracion" data-tab="configuracion" role="tab" aria-selected="false" hidden>Configuraci&oacute;n</button>
         </div>
@@ -237,6 +238,9 @@
             <div class="panel__head">
               <h2 id="tituloPacientes">Pacientes</h2>
               <div class="panel__actions">
+                <select id="selEspecialidad" class="badge badge--select" aria-label="Especialidad">
+                  <option value="">Bases desarrollo/producci&oacute;n</option>
+                </select>
                 <select id="selAmbiente" class="badge badge--select" aria-label="Base de datos">
                   <option value="desarrollo">Base de datos desarrollo</option>
                   <option value="produccion">Base de datos producci&oacute;n</option>
@@ -255,6 +259,12 @@
             <div class="toolbar-pacientes">
               <input type="search" id="buscador" placeholder="Buscar por nombre, tel&eacute;fono o info..." autocomplete="off">
               <span id="contadorSel" class="contador-sel"></span>
+            </div>
+
+            <div class="toolbar-pacientes" id="csvCarga" hidden>
+              <label class="btn btn--ghost" for="csvArchivo" style="cursor:pointer;">Cargar CSV en <span id="csvDestino">…</span></label>
+              <input type="file" id="csvArchivo" accept=".csv" hidden>
+              <span id="csvMsg" class="field__hint">Columnas: nombre, apellido, telefono (UTF-8).</span>
             </div>
 
             <div class="toolbar-masivo" id="toolbarMasivo" hidden>
@@ -298,11 +308,51 @@
           </section>
         </div>
 
+        <div id="tabEspecialidades" class="admin-panel" role="tabpanel" hidden>
+          <section class="panel">
+            <div class="panel__head">
+              <h2>Especialidades</h2>
+              <div class="panel__actions">
+                <button id="btnActualizarEspecialidades" class="btn btn--ghost" type="button">Actualizar</button>
+              </div>
+            </div>
+
+            <p class="usr-intro" style="margin: 14px 18px 0;">
+              Cada especialidad tiene su propia tabla de pacientes
+              (<strong>pacientes_&lt;nombre&gt;</strong>, sin separaci&oacute;n desarrollo/producci&oacute;n)
+              y su propio rol. Asigna el rol a una cuenta para darle acceso a esa tabla en
+              Pacientes, Mensajer&iacute;a e Historial. Los usuarios y supervisores solo ven sus
+              especialidades asignadas; no ven Estad&iacute;sticas.
+            </p>
+
+            <form id="formCrearEspecialidad" class="usr-invitar" style="margin-top: 12px;">
+              <div class="usr-invitar__campo">
+                <label for="espNombre">Nueva especialidad</label>
+                <input type="text" id="espNombre" placeholder="Ej: Kinesiología" maxlength="150" required>
+              </div>
+              <button type="submit" id="btnCrearEspecialidad" class="btn btn--primary">Crear especialidad</button>
+            </form>
+            <p id="espMsg" class="usr-intro" style="margin: 0 18px 10px;"></p>
+
+            <div class="usr-selector">
+              <label for="selEspecialidad">Especialidad</label>
+              <select id="selEspecialidad"></select>
+            </div>
+            <div id="detalleEspecialidad" class="usr-detalle"></div>
+            <p id="espVacio" class="tabla-vacia" hidden style="padding: 24px;">No hay especialidades creadas.</p>
+          </section>
+        </div>
+
         <div id="tabEstadisticas" class="admin-panel" role="tabpanel" hidden>
           <section class="panel">
             <div class="panel__head">
               <h2>Mensajes enviados en <span id="nombreMes">este mes</span></h2>
-              <button id="btnActualizarEstadisticas" class="btn btn--ghost" type="button">Actualizar</button>
+              <div class="panel__actions">
+                <select id="selEspecialidadEst" class="badge badge--select" aria-label="Especialidad">
+                  <option value="">Todas</option>
+                </select>
+                <button id="btnActualizarEstadisticas" class="btn btn--ghost" type="button">Actualizar</button>
+              </div>
             </div>
 
             <div class="hero-grid">
@@ -319,7 +369,7 @@
             <div class="panel__head">
               <h2>Respuestas de pacientes por WhatsApp</h2>
             </div>
-            <p class="field__hint" style="margin:12px 18px 0;">Estado actual de los pacientes de producci&oacute;n <strong>a los que ya se les envi&oacute; un mensaje</strong>. Usa los botones para comparar cu&aacute;ntos respondieron, se dieron de baja o no han respondido. En <a href="historial.html">Historial</a> puedes ver qui&eacute;nes son.</p>
+            <p class="field__hint" id="hintRespuestas" style="margin:12px 18px 0;">Estado actual de los pacientes de producci&oacute;n <strong>a los que ya se les envi&oacute; un mensaje</strong>. Usa los botones para comparar cu&aacute;ntos respondieron, se dieron de baja o no han respondido. En <a href="historial.html">Historial</a> puedes ver qui&eacute;nes son.</p>
             <p id="webhookSalud" class="webhook-salud" hidden></p>
             <div id="respuestasPacientes"></div>
           </section>
@@ -389,10 +439,11 @@
             <p class="usr-intro" style="margin: 14px 18px 0;">
               Las cuentas nuevas se crean invitando a la persona por correo: recibe un enlace para elegir
               su propia contrase&ntilde;a y la cuenta nace con rol <strong>usuario</strong> y acceso
-              b&aacute;sico (Mensajer&iacute;a, Historial, Estad&iacute;sticas y edici&oacute;n de plantillas). Aqu&iacute; ajustas qu&eacute;
+              b&aacute;sico (Mensajer&iacute;a, Historial y edici&oacute;n de plantillas). Aqu&iacute; ajustas qu&eacute;
               puede ver y hacer cada cuenta. Un administrador solo gestiona cuentas de rol
-              <strong>usuario</strong>; un desarrollador gestiona cualquier cuenta (salvo la suya) y
-              adem&aacute;s puede cambiar el rol. La pesta&ntilde;a <strong>Configuraci&oacute;n</strong> es
+              <strong>usuario</strong> y <strong>supervisor</strong>; un desarrollador gestiona cualquier cuenta (salvo la suya) y
+              adem&aacute;s puede cambiar el rol. El acceso a cada especialidad se asigna en la
+              pesta&ntilde;a <strong>Especialidades</strong>. La pesta&ntilde;a <strong>Configuraci&oacute;n</strong> es
               exclusiva del rol desarrollador. M&aacute;ximo 4 desarrolladores.
             </p>
             <p id="devInfo" class="usr-intro" style="margin: 0 18px 4px; font-weight: 600;"></p>
@@ -458,6 +509,7 @@
   <script src="js/layout.js"></script>
   <script src="js/pass-toggle.js"></script>
   <script src="js/usuarios.js"></script>
+  <script src="js/especialidades.js"></script>
   <script src="js/pacientes.js"></script>
   <script src="js/estadisticas.js"></script>
   <script src="js/configuracion.js"></script>
@@ -466,17 +518,20 @@
       const botones = {
         usuarios: document.getElementById("tabBtnUsuarios"),
         pacientes: document.getElementById("tabBtnPacientes"),
+        especialidades: document.getElementById("tabBtnEspecialidades"),
         estadisticas: document.getElementById("tabBtnEstadisticas"),
         configuracion: document.getElementById("tabBtnConfiguracion"),
       };
       const paneles = {
         usuarios: document.getElementById("tabUsuarios"),
         pacientes: document.getElementById("tabPacientes"),
+        especialidades: document.getElementById("tabEspecialidades"),
         estadisticas: document.getElementById("tabEstadisticas"),
         configuracion: document.getElementById("tabConfiguracion"),
       };
       const cargas = {
         pacientes: () => window.snwCargarPacientes && window.snwCargarPacientes(),
+        especialidades: () => window.snwCargarEspecialidades && window.snwCargarEspecialidades(),
         estadisticas: () => window.snwCargarEstadisticas && window.snwCargarEstadisticas(),
         configuracion: () => window.snwCargarConfiguracion && window.snwCargarConfiguracion(),
       };

@@ -207,8 +207,8 @@ sale de aquí (`GROUP BY numero_call_center`). Se ve en el panel **«Registro de
 call center»** del Historial (permiso `call_center_registro`).
 
 **`usuarios`** — cuentas de la app. `usuario` (correo o nombre corto para las semilla, único),
-`nombre`, `rol` (`usuario`/`administrador`/`desarrollador`), `permisos` (lista CSV, solo
-cuenta para el rol `usuario`), `clave_hash` (SHA-256), `correo_recuperacion` (a dónde llega
+`nombre`, `rol` (`usuario`/`supervisor`/`administrador`/`desarrollador`), `permisos` (lista CSV, solo
+cuenta para los roles `usuario` y `supervisor`), `clave_hash` (SHA-256), `correo_recuperacion` (a dónde llega
 el enlace de «Olvidé mi contraseña»; se rellena solo si el `usuario` ya es un correo).
 
 **`password_resets`** — enlaces de «Olvidé mi contraseña»: `token` (64 hex), `usuario`,
@@ -445,7 +445,16 @@ Cada especialidad vive en **una sola tabla** `pacientes_<slug>` dentro de `snw_b
 - **`envios` y `log_envios`** guardan `especialidad_id` + `tabla_pacientes` (NULL = fila legacy); los historiales no mezclan tablas con IDs coincidentes.
 - **Estadísticas y tarifas**: solo admin/dev (403 para el resto).
 - **Webhook**: busca pacientes también en `pacientes_<slug>`, etiqueta sus filas de log y el call center automático también responde en especialidades (anti flip-flop siempre activo ahí).
-- Pendiente Fase 3: pestaña Especialidades, selectores por especialidad, ocultar Estadísticas a usuario/supervisor, estadísticas por especialidad y confirmación del supervisor por especialidad.
+
+### Especialidades — Fase 3 (frontend + supervisión)
+
+- **Pestaña Especialidades** (administración, admin/dev): crear (con flujo duplicado: usar existente o crear `Kinesiología 2`), renombrar (la tabla no cambia), asignar/retirar roles por cuenta.
+- **Usuarios** muestra el rol `supervisor` y las especialidades asignadas de cada cuenta.
+- **Pacientes**: selector de especialidad + **carga CSV** en su tabla (informe de insertados/duplicados/rechazados).
+- **Mensajería**: asociación de plantilla a especialidad (badge en la lista) y **selector único de base de datos** en el modal (bases disponibles + una opción por especialidad; si hay una sola disponible, queda esa seleccionada; las plantillas de especialidad fuerzan su base), con conteo, slider y cupo diario.
+- **Historial**: filtro por especialidad (asignadas, o todas para admin/dev) y «Ver mensajes» con la tabla correcta.
+- **Estadísticas** (admin/dev): selector de especialidad o «Todas» en resumen, gráfico y costos.
+- **Confirmación de supervisor**: el correo de solicitud llega también a los supervisores activos de la especialidad (con su nombre en el mensaje); los enlaces por token sirven para cualquiera de los destinatarios.
 
 ### Webhook de WhatsApp (Meta)
 

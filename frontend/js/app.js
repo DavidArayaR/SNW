@@ -12,6 +12,16 @@ let plantillas = [];
 let activaId = null;
 let snapshot = null;
 
+// Especialidades visibles para la cuenta (Fase 3): todas si es
+// privilegiada, solo las asignadas si no. Las plantillas pueden asociarse a
+// una (envío solo a su tabla) o quedar globales.
+let misEspecialidades = [];
+
+function nombreEspecialidad(id) {
+  const e = misEspecialidades.find((x) => x.id === id);
+  return e ? e.nombre_visible : null;
+}
+
 const $ = (sel) => document.querySelector(sel);
 
 const listaEl = $("#listaPlantillas");
@@ -22,6 +32,7 @@ const inpMensaje = $("#inpMensaje");
 const inpTemplate = $("#inpTemplate");
 const inpTemplateLang = $("#inpTemplateLang");
 const inpTemplateCategoria = $("#inpTemplateCategoria");
+const inpEspecialidad = $("#inpEspecialidad");
 const hayTemplateMeta = !!inpTemplate && !!inpTemplateLang && !!inpTemplateCategoria;
 const bloqueEstadoMeta = $("#bloqueEstadoMeta");
 const badgeEstadoMeta = $("#badgeEstadoMeta");
@@ -126,6 +137,109 @@ function seleccionarDefault() {
   if (def) abrir(def.id);
 }
 
+async function cargarEspecialidades() {
+  try {
+    const res = await fetch("api/especialidades/mias", { headers: authHeaders(), cache: "no-store" });
+    if (!res.ok) throw new Error();
+    misEspecialidades = await res.json();
+  } catch {
+    misEspecialidades = [];
+  }
+  poblarSelectEspecialidad();
+}
+
+function poblarSelectEspecialidad() {
+  if (!inpEspecialidad) return;
+  const actual = inpEspecialidad.value;
+  inpEspecialidad.innerHTML =
+    `<option value="">Global (todas las bases)</option>` +
+    misEspecialidades.map((e) => `<option value="${e.id}">${escaparHtml(e.nombre_visible)}</option>`).join("");
+  if (actual && misEspecialidades.some((e) => String(e.id) === actual)) {
+    inpEspecialidad.value = actual;
+  }
+}
+
+// Selector único de base de datos del modal de envío (Fase 3): lista solo
+// las bases disponibles —desarrollo/producción (según restricción) y una
+// opción por especialidad—. Si hay una sola disponible, queda seleccionada.
+// Valores: "desarrollo" | "produccion" | "esp:<id>".
+function baseSeleccionadaConf() {
+  const sel = $("#selBaseConf");
+  return sel && sel.value ? sel.value : ambienteConf;
+}
+
+function modoEspecialidadConf() {
+  return baseSeleccionadaConf().startsWith("esp:");
+}
+
+function especialidadEnvioId() {
+  const v = baseSeleccionadaConf();
+  if (!v.startsWith("esp:")) return null;
+  const id = Number(v.slice(4));
+  return Number.isFinite(id) ? id : null;
+}
+
+function ambienteEnvioConf() {
+  // Las especialidades son tablas únicas (sin entorno): se envían como
+  // producción (con confirmación del supervisor salvo permiso directo).
+  return modoEspecialidadConf() ? "produccion" : baseSeleccionadaConf();
+}
+
+// Reconstruye las opciones del select. Con `forzarEspId` (plantilla de una
+// especialidad) deja solo esa opción, ya seleccionada.
+function construirOpcionesBaseConf(forzarEspId) {
+  const sel = $("#selBaseConf");
+  if (!sel) return;
+  const restringido = usuarioRestringidoADesarrollo();
+  let html = "";
+  if (forzarEspId != null) {
+    const nombre = nombreEspecialidad(forzarEspId) || "Especialidad";
+    html = `<option value="esp:${forzarEspId}">${escaparHtml(nombre)}</option>`;
+  } else {
+    html = `<optgroup label="Bases">` +
+      `<option value="desarrollo">Base de datos desarrollo</option>` +
+      (restringido ? "" : `<option value="produccion">Base de datos producción</option>`) +
+      `</optgroup>`;
+    if (misEspecialidades.length) {
+      html += `<optgroup label="Especialidades">` +
+        misEspecialidades.map((e) => `<option value="esp:${e.id}">${escaparHtml(e.nombre_visible)}</option>`).join("") +
+        `</optgroup>`;
+    }
+  }
+  sel.innerHTML = html;
+
+  // Restaura la última elección si sigue disponible; si no, la primera
+  // opción (cuando hay una sola disponible, queda esa seleccionada).
+  const valores = [...sel.options].map((o) => o.value);
+  let elegido = null;
+  if (forzarEspId != null) {
+    elegido = `esp:${forzarEspId}`;
+  } else {
+    const guardadoEsp = localStorage.getItem("snw_esp_mensajeria");
+    if (localStorage.getItem("snw_modo_conf") === "especialidad" && guardadoEsp &&
+        valores.includes(`esp:${guardadoEsp}`)) {
+      elegido = `esp:${guardadoEsp}`;
+    } else if (valores.includes(ambienteConf)) {
+      elegido = ambienteConf;
+    } else if (valores.length) {
+      elegido = valores[0];
+    }
+  }
+  if (elegido != null) {
+    sel.value = elegido;
+    if (elegido.startsWith("esp:")) {
+      localStorage.setItem("snw_modo_conf", "especialidad");
+      localStorage.setItem("snw_esp_mensajeria", elegido.slice(4));
+    } else {
+      ambienteConf = elegido;
+      localStorage.setItem("snw_ambiente", ambienteConf);
+      localStorage.setItem("snw_ambiente_admin", ambienteConf);
+      localStorage.setItem("snw_modo_conf", "base");
+      actualizarBadgeMensajeria();
+    }
+  }
+}
+
 async function cargar() {
   for (let intento = 1; intento <= 2; intento++) {
     try {
@@ -183,11 +297,11 @@ async function revisarPlantillasEnSegundoPlano() {
   }
 }
 
-async function crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_template_categoria) {
+async function crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, especialidad_id) {
   const res = await fetch(API_URL, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ clave: slug(nombre), nombre, texto, whatsapp_template_lang, whatsapp_template_categoria }),
+    body: JSON.stringify({ clave: slug(nombre), nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, especialidad_id }),
   });
   if (res.status === 401) { window.snwSesionExpirada(); return Promise.reject(new Error("Sesión expirada")); }
   const data = await res.json().catch(() => ({}));
@@ -195,11 +309,11 @@ async function crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_te
   return data;
 }
 
-async function actualizarPlantilla(id, nombre, texto, whatsapp_template_lang, whatsapp_template_categoria) {
+async function actualizarPlantilla(id, nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, especialidad_id) {
   const res = await fetch(`${API_URL}/${id}`, {
     method: "PUT",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ nombre, texto, whatsapp_template_lang, whatsapp_template_categoria }),
+    body: JSON.stringify({ nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, especialidad_id }),
   });
   if (res.status === 401) { window.snwSesionExpirada(); return Promise.reject(new Error("Sesión expirada")); }
   const data = await res.json().catch(() => ({}));
@@ -259,6 +373,10 @@ function crearItemPlantilla(p) {
       `${escaparHtml(etiquetaEstadoMeta(p.whatsapp_template_status))}</span>`;
   } else if (esRecienAprobada(p)) {
     estadoTag = ` <span class="tpl-item__estado tpl-item__estado--nueva">✨ Aprobada</span>`;
+  }
+  if (p.especialidad_id != null) {
+    const nombreEsp = nombreEspecialidad(p.especialidad_id) || "Especialidad";
+    estadoTag += ` <span class="tpl-item__estado">${escaparHtml(nombreEsp)}</span>`;
   }
   btn.innerHTML =
     `<span class="tpl-item__nombre">${escaparHtml(p.nombre ?? "(sin nombre)")}${estadoTag}</span>` +
@@ -366,7 +484,7 @@ function refrescarEditor() {
 }
 
 function estadoActualEditor() {
-  return JSON.stringify([inpNombre.value, inpMensaje.value, valTemplate(), valTemplateLang(), valTemplateCategoria()]);
+  return JSON.stringify([inpNombre.value, inpMensaje.value, valTemplate(), valTemplateLang(), valTemplateCategoria(), inpEspecialidad ? inpEspecialidad.value : ""]);
 }
 
 function marcarSnapshot() {
@@ -564,6 +682,14 @@ function abrir(id) {
   tituloForm.textContent = (PUEDE_EDITAR_PLANTILLAS && esPlantillaEditable(p)) ? `Editando: ${p.nombre}` : p.nombre;
   inpNombre.value = p.nombre;
   inpMensaje.value = p.texto;
+  if (inpEspecialidad) {
+    const espVal = p.especialidad_id != null ? String(p.especialidad_id) : "";
+    if (espVal && ![...inpEspecialidad.options].some((o) => o.value === espVal)) {
+      const nombreEsp = nombreEspecialidad(p.especialidad_id) || "Especialidad";
+      inpEspecialidad.add(new Option(nombreEsp, espVal));
+    }
+    inpEspecialidad.value = espVal;
+  }
   if (hayTemplateMeta) {
     inpTemplateLang.value = p.whatsapp_template_lang || "es";
     // Todas las plantillas son categoría Marketing; una plantilla antigua con
@@ -606,6 +732,7 @@ function modoNueva() {
   tituloForm.textContent = "Nueva plantilla";
   inpNombre.value = "";
   inpMensaje.value = "";
+  if (inpEspecialidad) inpEspecialidad.value = "";
   if (hayTemplateMeta) {
     inpTemplateLang.value = "es";
     inpTemplateCategoria.value = "MARKETING";
@@ -722,13 +849,14 @@ formEl.addEventListener("submit", async (e) => {
   setGuardando(true);
 
   try {
+    const especialidad_id = inpEspecialidad && inpEspecialidad.value ? Number(inpEspecialidad.value) : null;
     let fila;
     if (activaId) {
-      fila = await actualizarPlantilla(activaId, nombre, texto, whatsapp_template_lang, whatsapp_template_categoria);
+      fila = await actualizarPlantilla(activaId, nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, especialidad_id);
       const i = plantillas.findIndex((x) => x.id === activaId);
       if (i >= 0) plantillas[i] = fila;
     } else {
-      fila = await crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_template_categoria);
+      fila = await crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, especialidad_id);
       plantillas.push(fila);
     }
     setGuardando(false);
@@ -947,14 +1075,10 @@ function usuarioRestringidoADesarrollo() {
 
 // Aplica la restricción de base de datos en el modal de envío.
 function aplicarRestriccionAmbiente() {
-  const radios = document.querySelectorAll('input[name="ambienteConf"]');
+  // Las opciones se reconstruyen al abrir el modal (construirOpcionesBaseConf
+  // ya omite producción si hay restricción); acá solo se corrige la variable
+  // si había quedado en un valor no permitido.
   const restringido = usuarioRestringidoADesarrollo();
-
-  radios.forEach((r) => {
-    if (r.value === "produccion") {
-      r.disabled = restringido;
-    }
-  });
 
   if (restringido && ambienteConf === "produccion") {
     ambienteConf = "desarrollo";
@@ -969,9 +1093,9 @@ function abrirModalConf() {
   $("#confNombre").textContent = p?.nombre ?? "";
 
   aplicarRestriccionAmbiente();
-  document.querySelectorAll('input[name="ambienteConf"]').forEach((r) => {
-    r.checked = r.value === ambienteConf;
-  });
+  // Si la plantilla es de una especialidad, el select trae solo esa base;
+  // si no, trae las disponibles y restaura la última usada.
+  construirOpcionesBaseConf(p?.especialidad_id ?? null);
   refrescarAvisoDevConf();
   refrescarAvisoAdminConf();
   cargarLimiteAdminConf();
@@ -995,24 +1119,31 @@ $("#btnEnviarActual").addEventListener("click", () => {
   abrirModalConf();
 });
 
-document.querySelectorAll('input[name="ambienteConf"]').forEach((r) => {
-  r.addEventListener("change", () => {
-    ambienteConf = document.querySelector('input[name="ambienteConf"]:checked').value;
+const selBaseConfEl = $("#selBaseConf");
+if (selBaseConfEl) selBaseConfEl.addEventListener("change", () => {
+  const v = selBaseConfEl.value;
+  if (v.startsWith("esp:")) {
+    localStorage.setItem("snw_modo_conf", "especialidad");
+    localStorage.setItem("snw_esp_mensajeria", v.slice(4));
+  } else {
+    ambienteConf = v;
     localStorage.setItem("snw_ambiente", ambienteConf);
     localStorage.setItem("snw_ambiente_admin", ambienteConf);
+    localStorage.setItem("snw_modo_conf", "base");
     actualizarBadgeMensajeria();
-    refrescarAvisoDevConf();
-    refrescarAvisoAdminConf();
-    actualizarResumenConf();
-  });
+  }
+  refrescarAvisoDevConf();
+  refrescarAvisoAdminConf();
+  actualizarResumenConf();
 });
 
 function refrescarAvisoDevConf() {
   const box = $("#confAvisoDev");
-  const esDev = ambienteConf === "desarrollo";
+  const base = baseSeleccionadaConf();
+  const esDev = base === "desarrollo" && !modoEspecialidadConf();
   box.hidden = !esDev;
   if (!esDev) return;
-  fetch(`api/configuracion?ambiente=${ambienteConf}`, { headers: authHeaders() })
+  fetch(`api/configuracion?ambiente=${base}`, { headers: authHeaders() })
     .then((r) => (r.ok ? r.json() : {}))
     .then((cfg) => {
       const nums = (cfg.numeros_autorizados ?? []).join(", ") || "ninguno";
@@ -1026,11 +1157,18 @@ function refrescarAvisoDevConf() {
 function refrescarAvisoAdminConf() {
   const box = $("#confAvisoAdmin");
   const puedeProd = window.snwPuede && window.snwPuede("envio_produccion");
-  const esAdminProduccion = puedeProd && ambienteConf === "produccion";
-  box.hidden = !esAdminProduccion;
+  const modoEsp = modoEspecialidadConf();
+  const destinoProd = baseSeleccionadaConf() === "produccion" || modoEsp;
+  const esAdminProduccion = puedeProd && destinoProd;
+  const requiereConf = !puedeProd && destinoProd;
+  box.hidden = !(esAdminProduccion || requiereConf);
   if (esAdminProduccion) {
     box.textContent =
       "Logeado como admin: se envía directamente sin confirmación de supervisor.";
+  } else if (requiereConf) {
+    box.textContent = modoEsp
+      ? "Este envío pedirá confirmación por correo al supervisor (llega también a los supervisores de la especialidad)."
+      : "Este envío pedirá confirmación por correo al supervisor.";
   }
 }
 
@@ -1053,7 +1191,7 @@ function configurarLimiteConf(pendientes, lim) {
   const range = $("#limiteRangeConf");
   const num = $("#limiteNumConf");
   const nota = $("#limiteNotaConf");
-  const esProd = ambienteConf === "produccion";
+  const esProd = baseSeleccionadaConf() === "produccion" || modoEspecialidadConf();
 
   if (!esProd || pendientes <= 0) {
     fila.hidden = true;
@@ -1179,15 +1317,18 @@ async function actualizarResumenConf() {
   $("#btnLanzarConf").disabled = true;
 
   try {
+    const espId = especialidadEnvioId();
+    const cuerpoEnvio = { plantilla_id: activaId, ambiente: ambienteEnvioConf() };
+    if (espId != null) cuerpoEnvio.especialidad_id = espId;
     const res = await fetch("api/notificaciones/destinatarios", {
       method: "POST",
       headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ ambiente: ambienteConf, plantilla_id: activaId }),
+      body: JSON.stringify(cuerpoEnvio),
     });
     if (res.status === 401) { window.snwSesionExpirada(); return; }
     const data = await res.json();
     const lim = data.limite_mensajeria || null;
-    const esProd = ambienteConf === "produccion";
+    const esProd = baseSeleccionadaConf() === "produccion" || espId != null;
     const sinCupo = !!(lim && lim.disponibles <= 0);
     dd.textContent = `${data.pendientes} pendiente(s) · base: ${data.base_datos}`;
     configurarLimiteConf(data.pendientes || 0, lim);
@@ -1290,7 +1431,9 @@ $("#btnLanzarConf").addEventListener("click", async () => {
   setBloqueoEnvioConf(true);
 
   try {
-    const cuerpo = { plantilla_id: activaId, ambiente: ambienteConf };
+    const cuerpo = { plantilla_id: activaId, ambiente: ambienteEnvioConf() };
+    const espIdLanzar = especialidadEnvioId();
+    if (espIdLanzar != null) cuerpo.especialidad_id = espIdLanzar;
     const lim = limiteEnvioConf();
     if (lim != null) cuerpo.limite = lim;
     const res = await fetch("api/notificaciones/enviar", {
@@ -1522,5 +1665,6 @@ if (btnSincronizarMeta) {
 
 aplicarModoSoloLecturaPlantillas();
 modoVacia();
+cargarEspecialidades();
 cargar();
 setInterval(revisarPlantillasEnSegundoPlano, 30000);

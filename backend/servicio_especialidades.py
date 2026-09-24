@@ -447,3 +447,32 @@ def especialidades_por_usuarios() -> dict:
     except Exception as e:
         log_error("especialidades_por_usuarios", e)
         return {}
+
+
+def correos_supervisores_especialidad(especialidad_id: int) -> list[dict]:
+    """Supervisores activos asignados a la especialidad que tienen un correo
+    contactable (login si es correo, si no el de recuperación). Se usa para
+    avisarles las solicitudes de envío en producción de su especialidad."""
+    try:
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT u.usuario, u.nombre, u.correo_recuperacion"
+                " FROM usuario_especialidad_roles uer"
+                " JOIN roles_especialidad r ON r.id = uer.rol_id"
+                " JOIN usuarios u ON u.id = uer.usuario_id"
+                " WHERE r.especialidad_id = %s AND u.rol = 'supervisor' AND u.activo = 1",
+                (int(especialidad_id),),
+            )
+            out = []
+            for row in cur.fetchall():
+                correo = (row.get("correo_recuperacion") or "").strip().lower()
+                login = (row.get("usuario") or "").strip().lower()
+                if "@" not in correo and "@" in login:
+                    correo = login
+                if "@" in correo and correo not in [o["correo"] for o in out]:
+                    out.append({"usuario": login, "nombre": row.get("nombre") or login,
+                                "correo": correo})
+            return out
+    except Exception as e:
+        log_error("correos_supervisores_especialidad", e)
+        return []

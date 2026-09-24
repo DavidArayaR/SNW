@@ -33,6 +33,64 @@ function fechaDMA(iso) {
 
 const num = (n) => Number(n || 0).toLocaleString("es-CL");
 
+// Especialidad (Fase 3, solo admin/dev): "" = global producción; con id filtra
+// los tres endpoints (resumen, gráfico y costos).
+let especialidadesEst = [];
+const selEspecialidadEst = $("#selEspecialidadEst");
+
+function especialidadEstActual() {
+  const v = selEspecialidadEst ? selEspecialidadEst.value : "";
+  return v ? Number(v) : null;
+}
+
+function qsEspEst() {
+  const esp = especialidadEstActual();
+  return esp ? `&especialidad_id=${esp}` : "";
+}
+
+function nombreEspecialidadEst() {
+  const esp = especialidadEstActual();
+  const e = especialidadesEst.find((x) => x.id === esp);
+  return e ? e.nombre_visible : "";
+}
+
+async function cargarEspecialidadesEst() {
+  if (!selEspecialidadEst) return;
+  try {
+    const res = await fetch("api/especialidades/mias", { headers: authHeaders(), cache: "no-store" });
+    if (!res.ok) throw new Error();
+    especialidadesEst = await res.json();
+  } catch {
+    especialidadesEst = [];
+  }
+  const guardada = localStorage.getItem("snw_esp_estadisticas") || "";
+  selEspecialidadEst.innerHTML =
+    `<option value="">Todas</option>` +
+    especialidadesEst.map((e) => `<option value="${e.id}">${e.nombre_visible}</option>`).join("");
+  if (guardada && especialidadesEst.some((e) => String(e.id) === guardada)) {
+    selEspecialidadEst.value = guardada;
+  } else {
+    localStorage.removeItem("snw_esp_estadisticas");
+  }
+  selEspecialidadEst.hidden = !especialidadesEst.length;
+}
+
+if (selEspecialidadEst) selEspecialidadEst.addEventListener("change", () => {
+  const v = selEspecialidadEst.value;
+  if (v) localStorage.setItem("snw_esp_estadisticas", v);
+  else localStorage.removeItem("snw_esp_estadisticas");
+  recargarTodo();
+});
+
+function recargarTodo() {
+  cargar();
+  cargarEnvios(granEnvios);
+  if (ES_ADMIN && $("#panelCostos")) {
+    cargarTarifas();
+    cargarCostos(granCostos);
+  }
+}
+
 function chip(label, valor, clase, resp) {
   const attr = resp ? ` data-respuesta="${resp}"` : "";
   return `<div class="stat ${clase}"${attr}>${label} <strong>${num(valor)}</strong></div>`;
@@ -42,7 +100,8 @@ async function cargar() {
   // El botón lo deshabilita/rehabilita el cooldown de snwConCooldown, no
   // esta función (ver el addEventListener más abajo).
   try {
-    const res = await fetch("api/estadisticas", { headers: authHeaders(), cache: "no-store" });
+    const esp = especialidadEstActual();
+    const res = await fetch(`api/estadisticas${esp ? `?especialidad_id=${esp}` : ""}`, { headers: authHeaders(), cache: "no-store" });
     if (res.status === 401) { window.snwSesionExpirada(); return; }
     if (!res.ok) throw new Error();
     render(await res.json());
@@ -54,6 +113,20 @@ async function cargar() {
 function render(d) {
   $("#nombreMes").textContent = nombreMes(d.mes);
   $("#enviadosMes").textContent = num(d.enviados_mes);
+
+  const espNombre = (d.especialidad && d.especialidad.nombre_visible) || nombreEspecialidadEst();
+  const heroSub = document.querySelector(".hero-sub");
+  if (heroSub) {
+    heroSub.textContent = espNombre
+      ? `mensajes enviados este mes · ${espNombre}`
+      : "mensajes enviados este mes · solo producción";
+  }
+  const hintResp = $("#hintRespuestas");
+  if (hintResp && espNombre) {
+    hintResp.innerHTML = `Estado actual de los pacientes de <strong>${espNombre}</strong> ` +
+      `<strong>a los que ya se les envió un mensaje</strong>. Usa los botones para comparar cuántos ` +
+      `respondieron, se dieron de baja o no han respondido. En <a href="historial.html">Historial</a> puedes ver quiénes son.`;
+  }
 
   $("#statsMes").innerHTML =
     chip("Enviados", d.enviados_mes, "stat--enviado") +
@@ -240,7 +313,7 @@ async function cargarEnvios(gran) {
     b.classList.toggle("activo", b.dataset.gran === gran)
   );
   try {
-    const res = await fetch(`api/estadisticas/envios?granularidad=${gran}`, {
+    const res = await fetch(`api/estadisticas/envios?granularidad=${gran}${qsEspEst()}`, {
       headers: authHeaders(), cache: "no-store",
     });
     if (res.status === 401) { window.snwSesionExpirada(); return; }
@@ -406,7 +479,7 @@ async function cargarCostos(gran) {
     b.classList.toggle("activo", b.dataset.gran === gran)
   );
   try {
-    const res = await fetch(`api/estadisticas/costos?granularidad=${gran}`, {
+    const res = await fetch(`api/estadisticas/costos?granularidad=${gran}${qsEspEst()}`, {
       headers: authHeaders(), cache: "no-store",
     });
     if (res.status === 401) { window.snwSesionExpirada(); return; }
@@ -484,11 +557,9 @@ let yaCargada = false;
 window.snwCargarEstadisticas = function () {
   if (yaCargada) return;
   yaCargada = true;
-  cargar();
-  cargarEnvios("mes");
-  if (ES_ADMIN && $("#panelCostos")) {
-    cargarTarifas();
-    cargarCostos("mes");
-  }
+  (async () => {
+    await cargarEspecialidadesEst();
+    recargarTodo();
+  })();
 };
 })();

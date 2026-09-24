@@ -10,6 +10,8 @@ let _ambienteInicializado = false;
 
 let pacientes = [];
 let config = null;
+let especialidades = [];
+let especialidadSel = localStorage.getItem("snw_esp_pacientes") || "";
 let filtro = "";
 let filtroEstado = "todos";
 let filtroRespuesta = "todas";
@@ -27,6 +29,7 @@ const chkTodos = $("#chkTodos");
 const contadorSel = $("#contadorSel");
 const toastEl = $("#toast");
 const selAmbiente = $("#selAmbiente");
+const selEspecialidad = $("#selEspecialidad");
 const toolbarMasivo = $("#toolbarMasivo");
 const selEstadoMasivo = $("#selEstadoMasivo");
 const selRespuestaMasivo = $("#selRespuestaMasivo");
@@ -41,6 +44,70 @@ selAmbiente.addEventListener("change", async () => {
 function ambienteActual() {
   return selAmbiente.value;
 }
+
+// Especialidad (Fase 3): "" = bases legacy desarrollo/producción; con id se
+// lee la tabla pacientes_<slug> (el backend responde 403 si no está asignada).
+function especialidadActual() {
+  const v = selEspecialidad ? selEspecialidad.value : "";
+  return v ? Number(v) : null;
+}
+
+function qsBase() {
+  const amb = ambienteActual() || ambienteAdmin || "desarrollo";
+  const esp = especialidadActual();
+  return `ambiente=${encodeURIComponent(amb)}` + (esp ? `&especialidad_id=${esp}` : "");
+}
+
+async function cargarEspecialidades() {
+  if (!selEspecialidad) return;
+  try {
+    const r = await fetch("api/especialidades/mias", { headers: authHeaders(), cache: "no-store" });
+    if (!r.ok) throw new Error();
+    especialidades = await r.json();
+  } catch {
+    especialidades = [];
+  }
+  const actual = especialidadActual();
+  selEspecialidad.innerHTML =
+    `<option value="">Bases desarrollo/producción</option>` +
+    especialidades.map((e) => `<option value="${e.id}">${escaparHtml(e.nombre_visible)}</option>`).join("");
+  if (actual && especialidades.some((e) => e.id === actual)) {
+    selEspecialidad.value = String(actual);
+  } else {
+    especialidadSel = "";
+    localStorage.removeItem("snw_esp_pacientes");
+  }
+  aplicarModoEspecialidad();
+}
+
+function aplicarModoEspecialidad() {
+  const esp = especialidadActual();
+  selAmbiente.disabled = !!esp;
+  const csvBloque = $("#csvCarga");
+  if (csvBloque) {
+    csvBloque.hidden = !esp;
+    const dest = $("#csvDestino");
+    if (dest && esp) {
+      const e = especialidades.find((x) => x.id === esp);
+      dest.textContent = e ? e.nombre_visible : "especialidad";
+    }
+  }
+  const tituloEl = $("#tituloPacientes");
+  if (tituloEl && esp) {
+    const e = especialidades.find((x) => x.id === esp);
+    tituloEl.textContent = `Pacientes · ${e ? e.nombre_visible : "especialidad"}`;
+  }
+}
+
+if (selEspecialidad) selEspecialidad.addEventListener("change", async () => {
+  especialidadSel = selEspecialidad.value;
+  if (especialidadSel) localStorage.setItem("snw_esp_pacientes", especialidadSel);
+  else localStorage.removeItem("snw_esp_pacientes");
+  seleccionados = new Set();
+  todoMarcado = false;
+  aplicarModoEspecialidad();
+  cargar();
+});
 
 function escaparHtml(texto) {
   const div = document.createElement("div");
@@ -64,12 +131,18 @@ async function cargar() {
       _ambienteInicializado = true;
     }
     const amb = ambienteActual() || ambienteAdmin || "desarrollo";
+    const esp = especialidadActual();
     const [rp, rc] = await Promise.all([
-      fetch(`${API_PACIENTES}?ambiente=${amb}`, { headers: authHeaders(), cache: "no-store" }),
+      fetch(`${API_PACIENTES}?${qsBase()}`, { headers: authHeaders(), cache: "no-store" }),
       fetch(`api/configuracion?ambiente=${amb}`, { headers: authHeaders(), cache: "no-store" }),
     ]);
     if (rp.status === 401 || rc.status === 401) { window.snwSesionExpirada(); return; }
-    if (rp.status === 403) { location.href = "mensajeria.html"; return; }
+    if (rp.status === 403) {
+      toast(esp ? "No tienes acceso a esta especialidad." : "Sin acceso a esta base.", "error");
+      pacientes = [];
+      render();
+      return;
+    }
 
     pacientes = (await rp.json()).map((p) => ({
       ...p,
@@ -322,8 +395,7 @@ tbodyEl.addEventListener("change", async (e) => {
   }
   sel.disabled = true;
   try {
-    const amb = ambienteActual();
-    const res = await fetch(`api/pacientes/${id}/respuesta?ambiente=${encodeURIComponent(amb)}`, {
+    const res = await fetch(`api/pacientes/${id}/respuesta?${qsBase()}`, {
       method: "PUT",
       headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ respuesta: nueva }),
@@ -363,8 +435,7 @@ tbodyEl.addEventListener("change", async (e) => {
   }
   sel.disabled = true;
   try {
-    const amb = ambienteActual();
-    const res = await fetch(`api/pacientes/${id}?ambiente=${encodeURIComponent(amb)}`, {
+    const res = await fetch(`api/pacientes/${id}?${qsBase()}`, {
       method: "PUT",
       headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ estado: nuevoEstado }),
@@ -456,8 +527,7 @@ async function aplicarMasivo(sel, url, campo, etiquetas) {
   }
   sel.disabled = true;
   try {
-    const amb = ambienteActual();
-    const res = await fetch(`${url}?ambiente=${encodeURIComponent(amb)}`, {
+    const res = await fetch(`${url}?${qsBase()}`, {
       method: "PUT",
       headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ pacientes: ids, [campo]: valor }),
@@ -500,6 +570,38 @@ let yaCargada = false;
 window.snwCargarPacientes = function () {
   if (yaCargada) return;
   yaCargada = true;
-  cargar();
+  (async () => { await cargarEspecialidades(); cargar(); })();
 };
+
+// --- Carga CSV en la especialidad seleccionada (Fase 3) ---------------------
+const csvInput = $("#csvArchivo");
+if (csvInput) csvInput.addEventListener("change", async () => {
+  const esp = especialidadActual();
+  const archivo = csvInput.files && csvInput.files[0];
+  csvInput.value = "";
+  if (!esp || !archivo) return;
+  const msgEl = $("#csvMsg");
+  if (msgEl) msgEl.textContent = "Subiendo…";
+  try {
+    const datos = new FormData();
+    datos.append("archivo", archivo);
+    const res = await fetch(`api/especialidades/${esp}/pacientes/csv`, {
+      method: "POST", headers: authHeaders(), body: datos,
+    });
+    const informe = await res.json().catch(() => ({}));
+    if (res.status === 401) { window.snwSesionExpirada(); return; }
+    if (!res.ok) throw new Error((informe.detail && informe.detail.columnas) || informe.detail || `Error ${res.status}`);
+    const inf = informe.informe || {};
+    let texto = `${inf.insertados ?? 0} insertados de ${inf.procesados ?? 0} procesados` +
+      ` (${inf.duplicados ?? 0} duplicados, ${inf.rechazados ?? 0} rechazados).`;
+    const primeros = (inf.errores || []).slice(0, 3).map((e) => `fila ${e.fila}: ${e.motivo}`).join(" · ");
+    if (primeros) texto += " " + primeros;
+    if (msgEl) msgEl.textContent = texto;
+    toast("CSV procesado.", "ok");
+    cargar();
+  } catch (err) {
+    if (msgEl) msgEl.textContent = "";
+    toast(err.message || "No se pudo cargar el CSV.", "error");
+  }
+});
 })();
