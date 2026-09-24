@@ -354,10 +354,28 @@ def _cond_tabla_log_segura(tabla: str | None, ambiente: str) -> tuple[str, tuple
 
 
 def _validar_plantilla_especialidad(sesion: dict, especialidad_id: int | None) -> int | None:
-    """Valida la asociación plantilla -> especialidad (404/403). None = global."""
+    """Valida la asociación plantilla -> especialidad (404/403). None = global.
+    El usuario normal no puede usar plantillas globales: siempre debe asociar
+    una de sus especialidades asignadas."""
     if especialidad_id is None:
+        if sesion.get("rol") == "usuario":
+            raise HTTPException(
+                422, detail="Debes asociar la plantilla a una de tus especialidades asignadas.")
         return None
     return int(_exigir_especialidad(sesion, especialidad_id)["id"])
+
+
+def _exigir_plantilla_en_alcance(sesion: dict, p: dict) -> None:
+    """El usuario normal solo toca plantillas de sus especialidades asignadas.
+    Excepción: sus propias pendientes/rechazadas previas (globales) sí las
+    puede corregir o eliminar para asignarles especialidad."""
+    if sesion.get("rol") != "usuario":
+        return
+    if p.get("especialidad_id") in set(sesion.get("especialidad_ids") or []):
+        return
+    if _aprobacion_plantilla(p) != "aprobada" and _es_creador_plantilla(p, sesion):
+        return
+    raise HTTPException(403, detail="Solo puedes gestionar plantillas de tus especialidades asignadas.")
 
 
 def _especialidades_para_respuesta(sesion: dict) -> list[dict]:
@@ -1850,12 +1868,14 @@ def listar_plantillas(sesion: dict = Depends(sesion_actual)):
     plantillas = [p for p in plantillas
                   if p.get("especialidad_id") is None or p.get("especialidad_id") in permitidas]
     if sesion.get("rol") != "supervisor":
-        # Cuentas normales: solo las aprobadas, más las propias pendientes o
-        # rechazadas (para corregirlas o eliminarlas).
+        # Cuentas normales: solo plantillas de sus especialidades asignadas,
+        # en cualquier estado; más sus propias pendientes/rechazadas previas
+        # (para asignarles especialidad o eliminarlas).
         yo = (sesion.get("usuario") or "").strip().lower()
         plantillas = [p for p in plantillas
-                      if _aprobacion_plantilla(p) == "aprobada"
-                      or (p.get("creado_por") or "").strip().lower() == yo]
+                      if p.get("especialidad_id") in permitidas
+                      or (_aprobacion_plantilla(p) != "aprobada"
+                          and (p.get("creado_por") or "").strip().lower() == yo)]
     return sorted(plantillas, key=lambda p: p.get("actualizada", 0), reverse=True)
 
 
@@ -2229,6 +2249,7 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
                     400,
                     detail="El mensaje de call center no es editable.",
                 )
+            _exigir_plantilla_en_alcance(sesion, p)
             if _aprobacion_plantilla(p) != "aprobada":
                 # Pendiente/rechazada: aún no existe en Meta. La edita su
                 # creador o quien puede aprobar; si la edita alguien sin ese
@@ -2316,6 +2337,7 @@ def eliminar_plantilla(plantilla_id: int, sesion: dict = Depends(exigir("plantil
             400,
             detail="El mensaje de call center no se puede eliminar desde acá.",
         )
+    _exigir_plantilla_en_alcance(sesion, objetivo)
     if _aprobacion_plantilla(objetivo) != "aprobada":
         # Sin template en Meta: la borra su creador o un aprobador, sin más.
         if not (_es_creador_plantilla(objetivo, sesion) or _puede_aprobar_plantillas(sesion)):

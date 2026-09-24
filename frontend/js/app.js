@@ -160,11 +160,16 @@ async function cargarEspecialidades() {
 function poblarSelectEspecialidad() {
   if (!inpEspecialidad) return;
   const actual = inpEspecialidad.value;
+  // El usuario normal no puede usar plantillas globales: solo sus
+  // especialidades asignadas (el backend lo exige igual).
+  const esUsuario = (window.snwRol || "") === "usuario";
   inpEspecialidad.innerHTML =
-    `<option value="">Global (todas las bases)</option>` +
+    (esUsuario ? "" : `<option value="">Global (todas las bases)</option>`) +
     misEspecialidades.map((e) => `<option value="${e.id}">${escaparHtml(e.nombre_visible)}</option>`).join("");
   if (actual && misEspecialidades.some((e) => String(e.id) === actual)) {
     inpEspecialidad.value = actual;
+  } else if (esUsuario && misEspecialidades.length) {
+    inpEspecialidad.value = String(misEspecialidades[0].id);
   }
 }
 
@@ -888,6 +893,9 @@ formEl.addEventListener("submit", async (e) => {
 
   try {
     const especialidad_id = inpEspecialidad && inpEspecialidad.value ? Number(inpEspecialidad.value) : null;
+    if ((window.snwRol || "") === "usuario" && especialidad_id == null) {
+      return toast("Debes asociar la plantilla a una de tus especialidades asignadas.", "error");
+    }
     let fila;
     if (activaId) {
       fila = await actualizarPlantilla(activaId, nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, especialidad_id);
