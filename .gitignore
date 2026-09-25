@@ -33,6 +33,7 @@ backup_*.sql
 
 
 data/sesiones.json
+data/plantillas_eliminadas.json
 
 documentacion/
 AGENTS.md

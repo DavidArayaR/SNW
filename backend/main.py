@@ -1039,6 +1039,64 @@ def _plantilla_valida(p) -> bool:
     )
 
 
+# --- Nombres eliminados (política de Meta: 30 días) ---------------------------
+# Meta no permite crear un template con el nombre de uno eliminado hasta
+# pasados 30 días. Se guarda cada eliminación con su fecha; al crear se
+# rechaza el nombre (o clave/template equivalente) si está en cuarentena.
+DATA_ELIMINADAS = BASE_DIR / "data" / "plantillas_eliminadas.json"
+REUSO_ELIMINADA_MS = 30 * 24 * 3600 * 1000
+
+
+def _eliminadas_vigentes() -> list:
+    """Entradas con menos de 30 días (las más viejas ya liberan el nombre)."""
+    try:
+        datos = json.loads(DATA_ELIMINADAS.read_text(encoding="utf-8"))
+        lista = datos if isinstance(datos, list) else []
+    except FileNotFoundError:
+        return []
+    except Exception as e:
+        log_error(f"_eliminadas_vigentes: {DATA_ELIMINADAS.name} ilegible", e)
+        return []
+    ahora = int(time.time() * 1000)
+    return [e for e in lista
+            if isinstance(e, dict) and ahora - int(e.get("eliminada_en") or 0) < REUSO_ELIMINADA_MS]
+
+
+def _registrar_eliminada(nombre: str, clave: str, whatsapp_template: str | None) -> None:
+    """Guarda el nombre en cuarentena (solo si llegó a existir en Meta)."""
+    if not (whatsapp_template or "").strip():
+        return
+    try:
+        vigentes = _eliminadas_vigentes()
+        vigentes.append({
+            "nombre": (nombre or "").strip(),
+            "clave": (clave or "").strip(),
+            "whatsapp_template": (whatsapp_template or "").strip(),
+            "eliminada_en": int(time.time() * 1000),
+        })
+        DATA_ELIMINADAS.write_text(json.dumps(vigentes, ensure_ascii=False, indent=2),
+                                   encoding="utf-8")
+    except Exception as e:
+        log_error("_registrar_eliminada", e)
+
+
+def _validar_nombre_reusable(nombre: str, clave: str, whatsapp_template: str | None) -> None:
+    """409 si el nombre/clave/template se eliminó hace menos de 30 días."""
+    nom = (nombre or "").strip().lower()
+    wt = (whatsapp_template or "").strip()
+    for e in _eliminadas_vigentes():
+        if ((e.get("nombre") or "").strip().lower() == nom
+                or (e.get("clave") or "") == (clave or "")
+                or ((e.get("whatsapp_template") or "") and (e.get("whatsapp_template") or "") == wt)):
+            restantes = REUSO_ELIMINADA_MS - (int(time.time() * 1000) - int(e.get("eliminada_en") or 0))
+            dias = max(1, -(-restantes // (24 * 3600 * 1000)))
+            raise HTTPException(
+                409,
+                detail=f"Por políticas de Meta, no se puede crear una plantilla con el nombre "
+                       f"de una eliminada hasta pasados 30 días (restan {dias} días).",
+            )
+
+
 def leer_plantillas() -> list:
     try:
         datos = json.loads(DATA_FILE.read_text(encoding="utf-8"))
@@ -1899,22 +1957,20 @@ def _registrar_template_meta(p: dict, nombre_anterior: str | None = None,
 
 def _plantillas_visibles(sesion: dict, plantillas: list) -> list:
     """Subconjunto que la sesión puede ver: admin todo; supervisor su alcance
-    (incluye pendientes por revisar); usuario normal las globales aprobadas,
-    las de sus especialidades asignadas y sus propias pendientes/rechazadas
-    previas."""
+    (incluye pendientes por revisar); usuario normal solo lo que creó y lo de
+    sus especialidades asignadas."""
     if _es_privilegiado(sesion):
         return list(plantillas)
     permitidas = set(sesion.get("especialidad_ids") or [])
     plantillas = [p for p in plantillas
                   if p.get("especialidad_id") is None or p.get("especialidad_id") in permitidas]
     if sesion.get("rol") != "supervisor":
+        # Cuentas normales: solo lo que crearon y lo de sus especialidades
+        # asignadas (cualquier estado).
         yo = (sesion.get("usuario") or "").strip().lower()
         plantillas = [p for p in plantillas
-                      if (p.get("especialidad_id") is None
-                          and _aprobacion_plantilla(p) == "aprobada")
-                      or p.get("especialidad_id") in permitidas
-                      or (_aprobacion_plantilla(p) != "aprobada"
-                          and (p.get("creado_por") or "").strip().lower() == yo)]
+                      if (p.get("creado_por") or "").strip().lower() == yo
+                      or p.get("especialidad_id") in permitidas]
     return plantillas
 
 
@@ -2235,8 +2291,11 @@ def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(exigir("plantillas
     plantillas = leer_plantillas()
     clave = slug(body.clave or body.nombre)
 
+    if any((p.get("nombre") or "").strip().lower() == body.nombre.strip().lower() for p in plantillas):
+        raise HTTPException(409, detail="Ya existe una plantilla con ese nombre")
     if clave == CALL_CENTER_CLAVE or any(p["clave"] == clave for p in plantillas):
         raise HTTPException(409, detail="Ya existe una plantilla con esa clave")
+    _validar_nombre_reusable(body.nombre, clave, slug(body.nombre) or None)
 
     ahora_ms = int(time.time() * 1000)
     preaprobada = _puede_aprobar_plantillas(sesion)
@@ -2395,7 +2454,8 @@ def eliminar_plantilla(plantilla_id: int, sesion: dict = Depends(exigir("plantil
         )
     _exigir_plantilla_en_alcance(sesion, objetivo)
     if _aprobacion_plantilla(objetivo) != "aprobada":
-        # Sin template en Meta: se borra directo.
+        # Sin template en Meta: se borra directo (su nombre nunca llegó a
+        # Meta, así que no entra en la cuarentena de 30 días).
         escribir_plantillas([p for p in plantillas if p["id"] != plantilla_id])
         auditoria_registrar(sesion.get("usuario", ""), "plantilla_eliminada", objetivo.get("clave", ""),
                             f"Eliminó la plantilla pendiente «{objetivo.get('nombre', '')}»")
@@ -2426,6 +2486,10 @@ def eliminar_plantilla(plantilla_id: int, sesion: dict = Depends(exigir("plantil
             aviso_meta = res.get("error") or "No se pudo borrar el template en Meta."
 
     escribir_plantillas([p for p in plantillas if p["id"] != plantilla_id])
+    # El nombre entra en cuarentena de 30 días (política de Meta), haya o no
+    # podido borrarse el template allá.
+    _registrar_eliminada(objetivo.get("nombre", ""), objetivo.get("clave", ""),
+                         objetivo.get("whatsapp_template"))
     return {"ok": True, "meta_borrado": borrado_meta, "meta_advertencia": aviso_meta}
 
 
