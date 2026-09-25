@@ -1,0 +1,121 @@
+nombre,apellido,telefono
+  Camila  ,PAREDES,92000000
+JAVIER,tApIa,56992000037
+fErNaNdA,González,+56992000074
+Matías,  Flores  ,+56 9 2000 111
+  Valentina  ,ROMERO,92000-148
+DIEGO,fUeNtEs,(56) 92000185
+aNtOnIa,Díaz,56 92000222
+Benjamín,  Ramírez  ,92000259
+  Sofía  ,ORTIZ,56992000296
+LUCAS,cOnTrErAs,+56992000333
+mArTiNa,Muñoz,+56 9 2000 370
+Tomás,  Martínez  ,92000-407
+  Emilia  ,AGUILAR,(56) 92000444
+JOAQUÍN,sOtO,56 92000481
+iSiDoRa,Herrera,92000518
+Facundo,  Fernández  ,56992000555
+  Florencia  ,GÓMEZ,+56992000592
+VICENTE,nAvArRo,+56 9 2000 629
+cAtAlInA,Morales,92000-666
+Sebastián,  Pérez  ,(56) 92000703
+  Constanza  ,CRUZ,56 92000740
+NICOLÁS,cHáVeZ,92000777
+aNtOnElLa,Ríos,56992000814
+Cristóbal,  Rojas  ,+56992000851
+  Javiera  ,SÁNCHEZ,+56 9 2000 888
+MAXIMILIANO,cAsTiLlO,92000-925
+tRiNiDaD,Vargas,(56) 92000962
+Agustín,  Olivares  ,56 92000999
+  Josefa  ,LÓPEZ,92001036
+FELIPE,mEnDoZa,56992001073
+cAmIlA,Paredes,+56992001110
+Javier,  Tapia  ,+56 9 2001 147
+  Fernanda  ,GONZÁLEZ,92001-184
+MATÍAS,fLoReS,(56) 92001221
+vAlEnTiNa,Romero,56 92001258
+Diego,  Fuentes  ,92001295
+  Antonia  ,DÍAZ,56992001332
+BENJAMÍN,rAmÍrEz,+56992001369
+sOfÍa,Ortiz,+56 9 2001 406
+Lucas,  Contreras  ,92001-443
+  Martina  ,MUÑOZ,(56) 92001480
+TOMÁS,mArTíNeZ,56 92001517
+eMiLiA,Aguilar,92001554
+Joaquín,  Soto  ,56992001591
+  Isidora  ,HERRERA,+56992001628
+FACUNDO,fErNáNdEz,+56 9 2001 665
+fLoReNcIa,Gómez,92001-702
+Vicente,  Navarro  ,(56) 92001739
+  Catalina  ,MORALES,56 92001776
+SEBASTIÁN,pÉrEz,92001813
+cOnStAnZa,Cruz,56992001850
+Nicolás,  Chávez  ,+56992001887
+  Antonella  ,RÍOS,+56 9 2001 924
+CRISTÓBAL,rOjAs,92001-961
+jAvIeRa,Sánchez,(56) 92001998
+Maximiliano,  Castillo  ,56 92002035
+  Trinidad  ,VARGAS,92002072
+AGUSTÍN,oLiVaReS,56992002109
+jOsEfA,López,+56992002146
+Felipe,  Mendoza  ,+56 9 2002 183
+  Camila  ,PAREDES,92002-220
+JAVIER,tApIa,(56) 92002257
+fErNaNdA,González,56 92002294
+Matías,  Flores  ,92002331
+  Valentina  ,ROMERO,56992002368
+DIEGO,fUeNtEs,+56992002405
+aNtOnIa,Díaz,+56 9 2002 442
+Benjamín,  Ramírez  ,92002-479
+  Sofía  ,ORTIZ,(56) 92002516
+LUCAS,cOnTrErAs,56 92002553
+mArTiNa,Muñoz,92002590
+Tomás,  Martínez  ,56992002627
+  Emilia  ,AGUILAR,+56992002664
+JOAQUÍN,sOtO,+56 9 2002 701
+iSiDoRa,Herrera,92002-738
+Facundo,  Fernández  ,(56) 92002775
+  Florencia  ,GÓMEZ,56 92002812
+VICENTE,nAvArRo,92002849
+cAtAlInA,Morales,56992002886
+Sebastián,  Pérez  ,+56992002923
+  Constanza  ,CRUZ,+56 9 2002 960
+NICOLÁS,cHáVeZ,92002-997
+aNtOnElLa,Ríos,(56) 92003034
+Cristóbal,  Rojas  ,56 92003071
+  Javiera  ,SÁNCHEZ,92003108
+MAXIMILIANO,cAsTiLlO,56992003145
+tRiNiDaD,Vargas,+56992003182
+Agustín,  Olivares  ,+56 9 2003 219
+  Josefa  ,LÓPEZ,92003-256
+FELIPE,mEnDoZa,(56) 92003293
+cAmIlA,Paredes,56 92003330
+Javier,  Tapia  ,92003367
+  Fernanda  ,GONZÁLEZ,56992003404
+MATÍAS,fLoReS,+56992003441
+vAlEnTiNa,Romero,+56 9 2003 478
+Diego,  Fuentes  ,92003-515
+  Antonia  ,DÍAZ,(56) 92003552
+BENJAMÍN,rAmÍrEz,56 92003589
+sOfÍa,Ortiz,92003626
+Lucas,  Contreras  ,56992003663
+  Martina  ,MUÑOZ,+56992003700
+TOMÁS,mArTíNeZ,+56 9 2003 737
+eMiLiA,Aguilar,92003-774
+Joaquín,  Soto  ,(56) 92003811
+  Isidora  ,HERRERA,56 92003848
+FACUNDO,fErNáNdEz,92003885
+fLoReNcIa,Gómez,56992003922
+Vicente,  Navarro  ,+56992003959
+  Catalina  ,MORALES,+56 9 2003 996
+SEBASTIÁN,pÉrEz,92004-033
+cOnStAnZa,Cruz,(56) 92004070
+Nicolás,  Chávez  ,56 92004107
+  Antonella  ,RÍOS,92004144
+CRISTÓBAL,rOjAs,56992004181
+jAvIeRa,Sánchez,+56992004218
+Maximiliano,  Castillo  ,+56 9 2004 255
+  Trinidad  ,VARGAS,92004-292
+AGUSTÍN,oLiVaReS,(56) 92004329
+jOsEfA,López,56 92004366
+Felipe,  Mendoza  ,92004403

@@ -973,6 +973,32 @@ def retirar_rol_especialidad(especialidad_id: int, usuario: str,
     return {"ok": True, "retirado": retirado}
 
 
+def eliminar_paciente_especialidad(especialidad_id: int, paciente_id: int,
+                                   sesion: dict = Depends(solo_admin)):
+    """Borra UN registro de la tabla de la especialidad (solo admin/dev)."""
+    try:
+        borrado = servicio_especialidades.eliminar_paciente_especialidad(especialidad_id, paciente_id)
+    except ValueError as e:
+        raise _error_especialidad(str(e))
+    if not borrado:
+        raise HTTPException(404, detail="Paciente no encontrado en esta especialidad.")
+    auditoria_registrar(sesion.get("usuario", ""), "especialidad_paciente_eliminar",
+                        f"especialidad {especialidad_id}", f"Paciente {paciente_id} eliminado")
+    return {"ok": True}
+
+
+def eliminar_tabla_especialidad(especialidad_id: int, sesion: dict = Depends(solo_admin)):
+    """Elimina la especialidad entera: tabla, rol, asignaciones y registro
+    (solo admin/dev). El historial de envíos se conserva."""
+    try:
+        info = servicio_especialidades.eliminar_tabla_especialidad(especialidad_id)
+    except ValueError as e:
+        raise _error_especialidad(str(e))
+    auditoria_registrar(sesion.get("usuario", ""), "especialidad_eliminar",
+                        info["nombre_visible"], f"Tabla {info['nombre_tabla_base']} eliminada")
+    return {"ok": True, **info}
+
+
 async def importar_pacientes_csv(especialidad_id: int, archivo: UploadFile = File(...),
                                  sesion: dict = Depends(sesion_actual)):
     """Carga pacientes vía CSV en la tabla de la especialidad.
@@ -3958,13 +3984,21 @@ def detalle_historial(envio_id: int, ambiente: str = Query("produccion"),
             esp_id_env = _e.get("especialidad_id")
             tabla_env = _e.get("tabla_pacientes")
     if esp_id_env is not None:
-        _exigir_especialidad(sesion, esp_id_env)
+        if servicio_especialidades.obtener_especialidad(esp_id_env) is not None:
+            _exigir_especialidad(sesion, esp_id_env)
+        elif not _es_privilegiado(sesion):
+            # Especialidad eliminada: su historial lo ven solo admin/dev.
+            raise HTTPException(403, detail="No tienes acceso a este envío.")
     elif not _es_privilegiado(sesion):
         raise HTTPException(403, detail="No tienes acceso a este envío.")
-    if tabla_env and servicio_especialidades.tabla_valida(tabla_env):
+    if tabla_env and servicio_especialidades.tabla_valida(tabla_env) \
+            and servicio_especialidades.tabla_fisica_existe(tabla_env):
         t = tabla_env
     else:
+        # Tabla legacy o de especialidad eliminada: el join no encuentra filas
+        # y el detalle usa la señal congelada en cada registro.
         t = tabla_pacientes(ambiente)
+        tabla_env = None
     tiene_opt = columna_existe(t, "whatsapp_opt_out", ambiente)
     tiene_int = columna_existe(t, "interesado", ambiente)
     re_expr = expr_respuesta_efectiva("pac", tiene_opt, columna_existe(t, "respuesta_manual", ambiente),
@@ -4024,7 +4058,10 @@ def actualizar_respuesta(registro_id: int, body: EstadoPacienteIn,
             _r = cur.fetchone() or {}
             esp_id_reg = _r.get("especialidad_id")
         if esp_id_reg is not None:
-            _exigir_especialidad(sesion, esp_id_reg)
+            if servicio_especialidades.obtener_especialidad(esp_id_reg) is not None:
+                _exigir_especialidad(sesion, esp_id_reg)
+            elif not _es_privilegiado(sesion):
+                raise HTTPException(403, detail="No tienes acceso a este registro.")
         elif not _es_privilegiado(sesion):
             raise HTTPException(403, detail="No tienes acceso a este registro.")
         cur.execute("UPDATE log_envios SET respuesta = %s WHERE id = %s", (body.estado, registro_id))

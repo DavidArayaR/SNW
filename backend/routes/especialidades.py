@@ -7,6 +7,8 @@ RUTAS = (
     ("/api/especialidades/{especialidad_id}", "PUT", "renombrar_especialidad", None),
     ("/api/especialidades/{especialidad_id}/roles", "POST", "asignar_rol_especialidad", None),
     ("/api/especialidades/{especialidad_id}/roles/{usuario}", "DELETE", "retirar_rol_especialidad", None),
+    ("/api/especialidades/{especialidad_id}/pacientes/{paciente_id}", "DELETE", "eliminar_paciente_especialidad", None),
+    ("/api/especialidades/{especialidad_id}/tabla", "DELETE", "eliminar_tabla_especialidad", None),
     ("/api/especialidades/{especialidad_id}/pacientes/csv", "POST", "importar_pacientes_csv", 201),
 )
 

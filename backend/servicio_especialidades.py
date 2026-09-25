@@ -113,6 +113,18 @@ def _tabla_fisica_existe(cur, tabla: str) -> bool:
     return bool((cur.fetchone() or {}).get("n"))
 
 
+def tabla_fisica_existe(tabla: str) -> bool:
+    """True si la tabla física existe en `snw_base`."""
+    if not tabla_valida(tabla):
+        return False
+    try:
+        with conectar() as conn, conn.cursor() as cur:
+            return _tabla_fisica_existe(cur, tabla)
+    except Exception as e:
+        log_error("tabla_fisica_existe", e)
+        return False
+
+
 def listar_especialidades() -> list[dict]:
     try:
         with conectar() as conn, conn.cursor() as cur:
@@ -140,7 +152,14 @@ def obtener_especialidad(especialidad_id: int) -> dict | None:
                 " WHERE e.id = %s",
                 (int(especialidad_id),),
             )
-            return cur.fetchone()
+            esp = cur.fetchone()
+            if esp and tabla_valida(esp["nombre_tabla_base"]) \
+                    and _tabla_fisica_existe(cur, esp["nombre_tabla_base"]):
+                cur.execute(f"SELECT COUNT(*) AS n FROM {esp['nombre_tabla_base']}")
+                esp["total_pacientes"] = int((cur.fetchone() or {}).get("n", 0))
+            elif esp:
+                esp["total_pacientes"] = 0
+            return esp
     except Exception as e:
         log_error("obtener_especialidad", e)
         return None
@@ -326,6 +345,56 @@ def retirar_rol_especialidad(especialidad_id: int, usuario_id: int) -> bool:
         )
         conn.commit()
         return (cur.rowcount or 0) > 0
+
+
+def eliminar_paciente_especialidad(especialidad_id: int, paciente_id: int) -> bool:
+    """Borra UN registro de la tabla de la especialidad (solo admin/dev desde
+    el endpoint). También borra sus filas de log propias (aisladas por tabla);
+    el resto del historial no se toca."""
+    esp = obtener_especialidad(int(especialidad_id))
+    if not esp:
+        raise ValueError("no_existe")
+    tabla = esp["nombre_tabla_base"]
+    if not tabla_valida(tabla):
+        raise ValueError("tabla_invalida")
+    with conectar() as conn, conn.cursor() as cur:
+        if not _tabla_fisica_existe(cur, tabla):
+            raise ValueError("no_existe")
+        cur.execute(f"DELETE FROM {tabla} WHERE id = %s", (int(paciente_id),))
+        borrado = (cur.rowcount or 0) > 0
+        if borrado:
+            cur.execute(
+                "DELETE FROM log_envios WHERE paciente_id = %s AND tabla_pacientes = %s",
+                (int(paciente_id), tabla),
+            )
+        conn.commit()
+        return borrado
+
+
+def eliminar_tabla_especialidad(especialidad_id: int) -> dict:
+    """Elimina la especialidad entera (solo admin/dev desde el endpoint):
+    tabla física, rol, asignaciones y fila de especialidad. El historial de
+    envíos (`envios`/`log_envios`) se conserva como trazabilidad."""
+    esp = obtener_especialidad(int(especialidad_id))
+    if not esp:
+        raise ValueError("no_existe")
+    tabla = esp["nombre_tabla_base"]
+    if not tabla_valida(tabla):
+        raise ValueError("tabla_invalida")
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("SELECT id FROM roles_especialidad WHERE especialidad_id = %s",
+                    (int(especialidad_id),))
+        rol = cur.fetchone()
+        if rol:
+            cur.execute("DELETE FROM usuario_especialidad_roles WHERE rol_id = %s",
+                        (int(rol["id"]),))
+            cur.execute("DELETE FROM roles_especialidad WHERE id = %s", (int(rol["id"]),))
+        if _tabla_fisica_existe(cur, tabla):
+            cur.execute(f"DROP TABLE {tabla}")
+        cur.execute("DELETE FROM especialidades WHERE id = %s", (int(especialidad_id),))
+        conn.commit()
+    return {"id": int(especialidad_id), "nombre_visible": esp["nombre_visible"],
+            "nombre_tabla_base": tabla}
 
 
 def importar_pacientes_csv(especialidad_id: int, datos: bytes) -> dict:

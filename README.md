@@ -449,6 +449,8 @@ Cada especialidad vive en **una sola tabla** `pacientes_<slug>` dentro de `snw_b
 | POST | `/api/especialidades/{id}/roles` | (admin / dev) `{usuario}` — asigna a la cuenta el rol de la especialidad |
 | DELETE | `/api/especialidades/{id}/roles/{usuario}` | (admin / dev) — retira el rol de la especialidad |
 | POST | `/api/especialidades/{id}/pacientes/csv` | Carga CSV (`nombre, apellido, telefono`, UTF-8, máx. 5 MB) en la tabla de la especialidad; normaliza a `+569XXXXXXXX` e informa `{procesados, insertados, duplicados, rechazados, errores}`. Admin/dev o cuentas con permiso de mensajería y el rol asignado |
+| DELETE | `/api/especialidades/{id}/pacientes/{pid}` | (admin / dev) Borra UN registro de la tabla (más sus filas de log propias) |
+| DELETE | `/api/especialidades/{id}/tabla` | (admin / dev) Elimina la especialidad entera: tabla, rol, asignaciones y registro. El historial de envíos se conserva. Las tablas legacy (`pacientes_dev`/`pacientes_prod`) no se pueden borrar |
 
 ### Especialidades — Fase 2 (autorización en backend)
 
@@ -461,7 +463,7 @@ Cada especialidad vive en **una sola tabla** `pacientes_<slug>` dentro de `snw_b
 
 ### Especialidades — Fase 3 (frontend + supervisión)
 
-- **Pestaña Especialidades** (administración, admin/dev): crear (con flujo duplicado: usar existente o crear `Kinesiología 2`), renombrar (la tabla no cambia), asignar/retirar roles por cuenta.
+- **Pestaña Especialidades** (administración, admin/dev): crear (con flujo duplicado: usar existente o crear `Kinesiología 2`), renombrar (la tabla no cambia), asignar/retirar roles por cuenta y **eliminar la tabla completa** (zona de peligro, con confirmación; el historial se conserva).
 - **Usuarios** muestra el rol `supervisor` y las especialidades asignadas de cada cuenta; «Envíos realizados» y «Actividad» paginan de a 10.
 - **Pacientes**: **selector único de base de datos** (desarrollo/producción/especialidades, siempre con el nombre físico de la tabla), **carga CSV** en la tabla de la especialidad (informe de insertados/duplicados/rechazados) y **paginación** (10 a 100 por página, se recuerda).
 - **Mensajería**: especialidad por plantilla (badge en la lista + campo en el editor), **filtro «Filtrar por especialidad»** (Todas/Globales/cada una) y **selector único de base de datos** en el modal (bases disponibles + una opción por especialidad; si hay una sola disponible, queda esa seleccionada; las plantillas de especialidad fuerzan su base), con conteo, slider y cupo diario. Modales de confirmación al aprobar y de motivo al rechazar.
@@ -928,7 +930,8 @@ claro** de la sidebar, o con el botón flotante en la portada y el login (págin
   la señal de WhatsApp (Respondió / Se dio de baja / Sin respuesta) y su fecha, filtros por
   estado/respuesta, **paginación** (10 a 100 por página) y **carga CSV** en la especialidad elegida, y selección múltiple para editar **estado o respuesta de varios
   pacientes a la vez** (barra «Con los seleccionados», aparece al marcar alguno; pide
-  confirmación con la cantidad antes de aplicar). Un badge de «Se dio de baja» con
+  confirmación con la cantidad antes de aplicar). En tablas de especialidad hay además
+  borrado por fila (×) y en bloque («Eliminar»). Un badge de «Se dio de baja» con
   &#128274; no se puede editar (ni uno por uno ni en bloque): esa baja la pidió el propio
   paciente por WhatsApp (ver «Baja explícita» en «Sistema de baja»). Aquí se ve **quiénes**
   respondieron o se dieron de baja — **no se envían mensajes desde esta página** (ver

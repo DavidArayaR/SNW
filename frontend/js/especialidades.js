@@ -140,12 +140,17 @@ function renderDetalle() {
             `<option value="${esc(u.usuario)}">${esc(u.nombre || u.usuario)} (${esc(u.usuario)})</option>`).join("")}</select>` +
           `<button type="button" class="btn btn--primary" data-asignar${agregables.length ? "" : " disabled"}>Asignar</button>` +
         `</div>` +
+        `<label>Zona de peligro</label>` +
+        `<div><button type="button" class="btn btn--danger" data-eliminar-tabla>Eliminar tabla completa</button>` +
+        `<p class="field__hint" style="margin:6px 0 0;">Borra la tabla <code>${esc(esp.nombre_tabla_base)}</code> ` +
+        `(${(esp.total_pacientes ?? 0)} pacientes), su rol y sus asignaciones. El historial de envíos se conserva. No se puede deshacer.</p></div>` +
       `</div>` +
     `</div>`;
 
   const card = detalleEl.querySelector(".usr-card");
   card.querySelector("[data-renombrar]").addEventListener("click", () => renombrar(card));
   card.querySelector("[data-asignar]").addEventListener("click", () => asignar(card));
+  card.querySelector("[data-eliminar-tabla]").addEventListener("click", () => eliminarTabla(card));
   card.querySelectorAll("[data-quitar]").forEach((b) =>
     b.addEventListener("click", () => retirar(card, b.dataset.quitar)));
 }
@@ -192,8 +197,32 @@ async function asignar(card) {
   }
 }
 
-async function retirar(card, correo) {
+async function eliminarTabla(card) {
   const id = Number(card.dataset.id);
+  const esp = (estado.lista || []).find((x) => x.id === id);
+  if (!esp) return;
+  const total = esp.total_pacientes ?? "?";
+  if (!confirm(
+    `¿Eliminar DEFINITIVAMENTE la especialidad «${esp.nombre_visible}»?\n\n` +
+    `Se borra la tabla ${esp.nombre_tabla_base} (${total} pacientes), su rol y sus ` +
+    `asignaciones. El historial de envíos se conserva.\n\nEsta acción no se puede deshacer.`
+  )) return;
+  try {
+    const r = await fetch(`api/especialidades/${id}/tabla`, {
+      method: "DELETE", headers: authHeaders(),
+    });
+    if (r.status === 401) { window.snwSesionExpirada(); return; }
+    if (!r.ok) throw new Error(`Error ${r.status}`);
+    toast(`Tabla ${esp.nombre_tabla_base} eliminada.`);
+    seleccion = null;
+    yaCargada = false;
+    await cargar();
+  } catch (e) {
+    toast(e.message || "No se pudo eliminar.", "error");
+  }
+}
+
+async function retirar(card, correo) {  const id = Number(card.dataset.id);
   if (!confirm(`¿Quitar a ${correo} el acceso a esta especialidad?`)) return;
   try {
     const r = await fetch(`api/especialidades/${id}/roles/` + encodeURIComponent(correo), {

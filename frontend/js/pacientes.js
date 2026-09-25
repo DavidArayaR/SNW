@@ -140,15 +140,19 @@ async function cargarBasesPac() {
 function aplicarModoBase() {
   const esp = espPacId();
   const tabla = tablaPacActual();
+  const cardGestion = $("#cardGestionTabla");
+  if (cardGestion) cardGestion.hidden = esp == null;
   const csvBloque = $("#csvCarga");
-  if (csvBloque) {
-    csvBloque.hidden = esp == null;
+  if (csvBloque && esp != null) {
     const dest = $("#csvDestino");
-    if (dest && esp != null) {
+    if (dest) {
       const e = especialidades.find((x) => x.id === esp);
       dest.textContent = e ? `${e.nombre_visible} (${e.nombre_tabla_base})` : "especialidad";
     }
   }
+  // El borrado de registros solo existe para tablas de especialidad.
+  const btnDelMasivo = $("#btnEliminarMasivo");
+  if (btnDelMasivo) btnDelMasivo.hidden = esp == null;
   const tituloEl = $("#tituloPacientes");
   if (tituloEl && tabla) tituloEl.textContent = `Pacientes · ${tabla}`;
 }
@@ -613,6 +617,30 @@ if (selRespuestaMasivo) {
     aplicarMasivo(selRespuestaMasivo, "api/pacientes/respuesta-masiva", "respuesta", RESPUESTA_LABEL));
 }
 
+// --- Eliminar registros en bloque (solo tablas de especialidad;
+// esta página es exclusiva admin/dev) ----------------------------------------
+const btnEliminarMasivo = $("#btnEliminarMasivo");
+if (btnEliminarMasivo) btnEliminarMasivo.addEventListener("click", async () => {
+  const esp = espPacId();
+  const ids = [...seleccionados];
+  if (esp == null || !ids.length) return;
+  if (!confirm(`¿Eliminar ${ids.length} registro${ids.length === 1 ? "" : "s"} de esta especialidad? Esta acción no se puede deshacer.`)) return;
+  let ok = 0, mal = 0;
+  for (const id of ids) {
+    try {
+      const res = await fetch(`api/especialidades/${esp}/pacientes/${id}`, {
+        method: "DELETE", headers: authHeaders(),
+      });
+      if (res.status === 401) { window.snwSesionExpirada(); return; }
+      if (res.ok) { ok += 1; seleccionados.delete(id); }
+      else mal += 1;
+    } catch { mal += 1; }
+  }
+  toast(mal ? `${ok} eliminados, ${mal} fallaron.` : `${ok} registro${ok === 1 ? "" : "s"} eliminado${ok === 1 ? "" : "s"}.`, mal ? "error" : "ok");
+  todoMarcado = false;
+  cargar();
+});
+
 let toastTimer;
 function toast(msg, tipo = "ok") {
   clearTimeout(toastTimer);
@@ -627,6 +655,77 @@ window.snwCargarPacientes = function () {
   yaCargada = true;
   (async () => { await cargarBasesPac(); cargar(); })();
 };
+
+// --- Eliminar tabla completa (solo especialidad; esta página es exclusiva
+// admin/dev): modal con 10 s de espera antes de activar Confirmar; Cancelar
+// siempre activo. --------------------------------------------------------------
+const modalDelTabla = $("#modalEliminarTabla");
+let timerDelTabla = null;
+
+function cerrarModalDelTabla() {
+  if (timerDelTabla) { clearInterval(timerDelTabla); timerDelTabla = null; }
+  if (modalDelTabla) modalDelTabla.hidden = true;
+}
+
+const btnEliminarTablaPac = $("#btnEliminarTablaPac");
+if (btnEliminarTablaPac) btnEliminarTablaPac.addEventListener("click", () => {
+  const esp = espPacId();
+  if (esp == null || !modalDelTabla) return;
+  const e = especialidades.find((x) => x.id === esp);
+  $("#delTablaNombre").textContent = e ? `${e.nombre_visible} (${e.nombre_tabla_base})` : "especialidad";
+  $("#delTablaTotal").textContent = String(pacientes.length);
+  const btnConf = $("#btnConfirmarDelTabla");
+  const btnCanc = $("#btnCancelarDelTabla");
+  btnConf.disabled = true;
+  let restantes = 10;
+  btnConf.textContent = `Confirmar (${restantes})`;
+  if (timerDelTabla) clearInterval(timerDelTabla);
+  timerDelTabla = setInterval(() => {
+    restantes -= 1;
+    if (restantes <= 0) {
+      clearInterval(timerDelTabla);
+      timerDelTabla = null;
+      btnConf.disabled = false;
+      btnConf.textContent = "Confirmar";
+    } else {
+      btnConf.textContent = `Confirmar (${restantes})`;
+    }
+  }, 1000);
+  // Cancelar nunca se deshabilita.
+  btnCanc.disabled = false;
+  modalDelTabla.hidden = false;
+});
+
+const btnCancelarDelTabla = $("#btnCancelarDelTabla");
+if (btnCancelarDelTabla) btnCancelarDelTabla.addEventListener("click", cerrarModalDelTabla);
+if (modalDelTabla) modalDelTabla.addEventListener("click", (e) => {
+  if (e.target === modalDelTabla) cerrarModalDelTabla();
+});
+
+const btnConfirmarDelTabla = $("#btnConfirmarDelTabla");
+if (btnConfirmarDelTabla) btnConfirmarDelTabla.addEventListener("click", async () => {
+  const esp = espPacId();
+  if (esp == null) { cerrarModalDelTabla(); return; }
+  btnConfirmarDelTabla.disabled = true;
+  try {
+    const res = await fetch(`api/especialidades/${esp}/tabla`, {
+      method: "DELETE", headers: authHeaders(),
+    });
+    if (res.status === 401) { window.snwSesionExpirada(); return; }
+    if (!res.ok) throw new Error(`Error ${res.status}`);
+    const data = await res.json().catch(() => ({}));
+    toast(`Tabla ${data.nombre_tabla_base || ""} eliminada.`.trim(), "ok");
+    cerrarModalDelTabla();
+    seleccionados = new Set();
+    todoMarcado = false;
+    localStorage.removeItem("snw_esp_pacientes");
+    await cargarBasesPac();
+    cargar();
+  } catch (err) {
+    cerrarModalDelTabla();
+    toast(err.message || "No se pudo eliminar.", "error");
+  }
+});
 
 // --- Carga CSV en la especialidad seleccionada (Fase 3) ---------------------
 const csvInput = $("#csvArchivo");
