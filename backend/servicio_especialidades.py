@@ -98,6 +98,12 @@ def tabla_valida(nombre: str) -> bool:
     return bool(TABLA_RE.match(nombre or ""))
 
 
+def normalizar_texto(t: str) -> str:
+    """Nombre/apellido tipo "David Araya Rodriguez": sin espacios de más y
+    en tipo Título (primera letra de cada palabra en mayúscula)."""
+    return " ".join((t or "").split()).title()
+
+
 def _tabla_fisica_existe(cur, tabla: str) -> bool:
     cur.execute(
         "SELECT COUNT(*) AS n FROM information_schema.TABLES"
@@ -355,8 +361,8 @@ def importar_pacientes_csv(especialidad_id: int, datos: bytes) -> dict:
         errores: list[dict] = []
         vistos_archivo: set[str] = set()
         for nro, fila in enumerate(lector, start=2):
-            nombre = (fila.get(cols["nombre"]) or "").strip()
-            apellido = (fila.get(cols["apellido"]) or "").strip()
+            nombre = normalizar_texto(fila.get(cols["nombre"]))
+            apellido = normalizar_texto(fila.get(cols["apellido"]))
             telefono_crudo = (fila.get(cols["telefono"]) or "").strip()
             if not nombre and not apellido and not telefono_crudo:
                 continue
