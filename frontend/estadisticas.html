@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SNW &middot; Estadísticas</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
+  <link rel="stylesheet" href="css/tema.css">
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="css/pacientes.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/admin.css">
+  <link rel="stylesheet" href="css/estadisticas.css">
+  <script src="js/tema.js"></script>
+</head>
+<body data-pagina="estadisticas" data-seccion="administracion">
+
+  <div class="app-shell">
+    <nav class="sidebar" id="sidebar"></nav>
+    <div class="sidebar-backdrop"></div>
+
+    <div class="app-main">
+      <header class="app-topbar">
+        <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="Abrir men&uacute;">
+          <i class="fa-solid fa-bars"></i>
+        </button>
+        <span class="app-topbar__titulo">Estadísticas</span>
+      </header>
+
+      <main class="layout layout--ancho">
+
+        <section class="panel">
+          <div class="panel__head">
+            <h2>Mensajes enviados en <span id="nombreMes">este mes</span></h2>
+            <div class="panel__actions">
+              <label for="selEspecialidadEst">Especialidad:</label>
+              <select id="selEspecialidadEst" class="badge badge--select" aria-label="Especialidad">
+                <option value="">Todas</option>
+              </select>
+              <button id="btnActualizarEstadisticas" class="btn btn--ghost" type="button">Actualizar</button>
+            </div>
+          </div>
+
+          <div class="hero-grid">
+            <div class="hero-num-wrap">
+              <span class="hero-num" id="enviadosMes">&mdash;</span>
+              <span class="hero-sub">mensajes enviados este mes &middot; solo producci&oacute;n</span>
+            </div>
+          </div>
+
+          <div class="stats" id="statsMes"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel__head">
+            <h2>Respuestas de pacientes por WhatsApp</h2>
+          </div>
+          <p class="field__hint" id="hintRespuestas" style="margin:12px 18px 0;">Estado actual de los pacientes de producci&oacute;n <strong>a los que ya se les envi&oacute; un mensaje</strong>. Usa los botones para comparar cu&aacute;ntos respondieron, se dieron de baja o no han respondido. En <a href="historial.html">Historial</a> puedes ver qui&eacute;nes son.</p>
+          <p id="webhookSalud" class="webhook-salud" hidden></p>
+          <div id="respuestasPacientes"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel__head">
+            <h2>Mensajes enviados</h2>
+            <div class="grafico-tabs" id="enviosTabs">
+              <button type="button" data-gran="dia">D&iacute;a</button>
+              <button type="button" data-gran="mes" class="activo">Mes</button>
+              <button type="button" data-gran="anio">A&ntilde;o</button>
+            </div>
+          </div>
+          <div class="grafico-barras" id="enviosGrafico"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel__head"><h2>Total hist&oacute;rico</h2></div>
+          <div class="stats" id="statsTotal"></div>
+        </section>
+
+        <section class="panel" data-perm="tarifas_editar" id="panelCostos">
+          <div class="panel__head">
+            <h2>Costos de mensajes de WhatsApp</h2>
+            <button id="btnActualizarTarifas" class="btn btn--ghost" type="button">Actualizar tarifas</button>
+          </div>
+
+            <p class="field__hint" style="margin:12px 18px 0;">
+              Tarifas por mensaje que publica Meta para Chile
+              (<a href="https://developers.facebook.com/docs/whatsapp/pricing/" target="_blank" rel="noopener">documentaci&oacute;n de precios</a>).
+              El costo es una estimaci&oacute;n: se cuentan <strong>solo los mensajes de plantilla
+              de Marketing</strong> (la &uacute;nica categor&iacute;a que usa el sistema), aplicando la
+              tarifa vigente en su fecha. Los mensajes de texto libre dentro de la ventana de 24 h
+              no se cobran y quedan fuera.
+            Para ver una representación más precisa, visita <a href="https://business.facebook.com/latest/whatsapp_manager/insights/?business_id=799315784581199&tab=insights&nav_ref=whatsapp_manager&asset_id=1824108822101466" target="_blank" rel="noopener">el dashboard de meta</a>.
+          </p>
+
+          <p id="tarifasAlerta" class="webhook-salud" hidden></p>
+
+          <div class="tarifas-grid" id="tarifasVigente"></div>
+          <p class="tarifas-pie" id="tarifasPie"></p>
+
+          <div class="costos-cabecera">
+            <h3>Costo estimado por periodo</h3>
+            <div class="grafico-tabs" id="costosTabs">
+              <button type="button" data-gran="dia">D&iacute;a</button>
+              <button type="button" data-gran="mes" class="activo">Mes</button>
+              <button type="button" data-gran="anio">A&ntilde;o</button>
+            </div>
+          </div>
+
+          <div class="grafico-barras" id="costosBarras"></div>
+          <p class="costos-total" id="costosTotal"></p>
+        </section>
+
+      </main>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="js/layout.js"></script>
+  <script src="js/pass-toggle.js"></script>
+  <script src="js/estadisticas.js"></script>
+  <script>
+    if (window.snwCargarEstadisticas) window.snwCargarEstadisticas();
+  </script>
+  <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
+</body>
+</html>

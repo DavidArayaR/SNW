@@ -1,5 +1,5 @@
 /* Gestión de especialidades y sus roles (administrador / desarrollador).
-   Pestaña «Especialidades» de administracion.html */
+   Página «Especialidades» (especialidades.html) */
 (function () {
 const $ = (s) => document.querySelector(s);
 

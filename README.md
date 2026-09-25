@@ -419,7 +419,7 @@ Las cuentas `usuario` y `supervisor` reciben 403 en estos endpoints (y la migrac
 |---|---|---|
 | GET | `/api/estadisticas` | Resumen para Estadísticas (**solo envíos de producción**): mensajes `enviado` del mes, desglose, totales, `pacientes_por_respuesta` (cuántos pacientes de producción respondieron / se dieron de baja / no han respondido) y `webhook` (cuándo llegó el último evento de Meta — sirve para detectar que el webhook dejó de recibir). Con `?especialidad_id=` filtra a esa especialidad |
 | GET | `/api/estadisticas/envios?granularidad=dia\|mes\|anio` | Mensajes enviados de producción agrupados por periodo, para el gráfico de barras (día = últimos 30, mes = últimos 12, año = últimos 6). Acepta `&especialidad_id=` |
-| GET | `/api/estadisticas/costos?granularidad=dia\|mes\|anio` | (permiso `tarifas_editar`) Costo estimado agrupado por periodo. Acepta `&especialidad_id`. **Solo cuenta los mensajes de plantilla iniciados por la empresa** (la plantilla tiene un template Meta configurado y categoría Marketing / Utility / Authentication), aplicando la tarifa de `tarifas_whatsapp` vigente en su fecha. Los envíos de texto libre (respuestas dentro de la ventana de 24 h) son gratuitos y se devuelven aparte en `excluidos` |
+| GET | `/api/estadisticas/costos?granularidad=dia\|mes\|anio` | (permiso `tarifas_editar`) Costo estimado agrupado por periodo. Acepta `&especialidad_id`. **Solo cuenta mensajes de plantilla Marketing** (la única categoría que usa el sistema), aplicando la tarifa de `tarifas_whatsapp` vigente en su fecha. El resto (texto libre, otras categorías) va a `excluidos` |
 | GET | `/api/tarifas` | (permiso `tarifas_editar`) Tarifas guardadas: `vigente`, `proxima` (tarifa futura ya publicada por Meta), `usd_vigente`, `historial`, moneda de la cuenta y fecha de la última descarga |
 | POST | `/api/tarifas/actualizar` | (permiso `tarifas_editar`) Descarga la página de precios de Meta y sus CSV, guarda los rate cards nuevos de Chile (`INSERT IGNORE` por hash), autodetecta la moneda de facturación (`GET {waba}?fields=currency` → `wa_moneda`) y devuelve si hubo cambio |
 | GET | `/api/tarifas/chile.csv` | (permiso `tarifas_editar`) Descarga el CSV original del rate card de Chile (prefiere la moneda de la cuenta, si no USD) |
@@ -907,8 +907,13 @@ claro** de la sidebar, o con el botón flotante en la portada y el login (págin
   badges de aprobación interna («⏳ Por aprobar»/«Rechazada») con botones de aprobar (con
   confirmación) y rechazar (con motivo) para admin/dev/supervisor, y envío directo a todos los
   pendientes con selector único de base de datos. Sin el permiso `plantillas_editar` el editor queda de solo lectura; las ajenas también (solo su creador las edita, salvo admin/dev).
-- **Administración** (`administracion.html`, rol admin/desarrollador): página con pestañas.
-  La pestaña **Usuarios** (admin/desarrollador): arriba, **«Crear usuario»** manda
+- **Administración** (rol admin/desarrollador): ya no es una página con pestañas — son
+  5 páginas propias (`usuarios.html`, `pacientes.html`, `especialidades.html`,
+  `estadisticas.html`, `configuracion.html`; `administracion.html` solo redirige a
+  Usuarios por compatibilidad). Al entrar, la **sidebar cambia** a los botones de
+  navegación de administración (con separador «Administración»; Configuración solo
+  para desarrollador, con redirección si no lo es). Estilos compartidos en
+  `css/admin.css`. La página **Usuarios** (admin/desarrollador): arriba, **«Crear usuario»** manda
   la invitación por correo (solo el correo, sin permisos ni rol — esos se ajustan después de
   que la cuenta exista); abajo se elige una cuenta en un desplegable y el panel muestra sus
   datos: nombre, permisos, rol (solo el desarrollador), envíos realizados, actividad

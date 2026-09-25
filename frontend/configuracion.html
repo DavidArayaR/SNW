@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SNW &middot; Configuraci&oacute;n</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
+  <link rel="stylesheet" href="css/tema.css">
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="css/pacientes.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/admin.css">
+  <link rel="stylesheet" href="css/configuracion.css">
+  <script src="js/tema.js"></script>
+</head>
+<body data-pagina="configuracion" data-seccion="administracion">
+
+  <div class="app-shell">
+    <nav class="sidebar" id="sidebar"></nav>
+    <div class="sidebar-backdrop"></div>
+
+    <div class="app-main">
+      <header class="app-topbar">
+        <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="Abrir men&uacute;">
+          <i class="fa-solid fa-bars"></i>
+        </button>
+        <span class="app-topbar__titulo">Configuraci&oacute;n</span>
+      </header>
+
+      <main class="layout layout--ancho">
+
+        <section class="panel">
+          <div class="panel__head">
+            <h2>Configuraci&oacute;n</h2>
+            <button id="btnGuardar" class="btn btn--primary" type="button" disabled>Guardar cambios</button>
+          </div>
+          <p class="config-intro">
+            Todos los ajustes de la aplicaci&oacute;n. Se guardan en la base de datos y (salvo el
+            entorno activo) se aplican sin reiniciar.
+          </p>
+
+          <div id="secciones"></div>
+        </section>
+
+      </main>
+    </div>
+  </div>
+
+  <div class="config-guardar-fijo" id="barraGuardar" hidden>
+    <span id="cambiosResumen">Sin cambios</span>
+    <div class="config-guardar-fijo__btns">
+      <button id="btnDescartar" class="btn btn--ghost" type="button">Descartar</button>
+      <button id="btnGuardarFijo" class="btn btn--primary" type="button">Guardar cambios</button>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="js/layout.js"></script>
+  <script src="js/pass-toggle.js"></script>
+  <script src="js/configuracion.js"></script>
+  <script>
+    if (window.snwCargarConfiguracion) window.snwCargarConfiguracion();
+  </script>
+  <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
+</body>
+</html>

@@ -4492,8 +4492,9 @@ def estadisticas_costos(granularidad: str = Query("mes"), especialidad_id: int |
         per = r["periodo"]
         n = int(r["n"] or 0)
         cat = cats_clave.get(r["clave"])
-        if cat is None:
-            # Envío que no salió como template facturable: no se cobra.
+        if cat != "marketing":
+            # El sistema solo usa plantillas MARKETING: cualquier otra
+            # categoría (o texto libre) no se cobra acá y va a excluidos.
             excluidos += n
             periodos.setdefault(per, {
                 "periodo": per, "mensajes": 0, "costo": 0.0, "excluidos": 0,

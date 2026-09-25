@@ -72,10 +72,39 @@
   justify-content: space-between;
   gap: 12px;
   padding: 14px 18px 8px;
+  flex-wrap: wrap;
+}
+
+/* Grupo de paginación dentro de la barra: info + Anterior/Siguiente +
+   Por página, todo en la misma fila del buscador. */
+.pag-grupo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+/* Cada subgrupo nunca se parte en dos líneas, ni en celular. */
+.pag-grupo .pag-fila {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+.pag-info {
+  font-size: .9rem;
+  font-weight: 700;
+  color: var(--texto);
+  white-space: nowrap;
+}
+.pag-grupo .pag-label {
+  font-size: .85rem;
+  font-weight: 600;
+  color: var(--texto);
 }
 
 #buscador {
   flex: 0 1 380px;
+  min-width: 0;
   border: 1px solid var(--borde);
   border-radius: 10px;
   padding: 9px 13px;

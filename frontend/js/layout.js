@@ -63,7 +63,8 @@
   function limpiarSesion() {
     ["snw_token", "snw_rol", "snw_nombre", "snw_permisos", "snw_ambiente_admin", "snw_ambiente",
      "snw_esp_pacientes", "snw_esp_mensajeria", "snw_esp_historial", "snw_base_historial",
-     "snw_esp_estadisticas", "snw_modo_conf", "snw_page_size_pac"]
+     "snw_esp_estadisticas", "snw_modo_conf", "snw_page_size_pac",
+     "snw_page_size_usr_envios", "snw_page_size_usr_auditoria"]
       .forEach((k) => localStorage.removeItem(k));
   }
 
@@ -116,16 +117,24 @@
     ["mensajeria", "mensajeria.html"],
     ["historial", "historial.html"],
   ];
+  // Páginas de administración: cada una es un HTML propio (usuarios,
+  // pacientes, especialidades, estadisticas, configuracion) y la sidebar
+  // muestra sus botones de navegación en vez del menú normal.
+  const PAGINAS_ADMIN = ["usuarios", "pacientes", "especialidades", "estadisticas", "configuracion"];
+  const ES_PAG_ADMIN = PAGINAS_ADMIN.indexOf(PAGINA) !== -1;
   function primeraPaginaPermitida() {
     for (const [perm, href] of ORDEN_PAGINAS) if (puede(perm)) return href;
-    if (ES_PRIV) return "administracion.html";
+    if (ES_PRIV) return "usuarios.html";
     return "index.html";
   }
-  // Administración (Pacientes + Usuarios + Estadísticas + Configuración) es
-  // exclusiva de admin/dev; la pestaña Configuración, dentro de esa página,
-  // es exclusiva de desarrollador (esa parte se resuelve en
-  // administracion.html, no acá).
-  if (PAGINA === "administracion" && !ES_PRIV) {
+  // Administración (Usuarios + Base de datos + Especialidades + Estadísticas +
+  // Configuración) es exclusiva de admin/dev; Configuración, dentro de esas
+  // páginas, es exclusiva de desarrollador.
+  if (ES_PAG_ADMIN && !ES_PRIV) {
+    location.replace(primeraPaginaPermitida());
+    return;
+  }
+  if (PAGINA === "configuracion" && !ES_DEV) {
     location.replace(primeraPaginaPermitida());
     return;
   }
@@ -150,16 +159,32 @@
     { pagina: "inicio",       href: "index.html",        icono: "fa-house",             texto: "Inicio" },
     { pagina: "mensajeria",   href: "mensajeria.html",   icono: "fa-paper-plane",       texto: "Mensajería y plantillas", perm: "mensajeria" },
     { pagina: "historial",    href: "historial.html",    icono: "fa-clock-rotate-left", texto: "Historial", perm: "historial" },
-    { pagina: "administracion", href: "administracion.html", icono: "fa-user-shield",   texto: "Administración", priv: true },
+    { pagina: "usuarios", href: "usuarios.html", icono: "fa-user-shield", texto: "Administración", priv: true },
   ];
 
-  const items = LINKS
+  // En las páginas de administración la sidebar cambia a los botones de
+  // navegación de administración (con su separador), en vez del menú normal.
+  const LINKS_ADMIN = [
+    { pagina: "inicio",       href: "index.html",        icono: "fa-house",             texto: "Inicio" },
+    { pagina: "mensajeria",   href: "mensajeria.html",   icono: "fa-paper-plane",       texto: "Mensajería y plantillas", perm: "mensajeria" },
+    { pagina: "historial",    href: "historial.html",    icono: "fa-clock-rotate-left", texto: "Historial", perm: "historial" },
+    { separador: "Administración" },
+    { pagina: "usuarios",        href: "usuarios.html",        icono: "fa-users",        texto: "Usuarios" },
+    { pagina: "pacientes",       href: "pacientes.html",       icono: "fa-database",     texto: "Base de datos" },
+    { pagina: "especialidades",  href: "especialidades.html",  icono: "fa-stethoscope",  texto: "Especialidades" },
+    { pagina: "estadisticas",    href: "estadisticas.html",    icono: "fa-chart-column", texto: "Estadísticas" },
+    { pagina: "configuracion",   href: "configuracion.html",   icono: "fa-gear",         texto: "Configuración", dev: true },
+  ];
+
+  const FUENTE = ES_PAG_ADMIN ? LINKS_ADMIN : LINKS;
+  const items = FUENTE
     .filter((l) => (!l.perm || puede(l.perm)) && (!l.priv || ES_PRIV) && (!l.dev || ES_DEV))
-    .map((l) =>
-      `<li class="nav-item">` +
-      `<a class="nav-link${l.pagina === PAGINA ? " active" : ""}" href="${l.href}" title="${l.texto}">` +
-      `<i class="fa-solid ${l.icono}"></i><span>${l.texto}</span></a></li>`
-    )
+    .map((l) => {
+      if (l.separador) return `<li class="sidebar__seccion">${l.separador}</li>`;
+      return `<li class="nav-item">` +
+        `<a class="nav-link${l.pagina === PAGINA ? " active" : ""}" href="${l.href}" title="${l.texto}">` +
+        `<i class="fa-solid ${l.icono}"></i><span>${l.texto}</span></a></li>`;
+    })
     .join("");
 
   const sidebar = document.getElementById("sidebar");

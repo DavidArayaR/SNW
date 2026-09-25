@@ -201,7 +201,7 @@
         const r = await fetch("api/configuracion", { headers: { Authorization: "Bearer " + t } });
         if (!r.ok) throw new Error();
         const rol = localStorage.getItem("snw_rol");
-        location.replace(rol === "administrador" || rol === "desarrollador" ? "administracion.html" : "mensajeria.html");
+        location.replace(rol === "administrador" || rol === "desarrollador" ? "usuarios.html" : "mensajeria.html");
       } catch {
         ["snw_token", "snw_rol", "snw_nombre", "snw_permisos"].forEach(k => localStorage.removeItem(k));
       }
@@ -237,7 +237,7 @@
         btn.innerHTML = '<span class="btn-check">✓</span>¡Listo! Entrando...';
         btn.classList.add("exito");
         const destino = (data.rol === "administrador" || data.rol === "desarrollador"
-          ? "administracion.html" : "mensajeria.html") + "?entrada=ok";
+          ? "usuarios.html" : "mensajeria.html") + "?entrada=ok";
         setTimeout(() => { location.href = destino; }, 2000);
       } catch (ex) {
         err.textContent = ex.message;

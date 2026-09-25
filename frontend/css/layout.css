@@ -80,7 +80,17 @@
 .sidebar__brand strong { font-size: .98rem; font-weight: 700; }
 .sidebar__brand small { font-size: .72rem; opacity: .8; }
 
-.sidebar__nav { gap: 0; }
+.sidebar__nav { gap: 0; list-style: none; }
+
+/* Separador de sección dentro de la sidebar (navegación de administración). */
+.sidebar__seccion {
+  padding: 12px 14px 4px;
+  font-size: .72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--texto-suave);
+}
 
 .sidebar .nav-link {
   position: relative;

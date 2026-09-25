@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SNW &middot; Especialidades</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
+  <link rel="stylesheet" href="css/tema.css">
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="css/pacientes.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/admin.css">
+  <link rel="stylesheet" href="css/usuarios.css">
+  <script src="js/tema.js"></script>
+</head>
+<body data-pagina="especialidades" data-seccion="administracion">
+
+  <div class="app-shell">
+    <nav class="sidebar" id="sidebar"></nav>
+    <div class="sidebar-backdrop"></div>
+
+    <div class="app-main">
+      <header class="app-topbar">
+        <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="Abrir men&uacute;">
+          <i class="fa-solid fa-bars"></i>
+        </button>
+        <span class="app-topbar__titulo">Especialidades</span>
+      </header>
+
+      <main class="layout layout--ancho">
+
+        <section class="panel">
+          <div class="panel__head">
+            <h2>Especialidades</h2>
+            <div class="panel__actions">
+              <button id="btnActualizarEspecialidades" class="btn btn--ghost" type="button">Actualizar</button>
+            </div>
+          </div>
+
+          <p class="usr-intro" style="margin: 14px 18px 0;">
+            Cada especialidad tiene su propia tabla de pacientes
+            (<strong>pacientes_&lt;nombre&gt;</strong>, sin separaci&oacute;n desarrollo/producci&oacute;n)
+            y su propio rol. Asigna el rol a una cuenta para darle acceso a esa tabla en
+            Pacientes, Mensajer&iacute;a e Historial. Los usuarios y supervisores solo ven sus
+            especialidades asignadas; no ven Estad&iacute;sticas.
+          </p>
+
+          <form id="formCrearEspecialidad" class="usr-invitar" style="margin-top: 12px;">
+            <div class="usr-invitar__campo">
+              <label for="espNombre">Nueva especialidad</label>
+              <input type="text" id="espNombre" placeholder="Ej: Kinesiología" maxlength="150" required>
+            </div>
+            <button type="submit" id="btnCrearEspecialidad" class="btn btn--primary">Crear especialidad</button>
+          </form>
+          <p id="espMsg" class="usr-intro" style="margin: 0 18px 10px;"></p>
+
+          <div class="usr-selector">
+            <label for="selEspecialidad">Especialidad</label>
+            <select id="selEspecialidad"></select>
+          </div>
+          <div id="detalleEspecialidad" class="usr-detalle"></div>
+          <p id="espVacio" class="tabla-vacia" hidden style="padding: 24px;">No hay especialidades creadas.</p>
+        </section>
+
+      </main>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="js/layout.js"></script>
+  <script src="js/pass-toggle.js"></script>
+  <script src="js/especialidades.js"></script>
+  <script>
+    if (window.snwCargarEspecialidades) window.snwCargarEspecialidades();
+  </script>
+  <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
+</body>
+</html>

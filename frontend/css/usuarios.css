@@ -182,6 +182,14 @@
 .usr-card--envios h4 { margin: 0 0 10px; font-size: .84rem; font-weight: 700; color: var(--texto-suave); text-transform: uppercase; letter-spacing: .03em; }
 .usr-envios__vacio { margin: 0; font-size: .86rem; color: var(--texto-suave); }
 .usr-envios__cont { overflow-x: auto; }
+/* Tabla scrolleable con header fijo, igual que en Pacientes. */
+.usr-tabla-scroll { max-height: 320px; overflow: auto; overscroll-behavior: contain; }
+.usr-envios__tabla thead th {
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+  z-index: 1;
+}
 .usr-envios__tabla {
   width: 100%;
   border-collapse: collapse;
@@ -222,4 +230,3 @@
   .usr-grid { grid-template-columns: 1fr; }
   .usr-grid > label { padding-top: 0; }
 }
-.usr-paginador { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin: 14px 4px 4px; font-size: .85rem; color: var(--texto-suave); }

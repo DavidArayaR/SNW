@@ -1,0 +1,152 @@
+/* Estilos compartidos de las páginas de administración (usuarios.html,
+   pacientes.html, especialidades.html, estadisticas.html, configuracion.html).
+   Extraído del bloque propio que tenía administracion.html. Las páginas llevan
+   data-seccion="administracion" en el <body>. */
+
+/* ---------------------------------------------------------------
+   Formas más redondeadas y tarjetas con ícono al estilo "AdminHub"
+   (https://github.com/fajarnurwahid/adminhub), con la paleta de
+   colores propia de SNW (no la de la plantilla).
+   --------------------------------------------------------------- */
+body[data-seccion="administracion"] { --radio: 20px; }
+body[data-seccion="administracion"] .btn { border-radius: 999px; }
+body[data-seccion="administracion"] .field input[type="text"],
+body[data-seccion="administracion"] .field input[type="password"],
+body[data-seccion="administracion"] .field input[type="email"],
+body[data-seccion="administracion"] .field input[type="number"],
+body[data-seccion="administracion"] .field textarea,
+body[data-seccion="administracion"] .config-campo input:not([type="checkbox"]),
+body[data-seccion="administracion"] .config-campo select,
+body[data-seccion="administracion"] #buscador,
+body[data-seccion="administracion"] .usr-invitar__campo input,
+body[data-seccion="administracion"] .usr-reset__correo input { border-radius: 14px; }
+body[data-seccion="administracion"] .modal__card { border-radius: 22px; }
+body[data-seccion="administracion"] .panel__head h2 { font-size: 1.15rem; font-weight: 700; }
+
+/* El selector de base y los botones nunca se salen de la tarjeta: el select
+   puede encogerse (con puntos suspensivos) en vez de desbordar. */
+body[data-seccion="administracion"] .panel__actions { min-width: 0; }
+body[data-seccion="administracion"] .panel__actions select {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Botón para ocultar/mostrar los filtros (stat-card) de la base de
+   datos: solo existe en móvil, donde los filtros se comen la pantalla.
+   En escritorio sobra espacio y no hace falta ocultarlos. */
+#btnToggleFiltros { display: none; }
+
+/* Animación de abrir/cerrar: el wrapper es una grilla de una fila que
+   se colapsa de 1fr a 0fr (la altura real de las tarjetas), con el
+   contenido en overflow:hidden para que no estire su propio alto. */
+#tabPacientes .filtros-wrap {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows .28s ease;
+}
+#tabPacientes .filtros-wrap.cerrado { grid-template-rows: 0fr; }
+#tabPacientes .filtros-wrap .stats {
+  overflow: hidden;
+  min-height: 0;
+  opacity: 1;
+  transition: opacity .22s ease;
+}
+#tabPacientes .filtros-wrap.cerrado .stats { opacity: 0; }
+
+/* Tarjetas de estadísticas con ícono en chip de color, en vez de la
+   píldora chica con puntito (mismo botón/filtro de siempre, solo
+   cambia cómo se ve). */
+body[data-seccion="administracion"] .stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.stat-card {
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  transition: background-color .15s ease, border-color .15s ease,
+    transform .1s ease, box-shadow .15s ease;
+}
+/* Hover (no activo): además del fondo, un leve despegue y sombra para
+   que se lea como botón clickeable. */
+.stat-card:hover {
+  background: var(--hover);
+  border-color: var(--verde);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, .07);
+  transform: translateY(-1px);
+}
+.stat-card:active { transform: translateY(0) scale(.97); }
+.stat-card::before { display: none; }
+.stat-card__icono {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  font-size: 1rem;
+  flex-shrink: 0;
+  transition: background-color .15s ease, color .15s ease;
+}
+.stat-card__texto { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.3; }
+.stat-card__texto strong { font-size: 1.1rem; color: var(--texto); }
+.stat-card__texto span { font-size: .76rem; color: var(--texto-suave); font-weight: 600; }
+.stat-card--neutral .stat-card__icono { background: var(--neutral-bg); color: var(--neutral-fg); }
+.stat-card--warn .stat-card__icono { background: var(--warn-bg); color: var(--warn-fg); }
+.stat-card--ok .stat-card__icono { background: var(--ok-bg); color: var(--ok-fg); }
+.stat-card--danger .stat-card__icono { background: var(--danger-bg); color: var(--danger-fg); }
+.stat-card--info .stat-card__icono { background: var(--info-bg); color: var(--info-fg); }
+/* Filtro aplicado: anillo interior verde = «activo», distinto del
+   hover (que solo despega la tarjeta). El click vuelve a «todos». */
+.stat-card.activo,
+.stat-card.activo:hover {
+  border-color: var(--verde);
+  background: var(--brand-tint);
+  box-shadow: inset 0 0 0 1.5px var(--verde);
+  transform: none;
+}
+.stat-card.activo:active { transform: scale(.97); }
+.stat-card.activo .stat-card__texto strong,
+.stat-card.activo .stat-card__texto span { color: var(--verde-oscuro); }
+.stat-card.activo .stat-card__icono { filter: saturate(1.1); }
+
+#tabPacientes.panel {
+  display: flex;
+  flex-direction: column;
+  height: 80vh;
+  max-height: 80vh;
+  overflow: hidden;
+}
+#tabPacientes .tabla-wrap {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+}
+
+@media (max-width: 760px) {
+  /* En móvil el panel crece natural (el fijo de 80vh no dejaba ver la
+     tabla) y solo la tabla scrollea, con su propio alto máximo. */
+  #tabPacientes.panel { height: auto; max-height: none; overflow: visible; }
+  #tabPacientes .tabla-wrap { flex: none; max-height: 60vh; }
+  #tabPacientes .stats { gap: 8px; padding: 12px 12px 0; }
+  #btnToggleFiltros { display: inline-flex; align-items: center; gap: 6px; }
+  #tabPacientes .stat-card {
+    flex: 1 1 calc(50% - 8px);
+    min-width: 0;
+    padding: 9px 12px;
+    gap: 10px;
+  }
+  #tabPacientes .stat-card__icono {
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
+    font-size: .85rem;
+  }
+  #tabPacientes .stat-card__texto strong { font-size: 1rem; }
+  #tabPacientes .stat-card__texto span { font-size: .72rem; }
+}

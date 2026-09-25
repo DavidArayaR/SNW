@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SNW &middot; Base de datos</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
+  <link rel="stylesheet" href="css/tema.css">
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="css/pacientes.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/admin.css">
+  <script src="js/tema.js"></script>
+</head>
+<body data-pagina="pacientes" data-seccion="administracion">
+
+  <div class="app-shell">
+    <nav class="sidebar" id="sidebar"></nav>
+    <div class="sidebar-backdrop"></div>
+
+    <div class="app-main">
+      <header class="app-topbar">
+        <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="Abrir men&uacute;">
+          <i class="fa-solid fa-bars"></i>
+        </button>
+        <span class="app-topbar__titulo">Base de datos</span>
+      </header>
+
+      <main class="layout layout--ancho">
+
+        <section class="panel" id="tabPacientes">
+          <div class="panel__head">
+            <h2 id="tituloPacientes">Pacientes</h2>
+            <div class="panel__actions">
+              <select id="selBasePac" class="badge badge--select" aria-label="Base de datos">
+                <option value="dev">Base de datos desarrollo (pacientes_dev)</option>
+                <option value="prod">Base de datos producción (pacientes_prod)</option>
+              </select>
+              <button id="btnToggleFiltros" class="btn btn--ghost" type="button" aria-expanded="true">
+                <i class="fa-solid fa-sliders"></i> <span>Ocultar filtros</span>
+              </button>
+              <button id="btnActualizar" class="btn btn--ghost" type="button">Actualizar</button>
+            </div>
+          </div>
+
+          <div class="filtros-wrap" id="filtrosWrap">
+            <div class="stats" id="stats"></div>
+          </div>
+
+          <div class="toolbar-pacientes">
+            <input type="search" id="buscador" placeholder="Buscar por nombre, tel&eacute;fono o info..." autocomplete="off">
+            <span id="contadorSel" class="contador-sel"></span>
+            <span class="pag-grupo">
+              <span id="pagInfoPac" class="pag-info"></span>
+              <span class="pag-fila">
+                <button type="button" class="btn btn--ghost" id="pagAntPac" title="Página anterior" aria-label="Página anterior"><i class="fa-solid fa-chevron-left"></i></button>
+                <button type="button" class="btn btn--ghost" id="pagSigPac" title="Página siguiente" aria-label="Página siguiente"><i class="fa-solid fa-chevron-right"></i></button>
+              </span>
+              <span class="pag-fila">
+                <label class="pag-label" for="selPageSizePac">Por p&aacute;gina:</label>
+                <select id="selPageSizePac" aria-label="Pacientes por página">
+                  <option value="10">10</option>
+                  <option value="25">25</option>
+                  <option value="50">50</option>
+                  <option value="100">100</option>
+                </select>
+              </span>
+            </span>
+          </div>
+
+          <div class="toolbar-pacientes" id="csvCarga" hidden>
+            <label class="btn btn--ghost" for="csvArchivo" style="cursor:pointer;">Cargar CSV en <span id="csvDestino">…</span></label>
+            <input type="file" id="csvArchivo" accept=".csv" hidden>
+            <span id="csvMsg" class="field__hint">Columnas: nombre, apellido, telefono (UTF-8).</span>
+          </div>
+
+          <div class="toolbar-masivo" id="toolbarMasivo" hidden>
+            <span class="toolbar-masivo__label">Con los seleccionados:</span>
+            <label class="toolbar-masivo__campo">
+              Estado
+              <select id="selEstadoMasivo">
+                <option value="" selected>— cambiar a —</option>
+                <option value="pendiente">Pendiente</option>
+                <option value="enviado">Enviado</option>
+              </select>
+            </label>
+            <label class="toolbar-masivo__campo">
+              Respuesta
+              <select id="selRespuestaMasivo">
+                <option value="" selected>— cambiar a —</option>
+                <option value="pendiente">Sin respuesta</option>
+                <option value="baja">Se dio de baja</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="tabla-wrap">
+            <table id="tablaPacientes">
+              <thead>
+                <tr>
+                  <th class="col-check"><input type="checkbox" id="chkTodos" title="Seleccionar todos los visibles"></th>
+                  <th>ID</th>
+                  <th>Nombre</th>
+                  <th>Tel&eacute;fono</th>
+                  <th>Estado</th>
+                  <th>Error</th>
+                  <th>Respuesta</th>
+                  <th>Actualizado</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+            <p id="tablaVacia" class="tabla-vacia" hidden>Sin resultados.</p>
+          </div>
+        </section>
+
+      </main>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="js/layout.js"></script>
+  <script src="js/pass-toggle.js"></script>
+  <script src="js/pacientes.js"></script>
+  <script>
+    (function () {
+      if (window.snwCargarPacientes) window.snwCargarPacientes();
+      // Botón para ocultar/mostrar los filtros en móvil (con contador de
+      // filtros aplicados); en escritorio no hace falta y va oculto por CSS.
+      const statsFiltros = document.getElementById("stats");
+      const filtrosWrap = document.getElementById("filtrosWrap");
+      const btnFiltros = document.getElementById("btnToggleFiltros");
+      if (btnFiltros && statsFiltros && filtrosWrap) {
+        const filtrosActivos = () =>
+          [...statsFiltros.querySelectorAll(".stat-card.activo")]
+            .filter((c) => c.dataset.estado !== "todos").length;
+        const pintarBtnFiltros = () => {
+          const abierto = !filtrosWrap.classList.contains("cerrado");
+          const n = filtrosActivos();
+          btnFiltros.setAttribute("aria-expanded", String(abierto));
+          btnFiltros.querySelector("span").textContent =
+            abierto ? "Ocultar filtros" : (n ? `Mostrar filtros (${n})` : "Mostrar filtros");
+        };
+        btnFiltros.addEventListener("click", () => {
+          filtrosWrap.classList.toggle("cerrado");
+          pintarBtnFiltros();
+        });
+        new MutationObserver(() => pintarBtnFiltros()).observe(
+          statsFiltros, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] }
+        );
+        pintarBtnFiltros();
+      }
+    })();
+  </script>
+  <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
+</body>
+</html>

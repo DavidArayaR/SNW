@@ -117,6 +117,13 @@ select.badge--select {
 
 .panel__head h2 { margin: 0; font-size: 1rem; }
 .panel__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.panel__actions label,
+.toolbar-pacientes label:not(.pag-label):not(.btn) {
+  font-size: .82rem;
+  font-weight: 600;
+  color: var(--texto-suave);
+  white-space: nowrap;
+}
 
 .panel--list .panel__head {
   flex-wrap: wrap;
@@ -541,7 +548,7 @@ button:disabled:hover { outline: none; }
   transition: opacity .18s ease, transform .18s ease;
 }
 .modal__card h3 { margin: 0 0 20px; }
-.modal__actions { display: flex; justify-content: flex-end; gap: 10px; }
+.modal__actions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
 
 .toast {
   position: fixed;

@@ -1,5 +1,5 @@
 /* Gestión de usuarios y permisos (administrador / desarrollador).
-   Pestaña «Usuarios» de administracion.html*/
+   Página «Usuarios» (usuarios.html) */
 (function () {
 const $ = (s) => document.querySelector(s);
 
@@ -57,32 +57,52 @@ function fmtMoneda(monto, moneda) {
 
 const ENVIO_ESTADO_LABEL = { completado: "Aprobado", rechazado: "Rechazado", cancelado: "Cancelado" };
 
-// Paginación de las tablas «Envíos realizados» y «Actividad»: máximo 10
-// registros por página, con botones Anterior/Siguiente.
-const PAGE_SIZE = 10;
+// Paginación de las tablas «Envíos realizados» y «Actividad»: igual que en
+// Pacientes —paginador arriba con flechas, info y «Por página» (10 a 100)—
+// y tabla scrolleable con header fijo.
+const PAGE_SIZES = [10, 25, 50, 100];
 
-function renderPaginado(contenedor, lista, renderTabla, vacioTxt) {
+function renderPaginado(contenedor, lista, renderTabla, vacioTxt, sizeKey) {
   const total = lista.length;
-  const paginas = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  let pageSize = Math.min(100, Math.max(10,
+    Number(contenedor._pageSize || localStorage.getItem(sizeKey)) || 10));
+  contenedor._pageSize = pageSize;
+  const paginas = Math.max(1, Math.ceil(total / pageSize));
   let pagina = contenedor._pagina || 1;
   if (pagina > paginas) pagina = paginas;
   if (pagina < 1) pagina = 1;
   contenedor._pagina = pagina;
-  const parte = lista.slice((pagina - 1) * PAGE_SIZE, pagina * PAGE_SIZE);
+  const parte = lista.slice((pagina - 1) * pageSize, pagina * pageSize);
+  const repaginar = () => renderPaginado(contenedor, lista, renderTabla, vacioTxt, sizeKey);
   contenedor.innerHTML =
-    (parte.length ? renderTabla(parte) : `<p class="usr-envios__vacio">${vacioTxt}</p>`) +
-    (paginas > 1
-      ? `<div class="usr-paginador">` +
-        `<button type="button" class="btn btn--ghost" data-pag="ant"${pagina <= 1 ? " disabled" : ""}>&laquo; Anterior</button>` +
-        `<span>P&aacute;gina ${pagina} de ${paginas}</span>` +
-        `<button type="button" class="btn btn--ghost" data-pag="sig"${pagina >= paginas ? " disabled" : ""}>Siguiente &raquo;</button>` +
-        `</div>`
-      : "");
+    `<div class="pag-grupo">` +
+      `<span class="pag-info">Página ${pagina} de ${paginas} · ${total} registro${total === 1 ? "" : "s"}</span>` +
+      `<span class="pag-fila">` +
+        `<button type="button" class="btn btn--ghost" data-pag="ant" title="Página anterior" aria-label="Página anterior"${pagina <= 1 ? " disabled" : ""}><i class="fa-solid fa-chevron-left"></i></button>` +
+        `<button type="button" class="btn btn--ghost" data-pag="sig" title="Página siguiente" aria-label="Página siguiente"${pagina >= paginas ? " disabled" : ""}><i class="fa-solid fa-chevron-right"></i></button>` +
+      `</span>` +
+      `<span class="pag-fila">` +
+        `<label class="pag-label">Por página:</label>` +
+        `<select data-pagesize aria-label="Registros por página">` +
+          PAGE_SIZES.map((n) => `<option value="${n}"${n === pageSize ? " selected" : ""}>${n}</option>`).join("") +
+        `</select>` +
+      `</span>` +
+    `</div>` +
+    (parte.length
+      ? `<div class="usr-tabla-scroll">${renderTabla(parte)}</div>`
+      : `<p class="usr-envios__vacio">${vacioTxt}</p>`);
   contenedor.querySelectorAll("[data-pag]").forEach((b) =>
     b.addEventListener("click", () => {
       contenedor._pagina = pagina + (b.dataset.pag === "sig" ? 1 : -1);
-      renderPaginado(contenedor, lista, renderTabla, vacioTxt);
+      repaginar();
     }));
+  const selTam = contenedor.querySelector("[data-pagesize]");
+  if (selTam) selTam.addEventListener("change", () => {
+    contenedor._pageSize = Math.min(100, Math.max(10, Number(selTam.value) || 10));
+    localStorage.setItem(sizeKey, String(contenedor._pageSize));
+    contenedor._pagina = 1;
+    repaginar();
+  });
 }
 
 function renderEnviosUsuario(lista) {
@@ -113,7 +133,7 @@ async function cargarEnviosUsuario(correo, contenedor) {
     const lista = await r.json();
     if (seleccion !== correo) return;   // la selección cambió mientras cargaba
     contenedor._pagina = 1;
-    renderPaginado(contenedor, Array.isArray(lista) ? lista : [], renderEnviosUsuario, "Sin envíos registrados.");
+    renderPaginado(contenedor, Array.isArray(lista) ? lista : [], renderEnviosUsuario, "Sin envíos registrados.", "snw_page_size_usr_envios");
   } catch (e) {
     if (seleccion === correo) contenedor.innerHTML = `<p class="usr-envios__vacio">No se pudieron cargar los envíos.</p>`;
   }
@@ -155,7 +175,7 @@ async function cargarAuditoriaUsuario(correo, contenedor) {
     const lista = await r.json();
     if (seleccion !== correo) return;
     contenedor._pagina = 1;
-    renderPaginado(contenedor, Array.isArray(lista) ? lista : [], renderAuditoriaUsuario, "Sin actividad registrada.");
+    renderPaginado(contenedor, Array.isArray(lista) ? lista : [], renderAuditoriaUsuario, "Sin actividad registrada.", "snw_page_size_usr_auditoria");
   } catch (e) {
     if (seleccion === correo) contenedor.innerHTML = `<p class="usr-envios__vacio">No se pudo cargar la actividad.</p>`;
   }

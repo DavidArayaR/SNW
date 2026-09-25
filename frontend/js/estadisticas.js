@@ -1,5 +1,4 @@
-/* Pestaña «Estadísticas» de administracion.html (solo admin/dev). Se carga en
-   la misma página que Pacientes/Usuarios/Configuración */
+/* Página «Estadísticas» (estadisticas.html, solo admin/dev). */
 (function () {
 const $ = (sel) => document.querySelector(sel);
 
@@ -66,7 +65,7 @@ async function cargarEspecialidadesEst() {
   const guardada = localStorage.getItem("snw_esp_estadisticas") || "";
   selEspecialidadEst.innerHTML =
     `<option value="">Todas</option>` +
-    especialidadesEst.map((e) => `<option value="${e.id}">${e.nombre_visible}</option>`).join("");
+    especialidadesEst.map((e) => `<option value="${e.id}">${e.nombre_visible} (${e.nombre_tabla_base})</option>`).join("");
   if (guardada && especialidadesEst.some((e) => String(e.id) === guardada)) {
     selEspecialidadEst.value = guardada;
   } else {
@@ -395,9 +394,7 @@ function renderTarifas(d) {
     alerta.classList.add("webhook-salud--alerta");
     alerta.textContent =
       `⚠ Meta publicó una tarifa nueva que entra en vigor el ${fechaDMA(d.proxima.efectiva_desde)}: ` +
-      `Marketing ${fmtMoneda(d.proxima.marketing, d.proxima.moneda)}, ` +
-      `Utilidad ${fmtMoneda(d.proxima.utility, d.proxima.moneda)}, ` +
-      `Autenticación ${fmtMoneda(d.proxima.authentication, d.proxima.moneda)}.`;
+      `Marketing ${fmtMoneda(d.proxima.marketing, d.proxima.moneda)}.`;
   }
 
   if (!v) {
@@ -407,7 +404,7 @@ function renderTarifas(d) {
     return;
   }
 
-  const cats = ["marketing", "utility", "authentication"];
+  const cats = ["marketing"];
   $("#tarifasVigente").innerHTML = cats
     .map(
       (c) => `
