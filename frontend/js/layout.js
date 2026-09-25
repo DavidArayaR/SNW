@@ -112,6 +112,7 @@
   const PERM_PAGINA = {
     mensajeria: "mensajeria",
     historial: "historial",
+    carga: "mensajeria",
   };
   const ORDEN_PAGINAS = [
     ["mensajeria", "mensajeria.html"],
@@ -158,6 +159,7 @@
   const LINKS = [
     { pagina: "inicio",       href: "index.html",        icono: "fa-house",             texto: "Inicio" },
     { pagina: "mensajeria",   href: "mensajeria.html",   icono: "fa-paper-plane",       texto: "Mensajería y plantillas", perm: "mensajeria" },
+    { pagina: "carga",        href: "carga.html",        icono: "fa-upload",            texto: "Cargar base de datos", perm: "mensajeria" },
     { pagina: "historial",    href: "historial.html",    icono: "fa-clock-rotate-left", texto: "Historial", perm: "historial" },
     { pagina: "usuarios", href: "usuarios.html", icono: "fa-user-shield", texto: "Administración", priv: true },
   ];
@@ -167,6 +169,7 @@
   const LINKS_ADMIN = [
     { pagina: "inicio",       href: "index.html",        icono: "fa-house",             texto: "Inicio" },
     { pagina: "mensajeria",   href: "mensajeria.html",   icono: "fa-paper-plane",       texto: "Mensajería y plantillas", perm: "mensajeria" },
+    { pagina: "carga",        href: "carga.html",        icono: "fa-upload",            texto: "Cargar base de datos", perm: "mensajeria" },
     { pagina: "historial",    href: "historial.html",    icono: "fa-clock-rotate-left", texto: "Historial", perm: "historial" },
     { separador: "Administración" },
     { pagina: "usuarios",        href: "usuarios.html",        icono: "fa-users",        texto: "Usuarios" },

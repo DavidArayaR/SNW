@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SNW &middot; Cargar base de datos</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
+  <link rel="stylesheet" href="css/tema.css">
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <script src="js/tema.js"></script>
+</head>
+<body data-pagina="carga">
+
+  <div class="app-shell">
+    <nav class="sidebar" id="sidebar"></nav>
+    <div class="sidebar-backdrop"></div>
+
+    <div class="app-main">
+      <header class="app-topbar">
+        <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="Abrir menú">
+          <i class="fa-solid fa-bars"></i>
+        </button>
+        <span class="app-topbar__titulo">Cargar base de datos</span>
+        <span class="app-topbar__sep"></span>
+      </header>
+
+      <main class="layout layout--ancho">
+        <section class="panel">
+          <div class="panel__head">
+            <h2>Cargar base de datos (CSV)</h2>
+          </div>
+
+          <p class="field__hint" style="margin:12px 18px 0;">
+            Sube un archivo CSV con columnas <strong>nombre, apellido, telefono</strong>
+            (UTF-8, máx. 5 MB) a una de tus especialidades asignadas. Los teléfonos se
+            normalizan a <strong>+569XXXXXXXX</strong> y los duplicados se omiten.
+          </p>
+          <p id="csvSinEsp" class="warn" hidden style="margin:12px 18px 0;">
+            No tienes especialidades asignadas: pídele a un administrador que te asigne
+            una para poder cargar datos.
+          </p>
+
+          <div class="field" style="margin:14px 18px 0; max-width:640px;">
+            <label for="selEspCarga">Especialidad destino</label>
+            <select id="selEspCarga"></select>
+          </div>
+
+          <div class="field" style="margin:14px 18px 0; max-width:640px;">
+            <label>Archivo CSV</label>
+            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+              <label for="csvArchivoCarga" class="btn btn--ghost" id="lblArchivoCarga" style="cursor:pointer; margin:0;">Elegir archivo</label>
+              <span id="nombreArchivoCarga" class="field__hint" style="margin:0;">No se ha seleccionado ningún archivo</span>
+            </div>
+            <input type="file" id="csvArchivoCarga" accept=".csv" hidden>
+          </div>
+
+          <div style="margin:14px 18px 0;">
+            <button id="btnSubirCsv" class="btn btn--primary" type="button">Cargar base de datos</button>
+          </div>
+
+          <div id="csvResultado" style="margin:14px 18px 20px;"></div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="js/layout.js"></script>
+  <script src="js/carga.js"></script>
+  <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
+</body>
+</html>

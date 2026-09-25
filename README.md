@@ -907,6 +907,9 @@ claro** de la sidebar, o con el botón flotante en la portada y el login (págin
   badges de aprobación interna («⏳ Por aprobar»/«Rechazada») con botones de aprobar (con
   confirmación) y rechazar (con motivo) para admin/dev/supervisor, y envío directo a todos los
   pendientes con selector único de base de datos. Sin el permiso `plantillas_editar` el editor queda de solo lectura; las ajenas también (solo su creador las edita, salvo admin/dev).
+- **Cargar base de datos** (`carga.html`, permiso `mensajeria`): cualquier cuenta sube un CSV
+  (`nombre, apellido, telefono`, UTF-8, 5 MB) a una de sus especialidades asignadas, con
+  informe de insertados/duplicados/rechazados. Sin especialidades se le indica pedir una.
 - **Administración** (rol admin/desarrollador): ya no es una página con pestañas — son
   5 páginas propias (`usuarios.html`, `pacientes.html`, `especialidades.html`,
   `estadisticas.html`, `configuracion.html`; `administracion.html` solo redirige a
