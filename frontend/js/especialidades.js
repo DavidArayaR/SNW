@@ -48,7 +48,8 @@ async function cargar() {
     if (re.status === 401 || ru.status === 401) { window.snwSesionExpirada(); return; }
     if (!re.ok) throw new Error();
     estado.lista = await re.json();
-    estado.usuarios = ru.ok ? ((await ru.json()).usuarios || []) : [];
+    const du = ru.ok ? await ru.json() : {};
+    estado.usuarios = du.usuarios || [];
     msg("");
     render();
   } catch (e) {
@@ -106,6 +107,35 @@ function renderDetalle() {
   if (!esp) { detalleEl.innerHTML = ""; return; }
   const asignados = usuariosConRol(esp.id);
   const agregables = usuariosAgregables(esp.id);
+  const tablaUsuarios = asignados.filter((u) => u.rol === "usuario");
+  const tablaSupervisores = asignados.filter((u) => u.rol === "supervisor");
+  const tablaOtros = asignados.filter((u) => u.rol !== "usuario" && u.rol !== "supervisor");
+  const filasAcceso = (lista) => lista.map((u) =>
+    `<tr>` +
+      `<td>${esc(u.nombre || u.usuario)}</td>` +
+      `<td>${esc(u.usuario)}</td>` +
+      `<td style="text-align:right;">` +
+        (u.editable
+          ? `<button type="button" class="btn btn--danger-ghost" data-quitar="${esc(u.usuario)}">Quitar</button>`
+          : "") +
+      `</td>` +
+    `</tr>`).join("");
+  const tablaAcceso = (titulo, lista, vacioTxt) =>
+    `<h4 class="usr-subtitulo">${titulo} (${lista.length})</h4>` +
+    (lista.length
+      ? `<div class="usr-tabla-scroll"><table class="usr-envios__tabla usr-envios__tabla--compacta">` +
+        `<thead><tr><th>Nombre</th><th>Correo</th><th></th></tr></thead>` +
+        `<tbody>${filasAcceso(lista)}</tbody></table></div>`
+      : `<p class="usr-envios__vacio">${vacioTxt}</p>`);
+  const soloUsuarios = agregables.filter((u) => u.rol === "usuario");
+  const soloSupervisores = agregables.filter((u) => u.rol === "supervisor");
+  const opcion = (u) => `<option value="${esc(u.usuario)}">${esc(u.nombre || u.usuario)} (${esc(u.usuario)})</option>`;
+  const filaAsignar = (titulo, attrSel, lista) =>
+    `<label>${titulo}</label>` +
+    `<div class="usr-reset__correo">` +
+      `<select data-${attrSel}>${lista.map(opcion).join("")}</select>` +
+      `<button type="button" class="btn btn--primary" data-asignar-${attrSel}${lista.length ? "" : " disabled"}>Asignar</button>` +
+    `</div>`;
 
   detalleEl.innerHTML =
     `<div class="usr-card" data-id="${esp.id}">` +
@@ -124,22 +154,12 @@ function renderDetalle() {
         `<label>Creada</label><div>${esc(fmtFecha(esp.fecha_creacion))}</div>` +
         `<label>Cuentas con acceso</label>` +
         `<div>` +
-          (asignados.length
-            ? `<ul class="usr-envios__cont" style="list-style:none; margin:0; padding:0;">` + asignados.map((u) =>
-              `<li style="display:flex; align-items:center; gap:8px; padding:4px 0;">` +
-                `<span>${esc(u.nombre || u.usuario)} <span class="field__hint">(${esc(u.usuario)} · ${esc(u.rol)})</span></span>` +
-                (u.editable
-                  ? `<button type="button" class="btn btn--danger-ghost" data-quitar="${esc(u.usuario)}">Quitar</button>`
-                  : "") +
-              `</li>`).join("") + `</ul>`
-            : `<p class="usr-envios__vacio">Ninguna cuenta tiene este rol todavía.</p>`) +
+          tablaAcceso("Usuarios", tablaUsuarios, "Ninguno todavía.") +
+          tablaAcceso("Supervisores", tablaSupervisores, "Ninguno todavía.") +
+          (tablaOtros.length ? tablaAcceso("Otras cuentas", tablaOtros, "Ninguna.") : "") +
         `</div>` +
-        `<label>Asignar rol</label>` +
-        `<div class="usr-reset__correo">` +
-          `<select data-nuevo>${agregables.map((u) =>
-            `<option value="${esc(u.usuario)}">${esc(u.nombre || u.usuario)} (${esc(u.usuario)})</option>`).join("")}</select>` +
-          `<button type="button" class="btn btn--primary" data-asignar${agregables.length ? "" : " disabled"}>Asignar</button>` +
-        `</div>` +
+        filaAsignar("Asignar usuario", "nuevo-usuario", soloUsuarios) +
+        filaAsignar("Asignar supervisor", "nuevo-supervisor", soloSupervisores) +
         `<label>Zona de peligro</label>` +
         `<div><button type="button" class="btn btn--danger" data-eliminar-tabla>Eliminar tabla completa</button>` +
         `<p class="field__hint" style="margin:6px 0 0;">Borra la tabla <code>${esc(esp.nombre_tabla_base)}</code> ` +
@@ -149,7 +169,8 @@ function renderDetalle() {
 
   const card = detalleEl.querySelector(".usr-card");
   card.querySelector("[data-renombrar]").addEventListener("click", () => renombrar(card));
-  card.querySelector("[data-asignar]").addEventListener("click", () => asignar(card));
+  card.querySelector("[data-asignar-nuevo-usuario]").addEventListener("click", () => asignar(card, "nuevo-usuario"));
+  card.querySelector("[data-asignar-nuevo-supervisor]").addEventListener("click", () => asignar(card, "nuevo-supervisor"));
   card.querySelector("[data-eliminar-tabla]").addEventListener("click", () => eliminarTabla(card));
   card.querySelectorAll("[data-quitar]").forEach((b) =>
     b.addEventListener("click", () => retirar(card, b.dataset.quitar)));
@@ -176,9 +197,9 @@ async function renombrar(card) {
   }
 }
 
-async function asignar(card) {
+async function asignar(card, attrSel) {
   const id = Number(card.dataset.id);
-  const sel = card.querySelector("[data-nuevo]");
+  const sel = card.querySelector(`[data-${attrSel}]`);
   if (!sel || !sel.value) return;
   try {
     const r = await fetch(`api/especialidades/${id}/roles`, {
@@ -221,9 +242,26 @@ async function eliminarTabla(card) {
     toast(e.message || "No se pudo eliminar.", "error");
   }
 }
+let quitarPendiente = null; // {id, correo} a la espera de confirmación
 
-async function retirar(card, correo) {  const id = Number(card.dataset.id);
-  if (!confirm(`¿Quitar a ${correo} el acceso a esta especialidad?`)) return;
+function pedirQuitar(id, correo) {
+  quitarPendiente = { id, correo };
+  $("#quitarTexto").textContent = `¿Quitar a ${correo} el acceso a esta especialidad?`;
+  $("#modalQuitarRol").hidden = false;
+}
+
+function cerrarModalQuitar() {
+  quitarPendiente = null;
+  $("#modalQuitarRol").hidden = true;
+}
+
+$("#btnCancelarQuitar").addEventListener("click", cerrarModalQuitar);
+$("#modalQuitarRol").addEventListener("click", (e) => {
+  if (e.target.id === "modalQuitarRol") cerrarModalQuitar();
+});
+$("#btnConfirmarQuitar").addEventListener("click", async () => {
+  if (!quitarPendiente) return;
+  const { id, correo } = quitarPendiente;
   try {
     const r = await fetch(`api/especialidades/${id}/roles/` + encodeURIComponent(correo), {
       method: "DELETE", headers: authHeaders(),
@@ -231,11 +269,16 @@ async function retirar(card, correo) {  const id = Number(card.dataset.id);
     if (r.status === 401) { window.snwSesionExpirada(); return; }
     if (!r.ok) throw new Error(`Error ${r.status}`);
     toast("Acceso retirado.");
+    cerrarModalQuitar();
     yaCargada = false;
     await cargar();
   } catch (e) {
     toast(e.message || "No se pudo retirar el acceso.", "error");
   }
+});
+
+async function retirar(card, correo) {
+  pedirQuitar(Number(card.dataset.id), correo);
 }
 
 async function crear(nombre, modo) {

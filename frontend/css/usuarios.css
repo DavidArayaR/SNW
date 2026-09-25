@@ -114,6 +114,9 @@
   align-items: start;
 }
 .usr-grid > label { font-size: .8rem; font-weight: 600; color: var(--texto-suave); padding-top: 8px; }
+/* Sin esto, una tabla ancha estira la columna del grid y se sale de la
+   tarjeta en celular: los hijos pueden encogerse y la tabla scrollea dentro. */
+.usr-grid > * { min-width: 0; }
 
 .usr-grid input[type="text"] {
   width: 100%;
@@ -182,6 +185,18 @@
 .usr-card--envios h4 { margin: 0 0 10px; font-size: .84rem; font-weight: 700; color: var(--texto-suave); text-transform: uppercase; letter-spacing: .03em; }
 .usr-envios__vacio { margin: 0; font-size: .86rem; color: var(--texto-suave); }
 .usr-envios__cont { overflow-x: auto; }
+/* Versión pequeña para las tablas de acceso por rol (nombre, correo, quitar):
+   mismo ancho fijo en ambas (con tope al 100% en celular). */
+.usr-envios__tabla.usr-envios__tabla--compacta { width: 480px; max-width: 100%; font-size: .8rem; }
+.usr-envios__tabla--compacta th,
+.usr-envios__tabla--compacta td { padding: 4px 8px; }
+.usr-envios__tabla--compacta .btn { padding: 3px 10px; font-size: .75rem; }
+/* Subtítulos de las tablas de acceso por rol en Especialidades. */
+.usr-subtitulo { margin: 12px 0 6px; font-size: .88rem; }
+.usr-subtitulo:first-child { margin-top: 0; }
+
+/* Modal pequeño (quitar acceso a especialidad). */
+.modal__card--sm { max-width: 400px; }
 /* Tabla scrolleable con header fijo, igual que en Pacientes. */
 .usr-tabla-scroll { max-height: 320px; overflow: auto; overscroll-behavior: contain; }
 .usr-envios__tabla thead th {
