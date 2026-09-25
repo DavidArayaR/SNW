@@ -48,6 +48,8 @@ async function init() {
   selEsp.disabled = sinAsignadas;
   inpArchivo.disabled = sinAsignadas;
   btnSubir.disabled = sinAsignadas;
+  const lblArchivo = $("#lblArchivoCarga");
+  if (lblArchivo) lblArchivo.classList.toggle("is-disabled", sinAsignadas);
 }
 
 inpArchivo.addEventListener("change", () => {

@@ -64,7 +64,7 @@
     ["snw_token", "snw_rol", "snw_nombre", "snw_permisos", "snw_ambiente_admin", "snw_ambiente",
      "snw_esp_pacientes", "snw_esp_mensajeria", "snw_esp_historial", "snw_base_historial",
      "snw_esp_estadisticas", "snw_modo_conf", "snw_page_size_pac",
-     "snw_page_size_usr_envios", "snw_page_size_usr_auditoria"]
+     "snw_page_size_usr_envios", "snw_page_size_usr_auditoria", "snw_admin_open"]
       .forEach((k) => localStorage.removeItem(k));
   }
 
@@ -129,9 +129,12 @@
     return "index.html";
   }
   // Administración (Usuarios + Base de datos + Especialidades + Estadísticas +
-  // Configuración) es exclusiva de admin/dev; Configuración, dentro de esas
-  // páginas, es exclusiva de desarrollador.
-  if (ES_PAG_ADMIN && !ES_PRIV) {
+  // Configuración) es exclusiva de admin/dev, salvo la Base de datos
+  // (pacientes.html) que cualquier cuenta puede abrir: el backend limita a
+  // cada una a sus especialidades asignadas (vista de solo lectura sin el
+  // permiso). Configuración, dentro de esas páginas, es exclusiva de
+  // desarrollador.
+  if (ES_PAG_ADMIN && PAGINA !== "pacientes" && !ES_PRIV) {
     location.replace(primeraPaginaPermitida());
     return;
   }
@@ -156,22 +159,16 @@
     shellEl.classList.add("sidebar-colapsada");
   }
 
-  const LINKS = [
+  const LINKS_BASE = [
     { pagina: "inicio",       href: "index.html",        icono: "fa-house",             texto: "Inicio" },
     { pagina: "mensajeria",   href: "mensajeria.html",   icono: "fa-paper-plane",       texto: "Mensajería y plantillas", perm: "mensajeria" },
     { pagina: "carga",        href: "carga.html",        icono: "fa-upload",            texto: "Cargar base de datos", perm: "mensajeria" },
     { pagina: "historial",    href: "historial.html",    icono: "fa-clock-rotate-left", texto: "Historial", perm: "historial" },
-    { pagina: "usuarios", href: "usuarios.html", icono: "fa-user-shield", texto: "Administración", priv: true },
+    { pagina: "pacientes",    href: "pacientes.html",    icono: "fa-database",          texto: "Base de datos", perm: "mensajeria", soloNoPriv: true },
   ];
 
-  // En las páginas de administración la sidebar cambia a los botones de
-  // navegación de administración (con su separador), en vez del menú normal.
-  const LINKS_ADMIN = [
-    { pagina: "inicio",       href: "index.html",        icono: "fa-house",             texto: "Inicio" },
-    { pagina: "mensajeria",   href: "mensajeria.html",   icono: "fa-paper-plane",       texto: "Mensajería y plantillas", perm: "mensajeria" },
-    { pagina: "carga",        href: "carga.html",        icono: "fa-upload",            texto: "Cargar base de datos", perm: "mensajeria" },
-    { pagina: "historial",    href: "historial.html",    icono: "fa-clock-rotate-left", texto: "Historial", perm: "historial" },
-    { separador: "Administración" },
+  // Submenú de administración (desplegable): solo admin/dev.
+  const LINKS_ADMIN_SUB = [
     { pagina: "usuarios",        href: "usuarios.html",        icono: "fa-users",        texto: "Usuarios" },
     { pagina: "pacientes",       href: "pacientes.html",       icono: "fa-database",     texto: "Base de datos" },
     { pagina: "especialidades",  href: "especialidades.html",  icono: "fa-stethoscope",  texto: "Especialidades" },
@@ -179,16 +176,31 @@
     { pagina: "configuracion",   href: "configuracion.html",   icono: "fa-gear",         texto: "Configuración", dev: true },
   ];
 
-  const FUENTE = ES_PAG_ADMIN ? LINKS_ADMIN : LINKS;
-  const items = FUENTE
-    .filter((l) => (!l.perm || puede(l.perm)) && (!l.priv || ES_PRIV) && (!l.dev || ES_DEV))
-    .map((l) => {
-      if (l.separador) return `<li class="sidebar__seccion">${l.separador}</li>`;
-      return `<li class="nav-item">` +
-        `<a class="nav-link${l.pagina === PAGINA ? " active" : ""}" href="${l.href}" title="${l.texto}">` +
-        `<i class="fa-solid ${l.icono}"></i><span>${l.texto}</span></a></li>`;
-    })
+  const pintarEnlace = (l) =>
+    `<li class="nav-item">` +
+    `<a class="nav-link${l.pagina === PAGINA ? " active" : ""}" href="${l.href}" title="${l.texto}">` +
+    `<i class="fa-solid ${l.icono}"></i><span>${l.texto}</span></a></li>`;
+
+  const itemsBase = LINKS_BASE
+    .filter((l) => (!l.perm || puede(l.perm)) && (!l.priv || ES_PRIV) && (!l.dev || ES_DEV) && (!l.soloNoPriv || !ES_PRIV))
+    .map(pintarEnlace)
     .join("");
+
+  let bloqueAdmin = "";
+  if (ES_PRIV) {
+    const itemsSub = LINKS_ADMIN_SUB
+      .filter((l) => (!l.dev || ES_DEV))
+      .map(pintarEnlace)
+      .join("");
+    bloqueAdmin =
+      `<li class="nav-item">` +
+      `<button type="button" class="nav-link sidebar__admin-toggle${ES_PAG_ADMIN ? " active" : ""}" id="btnAdminToggle" aria-expanded="false" title="Administración">` +
+      `<i class="fa-solid fa-user-shield"></i><span>Administración</span>` +
+      `<i class="fa-solid fa-chevron-down sidebar__admin-flecha"></i></button></li>` +
+      `<li class="nav-subnav-wrap"><ul class="sidebar__subnav" id="subnavAdmin">${itemsSub}</ul></li>`;
+  }
+
+  const items = itemsBase + bloqueAdmin;
 
   const sidebar = document.getElementById("sidebar");
   if (sidebar) {
@@ -214,13 +226,27 @@
 
     // Feedback instantáneo al hacer clic: marca el ítem como activo de
     // una vez (sin esperar a que la página nueva termine de cargar)
-    const navLinks = sidebar.querySelectorAll(".sidebar__nav .nav-link");
+    const navLinks = sidebar.querySelectorAll(".sidebar__nav a.nav-link");
     navLinks.forEach((link) => {
       link.addEventListener("click", () => {
         navLinks.forEach((l) => l.classList.remove("active"));
         link.classList.add("active");
       });
     });
+
+    // Submenú desplegable de Administración (estado recordado entre sesiones;
+    // siempre abierto al entrar a una página de administración).
+    const btnAdminToggle = document.getElementById("btnAdminToggle");
+    const subnavAdmin = document.getElementById("subnavAdmin");
+    if (btnAdminToggle && subnavAdmin) {
+      const pintarAdmin = (abierto) => {
+        btnAdminToggle.setAttribute("aria-expanded", String(abierto));
+        subnavAdmin.hidden = !abierto;
+        try { localStorage.setItem("snw_admin_open", abierto ? "1" : "0"); } catch (e) { /* sin almacenamiento */ }
+      };
+      pintarAdmin(ES_PAG_ADMIN || localStorage.getItem("snw_admin_open") === "1");
+      btnAdminToggle.addEventListener("click", () => pintarAdmin(subnavAdmin.hidden));
+    }
 
     const btnTema = document.getElementById("btnTema");
     const pintarTema = () => {

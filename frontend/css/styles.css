@@ -264,6 +264,15 @@ button:disabled {
   cursor: not-allowed;
   filter: none;
 }
+/* Para "botones" que en realidad son <label> (ej. elegir archivo): no aceptan
+   disabled, así que se apagan con esta clase (sin clic ni hover). */
+.btn.is-disabled,
+label.btn.is-disabled {
+  opacity: .5;
+  cursor: not-allowed;
+  filter: none;
+  pointer-events: none;
+}
 
 /* Todos los botones muestran un contorno al pasar el ratón. */
 .btn:hover,
@@ -339,6 +348,9 @@ button:disabled:hover { outline: none; }
   font-size: .84rem;
 }
 .warn--nombre { margin: 8px 0 0; }
+/* Cuando el aviso va después de un texto de ayuda, sin margen negativo para
+   que no se solapen entre ellos. */
+.field__hint + .warn { margin-top: 8px; }
 #avisoPendiente { margin: 14px 18px 0; }
 
 .preview-wrap {

@@ -1185,8 +1185,15 @@ def expr_select_pacientes(ambiente: str, tabla: str | None = None) -> str:
 
 def listar_pacientes(q: str | None = Query(None), ambiente: str = Query("produccion"),
                      especialidad_id: int | None = Query(None),
-                     sesion: dict = Depends(exigir("pacientes"))):
-    t, _esp = _resolver_tabla_pacientes(sesion, ambiente, especialidad_id)
+                     sesion: dict = Depends(sesion_actual)):
+    # Lectura: con especialidad basta estar asignado (cualquier rol, para que
+    # el usuario vea su base); sin ella se exige el permiso de pacientes.
+    if especialidad_id is not None:
+        t, _esp = _resolver_tabla_pacientes(sesion, ambiente, especialidad_id)
+    else:
+        if not tiene_permiso(sesion, "pacientes"):
+            raise HTTPException(403, detail="No tienes permiso para acceder a esta sección.")
+        t, _esp = _resolver_tabla_pacientes(sesion, ambiente, None)
     sql = "SELECT " + expr_select_pacientes(ambiente, tabla=t) + from_pacientes(ambiente, tabla=t)
     args: list = []
     if q and q.strip():
@@ -1414,11 +1421,16 @@ def actualizar_respuesta_paciente(paciente_id: int, body: RespuestaIn,
 
 def mensajes_paciente(paciente_id: int, ambiente: str = Query("produccion"),
                       especialidad_id: int | None = Query(None),
-                      sesion: dict = Depends(exigir("historial", "pacientes"))):
+                      sesion: dict = Depends(sesion_actual)):
     """Todos los mensajes (entrantes y salientes) de un paciente, para revisar
     a mano si su interés es real. Los entrantes se guardan tal cual los escribió.
     Accesible a cualquier usuario (solo lectura)."""
-    t, _esp = _resolver_tabla_pacientes(sesion, ambiente, especialidad_id)
+    if especialidad_id is not None:
+        t, _esp = _resolver_tabla_pacientes(sesion, ambiente, especialidad_id)
+    else:
+        if not (tiene_permiso(sesion, "historial") or tiene_permiso(sesion, "pacientes")):
+            raise HTTPException(403, detail="No tienes permiso para acceder a esta sección.")
+        t, _esp = _resolver_tabla_pacientes(sesion, ambiente, None)
     cols = columnas_tabla(t, ambiente)
     tiene_opt = "whatsapp_opt_out" in cols
     tiene_int = "interesado" in cols
@@ -3365,6 +3377,12 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
     entorno_global = config_get("entorno", "desarrollo").strip().lower()
     if entorno_global == "desarrollo" and not tiene_permiso(sesion, "envio_produccion"):
         amb = "desarrollo"
+
+    # El usuario normal solo envía a pacientes de su especialidad o a la base
+    # de desarrollo; nunca a producción legacy.
+    if sesion.get("rol") == "usuario" and body.especialidad_id is None and amb != "desarrollo":
+        raise HTTPException(
+            403, detail="Solo puedes enviar a pacientes de tu especialidad o a la base de desarrollo.")
 
     # Envío a especialidad (Fase 2): tabla única pacientes_<slug>, con
     # autorización estricta (403 si no está asignada). Las reglas de

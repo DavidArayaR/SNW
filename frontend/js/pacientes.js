@@ -52,6 +52,7 @@ function pintarPaginadorPac(total) {
   const btnAnt = $("#pagAntPac");
   const btnSig = $("#pagSigPac");
   const selTam = $("#selPageSizePac");
+  if (!info && !btnAnt && !btnSig && !selTam) return; // HTML antiguo en caché
   const paginas = totalPaginasPac(total);
   if (info) info.textContent = `Página ${paginaPac} de ${paginas} · ${total} paciente${total === 1 ? "" : "s"}`;
   if (btnAnt) btnAnt.disabled = paginaPac <= 1;
@@ -69,6 +70,16 @@ const chkTodos = $("#chkTodos");
 const contadorSel = $("#contadorSel");
 const toastEl = $("#toast");
 const selBasePac = $("#selBasePac");
+
+// Solo lectura para cuentas sin permiso de gestión (el usuario normal ve su
+// base pero no la edita: sin checks, sin edición inline, sin CSV ni borrado;
+// el backend exige el permiso en cada mutación de todas formas).
+const PUEDE_GESTIONAR_PAC = !!window.snwEsPrivilegiado ||
+  (!!window.snwPuede && window.snwPuede("pacientes"));
+if (!PUEDE_GESTIONAR_PAC && chkTodos) {
+  const thCheck = chkTodos.closest("th");
+  if (thCheck) thCheck.hidden = true;
+}
 const toolbarMasivo = $("#toolbarMasivo");
 const selEstadoMasivo = $("#selEstadoMasivo");
 const selRespuestaMasivo = $("#selRespuestaMasivo");
@@ -111,20 +122,29 @@ async function cargarBasesPac() {
     especialidades = [];
   }
   selBasePac.innerHTML =
-    `<option value="dev">Base de datos desarrollo (pacientes_dev)</option>` +
-    `<option value="prod">Base de datos producción (pacientes_prod)</option>` +
-    especialidades.map((e) => `<option value="esp:${e.id}">${escaparHtml(e.nombre_visible)} (${escaparHtml(e.nombre_tabla_base)})</option>`).join("");
+    (PUEDE_GESTIONAR_PAC
+      ? `<option value="dev">Base de datos desarrollo (pacientes_dev)</option>` +
+        `<option value="prod">Base de datos producción (pacientes_prod)</option>`
+      : "") +
+    especialidades.map((e) => `<option value="esp:${e.id}">${escaparHtml(e.nombre_visible)} (${escaparHtml(e.nombre_tabla_base)})</option>`).join("") +
+    (!PUEDE_GESTIONAR_PAC && !especialidades.length
+      ? `<option value="" disabled>Sin bases asignadas: pide una especialidad a un administrador</option>`
+      : "");
   // Restaura la última usada si sigue disponible; si no, la primera.
-  const valores = [...selBasePac.options].map((o) => o.value);
+  const valores = [...selBasePac.options].map((o) => o.value).filter(Boolean);
   const guardadaEsp = localStorage.getItem("snw_esp_pacientes") || "";
   let elegido = null;
   if (guardadaEsp && valores.includes(`esp:${guardadaEsp}`)) {
     elegido = `esp:${guardadaEsp}`;
-  } else {
+  } else if (PUEDE_GESTIONAR_PAC) {
     const amb = ambienteAdmin === "produccion" ? "prod" : "dev";
     elegido = valores.includes(amb) ? amb : valores[0];
     localStorage.removeItem("snw_esp_pacientes");
+  } else {
+    elegido = valores[0] || null;
+    localStorage.removeItem("snw_esp_pacientes");
   }
+  if (elegido == null) return;
   selBasePac.value = elegido;
   if (elegido.startsWith("esp:")) {
     localStorage.setItem("snw_esp_pacientes", elegido.slice(4));
@@ -141,7 +161,8 @@ function aplicarModoBase() {
   const esp = espPacId();
   const tabla = tablaPacActual();
   const cardGestion = $("#cardGestionTabla");
-  if (cardGestion) cardGestion.hidden = esp == null;
+  // CSV y borrado solo para especialidad y con permiso de gestión.
+  if (cardGestion) cardGestion.hidden = esp == null || !PUEDE_GESTIONAR_PAC;
   const csvBloque = $("#csvCarga");
   if (csvBloque && esp != null) {
     const dest = $("#csvDestino");
@@ -220,8 +241,9 @@ async function cargar() {
     aplicarModoBase();
 
     render();
-  } catch {
-    toast("Error al conectar con el servidor.", "error");
+  } catch (err) {
+    console.error("[pacientes] cargar:", err);
+    toast("Error al conectar con el servidor" + (err && err.message ? `: ${err.message}` : "."), "error");
   }
 }
 
@@ -261,12 +283,14 @@ function render() {
       ? `<span class="respuesta-fecha">${escaparHtml(p.ultima_respuesta_fecha)}</span>`
       : "";
     tr.innerHTML =
-      `<td class="col-check"><input type="checkbox" data-id="${p.id}" ${seleccionados.has(p.id) ? "checked" : ""}></td>` +
+      (PUEDE_GESTIONAR_PAC
+        ? `<td class="col-check"><input type="checkbox" data-id="${p.id}" ${seleccionados.has(p.id) ? "checked" : ""}></td>`
+        : `<td class="col-check"></td>`) +
       `<td class="campo-id">${p.id}</td>` +
       `<td class="campo-nombre">${escaparHtml(nombreCompleto)}</td>` +
       `<td class="campo-tel">${escaparHtml(p.telefono)}</td>` +
       `<td class="campo-estado">` +
-        `<span class="estado-badge estado-${escaparHtml(p.estado)}" data-editable data-id="${p.id}" title="Click para cambiar estado">${escaparHtml(p.estado)}</span>` +
+        `<span class="estado-badge estado-${escaparHtml(p.estado)}"${PUEDE_GESTIONAR_PAC ? ` data-editable data-id="${p.id}" title="Click para cambiar estado"` : ""}>${escaparHtml(p.estado)}</span>` +
         `<select class="estado-select" data-id="${p.id}" hidden>` +
           `<option value="pendiente"${p.estado === "pendiente" ? " selected" : ""}>pendiente</option>` +
           `<option value="enviado"${p.estado === "enviado" ? " selected" : ""}>enviado</option>` +
@@ -275,8 +299,8 @@ function render() {
       celdaError +
       `<td class="campo-respuesta">` +
         `<span class="respuesta-badge respuesta-${escaparHtml(respuesta)}${bajaBloqueada ? " respuesta-badge--bloqueada" : ""}"` +
-          `${bajaBloqueada ? "" : " data-editable"} data-id="${p.id}"` +
-          ` title="${escaparHtml(bajaBloqueada ? tituloResp : tituloResp + " · click para cambiar")}">` +
+          `${!PUEDE_GESTIONAR_PAC || bajaBloqueada ? "" : " data-editable"} data-id="${p.id}"` +
+          ` title="${escaparHtml(!PUEDE_GESTIONAR_PAC || bajaBloqueada ? tituloResp : tituloResp + " · click para cambiar")}">` +
           `${bajaBloqueada ? '<i class="fa-solid fa-lock"></i> ' : ""}${escaparHtml(respuestaLabels[respuesta] ?? respuesta)}</span>` +
         `<select class="respuesta-select" data-id="${p.id}" hidden>` +
           // "Respondió" no es una opción manual: solo la pone el propio
@@ -294,7 +318,7 @@ function render() {
       `</td>` +
       `<td class="campo-fecha">${escaparHtml(p.actualizado)}</td>`;
     const chk = tr.querySelector('input[type="checkbox"]');
-    chk.addEventListener("change", (e) => {
+    if (chk) chk.addEventListener("change", (e) => {
       e.target.checked ? seleccionados.add(p.id) : seleccionados.delete(p.id);
       if (!e.target.checked) todoMarcado = false;
       refrescarSeleccion();
@@ -404,8 +428,10 @@ tbodyEl.addEventListener("click", (e) => {
   refrescarSeleccion();
 });
 
-// Edición inline del estado y de la respuesta (badge -> select)
+// Edición inline del estado y de la respuesta (badge -> select). Solo con
+// permiso de gestión; el resto ve los badges fijos.
 tbodyEl.addEventListener("click", (e) => {
+  if (!PUEDE_GESTIONAR_PAC) return;
   const badge = e.target.closest(".estado-badge[data-editable], .respuesta-badge[data-editable]");
   if (!badge) return;
   e.stopPropagation();
@@ -418,6 +444,7 @@ tbodyEl.addEventListener("click", (e) => {
 });
 
 tbodyEl.addEventListener("change", async (e) => {
+  if (!PUEDE_GESTIONAR_PAC) return;
   const sel = e.target;
   if (!sel.classList.contains("respuesta-select")) return;
   e.stopPropagation();
@@ -458,6 +485,7 @@ tbodyEl.addEventListener("change", async (e) => {
 });
 
 tbodyEl.addEventListener("change", async (e) => {
+  if (!PUEDE_GESTIONAR_PAC) return;
   const sel = e.target;
   if (!sel.classList.contains("estado-select")) return;
   e.stopPropagation();

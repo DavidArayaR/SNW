@@ -247,7 +247,9 @@ function ambienteEnvioConf() {
 function construirOpcionesBaseConf(forzarEspId) {
   const sel = $("#selBaseConf");
   if (!sel) return;
-  const restringido = usuarioRestringidoADesarrollo();
+  // El usuario normal nunca ve producción legacy: solo su especialidad o
+  // desarrollo (el backend lo exige igual).
+  const restringido = usuarioRestringidoADesarrollo() || (window.snwRol || "") === "usuario";
   let html = "";
   if (forzarEspId != null) {
     const espForzada = misEspecialidades.find((e) => e.id === forzarEspId);
@@ -551,6 +553,8 @@ function refrescarEditor() {
   actualizarEstadoBotonGuardar();
 }
 
+if (inpEspecialidad) inpEspecialidad.addEventListener("change", refrescarEditor);
+
 function estadoActualEditor() {
   return JSON.stringify([inpNombre.value, inpMensaje.value, valTemplate(), valTemplateLang(), valTemplateCategoria(), inpEspecialidad ? inpEspecialidad.value : ""]);
 }
@@ -565,9 +569,14 @@ function hayCambios() {
 }
 
 // El botón «Guardar» solo se habilita si hubo algún cambio desde que se abrió
-// la plantilla (o desde el último guardado); evita guardados vacíos/no-op.
+// la plantilla (o desde el último guardado) Y están completos nombre, mensaje
+// y especialidad (al usuario normal se le exige especialidad: no puede usar
+// globales; para el resto, global es válido). Evita guardados vacíos/no-op.
 function actualizarEstadoBotonGuardar() {
-  if (btnGuardar) btnGuardar.disabled = !hayCambios();
+  if (!btnGuardar) return;
+  const incompleto = !inpNombre.value.trim() || !inpMensaje.value.trim() ||
+    ((window.snwRol || "") === "usuario" && !(inpEspecialidad && inpEspecialidad.value));
+  btnGuardar.disabled = !hayCambios() || incompleto;
 }
 
 function renderEstadoMeta(p) {

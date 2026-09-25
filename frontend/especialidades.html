@@ -69,6 +69,17 @@
 
   <div id="toast" class="toast"></div>
 
+  <div id="modalQuitarRol" class="modal" hidden>
+    <div class="modal__card modal__card--sm" role="dialog" aria-modal="true">
+      <h3>Quitar acceso</h3>
+      <p id="quitarTexto" style="margin: 0 0 20px; font-size: .92rem; line-height: 1.5;"></p>
+      <div class="modal__actions">
+        <button type="button" class="btn btn--ghost" id="btnCancelarQuitar">Cancelar</button>
+        <button type="button" class="btn btn--danger" id="btnConfirmarQuitar">Quitar</button>
+      </div>
+    </div>
+  </div>
+
   <script src="js/layout.js"></script>
   <script src="js/pass-toggle.js"></script>
   <script src="js/especialidades.js"></script>
