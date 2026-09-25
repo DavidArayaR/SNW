@@ -338,7 +338,7 @@ contraseña?» en el login (`/api/auth/olvide`) — mismo mecanismo, pero autose
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/plantillas` | Lista de plantillas (incluye las de call center; el frontend de Mensajería las filtra). Cada cuenta recibe solo su alcance: el usuario normal ve las globales aprobadas, las de sus especialidades y sus propias pendientes/rechazadas |
+| GET | `/api/plantillas` | Lista de plantillas (incluye las de call center; el frontend de Mensajería las filtra). Cada cuenta recibe solo su alcance: el usuario normal ve solo las que creó y las de sus especialidades |
 | POST | `/api/plantillas` | Crear `{nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, especialidad_id?}`. `whatsapp_template_categoria` es obligatoria (`UTILITY` / `MARKETING` / `AUTHENTICATION`); sin ella → 400. `especialidad_id` asocia la plantilla (404 si no existe, 403 si no está asignada). **El usuario normal no puede crear plantillas globales** (422): siempre una de sus especialidades. **Aprobación interna**: lo creado por admin/dev/supervisor nace `aprobada` y va a Meta de inmediato; lo creado por un `usuario` nace `pendiente` y **no se registra en Meta** hasta que se aprueba |
 | POST | `/api/plantillas/{id}/aprobar` | (admin/dev/supervisor) Aprueba una pendiente y la registra en Meta |
 | POST | `/api/plantillas/{id}/rechazar` | (admin/dev/supervisor) `{motivo?}` Rechaza una pendiente (no va a Meta); su creador puede corregirla y vuelve a pendiente |

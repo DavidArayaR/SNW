@@ -174,11 +174,13 @@ async function cargarEspecialidades() {
 
 function poblarFiltroEspecialidad() {
   if (!selFiltroEspecialidad) return;
+  // El usuario normal no ve globales: no se le ofrece ese filtro.
+  const verGlobales = (window.snwRol || "") !== "usuario";
   selFiltroEspecialidad.innerHTML =
     `<option value="todas">Todas</option>` +
-    `<option value="global">Globales (sin especialidad)</option>` +
+    (verGlobales ? `<option value="global">Globales (sin especialidad)</option>` : "") +
     misEspecialidades.map((e) => `<option value="${e.id}">${escaparHtml(e.nombre_visible)}</option>`).join("");
-  const vals = ["todas", "global", ...misEspecialidades.map((e) => String(e.id))];
+  const vals = ["todas", ...(verGlobales ? ["global"] : []), ...misEspecialidades.map((e) => String(e.id))];
   if (!vals.includes(filtroEspecialidad)) filtroEspecialidad = "todas";
   selFiltroEspecialidad.value = filtroEspecialidad;
 }
