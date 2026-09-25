@@ -578,7 +578,7 @@ button:disabled:hover { outline: none; }
   z-index: 1060;
 }
 .toast.visible { opacity: 1; transform: translateX(-50%) translateY(0); }
-.toast--error { background: #c0504e; color: #fff; }
+.toast--error { background: #c0504e; color: #fff; cursor: pointer; }
 .toast--ok { background: #2f7d55; color: #fff; }
 
 .spinner {

@@ -674,8 +674,13 @@ function toast(msg, tipo = "ok") {
   clearTimeout(toastTimer);
   toastEl.textContent = msg;
   toastEl.className = `toast visible toast--${tipo}`;
-  toastTimer = setTimeout(() => toastEl.classList.remove("visible"), 3200);
+  if (tipo === "ok") {
+    toastTimer = setTimeout(() => toastEl.classList.remove("visible"), 3200);
+  }
 }
+
+// Los errores no se desvanecen solos: se cierran con click para leerlos bien.
+toastEl.addEventListener("click", () => toastEl.classList.remove("visible"));
 
 let yaCargada = false;
 window.snwCargarPacientes = function () {
