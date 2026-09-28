@@ -1155,7 +1155,10 @@ function toast(msg, tipo = "ok") {
   toastEl.textContent = msg;
   toastEl.className = `toast visible toast--${tipo}`;
   if (tipo === "ok") {
+  // Los errores no se desvanecen solos: se cierran con click para leerlos bien.
+  if (tipo === "ok") {
     toastTimer = setTimeout(() => toastEl.classList.remove("visible"), 3200);
+  }
   }
 }
 
