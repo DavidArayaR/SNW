@@ -22,7 +22,7 @@ if (selBaseHist) {
 }
 
 // Solo admin/dev eligen base de datos (dev/prod/todas). El usuario normal
-// solo ve sus especialidades asignadas: se le oculta ese selector.
+// solo ve sus áreas asignadas: se le oculta ese selector.
 const ES_PRIV_HIST = !!window.snwEsPrivilegiado;
 if (!ES_PRIV_HIST && selBaseHist) {
   selBaseHist.hidden = true;
@@ -46,7 +46,7 @@ async function cargarEspecialidadesHist() {
   }
   const guardada = localStorage.getItem("snw_esp_historial") || "";
   selEspecialidadHist.innerHTML =
-    `<option value="">${ES_PRIV_HIST ? "Todas" : "Mis especialidades"}</option>` +
+    `<option value="">${ES_PRIV_HIST ? "Todas" : "Mis áreas"}</option>` +
     especialidadesHist.map((e) => `<option value="${e.id}">${escaparHtml(e.nombre_visible)} (${escaparHtml(e.nombre_tabla_base)})</option>`).join("");
   if (guardada && especialidadesHist.some((e) => String(e.id) === guardada)) {
     selEspecialidadHist.value = guardada;
@@ -60,7 +60,7 @@ if (selEspecialidadHist) selEspecialidadHist.addEventListener("change", () => {
   const v = selEspecialidadHist.value;
   if (v) {
     localStorage.setItem("snw_esp_historial", v);
-    // La especialidad trae su propia base: se vuelve a "Todas".
+    // El área trae su propia base: se vuelve a "Todas".
     if (selBaseHist) {
       selBaseHist.value = "todos";
       localStorage.removeItem("snw_base_historial");
@@ -75,7 +75,7 @@ if (selBaseHist) selBaseHist.addEventListener("change", () => {
   const v = selBaseHist.value;
   if (v && v !== "todos") {
     localStorage.setItem("snw_base_historial", v);
-    // Una base concreta excluye especialidades: se limpia ese filtro.
+    // Una base concreta excluye áreas: se limpia ese filtro.
     if (selEspecialidadHist) {
       selEspecialidadHist.value = "";
       localStorage.removeItem("snw_esp_historial");

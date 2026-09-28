@@ -84,7 +84,7 @@ const toolbarMasivo = $("#toolbarMasivo");
 const selEstadoMasivo = $("#selEstadoMasivo");
 const selRespuestaMasivo = $("#selRespuestaMasivo");
 
-// Selector único de base de datos: legacy (dev/prod) o especialidad, siempre
+// Selector único de base de datos: legacy (dev/prod) o área, siempre
 // mostrando el nombre físico de la tabla. Valores: "dev" | "prod" | "esp:<id>".
 function basePacActual() {
   return (selBasePac && selBasePac.value) || "dev";
@@ -128,7 +128,7 @@ async function cargarBasesPac() {
       : "") +
     especialidades.map((e) => `<option value="esp:${e.id}">${escaparHtml(e.nombre_visible)} (${escaparHtml(e.nombre_tabla_base)})</option>`).join("") +
     (!PUEDE_GESTIONAR_PAC && !especialidades.length
-      ? `<option value="" disabled>Sin bases asignadas: pide una especialidad a un administrador</option>`
+      ? `<option value="" disabled>Sin bases asignadas: pide un área a un administrador</option>`
       : "");
   // Restaura la última usada si sigue disponible; si no, la primera.
   const valores = [...selBasePac.options].map((o) => o.value).filter(Boolean);
@@ -161,17 +161,17 @@ function aplicarModoBase() {
   const esp = espPacId();
   const tabla = tablaPacActual();
   const cardGestion = $("#cardGestionTabla");
-  // CSV y borrado solo para especialidad y con permiso de gestión.
+  // CSV y borrado solo para área y con permiso de gestión.
   if (cardGestion) cardGestion.hidden = esp == null || !PUEDE_GESTIONAR_PAC;
   const csvBloque = $("#csvCarga");
   if (csvBloque && esp != null) {
     const dest = $("#csvDestino");
     if (dest) {
       const e = especialidades.find((x) => x.id === esp);
-      dest.textContent = e ? `${e.nombre_visible} (${e.nombre_tabla_base})` : "especialidad";
+      dest.textContent = e ? `${e.nombre_visible} (${e.nombre_tabla_base})` : "área";
     }
   }
-  // El borrado de registros solo existe para tablas de especialidad.
+  // El borrado de registros solo existe para tablas de área.
   const btnDelMasivo = $("#btnEliminarMasivo");
   if (btnDelMasivo) btnDelMasivo.hidden = esp == null;
   const tituloEl = $("#tituloPacientes");
@@ -226,7 +226,7 @@ async function cargar() {
     ]);
     if (rp.status === 401 || rc.status === 401) { window.snwSesionExpirada(); return; }
     if (rp.status === 403) {
-      toast(esp ? "No tienes acceso a esta especialidad." : "Sin acceso a esta base.", "error");
+      toast(esp ? "No tienes acceso a esta área." : "Sin acceso a esta base.", "error");
       pacientes = [];
       render();
       return;
@@ -645,14 +645,14 @@ if (selRespuestaMasivo) {
     aplicarMasivo(selRespuestaMasivo, "api/pacientes/respuesta-masiva", "respuesta", RESPUESTA_LABEL));
 }
 
-// --- Eliminar registros en bloque (solo tablas de especialidad;
+// --- Eliminar registros en bloque (solo tablas de área;
 // esta página es exclusiva admin/dev) ----------------------------------------
 const btnEliminarMasivo = $("#btnEliminarMasivo");
 if (btnEliminarMasivo) btnEliminarMasivo.addEventListener("click", async () => {
   const esp = espPacId();
   const ids = [...seleccionados];
   if (esp == null || !ids.length) return;
-  if (!confirm(`¿Eliminar ${ids.length} registro${ids.length === 1 ? "" : "s"} de esta especialidad? Esta acción no se puede deshacer.`)) return;
+  if (!confirm(`¿Eliminar ${ids.length} registro${ids.length === 1 ? "" : "s"} de esta área? Esta acción no se puede deshacer.`)) return;
   let ok = 0, mal = 0;
   for (const id of ids) {
     try {
@@ -689,7 +689,7 @@ window.snwCargarPacientes = function () {
   (async () => { await cargarBasesPac(); cargar(); })();
 };
 
-// --- Eliminar tabla completa (solo especialidad; esta página es exclusiva
+// --- Eliminar tabla completa (solo área; esta página es exclusiva
 // admin/dev): modal con 10 s de espera antes de activar Confirmar; Cancelar
 // siempre activo. --------------------------------------------------------------
 const modalDelTabla = $("#modalEliminarTabla");
@@ -705,7 +705,7 @@ if (btnEliminarTablaPac) btnEliminarTablaPac.addEventListener("click", () => {
   const esp = espPacId();
   if (esp == null || !modalDelTabla) return;
   const e = especialidades.find((x) => x.id === esp);
-  $("#delTablaNombre").textContent = e ? `${e.nombre_visible} (${e.nombre_tabla_base})` : "especialidad";
+  $("#delTablaNombre").textContent = e ? `${e.nombre_visible} (${e.nombre_tabla_base})` : "área";
   $("#delTablaTotal").textContent = String(pacientes.length);
   const btnConf = $("#btnConfirmarDelTabla");
   const btnCanc = $("#btnCancelarDelTabla");
@@ -760,7 +760,7 @@ if (btnConfirmarDelTabla) btnConfirmarDelTabla.addEventListener("click", async (
   }
 });
 
-// --- Carga CSV en la especialidad seleccionada (Fase 3) ---------------------
+// --- Carga CSV en el área seleccionada ---------------------
 const csvInput = $("#csvArchivo");
 if (csvInput) csvInput.addEventListener("change", async () => {
   const esp = espPacId();

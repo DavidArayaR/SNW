@@ -37,7 +37,7 @@ function fechaDMA(iso) {
 
 const num = (n) => Number(n || 0).toLocaleString("es-CL");
 
-// Especialidad (Fase 3, solo admin/dev): "" = global producción; con id filtra
+// Área (solo admin/dev): "" = global producción; con id filtra
 // los tres endpoints (resumen, gráfico y costos).
 let especialidadesEst = [];
 const selEspecialidadEst = $("#selEspecialidadEst");

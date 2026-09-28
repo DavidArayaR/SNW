@@ -267,7 +267,7 @@ Reglas del editor:
   se puede enviar (400) ni consultar su estado Meta. Lo creado por admin/dev/supervisor nace
   `aprobada` y va a Meta de inmediato. Además **solo el creador edita o elimina sus
   plantillas** (admin/dev, cualquiera; 403 si no) y el **usuario normal no puede crear
-  plantillas globales** (422): siempre una de sus especialidades asignadas (si no tiene
+  plantillas globales** (422): siempre una de sus áreas asignadas (si no tiene
   ninguna, el editor le indica que pida una a un administrador).
 
   Esto se valida también en el servidor (`PUT`/`DELETE /api/plantillas/{id}` devuelven 400
@@ -436,7 +436,7 @@ Las cuentas `usuario` y `supervisor` reciben 403 en estos endpoints (y la migrac
 | GET | `/api/whatsapp/messaging-limit` | (admin / dev) `{tier, usados_24h, disponibles, ventana_horas}` — usuarios únicos contactados (mensajes iniciados por el negocio) en las últimas 24 h frente al `wa_messaging_limit_24h` |
 | PUT | `/api/whatsapp/messaging-limit` | (admin / dev) `{limite: int}` — actualiza `wa_messaging_limit_24h` (0 = ilimitado) para ajustarlo a lo que indique el dashboard de Meta; devuelve el estado actualizado |
 
-### Especialidades — Fase 1 (multi-especialidad)
+### Áreas — Fase 1 (múltiples áreas)
 
 Cada especialidad vive en **una sola tabla** `pacientes_<slug>` dentro de `snw_base` (**sin** sufijo `_dev`/`_prod`). El slug se genera del nombre visible en minúsculas, sin acentos, espacios ni caracteres especiales (`Kinesiología Sede Maipú` → `pacientes_kinesiologiasedemaipu`). El rol global de `usuarios` no se toca: el acceso por especialidad va en `roles_especialidad` / `usuario_especialidad_roles`.
 
@@ -452,24 +452,24 @@ Cada especialidad vive en **una sola tabla** `pacientes_<slug>` dentro de `snw_b
 | DELETE | `/api/especialidades/{id}/pacientes/{pid}` | (admin / dev) Borra UN registro de la tabla (más sus filas de log propias) |
 | DELETE | `/api/especialidades/{id}/tabla` | (admin / dev) Elimina la especialidad entera: tabla, rol, asignaciones y registro. El historial de envíos se conserva. Las tablas legacy (`pacientes_dev`/`pacientes_prod`) no se pueden borrar |
 
-### Especialidades — Fase 2 (autorización en backend)
+### Áreas — Fase 2 (autorización en backend)
 
 - **Sesión enriquecida**: `login`, `/api/auth/me` y `/api/auth/activar` devuelven `especialidades` (todas si es admin/dev, solo asignadas si no); cada petición refresca `especialidad_ids` junto a rol y permisos.
-- **Rol global `supervisor`**: como `usuario` pero pensado para aprobar envíos de sus especialidades (el enrutado de la confirmación por especialidad llega en Fase 3). El administrador gestiona cuentas `usuario` y `supervisor`.
+- **Rol global `supervisor`**: como `usuario` pero pensado para aprobar envíos de sus áreas (el enrutado de la confirmación por área llega en Fase 3). El administrador gestiona cuentas `usuario` y `supervisor`.
 - **Pacientes/envíos/historial/plantillas** aceptan `especialidad_id`: 404 si no existe, **403** si no está asignada. Las plantillas pueden asociarse a una especialidad y solo se envían en ella.
 - **`envios` y `log_envios`** guardan `especialidad_id` + `tabla_pacientes` (NULL = fila legacy); los historiales no mezclan tablas con IDs coincidentes.
 - **Estadísticas y tarifas**: solo admin/dev (403 para el resto).
 - **Webhook**: busca pacientes también en `pacientes_<slug>`, etiqueta sus filas de log y el call center automático también responde en especialidades (anti flip-flop siempre activo ahí).
 
-### Especialidades — Fase 3 (frontend + supervisión)
+### Áreas — Fase 3 (frontend + supervisión)
 
-- **Pestaña Especialidades** (administración, admin/dev): crear (con flujo duplicado: usar existente o crear `Kinesiología 2`), renombrar (la tabla no cambia), asignar/retirar roles por cuenta y **eliminar la tabla completa** (zona de peligro, con confirmación; el historial se conserva).
-- **Usuarios** muestra el rol `supervisor` y las especialidades asignadas de cada cuenta; «Envíos realizados» y «Actividad» paginan de a 10.
-- **Pacientes**: **selector único de base de datos** (desarrollo/producción/especialidades, siempre con el nombre físico de la tabla), **carga CSV** en la tabla de la especialidad (informe de insertados/duplicados/rechazados) y **paginación** (10 a 100 por página, se recuerda).
-- **Mensajería**: especialidad por plantilla (badge en la lista + campo en el editor), **filtro «Filtrar por especialidad»** (Todas/Globales/cada una) y **selector único de base de datos** en el modal (bases disponibles + una opción por especialidad; si hay una sola disponible, queda esa seleccionada; las plantillas de especialidad fuerzan su base), con conteo, slider y cupo diario. Modales de confirmación al aprobar y de motivo al rechazar.
-- **Historial**: filtros **Base** (Todas/Desarrollo/Producción, solo admin/dev) y **Especialidad** (con su tabla; «Mis especialidades» para el resto) y «Ver mensajes» con la tabla correcta.
-- **Estadísticas** (admin/dev): selector de especialidad o «Todas» en resumen, gráfico y costos.
-- **Confirmación de supervisor**: el correo de solicitud llega también a los supervisores activos de la especialidad (con su nombre en el mensaje); los enlaces por token sirven para cualquiera de los destinatarios.
+- **Pestaña Áreas** (administración, admin/dev): crear (con flujo duplicado: usar existente o crear `Kinesiología 2`), renombrar (la tabla no cambia), asignar/retirar roles por cuenta y **eliminar la tabla completa** (zona de peligro, con confirmación; el historial se conserva).
+- **Usuarios** muestra el rol `supervisor` y las áreas asignadas de cada cuenta; «Envíos realizados» y «Actividad» paginan de a 10.
+- **Pacientes**: **selector único de base de datos** (desarrollo/producción/áreas, siempre con el nombre físico de la tabla), **carga CSV** en la tabla de la área (informe de insertados/duplicados/rechazados) y **paginación** (10 a 100 por página, se recuerda).
+- **Mensajería**: área por plantilla (badge en la lista + campo en el editor), **filtro «Filtrar por área»** (Todas/Globales/cada una) y **selector único de base de datos** en el modal (bases disponibles + una opción por área; si hay una sola disponible, queda esa seleccionada; las plantillas de área fuerzan su base), con conteo, slider y cupo diario. Modales de confirmación al aprobar y de motivo al rechazar.
+- **Historial**: filtros **Base** (Todas/Desarrollo/Producción, solo admin/dev) y **Área** (con su tabla; «Mis áreas» para el resto) y «Ver mensajes» con la tabla correcta.
+- **Estadísticas** (admin/dev): selector de área o «Todas» en resumen, gráfico y costos.
+- **Confirmación de supervisor**: el correo de solicitud llega también a los supervisores activos del área (con su nombre en el mensaje); los enlaces por token sirven para cualquiera de los destinatarios.
 - **Estilo unificado de selects**: todos los desplegables de todas las vistas comparten el verde pastel corporativo (distinto del sólido de los botones).
 
 ### Webhook de WhatsApp (Meta)
@@ -783,8 +783,8 @@ esa misma pestaña (una cuenta por vez, elegida en un desplegable).
 
 | Rol | Alcance | Puede gestionar |
 |---|---|---|
-| `usuario` | Solo lo que tenga en `permisos`, acotado a sus especialidades asignadas. Solo crea/edita/elimina las plantillas que él creó y solo en sus especialidades (sin globales) | — |
-| `supervisor` | Como `usuario`, más aprobar plantillas y confirmar envíos en producción de sus especialidades. Sin Estadísticas | — |
+| `usuario` | Solo lo que tenga en `permisos`, acotado a sus áreas asignadas. Solo crea/edita/elimina las plantillas que él creó y solo en sus áreas (sin globales) | — |
+| `supervisor` | Como `usuario`, más aprobar plantillas y confirmar envíos en producción de sus áreas. Sin Estadísticas | — |
 | `administrador` | Todo **salvo la página Configuración** | Permisos, activar/desactivar y rol (`usuario`/`supervisor`/`administrador`) en cuentas de rol `usuario` o `supervisor` (nunca toca otro admin/dev ni la suya) |
 | `desarrollador` | Acceso total, **incluida Configuración** | Rol (cualquiera), permisos y activar/desactivar de cualquier cuenta salvo la suya |
 
@@ -902,16 +902,16 @@ claro** de la sidebar, o con el botón flotante en la portada y el login (págin
   contraseña (pide la actual); si la cuenta tiene correo de recuperación, avisa el cambio
   ahí. No tiene campo para fijar ese correo (ver «Contraseñas» más arriba).
 - **Mensajería y plantillas** (`mensajeria.html`, permiso `mensajeria`): editor de plantillas con vista
-  previa estilo WhatsApp (formato `*negrita*`/`_cursiva_`/`~tachado~`), campo de especialidad
+  previa estilo WhatsApp (formato `*negrita*`/`_cursiva_`/`~tachado~`), campo de área
   (el usuario normal solo las suyas; sin asignadas se le indica pedir una), filtro
-  «Filtrar por especialidad» (Todas/Globales/cada una), nombre y template
+  «Filtrar por área» (Todas/Globales/cada una), nombre y template
   de Meta permanentes, botón **Sincronizar** con Meta (cada cuenta solo recibe su alcance),
   badges de aprobación interna («⏳ Por aprobar»/«Rechazada») con botones de aprobar (con
   confirmación) y rechazar (con motivo) para admin/dev/supervisor, y envío directo a todos los
   pendientes con selector único de base de datos. Sin el permiso `plantillas_editar` el editor queda de solo lectura; las ajenas también (solo su creador las edita, salvo admin/dev).
 - **Cargar base de datos** (`carga.html`, permiso `mensajeria`): cualquier cuenta sube un CSV
-  (`nombre, apellido, telefono`, UTF-8, 5 MB) a una de sus especialidades asignadas, con
-  informe de insertados/duplicados/rechazados. Sin especialidades se le indica pedir una.
+  (`nombre, apellido, telefono`, UTF-8, 5 MB) a una de sus áreas asignadas, con
+  informe de insertados/duplicados/rechazados. Sin áreas se le indica pedir una.
 - **Administración** (rol admin/desarrollador): ya no es una página con pestañas — son
   5 páginas propias (`usuarios.html`, `pacientes.html`, `especialidades.html`,
   `estadisticas.html`, `configuracion.html`; `administracion.html` solo redirige a
@@ -925,19 +925,19 @@ claro** de la sidebar, o con el botón flotante en la portada y el login (págin
   (trazabilidad) y eliminar. Máximo 4 desarrolladores. Aquí no se cambian contraseñas — cada
   cuenta usa «Mi cuenta» o «¿Olvidaste tu contraseña?».
 - **Pacientes** (pestaña de `administracion.html`, exclusiva admin/dev): **selector único
-  de base de datos** (desarrollo/producción/especialidades con su tabla), tabla con estado
+  de base de datos** (desarrollo/producción/áreas con su tabla), tabla con estado
   editable en línea, columna **Error** (motivo del último fallo), columna **Respuesta** con
   la señal de WhatsApp (Respondió / Se dio de baja / Sin respuesta) y su fecha, filtros por
-  estado/respuesta, **paginación** (10 a 100 por página) y **carga CSV** en la especialidad elegida, y selección múltiple para editar **estado o respuesta de varios
+  estado/respuesta, **paginación** (10 a 100 por página) y **carga CSV** en el área elegida, y selección múltiple para editar **estado o respuesta de varios
   pacientes a la vez** (barra «Con los seleccionados», aparece al marcar alguno; pide
-  confirmación con la cantidad antes de aplicar). En tablas de especialidad hay además
+  confirmación con la cantidad antes de aplicar). En tablas de áreas hay además
   borrado por fila (×) y en bloque («Eliminar»). Un badge de «Se dio de baja» con
   &#128274; no se puede editar (ni uno por uno ni en bloque): esa baja la pidió el propio
   paciente por WhatsApp (ver «Baja explícita» en «Sistema de baja»). Aquí se ve **quiénes**
   respondieron o se dieron de baja — **no se envían mensajes desde esta página** (ver
   «Módulo de envío»).
 - **Historial** (`historial.html`): filtros **Base** (Todas/Desarrollo/Producción, admin/dev;
-  el usuario normal solo ve sus especialidades) y **Especialidad** (con su tabla),
+  el usuario normal solo ve sus áreas) y **Área** (con su tabla),
   envíos de ambas bases (o filtrado por una), detalle
   individual por paciente con estado, respuesta y error de cada mensaje.
 - **Estadísticas** (pestaña de `administracion.html`, exclusiva admin/dev, **solo cuenta

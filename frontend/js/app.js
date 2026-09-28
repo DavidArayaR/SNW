@@ -12,7 +12,7 @@ let plantillas = [];
 let activaId = null;
 let snapshot = null;
 
-// Especialidades visibles para la cuenta (Fase 3): todas si es
+// Áreas visibles para la cuenta (Fase 3): todas si es
 // privilegiada, solo las asignadas si no. Las plantillas pueden asociarse a
 // una (envío solo a su tabla) o quedar globales.
 let misEspecialidades = [];
@@ -178,7 +178,7 @@ function poblarFiltroEspecialidad() {
   const verGlobales = (window.snwRol || "") !== "usuario";
   selFiltroEspecialidad.innerHTML =
     `<option value="todas">Todas</option>` +
-    (verGlobales ? `<option value="global">Globales (sin especialidad)</option>` : "") +
+    (verGlobales ? `<option value="global">Globales (sin área)</option>` : "") +
     misEspecialidades.map((e) => `<option value="${e.id}">${escaparHtml(e.nombre_visible)}</option>`).join("");
   const vals = ["todas", ...(verGlobales ? ["global"] : []), ...misEspecialidades.map((e) => String(e.id))];
   if (!vals.includes(filtroEspecialidad)) filtroEspecialidad = "todas";
@@ -195,7 +195,7 @@ function poblarSelectEspecialidad() {
   if (!inpEspecialidad) return;
   const actual = inpEspecialidad.value;
   // El usuario normal no puede usar plantillas globales: solo sus
-  // especialidades asignadas (el backend lo exige igual).
+  // áreas asignadas (el backend lo exige igual).
   const esUsuario = (window.snwRol || "") === "usuario";
   inpEspecialidad.innerHTML =
     (esUsuario ? "" : `<option value="">Global (todas las bases)</option>`) +
@@ -208,7 +208,7 @@ function poblarSelectEspecialidad() {
   refrescarAvisoSinEspecialidad();
 }
 
-// Sin especialidades asignadas el usuario no puede crear plantillas: se le
+// Sin áreas asignadas el usuario no puede crear plantillas: se le
 // indica que pida una a un administrador, en vez de dejar un select vacío.
 function refrescarAvisoSinEspecialidad() {
   const hint = $("#hintSinEspecialidad");
@@ -220,7 +220,7 @@ function refrescarAvisoSinEspecialidad() {
 
 // Selector único de base de datos del modal de envío (Fase 3): lista solo
 // las bases disponibles —desarrollo/producción (según restricción) y una
-// opción por especialidad—. Si hay una sola disponible, queda seleccionada.
+// opción por área—. Si hay una sola disponible, queda seleccionada.
 // Valores: "desarrollo" | "produccion" | "esp:<id>".
 function baseSeleccionadaConf() {
   const sel = $("#selBaseConf");
@@ -239,23 +239,23 @@ function especialidadEnvioId() {
 }
 
 function ambienteEnvioConf() {
-  // Las especialidades son tablas únicas (sin entorno): se envían como
+  // Las áreas son tablas únicas (sin entorno): se envían como
   // producción (con confirmación del supervisor salvo permiso directo).
   return modoEspecialidadConf() ? "produccion" : baseSeleccionadaConf();
 }
 
 // Reconstruye las opciones del select. Con `forzarEspId` (plantilla de una
-// especialidad) deja solo esa opción, ya seleccionada.
+// área) deja solo esa opción, ya seleccionada.
 function construirOpcionesBaseConf(forzarEspId) {
   const sel = $("#selBaseConf");
   if (!sel) return;
-  // El usuario normal nunca ve producción legacy: solo su especialidad o
+  // El usuario normal nunca ve producción legacy: solo su área o
   // desarrollo (el backend lo exige igual).
   const restringido = usuarioRestringidoADesarrollo() || (window.snwRol || "") === "usuario";
   let html = "";
   if (forzarEspId != null) {
     const espForzada = misEspecialidades.find((e) => e.id === forzarEspId);
-    const nombre = espForzada ? espForzada.nombre_visible : (nombreEspecialidad(forzarEspId) || "Especialidad");
+    const nombre = espForzada ? espForzada.nombre_visible : (nombreEspecialidad(forzarEspId) || "Área");
     const tabla = espForzada ? espForzada.nombre_tabla_base : "";
     html = `<option value="esp:${forzarEspId}">${escaparHtml(nombre)}${tabla ? ` (${escaparHtml(tabla)})` : ""}</option>`;
   } else {
@@ -264,7 +264,7 @@ function construirOpcionesBaseConf(forzarEspId) {
       (restringido ? "" : `<option value="produccion">Producción (pacientes_prod)</option>`) +
       `</optgroup>`;
     if (misEspecialidades.length) {
-      html += `<optgroup label="Especialidades">` +
+      html += `<optgroup label="Áreas">` +
         misEspecialidades.map((e) => `<option value="esp:${e.id}">${escaparHtml(e.nombre_visible)} (${escaparHtml(e.nombre_tabla_base)})</option>`).join("") +
         `</optgroup>`;
     }
@@ -444,7 +444,7 @@ function crearItemPlantilla(p) {
     estadoTag += ` <span class="tpl-item__estado tpl-item__estado--rechazada">Rechazada</span>`;
   }
   if (p.especialidad_id != null) {
-    const nombreEsp = nombreEspecialidad(p.especialidad_id) || "Especialidad";
+    const nombreEsp = nombreEspecialidad(p.especialidad_id) || "Área";
     estadoTag += ` <span class="tpl-item__estado">${escaparHtml(nombreEsp)}</span>`;
   }
   btn.innerHTML =
@@ -572,7 +572,7 @@ function hayCambios() {
 
 // El botón «Guardar» solo se habilita si hubo algún cambio desde que se abrió
 // la plantilla (o desde el último guardado) Y están completos nombre, mensaje
-// y especialidad (al usuario normal se le exige especialidad: no puede usar
+// y área (al usuario normal se le exige área: no puede usar
 // globales; para el resto, global es válido). Evita guardados vacíos/no-op.
 function actualizarEstadoBotonGuardar() {
   if (!btnGuardar) return;
@@ -786,7 +786,7 @@ function abrir(id) {
   if (inpEspecialidad) {
     const espVal = p.especialidad_id != null ? String(p.especialidad_id) : "";
     if (espVal && ![...inpEspecialidad.options].some((o) => o.value === espVal)) {
-      const nombreEsp = nombreEspecialidad(p.especialidad_id) || "Especialidad";
+      const nombreEsp = nombreEspecialidad(p.especialidad_id) || "Área";
       inpEspecialidad.add(new Option(nombreEsp, espVal));
     }
     inpEspecialidad.value = espVal;
@@ -955,7 +955,7 @@ formEl.addEventListener("submit", async (e) => {
   try {
     const especialidad_id = inpEspecialidad && inpEspecialidad.value ? Number(inpEspecialidad.value) : null;
     if ((window.snwRol || "") === "usuario" && especialidad_id == null) {
-      return toast("Debes asociar la plantilla a una de tus especialidades asignadas.", "error");
+      return toast("Debes asociar la plantilla a una de tus áreas asignadas.", "error");
     }
     let fila;
     if (activaId) {
@@ -1283,7 +1283,7 @@ function abrirModalConf() {
   $("#confNombre").textContent = p?.nombre ?? "";
 
   aplicarRestriccionAmbiente();
-  // Si la plantilla es de una especialidad, el select trae solo esa base;
+  // Si la plantilla es de un área, el select trae solo esa base;
   // si no, trae las disponibles y restaura la última usada.
   construirOpcionesBaseConf(p?.especialidad_id ?? null);
   refrescarAvisoDevConf();
@@ -1357,7 +1357,7 @@ function refrescarAvisoAdminConf() {
       "Logeado como admin: se envía directamente sin confirmación de supervisor.";
   } else if (requiereConf) {
     box.textContent = modoEsp
-      ? "Este envío pedirá confirmación por correo al supervisor (llega también a los supervisores de la especialidad)."
+      ? "Este envío pedirá confirmación por correo al supervisor (llega también a los supervisores del área)."
       : "Este envío pedirá confirmación por correo al supervisor.";
   }
 }

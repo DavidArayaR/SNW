@@ -310,12 +310,12 @@ def _exigir_especialidad(sesion: dict, especialidad_id: int) -> dict:
     try:
         esp_id = int(especialidad_id)
     except (TypeError, ValueError):
-        raise HTTPException(422, detail="Especialidad inválida.")
+        raise HTTPException(422, detail="Área inválida.")
     esp = servicio_especialidades.obtener_especialidad(esp_id)
     if not esp:
-        raise HTTPException(404, detail="Especialidad no encontrada.")
+        raise HTTPException(404, detail="Área no encontrada.")
     if not _es_privilegiado(sesion) and esp_id not in (sesion.get("especialidad_ids") or []):
-        raise HTTPException(403, detail="No tienes acceso a esta especialidad.")
+        raise HTTPException(403, detail="No tienes acceso a esta área.")
     return esp
 
 
@@ -328,7 +328,7 @@ def _resolver_tabla_pacientes(sesion: dict, ambiente: str,
     esp = _exigir_especialidad(sesion, especialidad_id)
     tabla = esp["nombre_tabla_base"]
     if not servicio_especialidades.tabla_valida(tabla):
-        raise HTTPException(500, detail="La tabla registrada de la especialidad no es válida.")
+        raise HTTPException(500, detail="La tabla registrada del área no es válida.")
     return tabla, esp
 
 
@@ -360,7 +360,7 @@ def _validar_plantilla_especialidad(sesion: dict, especialidad_id: int | None) -
     if especialidad_id is None:
         if sesion.get("rol") == "usuario":
             raise HTTPException(
-                422, detail="Debes asociar la plantilla a una de tus especialidades asignadas.")
+                422, detail="Debes asociar la plantilla a una de tus áreas asignadas.")
         return None
     return int(_exigir_especialidad(sesion, especialidad_id)["id"])
 
@@ -375,7 +375,7 @@ def _exigir_plantilla_en_alcance(sesion: dict, p: dict) -> None:
         return
     if _aprobacion_plantilla(p) != "aprobada" and _es_creador_plantilla(p, sesion):
         return
-    raise HTTPException(403, detail="Solo puedes gestionar plantillas de tus especialidades asignadas.")
+    raise HTTPException(403, detail="Solo puedes gestionar plantillas de tus áreas asignadas.")
 
 
 def _especialidades_para_respuesta(sesion: dict) -> list[dict]:
@@ -852,13 +852,13 @@ def eliminar_usuario(usuario: str, sesion: dict = Depends(solo_admin)):
 # va en `roles_especialidad` / `usuario_especialidad_roles`.
 
 _ERRORES_ESPECIALIDAD = {
-    "nombre_vacio": (422, "Escribe el nombre de la especialidad."),
+    "nombre_vacio": (422, "Escribe el nombre del área."),
     "nombre_largo": (422, "El nombre no puede superar los 150 caracteres."),
     "slug_vacio": (422, "El nombre no genera un identificador técnico válido."),
     "slug_invalido": (422, "El nombre no genera un identificador técnico válido."),
     "modo_invalido": (422, "Modo inválido. Usa: preguntar, reutilizar o nueva."),
     "no_existe": (404, "Especialidad no encontrada."),
-    "nombre_duplicado": (409, "Ya existe otra especialidad con ese nombre visible."),
+    "nombre_duplicado": (409, "Ya existe otra área con ese nombre visible."),
     "tabla_larga": (409, "El nombre genera una tabla demasiado larga."),
     "tabla_invalida": (500, "La tabla registrada de la especialidad no es válida."),
     "sin_sufijo_libre": (409, "No se encontró un sufijo numérico libre para la tabla."),
@@ -904,7 +904,7 @@ def crear_especialidad(body: EspecialidadIn, sesion: dict = Depends(solo_admin))
         raise _error_especialidad(str(e))
     if prep["decision"] == "preguntar":
         raise HTTPException(409, detail={
-            "mensaje": "Ya existe una especialidad con este nombre. ¿Qué deseas hacer?",
+            "mensaje": "Ya existe un área con este nombre. ¿Qué deseas hacer?",
             "existentes": prep["existentes"],
         })
     if prep["decision"] == "reutilizar":
@@ -981,7 +981,7 @@ def eliminar_paciente_especialidad(especialidad_id: int, paciente_id: int,
     except ValueError as e:
         raise _error_especialidad(str(e))
     if not borrado:
-        raise HTTPException(404, detail="Paciente no encontrado en esta especialidad.")
+        raise HTTPException(404, detail="Paciente no encontrado en esta área.")
     auditoria_registrar(sesion.get("usuario", ""), "especialidad_paciente_eliminar",
                         f"especialidad {especialidad_id}", f"Paciente {paciente_id} eliminado")
     return {"ok": True}
@@ -1008,13 +1008,13 @@ async def importar_pacientes_csv(especialidad_id: int, archivo: UploadFile = Fil
     """
     esp = servicio_especialidades.obtener_especialidad(especialidad_id)
     if not esp:
-        raise HTTPException(404, detail="Especialidad no encontrada.")
+        raise HTTPException(404, detail="Área no encontrada.")
     privilegiado = _es_privilegiado(sesion)
     if not privilegiado and not tiene_permiso(sesion, "mensajeria"):
         raise HTTPException(403, detail="No tienes permiso para cargar pacientes.")
     uid = servicio_especialidades.usuario_id_por_correo(sesion.get("usuario", ""))
     if not servicio_especialidades.puede_acceder_especialidad(privilegiado, uid, especialidad_id):
-        raise HTTPException(403, detail="No tienes acceso a esta especialidad.")
+        raise HTTPException(403, detail="No tienes acceso a esta área.")
     datos = await archivo.read()
     if len(datos) > CSV_MAX_BYTES:
         raise HTTPException(413, detail="El archivo supera los 5 MB.")
@@ -3446,7 +3446,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
     # de desarrollo; nunca a producción legacy.
     if sesion.get("rol") == "usuario" and body.especialidad_id is None and amb != "desarrollo":
         raise HTTPException(
-            403, detail="Solo puedes enviar a pacientes de tu especialidad o a la base de desarrollo.")
+            403, detail="Solo puedes enviar a pacientes de tu área o a la base de desarrollo.")
 
     # Envío a especialidad (Fase 2): tabla única pacientes_<slug>, con
     # autorización estricta (403 si no está asignada). Las reglas de
@@ -3504,7 +3504,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
     if tpl_esp is not None and body.especialidad_id != tpl_esp:
         raise HTTPException(
             400,
-            detail="Esta plantilla pertenece a otra especialidad: no se puede usar en este envío.",
+            detail="Esta plantilla pertenece a otra área: no se puede usar en este envío.",
         )
 
     amb_q = "produccion" if t_esp else amb
