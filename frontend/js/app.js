@@ -174,13 +174,11 @@ async function cargarAreas() {
 
 function poblarFiltroArea() {
   if (!selFiltroArea) return;
-  // El usuario normal no ve globales: no se le ofrece ese filtro.
-  const verGlobales = (window.snwRol || "") !== "usuario";
   selFiltroArea.innerHTML =
     `<option value="todas">Todas</option>` +
-    (verGlobales ? `<option value="global">Globales (sin área)</option>` : "") +
+    `<option value="global">Globales (sin área)</option>` +
     misAreas.map((e) => `<option value="${e.id}">${escaparHtml(e.nombre_visible)}</option>`).join("");
-  const vals = ["todas", ...(verGlobales ? ["global"] : []), ...misAreas.map((e) => String(e.id))];
+  const vals = ["todas", "global", ...misAreas.map((e) => String(e.id))];
   if (!vals.includes(filtroArea)) filtroArea = "todas";
   selFiltroArea.value = filtroArea;
 }
@@ -1924,7 +1922,7 @@ setInterval(() => {
 aplicarModoSoloLecturaPlantillas();
 modoVacia();
 cargarMiUsuario();
-cargarEspecialidades();
+cargarAreas();
 cargar();
 actualizarBannerEnvioEnCurso();
 setInterval(revisarPlantillasEnSegundoPlano, 30000);
