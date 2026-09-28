@@ -3981,6 +3981,7 @@ def reanudar_job(job_id: str, sesion: dict = Depends(exigir("mensajeria"))):
 def listar_historial(q: str | None = Query(None), estado: str | None = Query(None),
                      ambiente: str = Query("produccion"),
                      area_id: int | None = Query(None),
+                     tabla: str | None = Query(None),
                      sesion: dict = Depends(exigir("historial"))):
     cols_env = columnas_tabla("envios", "produccion")
     com_col = "comentario" if "comentario" in cols_env else "NULL AS comentario"
@@ -3993,7 +3994,27 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
 
     # envios es una única tabla; 'base_datos' guarda 'pacientes_dev',
     # 'pacientes_prod' o la tabla de una area (con area_id).
-    if ambiente != "todos":
+    # El selector único de base de datos filtra por tabla física exacta:
+    # legacy dev/prod solo admin/dev; tablas de área, quien tenga el área
+    # (el historial de un área eliminada lo ven solo admin/dev).
+    if tabla:
+        if not servicio_areas.tabla_valida(tabla):
+            raise HTTPException(422, detail="Base de datos inválida.")
+        if tabla in ("pacientes_dev", "pacientes_prod"):
+            if not _es_privilegiado(sesion):
+                raise HTTPException(403, detail="No tienes acceso a esta base de datos.")
+        else:
+            esp_tabla = servicio_areas.area_por_tabla(tabla)
+            if esp_tabla is None:
+                if not _es_privilegiado(sesion):
+                    raise HTTPException(403, detail="No tienes acceso a esta base de datos.")
+                if not servicio_areas.tabla_fisica_existe(tabla):
+                    raise HTTPException(404, detail="Base de datos no encontrada.")
+            else:
+                _exigir_area(sesion, esp_tabla["id"])  # 404 si no existe, 403 si no asignada
+        condiciones.append("base_datos = %s")
+        args.append(tabla)
+    elif ambiente != "todos":
         condiciones.append("base_datos = %s")
         args.append(nombre_base(ambiente))
 

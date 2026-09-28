@@ -14,72 +14,56 @@ let pacienteMsgActual = null; // { id, ambiente, interesado }
 
 const $ = (sel) => document.querySelector(sel);
 
-let areasHist = [];
-const selAreaHist = $("#selAreaHist");
+let basesHist = [];
 const selBaseHist = $("#selBaseHist");
 if (selBaseHist) {
   selBaseHist.value = localStorage.getItem("snw_base_historial") || "todos";
 }
 
-// Solo admin/dev eligen base de datos (dev/prod/todas). El usuario normal
-// solo ve sus áreas asignadas: se le oculta ese selector.
+// Selector único de base de datos: admin/dev ven todas (legacy dev/prod +
+// tablas de áreas); el resto solo las tablas de sus áreas asignadas.
 const ES_PRIV_HIST = !!window.snwEsPrivilegiado;
-if (!ES_PRIV_HIST && selBaseHist) {
-  selBaseHist.hidden = true;
-  const lblBase = document.querySelector('label[for="selBaseHist"]');
-  if (lblBase) lblBase.hidden = true;
-}
 
-function areaHistActual() {
-  const v = selAreaHist ? selAreaHist.value : "";
-  return v ? Number(v) : null;
-}
-
-async function cargarAreasHist() {
-  if (!selAreaHist) return;
+async function cargarBasesHist() {
+  if (!selBaseHist) return;
+  let areas = [];
   try {
     const r = await fetch("api/areas/mias", { headers: authHeaders(), cache: "no-store" });
-    if (!r.ok) throw new Error();
-    areasHist = await r.json();
+    if (r.ok) areas = await r.json();
   } catch {
-    areasHist = [];
+    areas = [];
   }
-  const guardada = localStorage.getItem("snw_esp_historial") || "";
-  selAreaHist.innerHTML =
-    `<option value="">${ES_PRIV_HIST ? "Todas" : "Mis áreas"}</option>` +
-    areasHist.map((e) => `<option value="${e.id}">${escaparHtml(e.nombre_visible)} (${escaparHtml(e.nombre_tabla_base)})</option>`).join("");
-  if (guardada && areasHist.some((e) => String(e.id) === guardada)) {
-    selAreaHist.value = guardada;
-  } else {
-    localStorage.removeItem("snw_esp_historial");
+  basesHist = [];
+  if (ES_PRIV_HIST) {
+    basesHist.push(
+      { tabla: "pacientes_dev", nombre: "Desarrollo (pacientes_dev)" },
+      { tabla: "pacientes_prod", nombre: "Producción (pacientes_prod)" },
+    );
   }
-  if (selAreaHist) selAreaHist.hidden = !areasHist.length;
-}
-
-if (selAreaHist) selAreaHist.addEventListener("change", () => {
-  const v = selAreaHist.value;
-  if (v) {
-    localStorage.setItem("snw_esp_historial", v);
-    // El área trae su propia base: se vuelve a "Todas".
-    if (selBaseHist) {
-      selBaseHist.value = "todos";
-      localStorage.removeItem("snw_base_historial");
+  for (const a of areas) {
+    if (a.nombre_tabla_base) {
+      basesHist.push({
+        tabla: a.nombre_tabla_base,
+        nombre: `${a.nombre_visible} (${a.nombre_tabla_base})`,
+      });
     }
-  } else {
-    localStorage.removeItem("snw_esp_historial");
   }
-  cargar();
-});
+  const guardada = localStorage.getItem("snw_base_historial") || "todos";
+  selBaseHist.innerHTML = `<option value="todos">Todas</option>` +
+    basesHist.map((b) => `<option value="${escaparHtml(b.tabla)}">${escaparHtml(b.nombre)}</option>`).join("");
+  if (guardada !== "todos" && basesHist.some((b) => b.tabla === guardada)) {
+    selBaseHist.value = guardada;
+  } else {
+    selBaseHist.value = "todos";
+    localStorage.removeItem("snw_base_historial");
+  }
+  localStorage.removeItem("snw_esp_historial"); // llave anterior (filtro por área)
+}
 
 if (selBaseHist) selBaseHist.addEventListener("change", () => {
   const v = selBaseHist.value;
   if (v && v !== "todos") {
     localStorage.setItem("snw_base_historial", v);
-    // Una base concreta excluye áreas: se limpia ese filtro.
-    if (selAreaHist) {
-      selAreaHist.value = "";
-      localStorage.removeItem("snw_esp_historial");
-    }
   } else {
     localStorage.removeItem("snw_base_historial");
   }
@@ -101,9 +85,8 @@ function escaparHtml(texto) {
 
 async function cargar() {
   try {
-    const esp = areaHistActual();
-    const base = (ES_PRIV_HIST && selBaseHist && selBaseHist.value) || "todos";
-    const qs = `ambiente=${base}` + (esp ? `&area_id=${esp}` : "");
+    const base = (selBaseHist && selBaseHist.value) || "todos";
+    const qs = base !== "todos" ? `tabla=${encodeURIComponent(base)}` : "ambiente=todos";
     const [rh, rc] = await Promise.all([
       fetch(`${API_HISTORIAL}?${qs}`, { headers: authHeaders(), cache: "no-store" }),
       fetch(`api/configuracion?ambiente=produccion`, { headers: authHeaders(), cache: "no-store" }),
@@ -381,6 +364,6 @@ if (panelCCLogEl) {
   window.snwConCooldown($("#btnActualizarCCLog"), cargarLogCC);
 }
 
-cargarAreasHist();
+cargarBasesHist();
 cargar();
 cargarLogCC();
