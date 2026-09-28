@@ -609,7 +609,9 @@ def activar_cuenta(body: ActivarCuentaIn):
     )
     invite_consumir(body.token)
     invitador = est.get("invitado_por") or "invitación"
-    auditoria_registrar(invitador, "cuenta_creada", correo,
+    # La actividad se registra EN la cuenta creada (actor = ella misma), no en
+    # la que invitó: así aparece en «Actividad» de la cuenta nueva.
+    auditoria_registrar(correo, "cuenta_creada", correo,
                         f"Cuenta creada por invitación de {invitador}" if est.get("invitado_por") else "Cuenta creada por invitación")
 
     usuario = usuario_buscar(correo)
