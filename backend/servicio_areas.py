@@ -1,14 +1,14 @@
-"""Especialidades y roles din├ímicos (Fase 1 multi-especialidad).
+"""Especialidades y roles dinámicos (Fase 1 multi-especialidad).
 
 Reglas de esta fase:
 - Una sola tabla de pacientes por especialidad: ``pacientes_<slug>`` (SIN
   sufijo de entorno ``_dev`` / ``_prod``).
-- El ``slug`` se genera del nombre visible: min├║sculas, sin acentos, sin
-  espacios ni caracteres no alfanum├®ricos (``Kinesiolog├¡a`` -> ``kinesiologia``).
+- El ``slug`` se genera del nombre visible: minúsculas, sin acentos, sin
+  espacios ni caracteres no alfanuméricos (``Kinesiología`` -> ``kinesiologia``).
 - Nombre visible duplicado: el backend NO crea nada solo; devuelve las
   coincidencias para que la UI pregunte ┬½utilizar existente / crear nueva┬╗.
   Con ``modo="nueva"`` se genera ``pacientes_<slug><n>`` con el primer sufijo
-  num├®rico libre (si existen base, 2 y 4, la nueva usa 3).
+  numérico libre (si existen base, 2 y 4, la nueva usa 3).
 - Cada especialidad tiene su propio rol (``roles_area``) y los usuarios
   se vinculan en ``usuario_area_roles``. El rol global de `usuarios`
   (usuario/administrador/desarrollador) NO se toca en esta fase.
@@ -22,15 +22,15 @@ import unicodedata
 from db import conectar, log_error
 from telefono import normalizar_telefono
 
-# Nombre f├¡sico v├ílido de tabla de especialidad. Los nombres legacy
-# (`pacientes_dev`, `pacientes_prod`) tambi├®n calzan el patr├│n, por eso una
-# tabla solo cuenta como especialidad si est├í registrada en `areas`.
+# Nombre físico válido de tabla de especialidad. Los nombres legacy
+# (`pacientes_dev`, `pacientes_prod`) también calzan el patrón, por eso una
+# tabla solo cuenta como especialidad si está registrada en `areas`.
 TABLA_RE = re.compile(r"^pacientes_[a-z0-9_]{1,54}$")
 
-# La subida de CSV se rechaza si supera este tama├▒o (en bytes).
+# La subida de CSV se rechaza si supera este tamaño (en bytes).
 CSV_MAX_BYTES = 5 * 1024 * 1024
 
-# Esquema de las tablas din├ímicas: el mismo de pacientes_dev/prod incluyendo
+# Esquema de las tablas dinámicas: el mismo de pacientes_dev/prod incluyendo
 # las columnas que hoy agregan las migraciones, para no depender de ALTERs.
 _ESQUEMA_PACIENTES = (
     "CREATE TABLE IF NOT EXISTS {tabla} ("
@@ -54,9 +54,9 @@ _ESQUEMA_PACIENTES = (
 
 
 def migrar_tablas_areas(cur) -> None:
-    """Renombra las tablas del modelo a ├íreas: especialidades -> areas,
+    """Renombra las tablas del modelo a áreas: especialidades -> areas,
     roles_especialidad -> roles_area, usuario_especialidad_roles ->
-    usuario_area_roles. RENAME conserva datos e ├¡ndices. Idempotente: si la
+    usuario_area_roles. RENAME conserva datos e índices. Idempotente: si la
     tabla nueva ya existe no hace nada."""
     for vieja, nueva in (("especialidades", "areas"),
                          ("roles_especialidad", "roles_area"),
@@ -99,7 +99,7 @@ def migrar_tablas_areas(cur) -> None:
 def asegurar_tablas_areas(cur) -> None:
     """Crea las tablas del modelo multi-especialidad (idempotente).
 
-    Recibe el cursor de la transacci├│n abierta de `asegurar_tabla_config`."""
+    Recibe el cursor de la transacción abierta de `asegurar_tabla_config`."""
     cur.execute(
         "CREATE TABLE IF NOT EXISTS areas ("
         "  id INT AUTO_INCREMENT PRIMARY KEY,"
@@ -131,7 +131,7 @@ def asegurar_tablas_areas(cur) -> None:
 
 
 def slug_base(nombre_visible: str) -> str:
-    """`Kinesiolog├¡a Sede Maip├║` -> `kinesiologiasedemaipu`."""
+    """`Kinesiología Sede Maipú` -> `kinesiologiasedemaipu`."""
     n = unicodedata.normalize("NFKD", nombre_visible or "")
     n = n.encode("ascii", "ignore").decode("ascii")
     return re.sub(r"[^a-zA-Z0-9]", "", n).lower()[:54]
@@ -142,8 +142,8 @@ def tabla_valida(nombre: str) -> bool:
 
 
 def normalizar_texto(t: str) -> str:
-    """Nombre/apellido tipo "David Araya Rodriguez": sin espacios de m├ís y
-    en tipo T├¡tulo (primera letra de cada palabra en may├║scula)."""
+    """Nombre/apellido tipo "David Araya Rodriguez": sin espacios de más y
+    en tipo Título (primera letra de cada palabra en mayúscula)."""
     return " ".join((t or "").split()).title()
 
 
@@ -157,7 +157,7 @@ def _tabla_fisica_existe(cur, tabla: str) -> bool:
 
 
 def tabla_fisica_existe(tabla: str) -> bool:
-    """True si la tabla f├¡sica existe en `snw_base`."""
+    """True si la tabla física existe en `snw_base`."""
     if not tabla_valida(tabla):
         return False
     try:
@@ -209,7 +209,7 @@ def obtener_area(area_id: int) -> dict | None:
 
 
 def preparar_area(nombre_visible: str, modo: str = "preguntar") -> dict:
-    """Decide qu├® hacer ante un pedido de creaci├│n.
+    """Decide qué hacer ante un pedido de creación.
 
     Devuelve `{"decision": "preguntar"|"reutilizar"|"crear", ...}`. Con
     `decision == "preguntar"` el backend no crea nada: la UI debe mostrar las
@@ -255,7 +255,7 @@ def crear_area(nombre: str, slug: str) -> dict:
         tabla = base
         sufijo = 0
         if base in en_uso or _tabla_fisica_existe(cur, base):
-            # Primer sufijo num├®rico libre: con base, 2 y 4 ocupados, usa 3.
+            # Primer sufijo numérico libre: con base, 2 y 4 ocupados, usa 3.
             n = 2
             while True:
                 cand = f"{base}{n}"
@@ -287,7 +287,7 @@ def crear_area(nombre: str, slug: str) -> dict:
 
 
 def renombrar_area(area_id: int, nuevo_visible: str) -> dict:
-    """Cambia el nombre visible (y el del rol). La tabla f├¡sica NO cambia."""
+    """Cambia el nombre visible (y el del rol). La tabla física NO cambia."""
     nombre = (nuevo_visible or "").strip()
     if not nombre:
         raise ValueError("nombre_vacio")
@@ -392,7 +392,7 @@ def retirar_rol_area(area_id: int, usuario_id: int) -> bool:
 
 def eliminar_paciente_area(area_id: int, paciente_id: int) -> bool:
     """Borra UN registro de la tabla de la especialidad (solo admin/dev desde
-    el endpoint). Tambi├®n borra sus filas de log propias (aisladas por tabla);
+    el endpoint). También borra sus filas de log propias (aisladas por tabla);
     el resto del historial no se toca."""
     esp = obtener_area(int(area_id))
     if not esp:
@@ -416,8 +416,8 @@ def eliminar_paciente_area(area_id: int, paciente_id: int) -> bool:
 
 def eliminar_tabla_area(area_id: int) -> dict:
     """Elimina la especialidad entera (solo admin/dev desde el endpoint):
-    tabla f├¡sica, rol, asignaciones y fila de especialidad. El historial de
-    env├¡os (`envios`/`log_envios`) se conserva como trazabilidad."""
+    tabla física, rol, asignaciones y fila de especialidad. El historial de
+    envíos (`envios`/`log_envios`) se conserva como trazabilidad."""
     esp = obtener_area(int(area_id))
     if not esp:
         raise ValueError("no_existe")
@@ -444,8 +444,8 @@ def importar_pacientes_csv(area_id: int, datos: bytes) -> dict:
     """Valida un CSV y lo inserta en la tabla de la especialidad.
 
     Columnas obligatorias: `nombre`, `apellido`, `telefono` (UTF-8).
-    Tel├®fonos normalizados con `telefono.py` (`+569XXXXXXXX`); los campos del
-    esquema SNW se inicializan (`pendiente`, sin opt-out ni inter├®s).
+    Teléfonos normalizados con `telefono.py` (`+569XXXXXXXX`); los campos del
+    esquema SNW se inicializan (`pendiente`, sin opt-out ni interés).
     """
     esp = obtener_area(int(area_id))
     if not esp:
@@ -485,7 +485,7 @@ def importar_pacientes_csv(area_id: int, datos: bytes) -> dict:
             telefono = normalizar_telefono(telefono_crudo)
             if telefono is None:
                 errores.append({"fila": nro,
-                                "motivo": f"Formato de tel├®fono inv├ílido: '{telefono_crudo}'"})
+                                "motivo": f"Formato de teléfono inválido: '{telefono_crudo}'"})
                 continue
             if telefono in existentes or telefono in vistos_archivo:
                 duplicados += 1
@@ -521,7 +521,7 @@ def ids_de_areas() -> list[int]:
 
 
 def area_por_tabla(tabla: str) -> dict | None:
-    """Especialidad registrada para una tabla f├¡sica (None si no es de
+    """Especialidad registrada para una tabla física (None si no es de
     especialidad: tablas legacy u otras)."""
     if not tabla_valida(tabla):
         return None
@@ -569,8 +569,8 @@ def areas_por_usuarios() -> dict:
 
 def correos_supervisores_area(area_id: int) -> list[dict]:
     """Supervisores activos asignados a la especialidad que tienen un correo
-    contactable (login si es correo, si no el de recuperaci├│n). Se usa para
-    avisarles las solicitudes de env├¡o en producci├│n de su especialidad."""
+    contactable (login si es correo, si no el de recuperación). Se usa para
+    avisarles las solicitudes de envío en producción de su especialidad."""
     try:
         with conectar() as conn, conn.cursor() as cur:
             cur.execute(
