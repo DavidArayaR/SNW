@@ -9,13 +9,13 @@ if (!localStorage.getItem("snw_token")) location.replace("login.html");
 let registros = [];
 let filtro = "";
 let ambienteDetalle = "produccion";
-let especialidadDetalle = null; // especialidad del envío abierto (para sus mensajes)
+let areaDetalle = null; // area del envío abierto (para sus mensajes)
 let pacienteMsgActual = null; // { id, ambiente, interesado }
 
 const $ = (sel) => document.querySelector(sel);
 
-let especialidadesHist = [];
-const selEspecialidadHist = $("#selEspecialidadHist");
+let areasHist = [];
+const selAreaHist = $("#selAreaHist");
 const selBaseHist = $("#selBaseHist");
 if (selBaseHist) {
   selBaseHist.value = localStorage.getItem("snw_base_historial") || "todos";
@@ -30,34 +30,34 @@ if (!ES_PRIV_HIST && selBaseHist) {
   if (lblBase) lblBase.hidden = true;
 }
 
-function especialidadHistActual() {
-  const v = selEspecialidadHist ? selEspecialidadHist.value : "";
+function areaHistActual() {
+  const v = selAreaHist ? selAreaHist.value : "";
   return v ? Number(v) : null;
 }
 
-async function cargarEspecialidadesHist() {
-  if (!selEspecialidadHist) return;
+async function cargarAreasHist() {
+  if (!selAreaHist) return;
   try {
-    const r = await fetch("api/especialidades/mias", { headers: authHeaders(), cache: "no-store" });
+    const r = await fetch("api/areas/mias", { headers: authHeaders(), cache: "no-store" });
     if (!r.ok) throw new Error();
-    especialidadesHist = await r.json();
+    areasHist = await r.json();
   } catch {
-    especialidadesHist = [];
+    areasHist = [];
   }
   const guardada = localStorage.getItem("snw_esp_historial") || "";
-  selEspecialidadHist.innerHTML =
+  selAreaHist.innerHTML =
     `<option value="">${ES_PRIV_HIST ? "Todas" : "Mis áreas"}</option>` +
-    especialidadesHist.map((e) => `<option value="${e.id}">${escaparHtml(e.nombre_visible)} (${escaparHtml(e.nombre_tabla_base)})</option>`).join("");
-  if (guardada && especialidadesHist.some((e) => String(e.id) === guardada)) {
-    selEspecialidadHist.value = guardada;
+    areasHist.map((e) => `<option value="${e.id}">${escaparHtml(e.nombre_visible)} (${escaparHtml(e.nombre_tabla_base)})</option>`).join("");
+  if (guardada && areasHist.some((e) => String(e.id) === guardada)) {
+    selAreaHist.value = guardada;
   } else {
     localStorage.removeItem("snw_esp_historial");
   }
-  if (selEspecialidadHist) selEspecialidadHist.hidden = !especialidadesHist.length;
+  if (selAreaHist) selAreaHist.hidden = !areasHist.length;
 }
 
-if (selEspecialidadHist) selEspecialidadHist.addEventListener("change", () => {
-  const v = selEspecialidadHist.value;
+if (selAreaHist) selAreaHist.addEventListener("change", () => {
+  const v = selAreaHist.value;
   if (v) {
     localStorage.setItem("snw_esp_historial", v);
     // El área trae su propia base: se vuelve a "Todas".
@@ -76,8 +76,8 @@ if (selBaseHist) selBaseHist.addEventListener("change", () => {
   if (v && v !== "todos") {
     localStorage.setItem("snw_base_historial", v);
     // Una base concreta excluye áreas: se limpia ese filtro.
-    if (selEspecialidadHist) {
-      selEspecialidadHist.value = "";
+    if (selAreaHist) {
+      selAreaHist.value = "";
       localStorage.removeItem("snw_esp_historial");
     }
   } else {
@@ -101,9 +101,9 @@ function escaparHtml(texto) {
 
 async function cargar() {
   try {
-    const esp = especialidadHistActual();
+    const esp = areaHistActual();
     const base = (ES_PRIV_HIST && selBaseHist && selBaseHist.value) || "todos";
-    const qs = `ambiente=${base}` + (esp ? `&especialidad_id=${esp}` : "");
+    const qs = `ambiente=${base}` + (esp ? `&area_id=${esp}` : "");
     const [rh, rc] = await Promise.all([
       fetch(`${API_HISTORIAL}?${qs}`, { headers: authHeaders(), cache: "no-store" }),
       fetch(`api/configuracion?ambiente=produccion`, { headers: authHeaders(), cache: "no-store" }),
@@ -133,7 +133,7 @@ function render() {
     tr.dataset.id = String(r.id);
     tr.dataset.amb = (r.base_datos ?? "").includes("prod") ? "produccion" : "desarrollo";
     tr.dataset.base = r.base_datos ?? "";
-    tr.dataset.esp = r.especialidad_id != null ? String(r.especialidad_id) : "";
+    tr.dataset.esp = r.area_id != null ? String(r.area_id) : "";
     const total = r.total_pacientes ?? 0;
     const enviados = r.enviados ?? 0;
     const fallidos = r.fallidos ?? 0;
@@ -174,7 +174,7 @@ tbodyEl.addEventListener("click", async (e) => {
   const envio = registros.find((r) => String(r.id) === envioId && ((r.base_datos ?? "").includes("prod") ? "produccion" : "desarrollo") === amb)
     || registros.find((r) => String(r.id) === envioId);
   ambienteDetalle = amb;
-  especialidadDetalle = (envio && envio.especialidad_id != null) ? envio.especialidad_id : (tr.dataset.esp ? Number(tr.dataset.esp) : null);
+  areaDetalle = (envio && envio.area_id != null) ? envio.area_id : (tr.dataset.esp ? Number(tr.dataset.esp) : null);
 
   try {
     const r = await fetch(`api/notificaciones/historial/${envioId}/detalle?ambiente=${amb}`, {
@@ -262,7 +262,7 @@ $("#detalleBody").addEventListener("click", (e) => {
 
 async function abrirMensajes(pacienteId) {
   try {
-    const qsEsp = especialidadDetalle != null ? `&especialidad_id=${especialidadDetalle}` : "";
+    const qsEsp = areaDetalle != null ? `&area_id=${areaDetalle}` : "";
     const r = await fetch(`api/pacientes/${pacienteId}/mensajes?ambiente=${ambienteDetalle}${qsEsp}`, {
       headers: authHeaders(), cache: "no-store",
     });
@@ -381,6 +381,6 @@ if (panelCCLogEl) {
   window.snwConCooldown($("#btnActualizarCCLog"), cargarLogCC);
 }
 
-cargarEspecialidadesHist();
+cargarAreasHist();
 cargar();
 cargarLogCC();

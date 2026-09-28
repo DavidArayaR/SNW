@@ -87,9 +87,10 @@ snw/
 (Linux/macOS — la primera vez: `chmod +x iniciar_snw.sh`). Ambos scripts hacen lo mismo:
 
 1. Verifican que Python y MySQL (XAMPP/LAMPP) estén disponibles.
-2. **Solo la primera vez** (si `snw_base.pacientes_prod` todavía no existe) cargan
-   `sql/snw_base.sql` para crear la base, las tablas y los 2 números autorizados. En
-   arranques posteriores omiten este paso.
+2. Base de datos: **primera vez**, cargan `sql/snw_base.sql` tal cual. Si ya fue
+   inicializada, preguntan: **[1] backup e iniciar desde cero** (respalda
+   `snw_base` a `backups/` y la borra/recrea; si el respaldo falla no se sigue)
+   o **[2] backup y seguir como está** (respalda igual, no toca nada).
 3. Instalan las dependencias de `requirements.txt` si faltan.
 4. Abren `http://127.0.0.1:8000` en el navegador y levantan `uvicorn`.
 
@@ -327,8 +328,8 @@ contraseña?» en el login (`/api/auth/olvide`) — mismo mecanismo, pero autose
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/pacientes?q=&ambiente=&especialidad_id=` | Lista con respuesta y error del último `log_envios`. Con `especialidad_id` lee la tabla `pacientes_<slug>` (403 si no está asignada) |
-| PUT | `/api/pacientes/{id}?ambiente=&especialidad_id=` | Cambiar `estado` (`pendiente`/`enviado`/`error`) de **un** paciente |
+| GET | `/api/pacientes?q=&ambiente=&area_id=` | Lista con respuesta y error del último `log_envios`. Con `area_id` lee la tabla `pacientes_<slug>` (403 si no está asignada) |
+| PUT | `/api/pacientes/{id}?ambiente=&area_id=` | Cambiar `estado` (`pendiente`/`enviado`/`error`) de **un** paciente |
 | PUT | `/api/pacientes/estado-masivo?ambiente=` | `{pacientes: [ids], estado}` — igual que arriba pero para **varios** pacientes a la vez (selección en la pestaña Pacientes) |
 | PUT | `/api/pacientes/{id}/respuesta?ambiente=` | Ajuste manual de la respuesta (`pendiente`/`respondio`/`baja`) de **un** paciente; `baja` activa el opt-out. 409 si el paciente pidió la baja explícitamente por WhatsApp y se intenta poner algo distinto de `baja` (ver `opt_out_explicito`) |
 | PUT | `/api/pacientes/respuesta-masiva?ambiente=` | `{pacientes: [ids], respuesta}` — igual que arriba pero para **varios** pacientes a la vez. Los que tengan la baja bloqueada se saltan (no fallan los demás); responde `{actualizados, bloqueados}`; 409 solo si **todos** los seleccionados están bloqueados |
@@ -339,10 +340,10 @@ contraseña?» en el login (`/api/auth/olvide`) — mismo mecanismo, pero autose
 | Método | Endpoint | Descripción |
 |---|---|---|
 | GET | `/api/plantillas` | Lista de plantillas (incluye las de call center; el frontend de Mensajería las filtra). Cada cuenta recibe solo su alcance: el usuario normal ve solo las que creó y las de sus especialidades |
-| POST | `/api/plantillas` | Crear `{nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, especialidad_id?}`. `whatsapp_template_categoria` es obligatoria (`UTILITY` / `MARKETING` / `AUTHENTICATION`); sin ella → 400. `especialidad_id` asocia la plantilla (404 si no existe, 403 si no está asignada). **El nombre no se puede repetir** (409 si ya existe) **ni reutilizar el de una eliminada hasta pasados 30 días** (409 con los días restantes; política de Meta, registro en `data/plantillas_eliminadas.json`). **El usuario normal no puede crear plantillas globales** (422): siempre una de sus especialidades. **Aprobación interna**: lo creado por admin/dev/supervisor nace `aprobada` y va a Meta de inmediato; lo creado por un `usuario` nace `pendiente` y **no se registra en Meta** hasta que se aprueba |
+| POST | `/api/plantillas` | Crear `{nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id?}`. `whatsapp_template_categoria` es obligatoria (`UTILITY` / `MARKETING` / `AUTHENTICATION`); sin ella → 400. `area_id` asocia la plantilla (404 si no existe, 403 si no está asignada). **El nombre no se puede repetir** (409 si ya existe) **ni reutilizar el de una eliminada hasta pasados 30 días** (409 con los días restantes; política de Meta, registro en `data/plantillas_eliminadas.json`). **El usuario normal no puede crear plantillas globales** (422): siempre una de sus especialidades. **Aprobación interna**: lo creado por admin/dev/supervisor nace `aprobada` y va a Meta de inmediato; lo creado por un `usuario` nace `pendiente` y **no se registra en Meta** hasta que se aprueba |
 | POST | `/api/plantillas/{id}/aprobar` | (admin/dev/supervisor) Aprueba una pendiente y la registra en Meta |
 | POST | `/api/plantillas/{id}/rechazar` | (admin/dev/supervisor) `{motivo?}` Rechaza una pendiente (no va a Meta); su creador puede corregirla y vuelve a pendiente |
-| PUT | `/api/plantillas/{id}` | Actualizar `{nombre, texto, ...}` — rechaza (400) si `nombre` cambió, si falta `whatsapp_template_categoria`, si es una plantilla de call center, o si el estado en Meta no es `APPROVED` ni `REJECTED` (pendiente de revisión). **Solo el creador** (admin/dev, cualquiera; 403 si no). Acepta cambiar `especialidad_id` con la misma validación que al crear |
+| PUT | `/api/plantillas/{id}` | Actualizar `{nombre, texto, ...}` — rechaza (400) si `nombre` cambió, si falta `whatsapp_template_categoria`, si es una plantilla de call center, o si el estado en Meta no es `APPROVED` ni `REJECTED` (pendiente de revisión). **Solo el creador** (admin/dev, cualquiera; 403 si no). Acepta cambiar `area_id` con la misma validación que al crear |
 | DELETE | `/api/plantillas/{id}` | Eliminar. **Solo el creador** (admin/dev, cualquiera; 403 si no). Borra también el template en Meta (`DELETE /{waba_id}/message_templates?name=…`); si Meta falla la plantilla local se borra igual y la respuesta trae `meta_advertencia`. Rechaza (400) las de call center o las que no estén `APPROVED` ni `REJECTED` en Meta |
 | GET | `/api/plantillas/{id}/estado-meta` | Consulta en Meta el estado real de un template |
 | POST | `/api/plantillas/estado-meta/actualizar` | Refresca el estado de todas las plantillas con template |
@@ -389,8 +390,8 @@ tiene template de Meta (va como texto libre, ventana de 24 h). No hay gestión d
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| POST | `/api/notificaciones/enviar` | Inicia el envío `{pacientes: [ids] \| null, plantilla_id, ambiente, limite?, especialidad_id?}`. `pacientes: null` = todos los elegibles (usado desde Mensajería). `limite` (solo producción y especialidades) recorta cuántos pendientes entran en esta tanda; el resto quedan pendientes. Con `especialidad_id` envía a la tabla `pacientes_<slug>` (403 si no está asignada; una plantilla de otra especialidad da 400). El rol `usuario` solo puede enviar a sus especialidades o a desarrollo (403 a producción legacy). Rechaza (400) si la plantilla no está `APPROVED` en Meta; 409 si en ese momento hay **otro envío en curso en esa misma base** |
-| POST | `/api/notificaciones/destinatarios` | Cuenta pacientes totales/pendientes de un ambiente (o de una especialidad con `especialidad_id`). Con `plantilla_id`, agrega `costo` (aproximado, mismo cálculo que el correo de confirmación del supervisor) para mostrarlo en el modal antes de enviar; `null` si no hay tarifas cargadas, la plantilla no se factura, o la cuenta no tiene el permiso `tarifas_editar` (admin/dev sí lo ven siempre) |
+| POST | `/api/notificaciones/enviar` | Inicia el envío `{pacientes: [ids] \| null, plantilla_id, ambiente, limite?, area_id?}`. `pacientes: null` = todos los elegibles (usado desde Mensajería). `limite` (solo producción y especialidades) recorta cuántos pendientes entran en esta tanda; el resto quedan pendientes. Con `area_id` envía a la tabla `pacientes_<slug>` (403 si no está asignada; una plantilla de otra especialidad da 400). El rol `usuario` solo puede enviar a sus especialidades o a desarrollo (403 a producción legacy). Rechaza (400) si la plantilla no está `APPROVED` en Meta; 409 si en ese momento hay **otro envío en curso en esa misma base** |
+| POST | `/api/notificaciones/destinatarios` | Cuenta pacientes totales/pendientes de un ambiente (o de una especialidad con `area_id`). Con `plantilla_id`, agrega `costo` (aproximado, mismo cálculo que el correo de confirmación del supervisor) para mostrarlo en el modal antes de enviar; `null` si no hay tarifas cargadas, la plantilla no se factura, o la cuenta no tiene el permiso `tarifas_editar` (admin/dev sí lo ven siempre) |
 | GET | `/api/notificaciones/jobs/{job_id}` | Progreso en vivo del envío en curso |
 | POST | `/api/notificaciones/jobs/{job_id}/pausa` \| `/reanudar` \| `/cancelar` | Control del job en curso |
 | POST | `/api/notificaciones/prueba-wa` | (solo desarrollador) Envía un mensaje de prueba real vía API oficial |
@@ -407,7 +408,7 @@ tiene template de Meta (va como texto libre, ventana de 24 h). No hay gestión d
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/notificaciones/historial?ambiente=todos&especialidad_id=` | Envíos batch (`ambiente=todos` junta ambas bases). Cuentas no privilegiadas solo ven sus especialidades (las filas legacy las ven solo admin/dev); con `especialidad_id` filtra (403 si no está asignada) |
+| GET | `/api/notificaciones/historial?ambiente=todos&area_id=` | Envíos batch (`ambiente=todos` junta ambas bases). Cuentas no privilegiadas solo ven sus especialidades (las filas legacy las ven solo admin/dev); con `area_id` filtra (403 si no está asignada) |
 | GET | `/api/notificaciones/historial/{id}/detalle?ambiente=` | Pacientes individuales de un envío (une la tabla que corresponda: legacy o `pacientes_<slug>`). `numero_telefono` viene `null` si quien pregunta no es admin/dev. Envíos de especialidad: 403 si no está asignada; legacy: solo admin/dev |
 | PUT | `/api/notificaciones/historial/{id}/respuesta?ambiente=` | Corregir la respuesta de un registro |
 
@@ -417,9 +418,9 @@ Las cuentas `usuario` y `supervisor` reciben 403 en estos endpoints (y la migrac
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/estadisticas` | Resumen para Estadísticas (**solo envíos de producción**): mensajes `enviado` del mes, desglose, totales, `pacientes_por_respuesta` (cuántos pacientes de producción respondieron / se dieron de baja / no han respondido) y `webhook` (cuándo llegó el último evento de Meta — sirve para detectar que el webhook dejó de recibir). Con `?especialidad_id=` filtra a esa especialidad |
-| GET | `/api/estadisticas/envios?granularidad=dia\|mes\|anio` | Mensajes enviados de producción agrupados por periodo, para el gráfico de barras (día = últimos 30, mes = últimos 12, año = últimos 6). Acepta `&especialidad_id=` |
-| GET | `/api/estadisticas/costos?granularidad=dia\|mes\|anio` | (permiso `tarifas_editar`) Costo estimado agrupado por periodo. Acepta `&especialidad_id`. **Solo cuenta mensajes de plantilla Marketing** (la única categoría que usa el sistema), aplicando la tarifa de `tarifas_whatsapp` vigente en su fecha. El resto (texto libre, otras categorías) va a `excluidos` |
+| GET | `/api/estadisticas` | Resumen para Estadísticas (**solo envíos de producción**): mensajes `enviado` del mes, desglose, totales, `pacientes_por_respuesta` (cuántos pacientes de producción respondieron / se dieron de baja / no han respondido) y `webhook` (cuándo llegó el último evento de Meta — sirve para detectar que el webhook dejó de recibir). Con `?area_id=` filtra a esa especialidad |
+| GET | `/api/estadisticas/envios?granularidad=dia\|mes\|anio` | Mensajes enviados de producción agrupados por periodo, para el gráfico de barras (día = últimos 30, mes = últimos 12, año = últimos 6). Acepta `&area_id=` |
+| GET | `/api/estadisticas/costos?granularidad=dia\|mes\|anio` | (permiso `tarifas_editar`) Costo estimado agrupado por periodo. Acepta `&area_id`. **Solo cuenta mensajes de plantilla Marketing** (la única categoría que usa el sistema), aplicando la tarifa de `tarifas_whatsapp` vigente en su fecha. El resto (texto libre, otras categorías) va a `excluidos` |
 | GET | `/api/tarifas` | (permiso `tarifas_editar`) Tarifas guardadas: `vigente`, `proxima` (tarifa futura ya publicada por Meta), `usd_vigente`, `historial`, moneda de la cuenta y fecha de la última descarga |
 | POST | `/api/tarifas/actualizar` | (permiso `tarifas_editar`) Descarga la página de precios de Meta y sus CSV, guarda los rate cards nuevos de Chile (`INSERT IGNORE` por hash), autodetecta la moneda de facturación (`GET {waba}?fields=currency` → `wa_moneda`) y devuelve si hubo cambio |
 | GET | `/api/tarifas/chile.csv` | (permiso `tarifas_editar`) Descarga el CSV original del rate card de Chile (prefiere la moneda de la cuenta, si no USD) |
@@ -442,22 +443,22 @@ Cada especialidad vive en **una sola tabla** `pacientes_<slug>` dentro de `snw_b
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/especialidades` | (admin / dev) Todas las especialidades con su tabla y rol |
-| GET | `/api/especialidades/mias` | Especialidades visibles para la sesión (todas si es admin/dev, solo asignadas si no) |
-| POST | `/api/especialidades` | (admin / dev) `{nombre, modo}` — `preguntar` (por defecto): si el nombre visible ya existe responde 409 con las coincidencias sin crear nada; `reutilizar`: usa la existente; `nueva`: crea `pacientes_<slug><n>` con el primer sufijo libre (con base, 2 y 4 ocupados usa 3) |
-| PUT | `/api/especialidades/{id}` | (admin / dev) `{nombre_visible}` — renombra especialidad y rol; la tabla física **no** cambia |
-| POST | `/api/especialidades/{id}/roles` | (admin / dev) `{usuario}` — asigna a la cuenta el rol de la especialidad |
-| DELETE | `/api/especialidades/{id}/roles/{usuario}` | (admin / dev) — retira el rol de la especialidad |
-| POST | `/api/especialidades/{id}/pacientes/csv` | Carga CSV (`nombre, apellido, telefono`, UTF-8, máx. 5 MB) en la tabla de la especialidad; normaliza a `+569XXXXXXXX` e informa `{procesados, insertados, duplicados, rechazados, errores}`. Admin/dev o cuentas con permiso de mensajería y el rol asignado |
-| DELETE | `/api/especialidades/{id}/pacientes/{pid}` | (admin / dev) Borra UN registro de la tabla (más sus filas de log propias) |
-| DELETE | `/api/especialidades/{id}/tabla` | (admin / dev) Elimina la especialidad entera: tabla, rol, asignaciones y registro. El historial de envíos se conserva. Las tablas legacy (`pacientes_dev`/`pacientes_prod`) no se pueden borrar |
+| GET | `/api/areas` | (admin / dev) Todas las especialidades con su tabla y rol |
+| GET | `/api/areas/mias` | Especialidades visibles para la sesión (todas si es admin/dev, solo asignadas si no) |
+| POST | `/api/areas` | (admin / dev) `{nombre, modo}` — `preguntar` (por defecto): si el nombre visible ya existe responde 409 con las coincidencias sin crear nada; `reutilizar`: usa la existente; `nueva`: crea `pacientes_<slug><n>` con el primer sufijo libre (con base, 2 y 4 ocupados usa 3) |
+| PUT | `/api/areas/{id}` | (admin / dev) `{nombre_visible}` — renombra especialidad y rol; la tabla física **no** cambia |
+| POST | `/api/areas/{id}/roles` | (admin / dev) `{usuario}` — asigna a la cuenta el rol de la especialidad |
+| DELETE | `/api/areas/{id}/roles/{usuario}` | (admin / dev) — retira el rol de la especialidad |
+| POST | `/api/areas/{id}/pacientes/csv` | Carga CSV (`nombre, apellido, telefono`, UTF-8, máx. 5 MB) en la tabla de la especialidad; normaliza a `+569XXXXXXXX` e informa `{procesados, insertados, duplicados, rechazados, errores}`. Admin/dev o cuentas con permiso de mensajería y el rol asignado |
+| DELETE | `/api/areas/{id}/pacientes/{pid}` | (admin / dev) Borra UN registro de la tabla (más sus filas de log propias) |
+| DELETE | `/api/areas/{id}/tabla` | (admin / dev) Elimina la especialidad entera: tabla, rol, asignaciones y registro. El historial de envíos se conserva. Las tablas legacy (`pacientes_dev`/`pacientes_prod`) no se pueden borrar |
 
 ### Áreas — Fase 2 (autorización en backend)
 
-- **Sesión enriquecida**: `login`, `/api/auth/me` y `/api/auth/activar` devuelven `especialidades` (todas si es admin/dev, solo asignadas si no); cada petición refresca `especialidad_ids` junto a rol y permisos.
+- **Sesión enriquecida**: `login`, `/api/auth/me` y `/api/auth/activar` devuelven `especialidades` (todas si es admin/dev, solo asignadas si no); cada petición refresca `area_ids` junto a rol y permisos.
 - **Rol global `supervisor`**: como `usuario` pero pensado para aprobar envíos de sus áreas (el enrutado de la confirmación por área llega en Fase 3). El administrador gestiona cuentas `usuario` y `supervisor`.
-- **Pacientes/envíos/historial/plantillas** aceptan `especialidad_id`: 404 si no existe, **403** si no está asignada. Las plantillas pueden asociarse a una especialidad y solo se envían en ella.
-- **`envios` y `log_envios`** guardan `especialidad_id` + `tabla_pacientes` (NULL = fila legacy); los historiales no mezclan tablas con IDs coincidentes.
+- **Pacientes/envíos/historial/plantillas** aceptan `area_id`: 404 si no existe, **403** si no está asignada. Las plantillas pueden asociarse a una especialidad y solo se envían en ella.
+- **`envios` y `log_envios`** guardan `area_id` + `tabla_pacientes` (NULL = fila legacy); los historiales no mezclan tablas con IDs coincidentes.
 - **Estadísticas y tarifas**: solo admin/dev (403 para el resto).
 - **Webhook**: busca pacientes también en `pacientes_<slug>`, etiqueta sus filas de log y el call center automático también responde en especialidades (anti flip-flop siempre activo ahí).
 

@@ -39,7 +39,7 @@ function esc(t) {
 async function init() {
   let lista = [];
   try {
-    const r = await fetch("api/especialidades/mias", { headers: authHeaders(), cache: "no-store" });
+    const r = await fetch("api/areas/mias", { headers: authHeaders(), cache: "no-store" });
     if (r.status === 401) { window.snwSesionExpirada(); return; }
     if (!r.ok) throw new Error();
     lista = await r.json();
@@ -67,14 +67,14 @@ inpArchivo.addEventListener("change", () => {
 btnSubir.addEventListener("click", async () => {
   const espId = selEsp.value;
   const archivo = inpArchivo.files && inpArchivo.files[0];
-  if (!espId) return toast("Elige la especialidad destino.", "error");
+  if (!espId) return toast("Elige la area destino.", "error");
   if (!archivo) return toast("Elige un archivo CSV.", "error");
   btnSubir.disabled = true;
   resultado.innerHTML = "<p class=\"field__hint\">Subiendo…</p>";
   try {
     const datos = new FormData();
     datos.append("archivo", archivo);
-    const res = await fetch(`api/especialidades/${encodeURIComponent(espId)}/pacientes/csv`, {
+    const res = await fetch(`api/areas/${encodeURIComponent(espId)}/pacientes/csv`, {
       method: "POST", headers: authHeaders(), body: datos,
     });
     const cuerpo = await res.json().catch(() => ({}));

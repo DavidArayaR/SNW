@@ -14,7 +14,7 @@
   <link rel="stylesheet" href="css/usuarios.css">
   <script src="js/tema.js"></script>
 </head>
-<body data-pagina="especialidades" data-seccion="administracion">
+<body data-pagina="areas" data-seccion="administracion">
 
   <div class="app-shell">
     <nav class="sidebar" id="sidebar"></nav>
@@ -34,7 +34,7 @@
           <div class="panel__head">
             <h2>Áreas</h2>
             <div class="panel__actions">
-              <button id="btnActualizarEspecialidades" class="btn btn--ghost" type="button">Actualizar</button>
+              <button id="btnActualizarAreas" class="btn btn--ghost" type="button">Actualizar</button>
             </div>
           </div>
 
@@ -46,7 +46,7 @@
             áreas asignadas; no ven Estad&iacute;sticas.
           </p>
 
-          <form id="formCrearEspecialidad" class="usr-invitar" style="margin-top: 12px;">
+            <form id="formCrearArea" class="usr-invitar" style="margin-top: 12px;">
             <div class="usr-invitar__campo">
               <label for="espNombre">Nueva área</label>
               <input type="text" id="espNombre" placeholder="Ej: Kinesiología" maxlength="150" required>
@@ -56,10 +56,10 @@
           <p id="espMsg" class="usr-intro" style="margin: 0 18px 10px;"></p>
 
           <div class="usr-selector">
-            <label for="selEspecialidad">Área</label>
-            <select id="selEspecialidad"></select>
-          </div>
-          <div id="detalleEspecialidad" class="usr-detalle"></div>
+              <label for="selArea">Área</label>
+              <select id="selArea"></select>
+            </div>
+            <div id="detalleArea" class="usr-detalle"></div>
           <p id="espVacio" class="tabla-vacia" hidden style="padding: 24px;">No hay áreas creadas.</p>
         </section>
 
@@ -82,9 +82,9 @@
 
   <script src="js/layout.js"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/especialidades.js"></script>
+  <script src="js/areas.js"></script>
   <script>
-    if (window.snwCargarEspecialidades) window.snwCargarEspecialidades();
+    if (window.snwCargarAreas) window.snwCargarAreas();
   </script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>

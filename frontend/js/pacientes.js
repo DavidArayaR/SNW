@@ -10,7 +10,7 @@ let _ambienteInicializado = false;
 
 let pacientes = [];
 let config = null;
-let especialidades = [];
+let areas = [];
 let filtro = "";
 let filtroEstado = "todos";
 let filtroRespuesta = "todas";
@@ -100,7 +100,7 @@ function espPacId() {
 function tablaPacActual() {
   const esp = espPacId();
   if (esp != null) {
-    const e = especialidades.find((x) => x.id === esp);
+    const e = areas.find((x) => x.id === esp);
     return e ? e.nombre_tabla_base : null;
   }
   return basePacActual() === "prod" ? "pacientes_prod" : "pacientes_dev";
@@ -108,26 +108,26 @@ function tablaPacActual() {
 
 function qsBase() {
   const esp = espPacId();
-  if (esp != null) return `ambiente=produccion&especialidad_id=${esp}`;
+  if (esp != null) return `ambiente=produccion&area_id=${esp}`;
   return `ambiente=${basePacActual() === "prod" ? "produccion" : "desarrollo"}`;
 }
 
 async function cargarBasesPac() {
   if (!selBasePac) return;
   try {
-    const r = await fetch("api/especialidades/mias", { headers: authHeaders(), cache: "no-store" });
+    const r = await fetch("api/areas/mias", { headers: authHeaders(), cache: "no-store" });
     if (!r.ok) throw new Error();
-    especialidades = await r.json();
+    areas = await r.json();
   } catch {
-    especialidades = [];
+    areas = [];
   }
   selBasePac.innerHTML =
     (PUEDE_GESTIONAR_PAC
       ? `<option value="dev">Base de datos desarrollo (pacientes_dev)</option>` +
         `<option value="prod">Base de datos producción (pacientes_prod)</option>`
       : "") +
-    especialidades.map((e) => `<option value="esp:${e.id}">${escaparHtml(e.nombre_visible)} (${escaparHtml(e.nombre_tabla_base)})</option>`).join("") +
-    (!PUEDE_GESTIONAR_PAC && !especialidades.length
+    areas.map((e) => `<option value="esp:${e.id}">${escaparHtml(e.nombre_visible)} (${escaparHtml(e.nombre_tabla_base)})</option>`).join("") +
+    (!PUEDE_GESTIONAR_PAC && !areas.length
       ? `<option value="" disabled>Sin bases asignadas: pide un área a un administrador</option>`
       : "");
   // Restaura la última usada si sigue disponible; si no, la primera.
@@ -167,7 +167,7 @@ function aplicarModoBase() {
   if (csvBloque && esp != null) {
     const dest = $("#csvDestino");
     if (dest) {
-      const e = especialidades.find((x) => x.id === esp);
+      const e = areas.find((x) => x.id === esp);
       dest.textContent = e ? `${e.nombre_visible} (${e.nombre_tabla_base})` : "área";
     }
   }
@@ -656,7 +656,7 @@ if (btnEliminarMasivo) btnEliminarMasivo.addEventListener("click", async () => {
   let ok = 0, mal = 0;
   for (const id of ids) {
     try {
-      const res = await fetch(`api/especialidades/${esp}/pacientes/${id}`, {
+      const res = await fetch(`api/areas/${esp}/pacientes/${id}`, {
         method: "DELETE", headers: authHeaders(),
       });
       if (res.status === 401) { window.snwSesionExpirada(); return; }
@@ -704,7 +704,7 @@ const btnEliminarTablaPac = $("#btnEliminarTablaPac");
 if (btnEliminarTablaPac) btnEliminarTablaPac.addEventListener("click", () => {
   const esp = espPacId();
   if (esp == null || !modalDelTabla) return;
-  const e = especialidades.find((x) => x.id === esp);
+  const e = areas.find((x) => x.id === esp);
   $("#delTablaNombre").textContent = e ? `${e.nombre_visible} (${e.nombre_tabla_base})` : "área";
   $("#delTablaTotal").textContent = String(pacientes.length);
   const btnConf = $("#btnConfirmarDelTabla");
@@ -741,7 +741,7 @@ if (btnConfirmarDelTabla) btnConfirmarDelTabla.addEventListener("click", async (
   if (esp == null) { cerrarModalDelTabla(); return; }
   btnConfirmarDelTabla.disabled = true;
   try {
-    const res = await fetch(`api/especialidades/${esp}/tabla`, {
+    const res = await fetch(`api/areas/${esp}/tabla`, {
       method: "DELETE", headers: authHeaders(),
     });
     if (res.status === 401) { window.snwSesionExpirada(); return; }
@@ -772,7 +772,7 @@ if (csvInput) csvInput.addEventListener("change", async () => {
   try {
     const datos = new FormData();
     datos.append("archivo", archivo);
-    const res = await fetch(`api/especialidades/${esp}/pacientes/csv`, {
+    const res = await fetch(`api/areas/${esp}/pacientes/csv`, {
       method: "POST", headers: authHeaders(), body: datos,
     });
     const informe = await res.json().catch(() => ({}));

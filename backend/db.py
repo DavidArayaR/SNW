@@ -386,9 +386,9 @@ def asegurar_tabla_config() -> None:
             # Modelo multi-área: tablas `areas`,
             # `roles_area` y `usuario_area_roles`. Import
             # diferido porque servicio_especialidades importa este módulo.
-            from servicio_especialidades import asegurar_tablas_especialidades, migrar_tablas_areas
+            from servicio_areas import asegurar_tablas_areas, migrar_tablas_areas
             migrar_tablas_areas(cur)
-            asegurar_tablas_especialidades(cur)
+            asegurar_tablas_areas(cur)
 
             # Rol global `supervisor`: acceso acotado a sus especialidades,
             # sin Estadísticas (igual que `usuario`).
@@ -404,28 +404,41 @@ def asegurar_tabla_config() -> None:
                     " NOT NULL DEFAULT 'usuario'"
                 )
 
-            # Trazabilidad por especialidad en el historial (Fase 2). NULL =
-            # fila legacy (tablas pacientes_dev/prod, anteriores al modelo).
-            for _ht, _hidx in (("envios", "idx_envios_especialidad"),
-                               ("log_envios", "idx_log_especialidad")):
+            # Trazabilidad por área en el historial (NULL = fila legacy de las
+            # tablas pacientes_dev/prod, anteriores al modelo).
+            for _ht, _hidx in (("envios", "idx_envios_area"),
+                               ("log_envios", "idx_log_area")):
                 cur.execute(
                     "SELECT COLUMN_NAME FROM information_schema.COLUMNS"
                     " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s"
-                    "   AND COLUMN_NAME IN ('especialidad_id', 'tabla_pacientes')",
+                    "   AND COLUMN_NAME IN ('especialidad_id', 'area_id', 'tabla_pacientes')",
                     (_ht,),
                 )
                 _tiene = {r["COLUMN_NAME"] for r in cur.fetchall()}
-                if "especialidad_id" not in _tiene:
-                    cur.execute(f"ALTER TABLE {_ht} ADD COLUMN especialidad_id INT NULL")
+                if "especialidad_id" in _tiene and "area_id" not in _tiene:
+                    cur.execute(f"ALTER TABLE {_ht} CHANGE COLUMN especialidad_id area_id INT NULL")
+                    _tiene.discard("especialidad_id")
+                    _tiene.add("area_id")
+                if "area_id" not in _tiene:
+                    cur.execute(f"ALTER TABLE {_ht} ADD COLUMN area_id INT NULL")
                 if "tabla_pacientes" not in _tiene:
                     cur.execute(f"ALTER TABLE {_ht} ADD COLUMN tabla_pacientes VARCHAR(64) NULL")
+                # Índices con el nombre viejo se renuevan (drop + add).
+                for _viejo_idx in ("idx_envios_especialidad", "idx_log_especialidad"):
+                    cur.execute(
+                        "SELECT COUNT(*) AS n FROM information_schema.STATISTICS"
+                        " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND INDEX_NAME = %s",
+                        (_ht, _viejo_idx),
+                    )
+                    if (cur.fetchone() or {}).get("n"):
+                        cur.execute(f"ALTER TABLE {_ht} DROP INDEX {_viejo_idx}")
                 cur.execute(
                     "SELECT COUNT(*) AS n FROM information_schema.STATISTICS"
                     " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND INDEX_NAME = %s",
                     (_ht, _hidx),
                 )
                 if not (cur.fetchone() or {}).get("n"):
-                    cur.execute(f"ALTER TABLE {_ht} ADD INDEX {_hidx} (especialidad_id)")
+                    cur.execute(f"ALTER TABLE {_ht} ADD INDEX {_hidx} (area_id)")
 
             # Estadísticas (y costos) son exclusivas de admin/dev: se retiran
             # esos permisos de las cuentas no privilegiadas que los tuvieran.

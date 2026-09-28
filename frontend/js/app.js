@@ -15,7 +15,7 @@ let snapshot = null;
 // Áreas visibles para la cuenta (Fase 3): todas si es
 // privilegiada, solo las asignadas si no. Las plantillas pueden asociarse a
 // una (envío solo a su tabla) o quedar globales.
-let misEspecialidades = [];
+let misAreas = [];
 
 // Usuario actual (para saber si creó cada plantilla: solo el creador la
 // edita/elimina; admin/dev, cualquiera; el backend lo exige igual).
@@ -29,8 +29,8 @@ async function cargarMiUsuario() {
 const esCreador = (p) => !!p && !!miUsuario && (p.creado_por || "").toLowerCase() === miUsuario;
 const puedeEditarEsta = (p) => !p || !!window.snwEsPrivilegiado || esCreador(p);
 
-function nombreEspecialidad(id) {
-  const e = misEspecialidades.find((x) => x.id === id);
+function nombreArea(id) {
+  const e = misAreas.find((x) => x.id === id);
   return e ? e.nombre_visible : null;
 }
 
@@ -38,15 +38,15 @@ const $ = (sel) => document.querySelector(sel);
 
 const listaEl = $("#listaPlantillas");
 const buscadorEl = $("#buscador");
-const selFiltroEspecialidad = $("#selFiltroEspecialidad");
-let filtroEspecialidad = localStorage.getItem("snw_filtro_tpl") || "todas";
+const selFiltroArea = $("#selFiltroArea");
+let filtroArea = localStorage.getItem("snw_filtro_tpl") || "todas";
 const formEl = $("#formPlantilla");
 const inpNombre = $("#inpNombre");
 const inpMensaje = $("#inpMensaje");
 const inpTemplate = $("#inpTemplate");
 const inpTemplateLang = $("#inpTemplateLang");
 const inpTemplateCategoria = $("#inpTemplateCategoria");
-const inpEspecialidad = $("#inpEspecialidad");
+const inpArea = $("#inpArea");
 const hayTemplateMeta = !!inpTemplate && !!inpTemplateLang && !!inpTemplateCategoria;
 const bloqueEstadoMeta = $("#bloqueEstadoMeta");
 const badgeEstadoMeta = $("#badgeEstadoMeta");
@@ -160,62 +160,62 @@ function seleccionarDefault() {
   if (def) abrir(def.id);
 }
 
-async function cargarEspecialidades() {
+async function cargarAreas() {
   try {
-    const res = await fetch("api/especialidades/mias", { headers: authHeaders(), cache: "no-store" });
+    const res = await fetch("api/areas/mias", { headers: authHeaders(), cache: "no-store" });
     if (!res.ok) throw new Error();
-    misEspecialidades = await res.json();
+    misAreas = await res.json();
   } catch {
-    misEspecialidades = [];
+    misAreas = [];
   }
-  poblarSelectEspecialidad();
-  poblarFiltroEspecialidad();
+  poblarSelectArea();
+  poblarFiltroArea();
 }
 
-function poblarFiltroEspecialidad() {
-  if (!selFiltroEspecialidad) return;
+function poblarFiltroArea() {
+  if (!selFiltroArea) return;
   // El usuario normal no ve globales: no se le ofrece ese filtro.
   const verGlobales = (window.snwRol || "") !== "usuario";
-  selFiltroEspecialidad.innerHTML =
+  selFiltroArea.innerHTML =
     `<option value="todas">Todas</option>` +
     (verGlobales ? `<option value="global">Globales (sin área)</option>` : "") +
-    misEspecialidades.map((e) => `<option value="${e.id}">${escaparHtml(e.nombre_visible)}</option>`).join("");
-  const vals = ["todas", ...(verGlobales ? ["global"] : []), ...misEspecialidades.map((e) => String(e.id))];
-  if (!vals.includes(filtroEspecialidad)) filtroEspecialidad = "todas";
-  selFiltroEspecialidad.value = filtroEspecialidad;
+    misAreas.map((e) => `<option value="${e.id}">${escaparHtml(e.nombre_visible)}</option>`).join("");
+  const vals = ["todas", ...(verGlobales ? ["global"] : []), ...misAreas.map((e) => String(e.id))];
+  if (!vals.includes(filtroArea)) filtroArea = "todas";
+  selFiltroArea.value = filtroArea;
 }
 
-if (selFiltroEspecialidad) selFiltroEspecialidad.addEventListener("change", () => {
-  filtroEspecialidad = selFiltroEspecialidad.value;
-  localStorage.setItem("snw_filtro_tpl", filtroEspecialidad);
+if (selFiltroArea) selFiltroArea.addEventListener("change", () => {
+  filtroArea = selFiltroArea.value;
+  localStorage.setItem("snw_filtro_tpl", filtroArea);
   renderLista(buscadorEl.value);
 });
 
-function poblarSelectEspecialidad() {
-  if (!inpEspecialidad) return;
-  const actual = inpEspecialidad.value;
+function poblarSelectArea() {
+  if (!inpArea) return;
+  const actual = inpArea.value;
   // El usuario normal no puede usar plantillas globales: solo sus
   // áreas asignadas (el backend lo exige igual).
   const esUsuario = (window.snwRol || "") === "usuario";
-  inpEspecialidad.innerHTML =
+  inpArea.innerHTML =
     (esUsuario ? "" : `<option value="">Global (todas las bases)</option>`) +
-    misEspecialidades.map((e) => `<option value="${e.id}">${escaparHtml(e.nombre_visible)}</option>`).join("");
-  if (actual && misEspecialidades.some((e) => String(e.id) === actual)) {
-    inpEspecialidad.value = actual;
-  } else if (esUsuario && misEspecialidades.length) {
-    inpEspecialidad.value = String(misEspecialidades[0].id);
+    misAreas.map((e) => `<option value="${e.id}">${escaparHtml(e.nombre_visible)}</option>`).join("");
+  if (actual && misAreas.some((e) => String(e.id) === actual)) {
+    inpArea.value = actual;
+  } else if (esUsuario && misAreas.length) {
+    inpArea.value = String(misAreas[0].id);
   }
-  refrescarAvisoSinEspecialidad();
+  refrescarAvisoSinArea();
 }
 
 // Sin áreas asignadas el usuario no puede crear plantillas: se le
 // indica que pida una a un administrador, en vez de dejar un select vacío.
-function refrescarAvisoSinEspecialidad() {
-  const hint = $("#hintSinEspecialidad");
+function refrescarAvisoSinArea() {
+  const hint = $("#hintSinArea");
   if (!hint) return;
-  const sinAsignadas = (window.snwRol || "") === "usuario" && !misEspecialidades.length;
+  const sinAsignadas = (window.snwRol || "") === "usuario" && !misAreas.length;
   hint.hidden = !sinAsignadas;
-  if (inpEspecialidad) inpEspecialidad.disabled = sinAsignadas;
+  if (inpArea) inpArea.disabled = sinAsignadas;
 }
 
 // Selector único de base de datos del modal de envío (Fase 3): lista solo
@@ -227,11 +227,11 @@ function baseSeleccionadaConf() {
   return sel && sel.value ? sel.value : ambienteConf;
 }
 
-function modoEspecialidadConf() {
+function modoAreaConf() {
   return baseSeleccionadaConf().startsWith("esp:");
 }
 
-function especialidadEnvioId() {
+function areaEnvioId() {
   const v = baseSeleccionadaConf();
   if (!v.startsWith("esp:")) return null;
   const id = Number(v.slice(4));
@@ -241,7 +241,7 @@ function especialidadEnvioId() {
 function ambienteEnvioConf() {
   // Las áreas son tablas únicas (sin entorno): se envían como
   // producción (con confirmación del supervisor salvo permiso directo).
-  return modoEspecialidadConf() ? "produccion" : baseSeleccionadaConf();
+  return modoAreaConf() ? "produccion" : baseSeleccionadaConf();
 }
 
 // Reconstruye las opciones del select. Con `forzarEspId` (plantilla de una
@@ -254,8 +254,8 @@ function construirOpcionesBaseConf(forzarEspId) {
   const restringido = usuarioRestringidoADesarrollo() || (window.snwRol || "") === "usuario";
   let html = "";
   if (forzarEspId != null) {
-    const espForzada = misEspecialidades.find((e) => e.id === forzarEspId);
-    const nombre = espForzada ? espForzada.nombre_visible : (nombreEspecialidad(forzarEspId) || "Área");
+    const espForzada = misAreas.find((e) => e.id === forzarEspId);
+    const nombre = espForzada ? espForzada.nombre_visible : (nombreArea(forzarEspId) || "Área");
     const tabla = espForzada ? espForzada.nombre_tabla_base : "";
     html = `<option value="esp:${forzarEspId}">${escaparHtml(nombre)}${tabla ? ` (${escaparHtml(tabla)})` : ""}</option>`;
   } else {
@@ -263,9 +263,9 @@ function construirOpcionesBaseConf(forzarEspId) {
       `<option value="desarrollo">Desarrollo (pacientes_dev)</option>` +
       (restringido ? "" : `<option value="produccion">Producción (pacientes_prod)</option>`) +
       `</optgroup>`;
-    if (misEspecialidades.length) {
+    if (misAreas.length) {
       html += `<optgroup label="Áreas">` +
-        misEspecialidades.map((e) => `<option value="esp:${e.id}">${escaparHtml(e.nombre_visible)} (${escaparHtml(e.nombre_tabla_base)})</option>`).join("") +
+        misAreas.map((e) => `<option value="esp:${e.id}">${escaparHtml(e.nombre_visible)} (${escaparHtml(e.nombre_tabla_base)})</option>`).join("") +
         `</optgroup>`;
     }
   }
@@ -279,7 +279,7 @@ function construirOpcionesBaseConf(forzarEspId) {
     elegido = `esp:${forzarEspId}`;
   } else {
     const guardadoEsp = localStorage.getItem("snw_esp_mensajeria");
-    if (localStorage.getItem("snw_modo_conf") === "especialidad" && guardadoEsp &&
+    if (localStorage.getItem("snw_modo_conf") === "area" && guardadoEsp &&
         valores.includes(`esp:${guardadoEsp}`)) {
       elegido = `esp:${guardadoEsp}`;
     } else if (valores.includes(ambienteConf)) {
@@ -291,7 +291,7 @@ function construirOpcionesBaseConf(forzarEspId) {
   if (elegido != null) {
     sel.value = elegido;
     if (elegido.startsWith("esp:")) {
-      localStorage.setItem("snw_modo_conf", "especialidad");
+      localStorage.setItem("snw_modo_conf", "area");
       localStorage.setItem("snw_esp_mensajeria", elegido.slice(4));
     } else {
       ambienteConf = elegido;
@@ -360,11 +360,11 @@ async function revisarPlantillasEnSegundoPlano() {
   }
 }
 
-async function crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, especialidad_id) {
+async function crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id) {
   const res = await fetch(API_URL, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ clave: slug(nombre), nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, especialidad_id }),
+    body: JSON.stringify({ clave: slug(nombre), nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id }),
   });
   if (res.status === 401) { window.snwSesionExpirada(); return Promise.reject(new Error("Sesión expirada")); }
   const data = await res.json().catch(() => ({}));
@@ -372,11 +372,11 @@ async function crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_te
   return data;
 }
 
-async function actualizarPlantilla(id, nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, especialidad_id) {
+async function actualizarPlantilla(id, nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id) {
   const res = await fetch(`${API_URL}/${id}`, {
     method: "PUT",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, especialidad_id }),
+    body: JSON.stringify({ nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id }),
   });
   if (res.status === 401) { window.snwSesionExpirada(); return Promise.reject(new Error("Sesión expirada")); }
   const data = await res.json().catch(() => ({}));
@@ -443,8 +443,8 @@ function crearItemPlantilla(p) {
   } else if (ap === "rechazada") {
     estadoTag += ` <span class="tpl-item__estado tpl-item__estado--rechazada">Rechazada</span>`;
   }
-  if (p.especialidad_id != null) {
-    const nombreEsp = nombreEspecialidad(p.especialidad_id) || "Área";
+  if (p.area_id != null) {
+    const nombreEsp = nombreArea(p.area_id) || "Área";
     estadoTag += ` <span class="tpl-item__estado">${escaparHtml(nombreEsp)}</span>`;
   }
   btn.innerHTML =
@@ -456,13 +456,13 @@ function crearItemPlantilla(p) {
 
 function renderLista(filtro = "") {
   const q = filtro.trim().toLowerCase();
-  const fEsp = filtroEspecialidad;
+  const fEsp = filtroArea;
   const visibles = [...plantillas]
     .sort((a, b) => (b.actualizada || 0) - (a.actualizada || 0))
     .filter(
       (p) =>
         (fEsp === "todas" ||
-          (fEsp === "global" ? p.especialidad_id == null : String(p.especialidad_id) === fEsp)) &&
+          (fEsp === "global" ? p.area_id == null : String(p.area_id) === fEsp)) &&
         (!q ||
           String(p.nombre || "").toLowerCase().includes(q) ||
           String(p.texto || "").toLowerCase().includes(q))
@@ -555,10 +555,10 @@ function refrescarEditor() {
   actualizarEstadoBotonGuardar();
 }
 
-if (inpEspecialidad) inpEspecialidad.addEventListener("change", refrescarEditor);
+if (inpArea) inpArea.addEventListener("change", refrescarEditor);
 
 function estadoActualEditor() {
-  return JSON.stringify([inpNombre.value, inpMensaje.value, valTemplate(), valTemplateLang(), valTemplateCategoria(), inpEspecialidad ? inpEspecialidad.value : ""]);
+  return JSON.stringify([inpNombre.value, inpMensaje.value, valTemplate(), valTemplateLang(), valTemplateCategoria(), inpArea ? inpArea.value : ""]);
 }
 
 function marcarSnapshot() {
@@ -577,7 +577,7 @@ function hayCambios() {
 function actualizarEstadoBotonGuardar() {
   if (!btnGuardar) return;
   const incompleto = !inpNombre.value.trim() || !inpMensaje.value.trim() ||
-    ((window.snwRol || "") === "usuario" && !(inpEspecialidad && inpEspecialidad.value));
+    ((window.snwRol || "") === "usuario" && !(inpArea && inpArea.value));
   btnGuardar.disabled = !hayCambios() || incompleto;
 }
 
@@ -783,13 +783,13 @@ function abrir(id) {
   tituloForm.textContent = (PUEDE_EDITAR_PLANTILLAS && esPlantillaEditable(p)) ? `Editando: ${p.nombre}` : p.nombre;
   inpNombre.value = p.nombre;
   inpMensaje.value = p.texto;
-  if (inpEspecialidad) {
-    const espVal = p.especialidad_id != null ? String(p.especialidad_id) : "";
-    if (espVal && ![...inpEspecialidad.options].some((o) => o.value === espVal)) {
-      const nombreEsp = nombreEspecialidad(p.especialidad_id) || "Área";
-      inpEspecialidad.add(new Option(nombreEsp, espVal));
+  if (inpArea) {
+    const espVal = p.area_id != null ? String(p.area_id) : "";
+    if (espVal && ![...inpArea.options].some((o) => o.value === espVal)) {
+      const nombreEsp = nombreArea(p.area_id) || "Área";
+      inpArea.add(new Option(nombreEsp, espVal));
     }
-    inpEspecialidad.value = espVal;
+    inpArea.value = espVal;
   }
   if (hayTemplateMeta) {
     inpTemplateLang.value = p.whatsapp_template_lang || "es";
@@ -804,7 +804,7 @@ function abrir(id) {
   inpMensaje.classList.remove("invalido");
   if (hayTemplateMeta) { inpTemplate.classList.remove("invalido"); inpTemplateCategoria.classList.remove("invalido"); }
   actualizarBloqueoCampos();
-  refrescarAvisoSinEspecialidad();
+  refrescarAvisoSinArea();
   refrescarEditor();
   marcarSnapshot();
   renderLista(buscadorEl.value);
@@ -834,7 +834,7 @@ function modoNueva() {
   tituloForm.textContent = "Nueva plantilla";
   inpNombre.value = "";
   inpMensaje.value = "";
-  if (inpEspecialidad) inpEspecialidad.value = "";
+  if (inpArea) inpArea.value = "";
   if (hayTemplateMeta) {
     inpTemplateLang.value = "es";
     inpTemplateCategoria.value = "MARKETING";
@@ -846,7 +846,7 @@ function modoNueva() {
   inpMensaje.classList.remove("invalido");
   if (hayTemplateMeta) { inpTemplate.classList.remove("invalido"); inpTemplateCategoria.classList.remove("invalido"); }
   actualizarBloqueoCampos();
-  refrescarAvisoSinEspecialidad();
+  refrescarAvisoSinArea();
   refrescarEditor();
   marcarSnapshot();
   renderLista(buscadorEl.value);
@@ -953,17 +953,17 @@ formEl.addEventListener("submit", async (e) => {
   setGuardando(true);
 
   try {
-    const especialidad_id = inpEspecialidad && inpEspecialidad.value ? Number(inpEspecialidad.value) : null;
-    if ((window.snwRol || "") === "usuario" && especialidad_id == null) {
+    const area_id = inpArea && inpArea.value ? Number(inpArea.value) : null;
+    if ((window.snwRol || "") === "usuario" && area_id == null) {
       return toast("Debes asociar la plantilla a una de tus áreas asignadas.", "error");
     }
     let fila;
     if (activaId) {
-      fila = await actualizarPlantilla(activaId, nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, especialidad_id);
+      fila = await actualizarPlantilla(activaId, nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id);
       const i = plantillas.findIndex((x) => x.id === activaId);
       if (i >= 0) plantillas[i] = fila;
     } else {
-      fila = await crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, especialidad_id);
+      fila = await crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id);
       plantillas.push(fila);
     }
     setGuardando(false);
@@ -1285,7 +1285,7 @@ function abrirModalConf() {
   aplicarRestriccionAmbiente();
   // Si la plantilla es de un área, el select trae solo esa base;
   // si no, trae las disponibles y restaura la última usada.
-  construirOpcionesBaseConf(p?.especialidad_id ?? null);
+  construirOpcionesBaseConf(p?.area_id ?? null);
   refrescarAvisoDevConf();
   refrescarAvisoAdminConf();
   cargarLimiteAdminConf();
@@ -1313,7 +1313,7 @@ const selBaseConfEl = $("#selBaseConf");
 if (selBaseConfEl) selBaseConfEl.addEventListener("change", () => {
   const v = selBaseConfEl.value;
   if (v.startsWith("esp:")) {
-    localStorage.setItem("snw_modo_conf", "especialidad");
+    localStorage.setItem("snw_modo_conf", "area");
     localStorage.setItem("snw_esp_mensajeria", v.slice(4));
   } else {
     ambienteConf = v;
@@ -1330,7 +1330,7 @@ if (selBaseConfEl) selBaseConfEl.addEventListener("change", () => {
 function refrescarAvisoDevConf() {
   const box = $("#confAvisoDev");
   const base = baseSeleccionadaConf();
-  const esDev = base === "desarrollo" && !modoEspecialidadConf();
+  const esDev = base === "desarrollo" && !modoAreaConf();
   box.hidden = !esDev;
   if (!esDev) return;
   fetch(`api/configuracion?ambiente=${base}`, { headers: authHeaders() })
@@ -1347,7 +1347,7 @@ function refrescarAvisoDevConf() {
 function refrescarAvisoAdminConf() {
   const box = $("#confAvisoAdmin");
   const puedeProd = window.snwPuede && window.snwPuede("envio_produccion");
-  const modoEsp = modoEspecialidadConf();
+  const modoEsp = modoAreaConf();
   const destinoProd = baseSeleccionadaConf() === "produccion" || modoEsp;
   const esAdminProduccion = puedeProd && destinoProd;
   const requiereConf = !puedeProd && destinoProd;
@@ -1381,7 +1381,7 @@ function configurarLimiteConf(pendientes, lim) {
   const range = $("#limiteRangeConf");
   const num = $("#limiteNumConf");
   const nota = $("#limiteNotaConf");
-  const esProd = baseSeleccionadaConf() === "produccion" || modoEspecialidadConf();
+  const esProd = baseSeleccionadaConf() === "produccion" || modoAreaConf();
 
   if (!esProd || pendientes <= 0) {
     fila.hidden = true;
@@ -1507,9 +1507,9 @@ async function actualizarResumenConf() {
   $("#btnLanzarConf").disabled = true;
 
   try {
-    const espId = especialidadEnvioId();
+    const espId = areaEnvioId();
     const cuerpoEnvio = { plantilla_id: activaId, ambiente: ambienteEnvioConf() };
-    if (espId != null) cuerpoEnvio.especialidad_id = espId;
+    if (espId != null) cuerpoEnvio.area_id = espId;
     const res = await fetch("api/notificaciones/destinatarios", {
       method: "POST",
       headers: authHeaders({ "Content-Type": "application/json" }),
@@ -1622,8 +1622,8 @@ $("#btnLanzarConf").addEventListener("click", async () => {
 
   try {
     const cuerpo = { plantilla_id: activaId, ambiente: ambienteEnvioConf() };
-    const espIdLanzar = especialidadEnvioId();
-    if (espIdLanzar != null) cuerpo.especialidad_id = espIdLanzar;
+    const espIdLanzar = areaEnvioId();
+    if (espIdLanzar != null) cuerpo.area_id = espIdLanzar;
     const lim = limiteEnvioConf();
     if (lim != null) cuerpo.limite = lim;
     const res = await fetch("api/notificaciones/enviar", {
@@ -1856,6 +1856,6 @@ if (btnSincronizarMeta) {
 aplicarModoSoloLecturaPlantillas();
 modoVacia();
 cargarMiUsuario();
-cargarEspecialidades();
+cargarAreas();
 cargar();
 setInterval(revisarPlantillasEnSegundoPlano, 30000);

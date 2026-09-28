@@ -17,7 +17,7 @@ from datetime import datetime
 import httpx
 
 from db import conectar, config_get, log_error, tabla_pacientes
-import servicio_especialidades
+import servicio_areas
 from wa_rate_limit import (
     gobernador, es_error_throttle, clasificar_error, reintentos_throttle, TOPE_ESPERA_S,
 )
@@ -960,13 +960,13 @@ class WhatsAppService:
     # ---------- Registro de respuestas y estados ----------
     @staticmethod
     def _tablas_pac() -> tuple:
-        """Tablas legacy (dev + prod) más las de especialidades registradas."""
+        """Tablas legacy (dev + prod) más las de areas registradas."""
         base = (tabla_pacientes("desarrollo"), tabla_pacientes("produccion"))
         try:
             extra = tuple(r["nombre_tabla_base"]
-                          for r in servicio_especialidades.listar_tablas_especialidades())
+                          for r in servicio_areas.listar_tablas_areas())
         except Exception as e:
-            log_error("_tablas_pac: especialidades", e)
+            log_error("_tablas_pac: areas", e)
             extra = ()
         return base + extra
 
@@ -981,7 +981,7 @@ class WhatsAppService:
     def _pacientes_con_tel(self, cur, telefono: str) -> list[dict]:
         """Filas (id, nombre, telefono, whatsapp_opt_out, tabla) de los
         pacientes cuyo teléfono coincide, en las tablas legacy y en las de
-        especialidades. log_envios es compartida."""
+        areas. log_envios es compartida."""
         match = _TEL_MATCH.format(col="telefono")
         hallados = []
         for t in self._tablas_pac():
@@ -1043,11 +1043,11 @@ class WhatsAppService:
                     except Exception:
                         pass  # esquema sin la columna
                 p0 = pacientes[0]
-                esp0 = servicio_especialidades.especialidad_por_tabla(p0["tabla"])
+                esp0 = servicio_areas.area_por_tabla(p0["tabla"])
                 cur.execute(
                     "INSERT INTO log_envios (envio_id, paciente_id, nombre_paciente, numero_telefono,"
                     " mensaje, plantilla_clave, estado_envio, respuesta, descripcion_error,"
-                    " especialidad_id, tabla_pacientes)"
+                    " area_id, tabla_pacientes)"
                     " VALUES (NULL, %s, %s, %s, %s, 'respuesta', 'enviado', 'respondio', NULL, %s, %s)",
                     (p0["id"], p0["nombre"], p0["telefono"], (texto or "")[:2000],
                      esp0["id"] if esp0 else None, p0["tabla"] if esp0 else None),
@@ -1074,7 +1074,7 @@ class WhatsAppService:
         return bool((cur.fetchone() or {}).get("reciente"))
 
     def _bloquea_flip_flop(self, cur, p: dict) -> bool:
-        """Anti flip-flop: en producción y en especialidades SIEMPRE; en la
+        """Anti flip-flop: en producción y en areas SIEMPRE; en la
         base de desarrollo legacy solo si la opción `anti_flip_flop_dev` está
         activa (desactivarla permite probar el flujo sin límite en desarrollo)."""
         if p["tabla"] == tabla_pacientes("desarrollo"):
@@ -1235,11 +1235,11 @@ class WhatsAppService:
                 # inserta con los datos del primer paciente encontrado).
                 p0 = pacientes[0]
                 clave_oferta0 = self._ultima_plantilla_ofertada(cur, p0["id"], p0["tabla"])
-                esp0 = servicio_especialidades.especialidad_por_tabla(p0["tabla"])
+                esp0 = servicio_areas.area_por_tabla(p0["tabla"])
                 cur.execute(
                     "INSERT INTO log_envios (envio_id, paciente_id, nombre_paciente, numero_telefono,"
                     " mensaje, plantilla_clave, estado_envio, respuesta, descripcion_error,"
-                    " especialidad_id, tabla_pacientes)"
+                    " area_id, tabla_pacientes)"
                     " VALUES (NULL, %s, %s, %s, %s, 'interes_boton', 'enviado', 'respondio', NULL, %s, %s)",
                     (p0["id"], p0["nombre"], p0["telefono"],
                      f"Interesado en la oferta del {_hoy_es()}, plantilla '{clave_oferta0 or '—'}'.",
@@ -1274,11 +1274,11 @@ class WhatsAppService:
                 # mismo criterio que _registrar_respuesta).
                 p0 = pacientes[0]
                 clave_oferta0 = self._ultima_plantilla_ofertada(cur, p0["id"], p0["tabla"])
-                esp0 = servicio_especialidades.especialidad_por_tabla(p0["tabla"])
+                esp0 = servicio_areas.area_por_tabla(p0["tabla"])
                 cur.execute(
                     "INSERT INTO log_envios (envio_id, paciente_id, nombre_paciente, numero_telefono,"
                     " mensaje, plantilla_clave, estado_envio, respuesta, descripcion_error,"
-                    " especialidad_id, tabla_pacientes)"
+                    " area_id, tabla_pacientes)"
                     " VALUES (NULL, %s, %s, %s, %s, 'no_interes_boton', 'enviado', 'respondio', NULL, %s, %s)",
                     (p0["id"], p0["nombre"], p0["telefono"],
                      f"No interesado en la oferta del {_hoy_es()}, plantilla '{clave_oferta0 or '—'}'.",

@@ -39,48 +39,48 @@ const num = (n) => Number(n || 0).toLocaleString("es-CL");
 
 // Área (solo admin/dev): "" = global producción; con id filtra
 // los tres endpoints (resumen, gráfico y costos).
-let especialidadesEst = [];
-const selEspecialidadEst = $("#selEspecialidadEst");
+let areasEst = [];
+const selAreaEst = $("#selAreaEst");
 
-function especialidadEstActual() {
-  const v = selEspecialidadEst ? selEspecialidadEst.value : "";
+function areaEstActual() {
+  const v = selAreaEst ? selAreaEst.value : "";
   return v ? Number(v) : null;
 }
 
 function qsEspEst() {
-  const esp = especialidadEstActual();
-  return esp ? `&especialidad_id=${esp}` : "";
+  const esp = areaEstActual();
+  return esp ? `&area_id=${esp}` : "";
 }
 
-function nombreEspecialidadEst() {
-  const esp = especialidadEstActual();
-  const e = especialidadesEst.find((x) => x.id === esp);
+function nombreAreaEst() {
+  const esp = areaEstActual();
+  const e = areasEst.find((x) => x.id === esp);
   return e ? e.nombre_visible : "";
 }
 
-async function cargarEspecialidadesEst() {
-  if (!selEspecialidadEst) return;
+async function cargarAreasEst() {
+  if (!selAreaEst) return;
   try {
-    const res = await fetch("api/especialidades/mias", { headers: authHeaders(), cache: "no-store" });
+    const res = await fetch("api/areas/mias", { headers: authHeaders(), cache: "no-store" });
     if (!res.ok) throw new Error();
-    especialidadesEst = await res.json();
+    areasEst = await res.json();
   } catch {
-    especialidadesEst = [];
+    areasEst = [];
   }
   const guardada = localStorage.getItem("snw_esp_estadisticas") || "";
-  selEspecialidadEst.innerHTML =
+  selAreaEst.innerHTML =
     `<option value="">Todas</option>` +
-    especialidadesEst.map((e) => `<option value="${e.id}">${e.nombre_visible} (${e.nombre_tabla_base})</option>`).join("");
-  if (guardada && especialidadesEst.some((e) => String(e.id) === guardada)) {
-    selEspecialidadEst.value = guardada;
+    areasEst.map((e) => `<option value="${e.id}">${e.nombre_visible} (${e.nombre_tabla_base})</option>`).join("");
+  if (guardada && areasEst.some((e) => String(e.id) === guardada)) {
+    selAreaEst.value = guardada;
   } else {
     localStorage.removeItem("snw_esp_estadisticas");
   }
-  selEspecialidadEst.hidden = !especialidadesEst.length;
+  selAreaEst.hidden = !areasEst.length;
 }
 
-if (selEspecialidadEst) selEspecialidadEst.addEventListener("change", () => {
-  const v = selEspecialidadEst.value;
+if (selAreaEst) selAreaEst.addEventListener("change", () => {
+  const v = selAreaEst.value;
   if (v) localStorage.setItem("snw_esp_estadisticas", v);
   else localStorage.removeItem("snw_esp_estadisticas");
   recargarTodo();
@@ -104,8 +104,8 @@ async function cargar() {
   // El botón lo deshabilita/rehabilita el cooldown de snwConCooldown, no
   // esta función (ver el addEventListener más abajo).
   try {
-    const esp = especialidadEstActual();
-    const res = await fetch(`api/estadisticas${esp ? `?especialidad_id=${esp}` : ""}`, { headers: authHeaders(), cache: "no-store" });
+    const esp = areaEstActual();
+    const res = await fetch(`api/estadisticas${esp ? `?area_id=${esp}` : ""}`, { headers: authHeaders(), cache: "no-store" });
     if (res.status === 401) { window.snwSesionExpirada(); return; }
     if (!res.ok) throw new Error();
     render(await res.json());
@@ -118,7 +118,7 @@ function render(d) {
   $("#nombreMes").textContent = nombreMes(d.mes);
   $("#enviadosMes").textContent = num(d.enviados_mes);
 
-  const espNombre = (d.especialidad && d.especialidad.nombre_visible) || nombreEspecialidadEst();
+  const espNombre = (d.area && d.area.nombre_visible) || nombreAreaEst();
   const heroSub = document.querySelector(".hero-sub");
   if (heroSub) {
     heroSub.textContent = espNombre
@@ -560,7 +560,7 @@ window.snwCargarEstadisticas = function () {
   if (yaCargada) return;
   yaCargada = true;
   (async () => {
-    await cargarEspecialidadesEst();
+    await cargarAreasEst();
     recargarTodo();
   })();
 };

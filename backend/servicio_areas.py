@@ -1,14 +1,14 @@
-"""Especialidades y roles dinámicos (Fase 1 multi-especialidad).
+"""Especialidades y roles din├ímicos (Fase 1 multi-especialidad).
 
 Reglas de esta fase:
 - Una sola tabla de pacientes por especialidad: ``pacientes_<slug>`` (SIN
   sufijo de entorno ``_dev`` / ``_prod``).
-- El ``slug`` se genera del nombre visible: minúsculas, sin acentos, sin
-  espacios ni caracteres no alfanuméricos (``Kinesiología`` -> ``kinesiologia``).
+- El ``slug`` se genera del nombre visible: min├║sculas, sin acentos, sin
+  espacios ni caracteres no alfanum├®ricos (``Kinesiolog├¡a`` -> ``kinesiologia``).
 - Nombre visible duplicado: el backend NO crea nada solo; devuelve las
-  coincidencias para que la UI pregunte «utilizar existente / crear nueva».
+  coincidencias para que la UI pregunte ┬½utilizar existente / crear nueva┬╗.
   Con ``modo="nueva"`` se genera ``pacientes_<slug><n>`` con el primer sufijo
-  numérico libre (si existen base, 2 y 4, la nueva usa 3).
+  num├®rico libre (si existen base, 2 y 4, la nueva usa 3).
 - Cada especialidad tiene su propio rol (``roles_area``) y los usuarios
   se vinculan en ``usuario_area_roles``. El rol global de `usuarios`
   (usuario/administrador/desarrollador) NO se toca en esta fase.
@@ -22,15 +22,15 @@ import unicodedata
 from db import conectar, log_error
 from telefono import normalizar_telefono
 
-# Nombre físico válido de tabla de especialidad. Los nombres legacy
-# (`pacientes_dev`, `pacientes_prod`) también calzan el patrón, por eso una
-# tabla solo cuenta como especialidad si está registrada en `areas`.
+# Nombre f├¡sico v├ílido de tabla de especialidad. Los nombres legacy
+# (`pacientes_dev`, `pacientes_prod`) tambi├®n calzan el patr├│n, por eso una
+# tabla solo cuenta como especialidad si est├í registrada en `areas`.
 TABLA_RE = re.compile(r"^pacientes_[a-z0-9_]{1,54}$")
 
-# La subida de CSV se rechaza si supera este tamaño (en bytes).
+# La subida de CSV se rechaza si supera este tama├▒o (en bytes).
 CSV_MAX_BYTES = 5 * 1024 * 1024
 
-# Esquema de las tablas dinámicas: el mismo de pacientes_dev/prod incluyendo
+# Esquema de las tablas din├ímicas: el mismo de pacientes_dev/prod incluyendo
 # las columnas que hoy agregan las migraciones, para no depender de ALTERs.
 _ESQUEMA_PACIENTES = (
     "CREATE TABLE IF NOT EXISTS {tabla} ("
@@ -54,9 +54,9 @@ _ESQUEMA_PACIENTES = (
 
 
 def migrar_tablas_areas(cur) -> None:
-    """Renombra las tablas del modelo a áreas: especialidades -> areas,
+    """Renombra las tablas del modelo a ├íreas: especialidades -> areas,
     roles_especialidad -> roles_area, usuario_especialidad_roles ->
-    usuario_area_roles. RENAME conserva datos e índices. Idempotente: si la
+    usuario_area_roles. RENAME conserva datos e ├¡ndices. Idempotente: si la
     tabla nueva ya existe no hace nada."""
     for vieja, nueva in (("especialidades", "areas"),
                          ("roles_especialidad", "roles_area"),
@@ -71,12 +71,35 @@ def migrar_tablas_areas(cur) -> None:
             cur.execute(f"RENAME TABLE {vieja} TO {nueva}")
         elif vieja in hay and nueva in hay:
             log_error(f"migrar_tablas_areas: existen {vieja} y {nueva}; se conserva {nueva}")
+    # Columna especialidad_id -> area_id en roles_area (conserva datos).
+    cur.execute(
+        "SELECT COLUMN_NAME FROM information_schema.COLUMNS"
+        " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'roles_area'"
+        "   AND COLUMN_NAME IN ('especialidad_id', 'area_id')"
+    )
+    cols = {r["COLUMN_NAME"] for r in cur.fetchall()}
+    if "especialidad_id" in cols and "area_id" not in cols:
+        cur.execute("ALTER TABLE roles_area CHANGE COLUMN especialidad_id area_id INT NOT NULL")
+    cur.execute(
+        "SELECT COUNT(*) AS n FROM information_schema.STATISTICS"
+        " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'roles_area'"
+        "   AND INDEX_NAME = 'uq_especialidad'"
+    )
+    if (cur.fetchone() or {}).get("n"):
+        cur.execute("ALTER TABLE roles_area DROP INDEX uq_especialidad")
+    cur.execute(
+        "SELECT COUNT(*) AS n FROM information_schema.STATISTICS"
+        " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'roles_area'"
+        "   AND INDEX_NAME = 'uq_area'"
+    )
+    if not (cur.fetchone() or {}).get("n"):
+        cur.execute("ALTER TABLE roles_area ADD UNIQUE KEY uq_area (area_id)")
 
 
-def asegurar_tablas_especialidades(cur) -> None:
+def asegurar_tablas_areas(cur) -> None:
     """Crea las tablas del modelo multi-especialidad (idempotente).
 
-    Recibe el cursor de la transacción abierta de `asegurar_tabla_config`."""
+    Recibe el cursor de la transacci├│n abierta de `asegurar_tabla_config`."""
     cur.execute(
         "CREATE TABLE IF NOT EXISTS areas ("
         "  id INT AUTO_INCREMENT PRIMARY KEY,"
@@ -89,10 +112,10 @@ def asegurar_tablas_especialidades(cur) -> None:
     cur.execute(
         "CREATE TABLE IF NOT EXISTS roles_area ("
         "  id INT AUTO_INCREMENT PRIMARY KEY,"
-        "  especialidad_id INT NOT NULL,"
+        "  area_id INT NOT NULL,"
         "  nombre VARCHAR(150) NOT NULL,"
         "  descripcion VARCHAR(255) NOT NULL DEFAULT '',"
-        "  UNIQUE KEY uq_especialidad (especialidad_id),"
+        "  UNIQUE KEY uq_area (area_id),"
         "  INDEX idx_rol_nombre (nombre)"
         ") CHARACTER SET utf8mb4"
     )
@@ -108,7 +131,7 @@ def asegurar_tablas_especialidades(cur) -> None:
 
 
 def slug_base(nombre_visible: str) -> str:
-    """`Kinesiología Sede Maipú` -> `kinesiologiasedemaipu`."""
+    """`Kinesiolog├¡a Sede Maip├║` -> `kinesiologiasedemaipu`."""
     n = unicodedata.normalize("NFKD", nombre_visible or "")
     n = n.encode("ascii", "ignore").decode("ascii")
     return re.sub(r"[^a-zA-Z0-9]", "", n).lower()[:54]
@@ -119,8 +142,8 @@ def tabla_valida(nombre: str) -> bool:
 
 
 def normalizar_texto(t: str) -> str:
-    """Nombre/apellido tipo "David Araya Rodriguez": sin espacios de más y
-    en tipo Título (primera letra de cada palabra en mayúscula)."""
+    """Nombre/apellido tipo "David Araya Rodriguez": sin espacios de m├ís y
+    en tipo T├¡tulo (primera letra de cada palabra en may├║scula)."""
     return " ".join((t or "").split()).title()
 
 
@@ -134,7 +157,7 @@ def _tabla_fisica_existe(cur, tabla: str) -> bool:
 
 
 def tabla_fisica_existe(tabla: str) -> bool:
-    """True si la tabla física existe en `snw_base`."""
+    """True si la tabla f├¡sica existe en `snw_base`."""
     if not tabla_valida(tabla):
         return False
     try:
@@ -145,32 +168,32 @@ def tabla_fisica_existe(tabla: str) -> bool:
         return False
 
 
-def listar_especialidades() -> list[dict]:
+def listar_areas() -> list[dict]:
     try:
         with conectar() as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT e.id, e.nombre_visible, e.nombre_tabla_base, e.fecha_creacion,"
                 "       r.id AS rol_id, r.nombre AS rol_nombre"
                 " FROM areas e"
-                " LEFT JOIN roles_area r ON r.especialidad_id = e.id"
+                " LEFT JOIN roles_area r ON r.area_id = e.id"
                 " ORDER BY e.nombre_visible"
             )
             return cur.fetchall()
     except Exception as e:
-        log_error("listar_especialidades", e)
+        log_error("listar_areas", e)
         return []
 
 
-def obtener_especialidad(especialidad_id: int) -> dict | None:
+def obtener_area(area_id: int) -> dict | None:
     try:
         with conectar() as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT e.id, e.nombre_visible, e.nombre_tabla_base,"
                 "       r.id AS rol_id, r.nombre AS rol_nombre"
                 " FROM areas e"
-                " LEFT JOIN roles_area r ON r.especialidad_id = e.id"
+                " LEFT JOIN roles_area r ON r.area_id = e.id"
                 " WHERE e.id = %s",
-                (int(especialidad_id),),
+                (int(area_id),),
             )
             esp = cur.fetchone()
             if esp and tabla_valida(esp["nombre_tabla_base"]) \
@@ -181,16 +204,16 @@ def obtener_especialidad(especialidad_id: int) -> dict | None:
                 esp["total_pacientes"] = 0
             return esp
     except Exception as e:
-        log_error("obtener_especialidad", e)
+        log_error("obtener_area", e)
         return None
 
 
-def preparar_especialidad(nombre_visible: str, modo: str = "preguntar") -> dict:
-    """Decide qué hacer ante un pedido de creación.
+def preparar_area(nombre_visible: str, modo: str = "preguntar") -> dict:
+    """Decide qu├® hacer ante un pedido de creaci├│n.
 
     Devuelve `{"decision": "preguntar"|"reutilizar"|"crear", ...}`. Con
     `decision == "preguntar"` el backend no crea nada: la UI debe mostrar las
-    coincidencias y pedir «utilizar existente / crear nueva».
+    coincidencias y pedir ┬½utilizar existente / crear nueva┬╗.
     """
     nombre = (nombre_visible or "").strip()
     if not nombre:
@@ -208,7 +231,7 @@ def preparar_especialidad(nombre_visible: str, modo: str = "preguntar") -> dict:
             "SELECT e.id, e.nombre_visible, e.nombre_tabla_base,"
             "       r.id AS rol_id, r.nombre AS rol_nombre"
             " FROM areas e"
-            " LEFT JOIN roles_area r ON r.especialidad_id = e.id"
+            " LEFT JOIN roles_area r ON r.area_id = e.id"
             " WHERE LOWER(e.nombre_visible) = LOWER(%s) ORDER BY e.id",
             (nombre,),
         )
@@ -221,7 +244,7 @@ def preparar_especialidad(nombre_visible: str, modo: str = "preguntar") -> dict:
             "aviso_duplicada": bool(existentes)}
 
 
-def crear_especialidad(nombre: str, slug: str) -> dict:
+def crear_area(nombre: str, slug: str) -> dict:
     """Crea la especialidad, su tabla `pacientes_<slug>` y su rol."""
     base = f"pacientes_{slug}"
     if not tabla_valida(base):
@@ -232,7 +255,7 @@ def crear_especialidad(nombre: str, slug: str) -> dict:
         tabla = base
         sufijo = 0
         if base in en_uso or _tabla_fisica_existe(cur, base):
-            # Primer sufijo numérico libre: con base, 2 y 4 ocupados, usa 3.
+            # Primer sufijo num├®rico libre: con base, 2 y 4 ocupados, usa 3.
             n = 2
             while True:
                 cand = f"{base}{n}"
@@ -254,7 +277,7 @@ def crear_especialidad(nombre: str, slug: str) -> dict:
         )
         esp_id = cur.lastrowid
         cur.execute(
-            "INSERT INTO roles_area (especialidad_id, nombre, descripcion)"
+            "INSERT INTO roles_area (area_id, nombre, descripcion)"
             " VALUES (%s, %s, %s)",
             (esp_id, visible, f"Acceso a la especialidad {visible}"),
         )
@@ -263,35 +286,35 @@ def crear_especialidad(nombre: str, slug: str) -> dict:
             "nombre_tabla_base": tabla, "rol": visible}
 
 
-def renombrar_especialidad(especialidad_id: int, nuevo_visible: str) -> dict:
-    """Cambia el nombre visible (y el del rol). La tabla física NO cambia."""
+def renombrar_area(area_id: int, nuevo_visible: str) -> dict:
+    """Cambia el nombre visible (y el del rol). La tabla f├¡sica NO cambia."""
     nombre = (nuevo_visible or "").strip()
     if not nombre:
         raise ValueError("nombre_vacio")
     if len(nombre) > 150:
         raise ValueError("nombre_largo")
     with conectar() as conn, conn.cursor() as cur:
-        cur.execute("SELECT id FROM areas WHERE id = %s", (int(especialidad_id),))
+        cur.execute("SELECT id FROM areas WHERE id = %s", (int(area_id),))
         if not cur.fetchone():
             raise ValueError("no_existe")
         cur.execute(
             "SELECT id FROM areas WHERE LOWER(nombre_visible) = LOWER(%s)"
             " AND id <> %s",
-            (nombre, int(especialidad_id)),
+            (nombre, int(area_id)),
         )
         if cur.fetchone():
             raise ValueError("nombre_duplicado")
         cur.execute(
             "UPDATE areas SET nombre_visible = %s WHERE id = %s",
-            (nombre, int(especialidad_id)),
+            (nombre, int(area_id)),
         )
         cur.execute(
             "UPDATE roles_area SET nombre = %s, descripcion = %s"
-            " WHERE especialidad_id = %s",
-            (nombre, f"Acceso a la especialidad {nombre}", int(especialidad_id)),
+            " WHERE area_id = %s",
+            (nombre, f"Acceso a la especialidad {nombre}", int(area_id)),
         )
         conn.commit()
-    return obtener_especialidad(int(especialidad_id)) or {}
+    return obtener_area(int(area_id)) or {}
 
 
 def usuario_id_por_correo(correo: str) -> int | None:
@@ -308,7 +331,7 @@ def usuario_id_por_correo(correo: str) -> int | None:
         return None
 
 
-def especialidades_de_usuario(usuario_id: int) -> list[dict]:
+def areas_de_usuario(usuario_id: int) -> list[dict]:
     try:
         with conectar() as conn, conn.cursor() as cur:
             cur.execute(
@@ -316,32 +339,32 @@ def especialidades_de_usuario(usuario_id: int) -> list[dict]:
                 "       r.id AS rol_id, r.nombre AS rol_nombre"
                 " FROM usuario_area_roles uer"
                 " JOIN roles_area r ON r.id = uer.rol_id"
-                " JOIN areas e ON e.id = r.especialidad_id"
+                " JOIN areas e ON e.id = r.area_id"
                 " WHERE uer.usuario_id = %s"
                 " ORDER BY e.nombre_visible",
                 (int(usuario_id),),
             )
             return cur.fetchall()
     except Exception as e:
-        log_error("especialidades_de_usuario", e)
+        log_error("areas_de_usuario", e)
         return []
 
 
-def puede_acceder_especialidad(es_privilegiado: bool, usuario_id: int | None,
-                               especialidad_id: int) -> bool:
+def puede_acceder_area(es_privilegiado: bool, usuario_id: int | None,
+                               area_id: int) -> bool:
     """Admin/dev acceden a todo; el resto solo a sus areas asignadas."""
     if es_privilegiado:
         return True
     if not usuario_id:
         return False
-    return any(e["id"] == int(especialidad_id)
-               for e in especialidades_de_usuario(usuario_id))
+    return any(e["id"] == int(area_id)
+               for e in areas_de_usuario(usuario_id))
 
 
-def asignar_rol_especialidad(especialidad_id: int, usuario_id: int) -> dict:
+def asignar_rol_area(area_id: int, usuario_id: int) -> dict:
     with conectar() as conn, conn.cursor() as cur:
-        cur.execute("SELECT id, nombre FROM roles_area WHERE especialidad_id = %s",
-                    (int(especialidad_id),))
+        cur.execute("SELECT id, nombre FROM roles_area WHERE area_id = %s",
+                    (int(area_id),))
         rol = cur.fetchone()
         if not rol:
             raise ValueError("no_existe")
@@ -352,26 +375,26 @@ def asignar_rol_especialidad(especialidad_id: int, usuario_id: int) -> dict:
         )
         conn.commit()
     return {"rol_id": int(rol["id"]), "rol": rol["nombre"],
-            "especialidad_id": int(especialidad_id)}
+            "area_id": int(area_id)}
 
 
-def retirar_rol_especialidad(especialidad_id: int, usuario_id: int) -> bool:
+def retirar_rol_area(area_id: int, usuario_id: int) -> bool:
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(
             "DELETE uer FROM usuario_area_roles uer"
             " JOIN roles_area r ON r.id = uer.rol_id"
-            " WHERE uer.usuario_id = %s AND r.especialidad_id = %s",
-            (int(usuario_id), int(especialidad_id)),
+            " WHERE uer.usuario_id = %s AND r.area_id = %s",
+            (int(usuario_id), int(area_id)),
         )
         conn.commit()
         return (cur.rowcount or 0) > 0
 
 
-def eliminar_paciente_especialidad(especialidad_id: int, paciente_id: int) -> bool:
+def eliminar_paciente_area(area_id: int, paciente_id: int) -> bool:
     """Borra UN registro de la tabla de la especialidad (solo admin/dev desde
-    el endpoint). También borra sus filas de log propias (aisladas por tabla);
+    el endpoint). Tambi├®n borra sus filas de log propias (aisladas por tabla);
     el resto del historial no se toca."""
-    esp = obtener_especialidad(int(especialidad_id))
+    esp = obtener_area(int(area_id))
     if not esp:
         raise ValueError("no_existe")
     tabla = esp["nombre_tabla_base"]
@@ -391,19 +414,19 @@ def eliminar_paciente_especialidad(especialidad_id: int, paciente_id: int) -> bo
         return borrado
 
 
-def eliminar_tabla_especialidad(especialidad_id: int) -> dict:
+def eliminar_tabla_area(area_id: int) -> dict:
     """Elimina la especialidad entera (solo admin/dev desde el endpoint):
-    tabla física, rol, asignaciones y fila de especialidad. El historial de
-    envíos (`envios`/`log_envios`) se conserva como trazabilidad."""
-    esp = obtener_especialidad(int(especialidad_id))
+    tabla f├¡sica, rol, asignaciones y fila de especialidad. El historial de
+    env├¡os (`envios`/`log_envios`) se conserva como trazabilidad."""
+    esp = obtener_area(int(area_id))
     if not esp:
         raise ValueError("no_existe")
     tabla = esp["nombre_tabla_base"]
     if not tabla_valida(tabla):
         raise ValueError("tabla_invalida")
     with conectar() as conn, conn.cursor() as cur:
-        cur.execute("SELECT id FROM roles_area WHERE especialidad_id = %s",
-                    (int(especialidad_id),))
+        cur.execute("SELECT id FROM roles_area WHERE area_id = %s",
+                    (int(area_id),))
         rol = cur.fetchone()
         if rol:
             cur.execute("DELETE FROM usuario_area_roles WHERE rol_id = %s",
@@ -411,20 +434,20 @@ def eliminar_tabla_especialidad(especialidad_id: int) -> dict:
             cur.execute("DELETE FROM roles_area WHERE id = %s", (int(rol["id"]),))
         if _tabla_fisica_existe(cur, tabla):
             cur.execute(f"DROP TABLE {tabla}")
-        cur.execute("DELETE FROM areas WHERE id = %s", (int(especialidad_id),))
+        cur.execute("DELETE FROM areas WHERE id = %s", (int(area_id),))
         conn.commit()
-    return {"id": int(especialidad_id), "nombre_visible": esp["nombre_visible"],
+    return {"id": int(area_id), "nombre_visible": esp["nombre_visible"],
             "nombre_tabla_base": tabla}
 
 
-def importar_pacientes_csv(especialidad_id: int, datos: bytes) -> dict:
+def importar_pacientes_csv(area_id: int, datos: bytes) -> dict:
     """Valida un CSV y lo inserta en la tabla de la especialidad.
 
     Columnas obligatorias: `nombre`, `apellido`, `telefono` (UTF-8).
-    Teléfonos normalizados con `telefono.py` (`+569XXXXXXXX`); los campos del
-    esquema SNW se inicializan (`pendiente`, sin opt-out ni interés).
+    Tel├®fonos normalizados con `telefono.py` (`+569XXXXXXXX`); los campos del
+    esquema SNW se inicializan (`pendiente`, sin opt-out ni inter├®s).
     """
-    esp = obtener_especialidad(int(especialidad_id))
+    esp = obtener_area(int(area_id))
     if not esp:
         raise ValueError("no_existe")
     tabla = esp["nombre_tabla_base"]
@@ -462,7 +485,7 @@ def importar_pacientes_csv(especialidad_id: int, datos: bytes) -> dict:
             telefono = normalizar_telefono(telefono_crudo)
             if telefono is None:
                 errores.append({"fila": nro,
-                                "motivo": f"Formato de teléfono inválido: '{telefono_crudo}'"})
+                                "motivo": f"Formato de tel├®fono inv├ílido: '{telefono_crudo}'"})
                 continue
             if telefono in existentes or telefono in vistos_archivo:
                 duplicados += 1
@@ -482,23 +505,23 @@ def importar_pacientes_csv(especialidad_id: int, datos: bytes) -> dict:
             "errores": errores}
 
 
-def listar_tablas_especialidades() -> list[dict]:
+def listar_tablas_areas() -> list[dict]:
     """[{id, nombre_tabla_base}] para construir listas blancas (webhook, etc.)."""
     try:
         with conectar() as conn, conn.cursor() as cur:
             cur.execute("SELECT id, nombre_tabla_base FROM areas ORDER BY id")
             return cur.fetchall()
     except Exception as e:
-        log_error("listar_tablas_especialidades", e)
+        log_error("listar_tablas_areas", e)
         return []
 
 
-def ids_de_especialidades() -> list[int]:
-    return [int(r["id"]) for r in listar_tablas_especialidades()]
+def ids_de_areas() -> list[int]:
+    return [int(r["id"]) for r in listar_tablas_areas()]
 
 
-def especialidad_por_tabla(tabla: str) -> dict | None:
-    """Especialidad registrada para una tabla física (None si no es de
+def area_por_tabla(tabla: str) -> dict | None:
+    """Especialidad registrada para una tabla f├¡sica (None si no es de
     especialidad: tablas legacy u otras)."""
     if not tabla_valida(tabla):
         return None
@@ -508,21 +531,21 @@ def especialidad_por_tabla(tabla: str) -> dict | None:
                 "SELECT e.id, e.nombre_visible, e.nombre_tabla_base,"
                 "       r.id AS rol_id, r.nombre AS rol_nombre"
                 " FROM areas e"
-                " LEFT JOIN roles_area r ON r.especialidad_id = e.id"
+                " LEFT JOIN roles_area r ON r.area_id = e.id"
                 " WHERE e.nombre_tabla_base = %s",
                 (tabla,),
             )
             return cur.fetchone()
     except Exception as e:
-        log_error("especialidad_por_tabla", e)
+        log_error("area_por_tabla", e)
         return None
 
 
-def especialidades_ids_de_usuario(usuario_id: int) -> list[int]:
-    return [int(e["id"]) for e in especialidades_de_usuario(usuario_id)]
+def areas_ids_de_usuario(usuario_id: int) -> list[int]:
+    return [int(e["id"]) for e in areas_de_usuario(usuario_id)]
 
 
-def especialidades_por_usuarios() -> dict:
+def areas_por_usuarios() -> dict:
     """{login: [{id, nombre_visible}]} para enriquecer el listado de cuentas."""
     try:
         with conectar() as conn, conn.cursor() as cur:
@@ -530,7 +553,7 @@ def especialidades_por_usuarios() -> dict:
                 "SELECT u.usuario, e.id, e.nombre_visible"
                 " FROM usuario_area_roles uer"
                 " JOIN roles_area r ON r.id = uer.rol_id"
-                " JOIN areas e ON e.id = r.especialidad_id"
+                " JOIN areas e ON e.id = r.area_id"
                 " JOIN usuarios u ON u.id = uer.usuario_id"
                 " ORDER BY u.usuario, e.nombre_visible"
             )
@@ -540,14 +563,14 @@ def especialidades_por_usuarios() -> dict:
                     {"id": int(r["id"]), "nombre_visible": r["nombre_visible"]})
             return out
     except Exception as e:
-        log_error("especialidades_por_usuarios", e)
+        log_error("areas_por_usuarios", e)
         return {}
 
 
-def correos_supervisores_especialidad(especialidad_id: int) -> list[dict]:
+def correos_supervisores_area(area_id: int) -> list[dict]:
     """Supervisores activos asignados a la especialidad que tienen un correo
-    contactable (login si es correo, si no el de recuperación). Se usa para
-    avisarles las solicitudes de envío en producción de su especialidad."""
+    contactable (login si es correo, si no el de recuperaci├│n). Se usa para
+    avisarles las solicitudes de env├¡o en producci├│n de su especialidad."""
     try:
         with conectar() as conn, conn.cursor() as cur:
             cur.execute(
@@ -555,8 +578,8 @@ def correos_supervisores_especialidad(especialidad_id: int) -> list[dict]:
                 " FROM usuario_area_roles uer"
                 " JOIN roles_area r ON r.id = uer.rol_id"
                 " JOIN usuarios u ON u.id = uer.usuario_id"
-                " WHERE r.especialidad_id = %s AND u.rol = 'supervisor' AND u.activo = 1",
-                (int(especialidad_id),),
+                " WHERE r.area_id = %s AND u.rol = 'supervisor' AND u.activo = 1",
+                (int(area_id),),
             )
             out = []
             for row in cur.fetchall():
@@ -569,5 +592,5 @@ def correos_supervisores_especialidad(especialidad_id: int) -> list[dict]:
                                 "correo": correo})
             return out
     except Exception as e:
-        log_error("correos_supervisores_especialidad", e)
+        log_error("correos_supervisores_area", e)
         return []

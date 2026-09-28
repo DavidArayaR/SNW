@@ -1,5 +1,5 @@
 /* Gestión de áreas y sus roles (administrador / desarrollador).
-   Página «Especialidades» (especialidades.html) */
+   Página «Areas» (areas.html) */
 (function () {
 const $ = (s) => document.querySelector(s);
 
@@ -9,8 +9,8 @@ function authHeaders(extra = {}) {
 
 if (!localStorage.getItem("snw_token")) location.replace("login.html");
 
-const selEl = $("#selEspecialidad");
-const detalleEl = $("#detalleEspecialidad");
+const selEl = $("#selArea");
+const detalleEl = $("#detalleArea");
 const vacioEl = $("#espVacio");
 const msgEl = $("#espMsg");
 const toastEl = $("#toast");
@@ -47,7 +47,7 @@ async function cargar() {
   yaCargada = true;
   try {
     const [re, ru] = await Promise.all([
-      fetch("api/especialidades", { headers: authHeaders(), cache: "no-store" }),
+      fetch("api/areas", { headers: authHeaders(), cache: "no-store" }),
       fetch("api/usuarios", { headers: authHeaders(), cache: "no-store" }),
     ]);
     if (re.status === 401 || ru.status === 401) { window.snwSesionExpirada(); return; }
@@ -62,12 +62,12 @@ async function cargar() {
   }
 }
 
-window.snwCargarEspecialidades = function () {
+window.snwCargarAreas = function () {
   if (yaCargada) return;
   cargar();
 };
 
-const btnActualizar = $("#btnActualizarEspecialidades");
+const btnActualizar = $("#btnActualizarAreas");
 if (btnActualizar) btnActualizar.addEventListener("click", () => { yaCargada = false; cargar(); });
 
 function fmtFecha(f) {
@@ -99,7 +99,7 @@ if (selEl) selEl.addEventListener("change", () => {
 
 function usuariosConRol(espId) {
   return (estado.usuarios || []).filter((u) =>
-    (u.especialidades || []).some((e) => e.id === espId));
+    (u.areas || []).some((e) => e.id === espId));
 }
 
 function usuariosAgregables(espId) {
@@ -186,7 +186,7 @@ async function renombrar(card) {
   const nombre = card.querySelector("[data-nombre]").value.trim();
   if (!nombre) return toast("Escribe el nombre visible.", "error");
   try {
-    const r = await fetch("api/especialidades/" + id, {
+    const r = await fetch("api/areas/" + id, {
       method: "PUT",
       headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ nombre_visible: nombre }),
@@ -207,7 +207,7 @@ async function asignar(card, attrSel) {
   const sel = card.querySelector(`[data-${attrSel}]`);
   if (!sel || !sel.value) return;
   try {
-    const r = await fetch(`api/especialidades/${id}/roles`, {
+    const r = await fetch(`api/areas/${id}/roles`, {
       method: "POST",
       headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ usuario: sel.value }),
@@ -234,7 +234,7 @@ async function eliminarTabla(card) {
     `asignaciones. El historial de envíos se conserva.\n\nEsta acción no se puede deshacer.`
   )) return;
   try {
-    const r = await fetch(`api/especialidades/${id}/tabla`, {
+    const r = await fetch(`api/areas/${id}/tabla`, {
       method: "DELETE", headers: authHeaders(),
     });
     if (r.status === 401) { window.snwSesionExpirada(); return; }
@@ -268,7 +268,7 @@ $("#btnConfirmarQuitar").addEventListener("click", async () => {
   if (!quitarPendiente) return;
   const { id, correo } = quitarPendiente;
   try {
-    const r = await fetch(`api/especialidades/${id}/roles/` + encodeURIComponent(correo), {
+    const r = await fetch(`api/areas/${id}/roles/` + encodeURIComponent(correo), {
       method: "DELETE", headers: authHeaders(),
     });
     if (r.status === 401) { window.snwSesionExpirada(); return; }
@@ -287,7 +287,7 @@ async function retirar(card, correo) {
 }
 
 async function crear(nombre, modo) {
-  const r = await fetch("api/especialidades", {
+  const r = await fetch("api/areas", {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ nombre, modo }),
@@ -296,7 +296,7 @@ async function crear(nombre, modo) {
   return { estado: r.status, ok: r.ok, datos: d };
 }
 
-const formCrear = $("#formCrearEspecialidad");
+const formCrear = $("#formCrearArea");
 if (formCrear) formCrear.addEventListener("submit", async (e) => {
   e.preventDefault();
   const inp = $("#espNombre");
@@ -320,7 +320,7 @@ if (formCrear) formCrear.addEventListener("submit", async (e) => {
       const det = res.datos.detail;
       throw new Error(typeof det === "string" ? det : `Error ${res.estado}`);
     }
-    const esp = res.datos.especialidad || {};
+    const esp = res.datos.area || {};
     msg(res.datos.creada
       ? `Creada «${esp.nombre_visible}» (tabla ${esp.nombre_tabla_base}).`
       : `Se utiliza el área existente «${esp.nombre_visible}».`);

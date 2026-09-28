@@ -121,7 +121,7 @@
   // Páginas de administración: cada una es un HTML propio (usuarios,
   // pacientes, areas, estadisticas, configuracion) y la sidebar
   // muestra sus botones de navegación en vez del menú normal.
-  const PAGINAS_ADMIN = ["usuarios", "pacientes", "especialidades", "estadisticas", "configuracion"];
+  const PAGINAS_ADMIN = ["usuarios", "pacientes", "areas", "estadisticas", "configuracion"];
   const ES_PAG_ADMIN = PAGINAS_ADMIN.indexOf(PAGINA) !== -1;
   function primeraPaginaPermitida() {
     for (const [perm, href] of ORDEN_PAGINAS) if (puede(perm)) return href;
@@ -171,7 +171,7 @@
   const LINKS_ADMIN_SUB = [
     { pagina: "usuarios",        href: "usuarios.html",        icono: "fa-users",        texto: "Usuarios" },
     { pagina: "pacientes",       href: "pacientes.html",       icono: "fa-database",     texto: "Base de datos" },
-    { pagina: "especialidades",  href: "especialidades.html",  icono: "fa-stethoscope",  texto: "Áreas" },
+    { pagina: "areas",           href: "areas.html",           icono: "fa-stethoscope",  texto: "Áreas" },
     { pagina: "estadisticas",    href: "estadisticas.html",    icono: "fa-chart-column", texto: "Estadísticas" },
     { pagina: "configuracion",   href: "configuracion.html",   icono: "fa-gear",         texto: "Configuración", dev: true },
   ];
