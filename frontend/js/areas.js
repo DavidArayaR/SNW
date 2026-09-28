@@ -61,6 +61,7 @@ async function cargar() {
     msg("");
     render();
   } catch (e) {
+    console.error("[areas.js cargar()]", e);
     toast("No se pudieron cargar las áreas.", "error");
   }
 }
@@ -201,6 +202,7 @@ async function renombrar(card) {
     yaCargada = false;
     await cargar();
   } catch (e) {
+    console.error("[areas.js renombrar()]", e);
     toast(e.message || "No se pudo renombrar.", "error");
   }
 }
@@ -222,6 +224,7 @@ async function asignar(card, attrSel) {
     yaCargada = false;
     await cargar();
   } catch (e) {
+    console.error("[areas.js asignar()]", e);
     toast(e.message || "No se pudo asignar el rol.", "error");
   }
 }
@@ -247,6 +250,7 @@ async function eliminarTabla(card) {
     yaCargada = false;
     await cargar();
   } catch (e) {
+    console.error("[areas.js eliminarTabla()]", e);
     toast(e.message || "No se pudo eliminar.", "error");
   }
 }
@@ -281,6 +285,7 @@ $("#btnConfirmarQuitar").addEventListener("click", async () => {
     yaCargada = false;
     await cargar();
   } catch (e) {
+    console.error("[areas.js cerrarModalQuitar()]", e);
     toast(e.message || "No se pudo retirar el acceso.", "error");
   }
 });
@@ -333,6 +338,7 @@ if (formCrear) formCrear.addEventListener("submit", async (e) => {
     yaCargada = false;
     await cargar();
   } catch (err) {
+    console.error("[areas.js crear()]", err);
     msg(err.message || "No se pudo crear.", "error");
   }
 });

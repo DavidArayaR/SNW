@@ -170,6 +170,7 @@ async function cargarAreas() {
     if (!res.ok) throw new Error();
     misAreas = await res.json();
   } catch {
+    console.error("[app.js cargarAreas()]");
     misAreas = [];
   }
   poblarSelectArea();
@@ -319,6 +320,7 @@ async function cargar() {
       if (activaId === null) seleccionarDefault();
       return;
     } catch (err) {
+      console.error("[app.js cargar()]", err);
       if (intento === 2) {
         toast("Error al conectar con el servidor.", "error");
       } else {
@@ -989,6 +991,7 @@ formEl.addEventListener("submit", async (e) => {
 
     abrir(fila.id);
   } catch (err) {
+    console.error("[app.js:991]", err);
     setGuardando(false);
     toast(err.message === "Ya existe una plantilla con esa clave"
       ? "Ya existe una plantilla similar."
@@ -1021,6 +1024,7 @@ $("#btnModalConfirmar").addEventListener("click", async () => {
     }
     modoVacia();
   } catch (err) {
+    console.error("[app.js:1023]", err);
     modalEl.hidden = true;
     toast(`Error al eliminar: ${err.message}`, "error");
   } finally {
@@ -1046,6 +1050,7 @@ async function aprobarPlantillaActiva() {
     toast("Plantilla aprobada: ahora va a Meta para su revisión.", "ok");
     abrir(activaId);
   } catch (err) {
+    console.error("[app.js aprobarPlantillaActiva()]", err);
     toast(`No se pudo aprobar: ${err.message}`, "error");
   } finally {
     if (btn) btn.disabled = false;
@@ -1070,6 +1075,7 @@ async function rechazarPlantillaActiva(motivo) {
     toast("Plantilla rechazada: no irá a Meta.", "ok");
     abrir(activaId);
   } catch (err) {
+    console.error("[app.js rechazarPlantillaActiva()]", err);
     toast(`No se pudo rechazar: ${err.message}`, "error");
   } finally {
     if (btn) btn.disabled = false;
@@ -1485,6 +1491,7 @@ if (btnGuardarLimiteConf) {
       toast("Límite diario actualizado.");
       actualizarResumenConf();
     } catch (e) {
+      console.error("[app.js cargarLimiteAdminConf()]", e);
       toast(e.message || "No se pudo guardar el límite.", "error");
     } finally {
       btnGuardarLimiteConf.disabled = false;
@@ -1550,6 +1557,7 @@ async function actualizarResumenConf() {
       filaCosto.hidden = true;
     }
   } catch {
+    console.error("[app.js actualizarResumenConf()]");
     dd.textContent = "No se pudieron contar.";
     configurarLimiteConf(0);
     mostrarAvisoLimiteConf(null, false);
@@ -1590,6 +1598,7 @@ $("#btnConfirmarCancelarConf").addEventListener("click", async () => {
       if (res.status === 401) { window.snwSesionExpirada(); return false; }
       return res.ok;
     } catch {
+      console.error("[app.js:1592]");
       return false;
     }
   })();
@@ -1706,6 +1715,7 @@ $("#btnLanzarConf").addEventListener("click", async () => {
     totalActualConf = data.total;
     seguirProgresoConf(data.job_id, data.total);
   } catch (err) {
+    console.error("[app.js:1708]", err);
     toast(`Error al iniciar el envío: ${err.message}`, "error");
     setBloqueoEnvioConf(false);
     $("#btnLanzarConf").hidden = false;
@@ -1775,6 +1785,7 @@ function seguirProgresoConf(jobId, total) {
         cargar();
       }
     } catch {
+      console.error("[app.js seguirProgresoConf()]");
       clearInterval(timerPollingConf);
       finalizarConf("Se perdió la conexión con el servidor.", true);
       setBloqueoEnvioConf(false);
@@ -1820,6 +1831,7 @@ if (btnRevisarTodos) {
       }
       toast("Estados actualizados.", "ok");
     } catch (err) {
+      console.error("[app.js refrescarVistaPlantillaActiva()]", err);
       toast(`No se pudieron actualizar los estados: ${err.message}`, "error");
     } finally {
       setConsultandoEstado(false, btnRevisarTodos);
@@ -1855,6 +1867,7 @@ if (btnSincronizarMeta) {
         "ok"
       );
     } catch (err) {
+      console.error("[app.js refrescarVistaPlantillaActiva()]", err);
       toast(`No se pudo sincronizar con Meta: ${err.message}`, "error");
     } finally {
       setConsultandoEstado(false, btnSincronizarMeta);
@@ -1892,6 +1905,7 @@ async function actualizarBannerEnvioEnCurso() {
       (job.nombre_enviador ? ` · por ${job.nombre_enviador}` : "");
     banner.hidden = false;
   } catch {
+    console.error("[app.js actualizarBannerEnvioEnCurso()]");
     banner.hidden = true;
     jobBannerActual = null;
   }
@@ -1923,6 +1937,7 @@ if (btnVerEnvio) btnVerEnvio.addEventListener("click", async () => {
     setBloqueoEnvioConf(true);
     seguirProgresoConf(job.job_id, job.total);
   } catch {
+    console.error("[app.js actualizarBannerEnvioEnCurso()]");
     toast("No se pudo retomar el envío.", "error");
   }
 });

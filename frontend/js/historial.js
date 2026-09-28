@@ -31,6 +31,7 @@ async function cargarBasesHist() {
     const r = await fetch("api/areas/mias", { headers: authHeaders(), cache: "no-store" });
     if (r.ok) areas = await r.json();
   } catch {
+    console.error("[historial.js cargarBasesHist()]");
     areas = [];
   }
   basesHist = [];
@@ -96,6 +97,7 @@ async function cargar() {
     registros = await rh.json();
     render();
   } catch {
+    console.error("[historial.js cargar()]");
     toast("Error al conectar con el servidor.", "error");
   }
 }
@@ -168,6 +170,7 @@ tbodyEl.addEventListener("click", async (e) => {
     const detalle = await r.json();
     abrirDetalle(envio, detalle);
   } catch {
+    console.error("[historial.js render()]");
     toast("Error al cargar el detalle.", "error");
   }
 });
@@ -254,6 +257,7 @@ async function abrirMensajes(pacienteId) {
     const data = await r.json();
     renderMensajes(data);
   } catch {
+    console.error("[historial.js abrirMensajes()]");
     toast("No se pudieron cargar los mensajes del paciente.", "error");
   }
 }
@@ -359,6 +363,7 @@ async function cargarLogCC() {
         }).join("")
       : `<tr><td colspan="4" style="text-align:center;color:var(--texto-suave);">Todavía no se ha enviado ninguna respuesta de call center.</td></tr>`;
   } catch {
+    console.error("[historial.js cargarLogCC()]");
     body.innerHTML = `<tr><td colspan="4" style="text-align:center;color:var(--danger-fg);">No se pudo cargar el registro.</td></tr>`;
   }
 }

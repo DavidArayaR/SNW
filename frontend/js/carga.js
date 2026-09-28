@@ -47,6 +47,7 @@ async function init() {
     if (!r.ok) throw new Error();
     lista = await r.json();
   } catch {
+    console.error("[carga.js init()]");
     toast("No se pudieron cargar tus áreas.", "error");
   }
   selEsp.innerHTML = lista.map((e) =>
@@ -99,6 +100,7 @@ btnSubir.addEventListener("click", async () => {
     inpArchivo.value = "";
     nombreArchivo.textContent = "No se ha seleccionado ningún archivo";
   } catch (err) {
+    console.error("[carga.js init()]", err);
     resultado.innerHTML = "";
     toast(err.message || "No se pudo cargar el archivo.", "error");
   } finally {

@@ -143,6 +143,7 @@ async function cargarEnviosUsuario(correo, contenedor) {
     contenedor._pagina = 1;
     renderPaginado(contenedor, Array.isArray(lista) ? lista : [], renderEnviosUsuario, "Sin envíos registrados.", "snw_page_size_usr_envios");
   } catch (e) {
+    console.error("[usuarios.js cargarEnviosUsuario()]", e);
     if (seleccion === correo) contenedor.innerHTML = `<p class="usr-envios__vacio">No se pudieron cargar los envíos.</p>`;
   }
 }
@@ -185,6 +186,7 @@ async function cargarAuditoriaUsuario(correo, contenedor) {
     contenedor._pagina = 1;
     renderPaginado(contenedor, Array.isArray(lista) ? lista : [], renderAuditoriaUsuario, "Sin actividad registrada.", "snw_page_size_usr_auditoria");
   } catch (e) {
+    console.error("[usuarios.js cargarAuditoriaUsuario()]", e);
     if (seleccion === correo) contenedor.innerHTML = `<p class="usr-envios__vacio">No se pudo cargar la actividad.</p>`;
   }
 }
@@ -203,6 +205,7 @@ async function cargar() {
     }
     render();
   } catch (e) {
+    console.error("[usuarios.js cargar()]", e);
     toast("No se pudieron cargar las cuentas.", "error");
   }
 }
@@ -367,6 +370,7 @@ async function guardar(card) {
     toast("Cuenta actualizada.");
     await cargar();
   } catch (e) {
+    console.error("[usuarios.js guardar()]", e);
     toast(e.message, "error");
     btn.disabled = false;
   }
@@ -384,6 +388,7 @@ async function eliminar() {
     cerrarModal();
     await cargar();
   } catch (e) {
+    console.error("[usuarios.js eliminar()]", e);
     toast(e.message, "error");
   }
 }
@@ -433,6 +438,7 @@ async function guardarCorreoRecuperacion(card) {
     toast("Correo de recuperación guardado.");
     await cargar();
   } catch (ex) {
+    console.error("[usuarios.js guardarCorreoRecuperacion()]", ex);
     toast(ex.message, "error");
   } finally {
     btn.disabled = false;
@@ -457,6 +463,7 @@ async function enviarCambioClave(card) {
     if (!r.ok) throw new Error(data.detail || "No se pudo enviar el enlace.");
     toast("Enlace de cambio de contraseña enviado a " + data.destino + ".");
   } catch (ex) {
+    console.error("[usuarios.js enviarCambioClave()]", ex);
     toast(ex.message, "error");
   } finally {
     btnReset.disabled = false;
@@ -489,6 +496,7 @@ formInvitar.addEventListener("submit", async (e) => {
     toast("Invitación enviada a " + correo + ".");
     inp.value = "";
   } catch (ex) {
+    console.error("[usuarios.js enviarCambioClave()]", ex);
     invMsg.textContent = ex.message;
   } finally {
     btn.disabled = false;

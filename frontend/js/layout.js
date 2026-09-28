@@ -337,6 +337,7 @@
           cerrar();
           alert("Contraseña actualizada. Si tu cuenta tiene un correo registrado, te llegará un aviso.");
         } catch (ex) {
+          console.error("[layout.js abrirModalClave()]", ex);
           mostrar(ex.message);
         } finally {
           btn.disabled = false;

@@ -68,6 +68,7 @@ async function cargarAreasEst() {
     if (!res.ok) throw new Error();
     areasEst = await res.json();
   } catch {
+    console.error("[estadisticas.js cargarAreasEst()]");
     areasEst = [];
   }
   const guardada = localStorage.getItem("snw_esp_estadisticas") || "";
@@ -113,6 +114,7 @@ async function cargar() {
     if (!res.ok) throw new Error();
     render(await res.json());
   } catch {
+    console.error("[estadisticas.js cargar()]");
     toast("No se pudieron cargar las estadísticas.", "error");
   }
 }
@@ -239,6 +241,7 @@ function fmtMoneda(n, mon) {
       style: "currency", currency: mon || "USD", maximumFractionDigits: 2,
     }).format(Number(n || 0));
   } catch {
+    console.error("[estadisticas.js fmtMoneda()]");
     return `${num(n)} ${mon || ""}`.trim();
   }
 }
@@ -332,6 +335,7 @@ async function cargarEnvios(gran) {
       vacio: "Sin mensajes enviados en este periodo.",
     });
   } catch {
+    console.error("[estadisticas.js cargarEnvios()]");
     $("#enviosGrafico").innerHTML =
       '<p class="mes-vacio" style="padding:8px 18px;">No se pudo cargar el gráfico.</p>';
   }
@@ -347,6 +351,7 @@ async function cargarTarifas() {
     if (!res.ok) throw new Error();
     renderTarifas(await res.json());
   } catch {
+    console.error("[estadisticas.js cargarTarifas()]");
     $("#tarifasVigente").innerHTML =
       '<p class="mes-vacio" style="padding:8px 0;">No se pudieron cargar las tarifas.</p>';
   }
@@ -447,6 +452,7 @@ async function descargarCsvChile(e) {
     a.remove();
     URL.revokeObjectURL(url);
   } catch {
+    console.error("[estadisticas.js descargarCsvChile()]");
     toast("No se pudo descargar el CSV.", "error");
   }
 }
@@ -472,6 +478,7 @@ async function actualizarTarifas() {
     await cargarTarifas();
     await cargarCostos(granCostos);
   } catch (err) {
+    console.error("[estadisticas.js actualizarTarifas()]", err);
     toast("No se pudieron actualizar las tarifas. " + (err.message || ""), "error");
     btn.disabled = false;
     btn.textContent = textoOriginal;
@@ -491,6 +498,7 @@ async function cargarCostos(gran) {
     if (!res.ok) throw new Error();
     renderCostos(await res.json());
   } catch {
+    console.error("[estadisticas.js cargarCostos()]");
     $("#costosBarras").innerHTML =
       '<p class="mes-vacio" style="padding:8px 18px;">No se pudieron cargar los costos.</p>';
     $("#costosTotal").textContent = "";

@@ -119,6 +119,7 @@ async function cargarBasesPac() {
     if (!r.ok) throw new Error();
     areas = await r.json();
   } catch {
+    console.error("[pacientes.js cargarBasesPac()]");
     areas = [];
   }
   selBasePac.innerHTML =
@@ -475,6 +476,7 @@ tbodyEl.addEventListener("change", async (e) => {
     toast(nueva === "baja" ? "Paciente marcado como dado de baja." : `Respuesta actualizada a "${nueva}".`, "ok");
     render();
   } catch (err) {
+    console.error("[pacientes.js:477]", err);
     toast(err.message || "No se pudo actualizar la respuesta", "error");
     if (paciente) sel.value = anterior || "pendiente";
     const badge = tbodyEl.querySelector(`.respuesta-badge[data-id="${id}"]`);
@@ -519,6 +521,7 @@ tbodyEl.addEventListener("change", async (e) => {
     toast(`Estado actualizado a "${nuevoEstado}"`, "ok");
     render();
   } catch (err) {
+    console.error("[pacientes.js:521]", err);
     toast(err.message || "No se pudo actualizar el estado", "error");
     if (paciente) sel.value = estadoAnterior || "pendiente";
     const badge = tbodyEl.querySelector(`.estado-badge[data-id="${id}"]`);
@@ -629,6 +632,7 @@ async function aplicarMasivo(sel, url, campo, etiquetas) {
     toast(msg, data.bloqueados ? "error" : "ok");
     await cargar();
   } catch (err) {
+    console.error("[pacientes.js aplicarMasivo()]", err);
     toast(err.message || "No se pudo aplicar el cambio", "error");
   } finally {
     sel.value = "";
@@ -758,6 +762,7 @@ if (btnConfirmarDelTabla) btnConfirmarDelTabla.addEventListener("click", async (
     await cargarBasesPac();
     cargar();
   } catch (err) {
+    console.error("[pacientes.js cerrarModalDelTabla()]", err);
     cerrarModalDelTabla();
     toast(err.message || "No se pudo eliminar.", "error");
   }
@@ -790,6 +795,7 @@ if (csvInput) csvInput.addEventListener("change", async () => {
     toast("CSV procesado.", "ok");
     cargar();
   } catch (err) {
+    console.error("[pacientes.js:792]", err);
     if (msgEl) msgEl.textContent = "";
     toast(err.message || "No se pudo cargar el CSV.", "error");
   }

@@ -52,6 +52,7 @@ async function cargar() {
     valores = d.valores || {};
     render(d.secciones || []);
   } catch {
+    console.error("[configuracion.js cargar()]");
     cont.innerHTML = '<p class="mes-vacio" style="padding:18px;">No se pudo cargar la configuración.</p>';
   }
 }
@@ -106,6 +107,7 @@ function render(secciones) {
           try {
             await navigator.clipboard.writeText(txt);
           } catch {
+            console.error("[configuracion.js render()]");
             salida.removeAttribute("readonly");
             salida.select();
             document.execCommand("copy");
@@ -234,6 +236,7 @@ async function guardar() {
       "ok"
     );
   } catch (err) {
+    console.error("[configuracion.js guardar()]", err);
     toast(err.message || "No se pudo guardar la configuración.", "error");
   } finally {
     botones.forEach((b) => (b.disabled = false));
