@@ -9,11 +9,9 @@
     "whatsapp_template_categoria": "MARKETING",
     "whatsapp_template_id": "4045523162418166",
     "whatsapp_template_status": "APPROVED",
-    "whatsapp_template_rejected_reason": null,
+    "whatsapp_template_rejected_reason": "NONE",
     "whatsapp_template_error": null,
-    "actualizada": 1790016923822,
-    "ultima_edicion": 1790016923822,
-    "whatsapp_template_aprobada_en": 1790017097872
+    "actualizada": 1790359220659
   },
   {
     "id": 2,
@@ -25,10 +23,9 @@
     "whatsapp_template_categoria": "MARKETING",
     "whatsapp_template_id": "1737252654192451",
     "whatsapp_template_status": "APPROVED",
-    "whatsapp_template_rejected_reason": null,
+    "whatsapp_template_rejected_reason": "NONE",
     "whatsapp_template_error": null,
-    "actualizada": 1789672086133,
-    "whatsapp_template_aprobada_en": 1790016444747
+    "actualizada": 1790359220660
   },
   {
     "id": 3,
@@ -40,11 +37,9 @@
     "whatsapp_template_categoria": "MARKETING",
     "whatsapp_template_id": "1382444860710230",
     "whatsapp_template_status": "APPROVED",
-    "whatsapp_template_rejected_reason": null,
+    "whatsapp_template_rejected_reason": "NONE",
     "whatsapp_template_error": null,
-    "actualizada": 1790005668399,
-    "ultima_edicion": 1790005668399,
-    "whatsapp_template_aprobada_en": 1790005851005
+    "actualizada": 1790359220660
   },
   {
     "id": 4,
@@ -56,30 +51,8 @@
     "whatsapp_template_categoria": "UTILITY",
     "whatsapp_template_id": "1285483704651425",
     "whatsapp_template_status": "APPROVED",
-    "whatsapp_template_rejected_reason": null,
+    "whatsapp_template_rejected_reason": "NONE",
     "whatsapp_template_error": null,
-    "actualizada": 1789672086133
-  },
-  {
-    "id": 5,
-    "clave": "hola123",
-    "nombre": "hola123",
-    "texto": "hola como estas",
-    "especialidad_id": 1,
-    "whatsapp_template": "hola123",
-    "whatsapp_template_lang": "es",
-    "whatsapp_template_categoria": "MARKETING",
-    "actualizada": 1790282758307,
-    "creado_por": "usuario",
-    "creada_en": 1790282507727,
-    "aprobacion_estado": "aprobada",
-    "aprobada_por": "dav.araya@duocuc.cl",
-    "aprobada_en": 1790282782086,
-    "rechazo_motivo": null,
-    "whatsapp_template_id": "1389128016192795",
-    "whatsapp_template_status": "APPROVED",
-    "whatsapp_template_error": null,
-    "whatsapp_template_aprobada_en": 1790282998007,
-    "whatsapp_template_rejected_reason": null
+    "actualizada": 1790359220660
   }
 ]

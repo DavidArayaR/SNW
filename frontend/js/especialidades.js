@@ -1,4 +1,4 @@
-/* Gestión de especialidades y sus roles (administrador / desarrollador).
+/* Gestión de áreas y sus roles (administrador / desarrollador).
    Página «Especialidades» (especialidades.html) */
 (function () {
 const $ = (s) => document.querySelector(s);
@@ -16,7 +16,7 @@ const msgEl = $("#espMsg");
 const toastEl = $("#toast");
 
 let estado = { lista: [], usuarios: [] };
-let seleccion = null;   // id de la especialidad mostrada
+let seleccion = null;   // id del área mostrada
 let yaCargada = false;
 
 let toastTimer;
@@ -58,7 +58,7 @@ async function cargar() {
     msg("");
     render();
   } catch (e) {
-    toast("No se pudieron cargar las especialidades.", "error");
+    toast("No se pudieron cargar las áreas.", "error");
   }
 }
 
@@ -194,7 +194,7 @@ async function renombrar(card) {
     const d = await r.json().catch(() => ({}));
     if (r.status === 401) { window.snwSesionExpirada(); return; }
     if (!r.ok) throw new Error(typeof d.detail === "string" ? d.detail : `Error ${r.status}`);
-    toast("Especialidad renombrada.");
+    toast("Área renombrada.");
     yaCargada = false;
     await cargar();
   } catch (e) {
@@ -229,7 +229,7 @@ async function eliminarTabla(card) {
   if (!esp) return;
   const total = esp.total_pacientes ?? "?";
   if (!confirm(
-    `¿Eliminar DEFINITIVAMENTE la especialidad «${esp.nombre_visible}»?\n\n` +
+    `¿Eliminar DEFINITIVAMENTE el área «${esp.nombre_visible}»?\n\n` +
     `Se borra la tabla ${esp.nombre_tabla_base} (${total} pacientes), su rol y sus ` +
     `asignaciones. El historial de envíos se conserva.\n\nEsta acción no se puede deshacer.`
   )) return;
@@ -251,7 +251,7 @@ let quitarPendiente = null; // {id, correo} a la espera de confirmación
 
 function pedirQuitar(id, correo) {
   quitarPendiente = { id, correo };
-  $("#quitarTexto").textContent = `¿Quitar a ${correo} el acceso a esta especialidad?`;
+  $("#quitarTexto").textContent = `¿Quitar a ${correo} el acceso a esta área?`;
   $("#modalQuitarRol").hidden = false;
 }
 
@@ -309,9 +309,9 @@ if (formCrear) formCrear.addEventListener("submit", async (e) => {
     if (res.estado === 409 && res.datos.detail && res.datos.detail.existentes) {
       // Nombre visible duplicado: la UI pregunta qué hacer.
       const nueva = confirm(
-        "Ya existe una especialidad con este nombre. ¿Qué deseas hacer?\n\n" +
+        "Ya existe un área con este nombre. ¿Qué deseas hacer?\n\n" +
         "Aceptar = Crear una nueva instancia (ej: «Kinesiología 2», tabla propia).\n" +
-        "Cancelar = Utilizar la especialidad existente."
+        "Cancelar = Utilizar el área existente."
       );
       res = await crear(nombre, nueva ? "nueva" : "reutilizar");
       if (res.estado === 401) { window.snwSesionExpirada(); return; }
@@ -323,9 +323,9 @@ if (formCrear) formCrear.addEventListener("submit", async (e) => {
     const esp = res.datos.especialidad || {};
     msg(res.datos.creada
       ? `Creada «${esp.nombre_visible}» (tabla ${esp.nombre_tabla_base}).`
-      : `Se utiliza la especialidad existente «${esp.nombre_visible}».`);
+      : `Se utiliza el área existente «${esp.nombre_visible}».`);
     inp.value = "";
-    toast("Especialidad lista.");
+    toast("Área lista.");
     seleccion = esp.id ?? seleccion;
     yaCargada = false;
     await cargar();

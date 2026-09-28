@@ -383,10 +383,11 @@ def asegurar_tabla_config() -> None:
                 )
             cur.execute("DELETE FROM configuracion WHERE clave = 'call_center_numero'")
 
-            # Modelo multi-especialidad (Fase 1): tablas `especialidades`,
-            # `roles_especialidad` y `usuario_especialidad_roles`. Import
+            # Modelo multi-área: tablas `areas`,
+            # `roles_area` y `usuario_area_roles`. Import
             # diferido porque servicio_especialidades importa este módulo.
-            from servicio_especialidades import asegurar_tablas_especialidades
+            from servicio_especialidades import asegurar_tablas_especialidades, migrar_tablas_areas
+            migrar_tablas_areas(cur)
             asegurar_tablas_especialidades(cur)
 
             # Rol global `supervisor`: acceso acotado a sus especialidades,
@@ -747,9 +748,9 @@ def usuario_borrar(correo: str) -> None:
         cur.execute("DELETE FROM usuarios WHERE usuario = %s", (correo,))
         cur.execute("DELETE FROM password_resets WHERE usuario = %s", (correo,))
         if fila:
-            # Limpia los roles de especialidad de la cuenta eliminada.
+            # Limpia los roles de área de la cuenta eliminada.
             try:
-                cur.execute("DELETE FROM usuario_especialidad_roles WHERE usuario_id = %s",
+                cur.execute("DELETE FROM usuario_area_roles WHERE usuario_id = %s",
                             (int(fila["id"]),))
             except Exception as e:
                 log_error("usuario_borrar: roles de especialidad", e)

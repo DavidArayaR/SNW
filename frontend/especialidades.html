@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SNW &middot; Especialidades</title>
+  <title>SNW &middot; Áreas</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
   <link rel="stylesheet" href="css/tema.css">
@@ -25,42 +25,42 @@
         <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="Abrir men&uacute;">
           <i class="fa-solid fa-bars"></i>
         </button>
-        <span class="app-topbar__titulo">Especialidades</span>
+        <span class="app-topbar__titulo">Áreas</span>
       </header>
 
       <main class="layout layout--ancho">
 
         <section class="panel">
           <div class="panel__head">
-            <h2>Especialidades</h2>
+            <h2>Áreas</h2>
             <div class="panel__actions">
               <button id="btnActualizarEspecialidades" class="btn btn--ghost" type="button">Actualizar</button>
             </div>
           </div>
 
           <p class="usr-intro" style="margin: 14px 18px 0;">
-            Cada especialidad tiene su propia tabla de pacientes
+            Cada área tiene su propia tabla de pacientes
             (<strong>pacientes_&lt;nombre&gt;</strong>, sin separaci&oacute;n desarrollo/producci&oacute;n)
             y su propio rol. Asigna el rol a una cuenta para darle acceso a esa tabla en
             Pacientes, Mensajer&iacute;a e Historial. Los usuarios y supervisores solo ven sus
-            especialidades asignadas; no ven Estad&iacute;sticas.
+            áreas asignadas; no ven Estad&iacute;sticas.
           </p>
 
           <form id="formCrearEspecialidad" class="usr-invitar" style="margin-top: 12px;">
             <div class="usr-invitar__campo">
-              <label for="espNombre">Nueva especialidad</label>
+              <label for="espNombre">Nueva área</label>
               <input type="text" id="espNombre" placeholder="Ej: Kinesiología" maxlength="150" required>
             </div>
-            <button type="submit" id="btnCrearEspecialidad" class="btn btn--primary">Crear especialidad</button>
+            <button type="submit" id="btnCrearEspecialidad" class="btn btn--primary">Crear área</button>
           </form>
           <p id="espMsg" class="usr-intro" style="margin: 0 18px 10px;"></p>
 
           <div class="usr-selector">
-            <label for="selEspecialidad">Especialidad</label>
+            <label for="selEspecialidad">Área</label>
             <select id="selEspecialidad"></select>
           </div>
           <div id="detalleEspecialidad" class="usr-detalle"></div>
-          <p id="espVacio" class="tabla-vacia" hidden style="padding: 24px;">No hay especialidades creadas.</p>
+          <p id="espVacio" class="tabla-vacia" hidden style="padding: 24px;">No hay áreas creadas.</p>
         </section>
 
       </main>

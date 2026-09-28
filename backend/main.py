@@ -847,9 +847,9 @@ def eliminar_usuario(usuario: str, sesion: dict = Depends(solo_admin)):
 #  Especialidades y roles dinámicos (Fase 1 multi-especialidad)
 # ===========================================================================
 
-# Cada especialidad vive en UNA sola tabla `pacientes_<slug>` (sin sufijo de
-# entorno). El rol global de `usuarios` no se toca: el acceso por especialidad
-# va en `roles_especialidad` / `usuario_especialidad_roles`.
+# Cada área vive en UNA sola tabla `pacientes_<slug>` (sin sufijo de
+# entorno). El rol global de `usuarios` no se toca: el acceso por área
+# va en `roles_area` / `usuario_area_roles`.
 
 _ERRORES_ESPECIALIDAD = {
     "nombre_vacio": (422, "Escribe el nombre del área."),

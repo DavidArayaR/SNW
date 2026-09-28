@@ -438,7 +438,7 @@ Las cuentas `usuario` y `supervisor` reciben 403 en estos endpoints (y la migrac
 
 ### Áreas — Fase 1 (múltiples áreas)
 
-Cada especialidad vive en **una sola tabla** `pacientes_<slug>` dentro de `snw_base` (**sin** sufijo `_dev`/`_prod`). El slug se genera del nombre visible en minúsculas, sin acentos, espacios ni caracteres especiales (`Kinesiología Sede Maipú` → `pacientes_kinesiologiasedemaipu`). El rol global de `usuarios` no se toca: el acceso por especialidad va en `roles_especialidad` / `usuario_especialidad_roles`.
+Cada especialidad vive en **una sola tabla** `pacientes_<slug>` dentro de `snw_base` (**sin** sufijo `_dev`/`_prod`). El slug se genera del nombre visible en minúsculas, sin acentos, espacios ni caracteres especiales (`Kinesiología Sede Maipú` → `pacientes_kinesiologiasedemaipu`). El rol global de `usuarios` no se toca: el acceso por área va en `roles_area` / `usuario_area_roles` (tablas `areas`).
 
 | Método | Endpoint | Descripción |
 |---|---|---|

@@ -1,5 +1,5 @@
 /* Carga de base de datos vía CSV (todas las cuentas con permiso de
-   mensajería): el archivo se sube a una especialidad asignada. */
+   mensajería): el archivo se sube a un área asignada. */
 (function () {
 const $ = (s) => document.querySelector(s);
 
@@ -44,7 +44,7 @@ async function init() {
     if (!r.ok) throw new Error();
     lista = await r.json();
   } catch {
-    toast("No se pudieron cargar tus especialidades.", "error");
+    toast("No se pudieron cargar tus áreas.", "error");
   }
   selEsp.innerHTML = lista.map((e) =>
     `<option value="${e.id}">${esc(e.nombre_visible)} (${esc(e.nombre_tabla_base)})</option>`).join("");
@@ -79,7 +79,7 @@ btnSubir.addEventListener("click", async () => {
     });
     const cuerpo = await res.json().catch(() => ({}));
     if (res.status === 401) { window.snwSesionExpirada(); return; }
-    if (res.status === 403) throw new Error("No tienes acceso a esta especialidad.");
+    if (res.status === 403) throw new Error("No tienes acceso a esta área.");
     if (!res.ok) throw new Error(typeof cuerpo.detail === "string" ? cuerpo.detail : `Error ${res.status}`);
     const inf = cuerpo.informe || {};
     const errores = inf.errores || [];

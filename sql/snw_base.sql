@@ -199,11 +199,11 @@ CREATE TABLE IF NOT EXISTS usuarios (
   UNIQUE KEY uq_usuario (usuario)
 ) CHARACTER SET utf8mb4;
 
--- Multi-especialidad (Fase 1): cada especialidad vive en UNA sola tabla
+-- Multi-área (Fase 1): cada área vive en UNA sola tabla
 -- `pacientes_<slug>` (sin sufijo de entorno), creada por el backend al crear
--- la especialidad. Cada instancia tiene su propio rol y los usuarios se
+-- el área. Cada instancia tiene su propio rol y los usuarios se
 -- vinculan a esos roles sin tocar el rol global de `usuarios`.
-CREATE TABLE IF NOT EXISTS especialidades (
+CREATE TABLE IF NOT EXISTS areas (
   id INT AUTO_INCREMENT PRIMARY KEY,
   nombre_visible VARCHAR(150) NOT NULL,
   nombre_tabla_base VARCHAR(64) NOT NULL,
@@ -211,16 +211,16 @@ CREATE TABLE IF NOT EXISTS especialidades (
   UNIQUE KEY uq_tabla_base (nombre_tabla_base)
 ) CHARACTER SET utf8mb4;
 
-CREATE TABLE IF NOT EXISTS roles_especialidad (
+CREATE TABLE IF NOT EXISTS roles_area (
   id INT AUTO_INCREMENT PRIMARY KEY,
   especialidad_id INT NOT NULL,
   nombre VARCHAR(150) NOT NULL,
   descripcion VARCHAR(255) NOT NULL DEFAULT '',
-  UNIQUE KEY uq_especialidad (especialidad_id),
+  UNIQUE KEY uq_area (especialidad_id),
   INDEX idx_rol_nombre (nombre)
 ) CHARACTER SET utf8mb4;
 
-CREATE TABLE IF NOT EXISTS usuario_especialidad_roles (
+CREATE TABLE IF NOT EXISTS usuario_area_roles (
   usuario_id INT NOT NULL,
   rol_id INT NOT NULL,
   creado DATETIME DEFAULT CURRENT_TIMESTAMP,

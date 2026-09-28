@@ -275,11 +275,11 @@ function renderDetalle() {
         (estado.puede_cambiar_rol && u.editable ? `<label>Rol</label><div>${rolControl(u)}</div>` : "") +
         `<label>Permisos</label>` +
         `<div id="permWrap">${permisosCheckboxes(u.rol, u.permisos, u.editable)}</div>` +
-        `<label>Especialidades</label>` +
+        `<label>Áreas</label>` +
         `<div>${(u.especialidades && u.especialidades.length ? u.especialidades.map((e) =>
             `<span class="usr-tag">${esc(e.nombre_visible)}</span>`).join(" ")
-          : `<span class="field__hint">Sin especialidades asignadas.</span>`)}` +
-          `<p class="field__hint" style="margin:6px 0 0;">Se asignan en la pestaña Especialidades. Sin ellas, la cuenta solo usa las bases desarrollo/producción.</p></div>` +
+          : `<span class="field__hint">Sin áreas asignadas.</span>`)}` +
+          `<p class="field__hint" style="margin:6px 0 0;">Se asignan en la pestaña Áreas. Sin ellas, la cuenta solo usa las bases desarrollo/producción.</p></div>` +
         (u.editable ?
           `<label>Acceso</label>` +
           `<div><label class="usr-check"><input type="checkbox" data-activo${u.activo === false ? "" : " checked"}> Cuenta activa (puede iniciar sesión)</label></div>`
