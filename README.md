@@ -89,8 +89,10 @@ snw/
 1. Verifican que Python y MySQL (XAMPP/LAMPP) estén disponibles.
 2. Base de datos: **primera vez**, cargan `sql/snw_base.sql` tal cual. Si ya fue
    inicializada, preguntan: **[1] backup e iniciar desde cero** (respalda
-   `snw_base` a `backups/` y la borra/recrea; si el respaldo falla no se sigue)
-   o **[2] backup y seguir como está** (respalda igual, no toca nada).
+   `snw_base` a `backups/` y la borra/recrea; si el respaldo falla no se sigue),
+   **[2] backup y seguir como está** (respalda igual, no toca nada),
+   **[3] seguir sin backup** o **[4] elegir un backup** de `backups/` e iniciar
+   con ese backup (primero respalda la actual, pide confirmación, borra la base actual).
 3. Instalan las dependencias de `requirements.txt` si faltan.
 4. Abren `http://127.0.0.1:8000` en el navegador y levantan `uvicorn`.
 

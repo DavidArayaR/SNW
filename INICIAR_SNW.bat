@@ -1,4 +1,5 @@
 @echo off
+setlocal enabledelayedexpansion
 title SNW - Sistema de Notificaciones WhatsApp
 cd /d "%~dp0"
 
@@ -35,8 +36,10 @@ echo  La base de datos ya fue inicializada antes. Que deseas hacer?
 echo    [1] Backup e iniciar desde cero (borra y recrea snw_base)
 echo    [2] Backup y seguir como esta (no se toca la base)
 echo    [3] Seguir sin backup (no se respalda nada)
+echo    [4] Elegir un backup e iniciar con ese backup (primero respalda la actual)
 echo.
-choice /C 123 /N /T 60 /D 2 /M "Elige una opcion [1/2/3] (por defecto 2 en 60 s): "
+choice /C 1234 /N /T 60 /D 2 /M "Elige una opcion [1/2/3/4] (por defecto 2 en 60 s): "
+if errorlevel 4 goto ELEGIR_BACKUP
 if errorlevel 3 goto SEGUIR_SIN_BACKUP
 if errorlevel 2 goto SOLO_BACKUP
 if errorlevel 1 goto DESDE_CERO
@@ -60,6 +63,38 @@ goto CHECKEAR_DEPS
 :SOLO_BACKUP
 call :HACER_BACKUP
 echo  [OK] Se sigue con la base actual (no se crea nada).
+goto CHECKEAR_DEPS
+
+:ELEGIR_BACKUP
+echo  Primero se respalda la base actual.
+call :HACER_BACKUP
+if errorlevel 1 goto FIN
+set "N=0"
+for %%F in ("%~dp0backups\snw_base_*.sql") do (
+  set /a N+=1
+  set "BK!N!=%%F"
+  echo    [!N!] %%~nxF
+)
+if !N! EQU 0 (
+  echo  [!!] No hay respaldos en backups\.
+  goto CHECKEAR_DEPS
+)
+set /p "SEL=Elige el numero del backup: "
+call set "ELEGIDO=%%BK%SEL%%%"
+if not defined ELEGIDO (
+  echo  [!!] Opcion invalida.
+  goto CHECKEAR_DEPS
+)
+echo.
+echo  Se BORRARA la base actual y se cargara "!ELEGIDO!".
+choice /C SN /N /M "Seguro? [S/N]: "
+if errorlevel 2 goto CHECKEAR_DEPS
+echo       Borrando y cargando respaldo...
+"%MYSQL%" -u root -h 127.0.0.1 -P 3306 -e "DROP DATABASE IF EXISTS snw_base; CREATE DATABASE snw_base CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" >nul 2>nul
+if errorlevel 1 goto ERROR_SQL
+"%MYSQL%" --default-character-set=utf8mb4 -u root -h 127.0.0.1 -P 3306 snw_base < "!ELEGIDO!" >nul 2>nul
+if errorlevel 1 goto ERROR_SQL
+echo  [OK] Respaldo cargado. Se inicia con esa base.
 goto CHECKEAR_DEPS
 
 :PRIMERA_VEZ

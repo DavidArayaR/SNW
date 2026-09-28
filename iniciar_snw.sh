@@ -63,10 +63,11 @@ else
     echo "  [1] Backup e iniciar desde cero (borra y recrea snw_base)"
     echo "  [2] Backup y seguir como está (no se toca la base)"
     echo "  [3] Seguir sin backup (no se respalda nada)"
+    echo "  [4] Elegir un backup e iniciar con ese backup (primero respalda la actual)"
     echo
     opcion=""
     if [ -t 0 ]; then
-      printf "Elige una opción [1/2/3] (por defecto 2): "
+      printf "Elige una opción [1/2/3/4] (por defecto 2): "
       read -r opcion
     fi
     case "$opcion" in
@@ -80,6 +81,34 @@ else
         ;;
       3)
         echo " [!!] Se sigue SIN respaldo."
+        ;;
+      4)
+        echo " Primero se respalda la base actual."
+        if hacer_backup; then
+        archivos=(backups/snw_base_*.sql)
+        if [ ! -e "${archivos[0]}" ]; then
+          echo " [!!] No hay respaldos en backups/."
+        else
+          echo " Respaldos disponibles:"
+          select elegido in "${archivos[@]}"; do
+            if [ -n "$elegido" ]; then
+              printf "Se BORRARÁ la base actual y se cargará '%s'. ¿Seguro? [s/N]: " "$elegido"
+              read -r conf
+              if [ "$conf" = "s" ] || [ "$conf" = "S" ]; then
+                echo "      Borrando y cargando respaldo..."
+                "$MYSQL" -u root -h 127.0.0.1 -P 3306 -e "DROP DATABASE IF EXISTS snw_base; CREATE DATABASE snw_base CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" >/dev/null 2>&1 &&
+                "$MYSQL" --default-character-set=utf8mb4 -u root -h 127.0.0.1 -P 3306 snw_base < "$elegido" >/dev/null 2>&1 &&
+                echo " [OK] Respaldo cargado. Se inicia con esa base."
+              else
+                echo " Operación cancelada. Se sigue con la base actual."
+              fi
+            else
+              echo " [!!] Opción inválida."
+            fi
+            break
+          done
+        fi
+        fi
         ;;
       *)
         if hacer_backup; then
