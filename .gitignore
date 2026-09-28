@@ -30,7 +30,7 @@ desktop.ini
 *.bak
 dump_*.sql
 backup_*.sql
-
+backups/
 
 data/sesiones.json
 data/plantillas_eliminadas.json
