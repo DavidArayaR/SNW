@@ -43,7 +43,7 @@ import whatsapp_service
 from wa_rate_limit import gobernador as wa_gobernador
 from whatsapp_service import WhatsAppService, es_mensaje_interes
 from whatsapp_webhook import router as whatsapp_router
-from config_service import config_correo as _config_correo, enviar_correo as _enviar_correo, leer_config, url_base
+from config_service import config_correo as _config_correo, enviar_correo as _enviar_correo, armar_mensaje as _armar_mensaje, leer_config, url_base
 from schemas import (
     ActivarCuentaIn, ClavePropiaIn, ConfigIn, ConfigTodoIn,
     CorreoRecuperacionIn, EnvioIn, AreaIn, AreaRenombrarIn,
@@ -3185,11 +3185,7 @@ def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, p
     </body></html>
     """
     try:
-        msg = MIMEMultipart("alternative")
-        msg["From"] = emisor
-        msg["To"] = ", ".join(destinos)
-        msg["Subject"] = subject
-        msg.attach(MIMEText(html, "html", "utf-8"))
+        msg = _armar_mensaje(subject, emisor, ", ".join(destinos), html)
         context = ssl.create_default_context()
         with smtplib.SMTP(host, port) as server:
             if tls:
@@ -3951,6 +3947,31 @@ def estado_job(job_id: str, sesion: dict = Depends(exigir("mensajeria"))):
         raise HTTPException(404, detail="Envío no encontrado")
 
     return {k: v for k, v in job.items() if k != "destinatarios"}
+
+
+def envios_en_curso(sesion: dict = Depends(exigir("mensajeria"))):
+    """Envíos masivos activos (en proceso o pausados) para mostrarlos en
+    Mensajería aunque se haya cerrado el modal. Sin destinatarios."""
+    activos = []
+    with JOBS_LOCK:
+        jobs = list(JOBS.items())
+    for job_id, job in jobs:
+        if job.get("estado") not in ESTADOS_ENVIO_EN_CURSO:
+            continue
+        activos.append({
+            "job_id": job_id,
+            "estado": job.get("estado"),
+            "ambiente": job.get("ambiente"),
+            "base": job.get("base", job.get("ambiente")),
+            "plantilla": (job.get("plantilla") or {}).get("nombre") or "",
+            "total": job.get("total", 0),
+            "enviados": job.get("enviados", 0),
+            "fallidos": job.get("fallidos", 0),
+            "pausado": bool(job.get("pausado")),
+            "usuario": job.get("usuario", ""),
+            "nombre_enviador": job.get("nombre_enviador", ""),
+        })
+    return activos
 
 
 def cancelar_job(job_id: str, sesion: dict = Depends(exigir("mensajeria"))):

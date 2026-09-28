@@ -1853,9 +1853,78 @@ if (btnSincronizarMeta) {
   });
 }
 
+// Banner de envío en curso: aunque se cierre el modal (o se recargue la
+// página), Mensajería muestra los envíos activos y permite retomarlos.
+let jobBannerActual = null;
+
+async function actualizarBannerEnvioEnCurso() {
+  const banner = $("#bannerEnvioEnCurso");
+  const texto = $("#bannerEnvioTexto");
+  if (!banner || !texto) return;
+  try {
+    const res = await fetch("api/notificaciones/envio-en-curso", {
+      headers: authHeaders(), cache: "no-store",
+    });
+    if (res.status === 401) { window.snwSesionExpirada(); return; }
+    if (!res.ok) throw new Error();
+    const jobs = await res.json();
+    const job = (Array.isArray(jobs) ? jobs : [])[0] || null;
+    jobBannerActual = job;
+    // Si el modal ya sigue ese mismo envío, el banner sobra.
+    if (!job || (envioEnCursoConf && jobIdActualConf === job.job_id)) {
+      banner.hidden = true;
+      return;
+    }
+    const hechos = (job.enviados || 0) + (job.fallidos || 0);
+    texto.textContent =
+      `Envío en curso: ${job.plantilla || "plantilla"} (${hechos}/${job.total})` +
+      (job.estado === "pausado" ? " · pausado" : "") +
+      (job.nombre_enviador ? ` · por ${job.nombre_enviador}` : "");
+    banner.hidden = false;
+  } catch {
+    banner.hidden = true;
+    jobBannerActual = null;
+  }
+}
+
+const btnVerEnvio = $("#btnVerEnvioEnCurso");
+if (btnVerEnvio) btnVerEnvio.addEventListener("click", async () => {
+  const job = jobBannerActual;
+  if (!job) return;
+  // Verifica que siga activo antes de enganchar el modal.
+  try {
+    const res = await fetch(`api/notificaciones/jobs/${job.job_id}`, {
+      headers: authHeaders(), cache: "no-store",
+    });
+    if (!res.ok) {
+      toast("Ese envío ya terminó. Revisa el Historial.", "error");
+      actualizarBannerEnvioEnCurso();
+      return;
+    }
+    $("#confNombre").textContent = job.plantilla || "";
+    $("#listaRechazadosConf").innerHTML = "";
+    $("#listaRechazadosConf").hidden = true;
+    $("#btnLanzarConf").hidden = true;
+    $("#confProgreso").hidden = false;
+    jobIdActualConf = job.job_id;
+    totalActualConf = job.total;
+    hechosActualConf = (job.enviados || 0) + (job.fallidos || 0);
+    modalConf.hidden = false;
+    setBloqueoEnvioConf(true);
+    seguirProgresoConf(job.job_id, job.total);
+  } catch {
+    toast("No se pudo retomar el envío.", "error");
+  }
+});
+
+setInterval(() => {
+  if (!document.hidden) actualizarBannerEnvioEnCurso();
+}, 5000);
+
 aplicarModoSoloLecturaPlantillas();
 modoVacia();
 cargarMiUsuario();
-cargarAreas();
+cargarEspecialidades();
 cargar();
+actualizarBannerEnvioEnCurso();
 setInterval(revisarPlantillasEnSegundoPlano, 30000);

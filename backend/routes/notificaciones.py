@@ -7,6 +7,7 @@ RUTAS = (
     ("/api/notificaciones/rechazar/{token}", "POST", "rechazar_envio", None),
     ("/api/notificaciones/confirmar/{token}", "GET", "confirmar_envio", None),
     ("/api/notificaciones/destinatarios", "POST", "contar_destinatarios", None),
+    ("/api/notificaciones/envio-en-curso", "GET", "envios_en_curso", None),
     ("/api/notificaciones/jobs/{job_id}", "GET", "estado_job", None),
     ("/api/notificaciones/jobs/{job_id}/cancelar", "POST", "cancelar_job", None),
     ("/api/notificaciones/jobs/{job_id}/pausa", "POST", "pausar_job", None),

@@ -161,6 +161,23 @@ select.badge--select {
 }
 .searchbox:focus-within { border-color: var(--verde); }
 
+/* Banner de envío en curso en Mensajería (aunque se haya cerrado el modal). */
+.aviso-envio-curso {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 14px 0;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: var(--brand-tint);
+  border: 1.5px solid var(--brand-tint-bd);
+  color: var(--brand-tint-fg);
+  font-size: .85rem;
+  font-weight: 600;
+}
+.aviso-envio-curso[hidden] { display: none; }
+.aviso-envio-curso span { flex: 1; }
+
 .filtro-especialidad {
   display: flex;
   align-items: center;
