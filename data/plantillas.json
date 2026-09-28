@@ -11,7 +11,7 @@
     "whatsapp_template_status": "APPROVED",
     "whatsapp_template_rejected_reason": "NONE",
     "whatsapp_template_error": null,
-    "actualizada": 1790613157291,
+    "actualizada": 1790617559020,
     "area_id": null
   },
   {
@@ -24,10 +24,9 @@
     "whatsapp_template_categoria": "MARKETING",
     "whatsapp_template_id": "1382444860710230",
     "whatsapp_template_status": "APPROVED",
-    "whatsapp_template_rejected_reason": null,
+    "whatsapp_template_rejected_reason": "NONE",
     "whatsapp_template_error": null,
     "actualizada": 1790612987656,
-    "area_id": 1,
     "ultima_edicion": 1790612987656,
     "whatsapp_template_aprobada_en": 1790613024125
   },
@@ -43,6 +42,9 @@
     "whatsapp_template_status": "APPROVED",
     "whatsapp_template_rejected_reason": "NONE",
     "whatsapp_template_error": null,
-    "actualizada": 1790359220660
+    "actualizada": 1790617613535,
+    "area_id": null,
+    "ultima_edicion": 1790617613535,
+    "whatsapp_template_aprobada_en": 1790617655686
   }
 ]

@@ -17,8 +17,6 @@ from pathlib import Path
 
 import smtplib
 import ssl
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 
 import httpx
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
@@ -3059,61 +3057,6 @@ def _error_envio_en_curso(job: dict | None) -> HTTPException:
     partes.append(f"en la base de {ambiente}.")
     partes.append("Espera a que termine antes de iniciar otro.")
     return HTTPException(409, detail=" ".join(partes))
-
-
-def _url_base_legacy() -> str:
-    base = (config_get("url_base") or "").strip().rstrip("/")
-    return base or "http://localhost:8000"
-
-
-def _config_correo_legacy() -> dict:
-    """Parámetros de correo/SMTP desde la tabla `configuracion`."""
-    emisor = (config_get("correo_emisor") or "").strip()
-    try:
-        port = int((config_get("smtp_port") or "587").strip() or 587)
-    except ValueError:
-        port = 587
-    return {
-        "emisor": emisor,
-        "destino": (config_get("correo_destino") or "").strip(),
-        "host": (config_get("smtp_host") or "").strip(),
-        "port": port,
-        "user": (config_get("smtp_user") or "").strip() or emisor,
-        "pwd": (config_get("smtp_pass") or "").strip().replace(" ", ""),
-        "tls": (config_get("smtp_tls", "true") or "true").lower() in ("1", "true", "yes", "si"),
-    }
-
-
-def _enviar_correo_legacy(destino: str, subject: str, html: str) -> bool:
-    """Envía un correo HTML usando la configuración SMTP. Devuelve True si se
-    entregó (o si no hay SMTP y solo se registró en consola)."""
-    c = _config_correo()
-    emisor = c["emisor"]
-    if not emisor or not destino:
-        print(f"[CORREO] Sin emisor o destino para '{subject}' -> {destino!r}")
-        return False
-    host, port, user, pwd, tls = c["host"], c["port"], c["user"], c["pwd"], c["tls"]
-    if not host or not pwd:
-        print(f"[CORREO SIMULADO] Para {destino} desde {emisor}: {subject}")
-        return True
-    try:
-        msg = MIMEMultipart("alternative")
-        msg["From"] = emisor
-        msg["To"] = destino
-        msg["Subject"] = subject
-        msg.attach(MIMEText(html, "html", "utf-8"))
-        context = ssl.create_default_context()
-        with smtplib.SMTP(host, port) as server:
-            if tls:
-                server.starttls(context=context)
-            if user and pwd:
-                server.login(user, pwd)
-            server.sendmail(emisor, destino, msg.as_string())
-        print(f"[CORREO] Enviado a {destino}: {subject}")
-        return True
-    except Exception as e:
-        log_error(f"_enviar_correo a {destino}", e)
-        return False
 
 
 def _fmt_moneda(monto: float, moneda: str) -> str:
