@@ -105,8 +105,12 @@ const esPlantillaRechazada = (p) => !!p && p.whatsapp_template_status === "REJEC
 // antiguas (sin campo) cuentan como "aprobada".
 const aprobacionPlantilla = (p) => !p || p.aprobacion_estado || "aprobada";
 const puedeAprobarPlantillas = () => !!window.snwEsPrivilegiado || window.snwRol === "supervisor";
+// Muestra de Meta (hello_world): no se edita ni elimina desde acá.
+const esPlantillaProtegida = (p) =>
+  !!p && (p.clave === "hello_world" || p.whatsapp_template === "hello_world");
 const esPlantillaEditable = (p) => {
   if (!p) return true;
+  if (esPlantillaProtegida(p)) return false;
   if (aprobacionPlantilla(p) !== "aprobada") return true; // aún no existe en Meta
   return esPlantillaAprobada(p) || esPlantillaRechazada(p);
 };
@@ -653,8 +657,8 @@ function actualizarBotonesSegunEstado(p) {
   // Meta limita la edición a una vez cada 24h, pero no el borrado: Eliminar
   // sigue disponible aunque Guardar esté bloqueado por el enfriamiento.
   // Además solo el creador edita/elimina las suyas (admin/dev, cualquiera).
-  const puedeGuardar = PUEDE_EDITAR_PLANTILLAS && puedeEditarEsta(p) && editable && !enEnfriamiento;
-  const puedeEliminar = PUEDE_EDITAR_PLANTILLAS && puedeEditarEsta(p) && editable;
+  const puedeGuardar = PUEDE_EDITAR_PLANTILLAS && puedeEditarEsta(p) && editable && !enEnfriamiento && !esPlantillaProtegida(p);
+  const puedeEliminar = PUEDE_EDITAR_PLANTILLAS && puedeEditarEsta(p) && editable && !esPlantillaProtegida(p);
   const puedeRevisar = p && ap !== "aprobada" && puedeAprobarPlantillas();
   btnGuardar.hidden = !puedeGuardar;
   const btnAprobar = $("#btnAprobar");
@@ -672,7 +676,12 @@ function actualizarBotonesSegunEstado(p) {
   btnEliminar.hidden = !(p && puedeEliminar);
   if (btnEnviarActual) btnEnviarActual.hidden = !(p && enviable);
   if (avisoPendiente) {
-    if (p && ap === "pendiente") {
+    if (p && esPlantillaProtegida(p)) {
+      pararCuentaRegresiva();
+      avisoPendiente.textContent =
+        "La plantilla Hello World es una muestra de Meta: no se puede editar ni eliminar, solo usar para enviar mensajes.";
+      avisoPendiente.hidden = false;
+    } else if (p && ap === "pendiente") {
       pararCuentaRegresiva();
       avisoPendiente.textContent =
         "Esta plantilla está pendiente de aprobación interna: todavía no se envió a Meta " +

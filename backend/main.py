@@ -1030,6 +1030,12 @@ async def importar_pacientes_csv(area_id: int, archivo: UploadFile = File(...),
     return {"ok": True, "area": esp, "informe": informe}
 
 
+# Plantillas de muestra de Meta (ej. hello_world): viven allá y no se pueden
+# editar ni eliminar desde acá (Meta tampoco deja borrarlas).
+def _es_plantilla_protegida(p: dict) -> bool:
+    return (p.get("clave") or "") == "hello_world" or (p.get("whatsapp_template") or "") == "hello_world"
+
+
 def _plantilla_valida(p) -> bool:
     """Descarta entradas rotas (ej. ediciones manuales de plantillas.json que
     dejan un objeto a medias): hace falta id, nombre y texto como mínimo."""
@@ -2362,6 +2368,11 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
                     400,
                     detail="El mensaje de call center no es editable.",
                 )
+            if _es_plantilla_protegida(p):
+                raise HTTPException(
+                    400,
+                    detail="La plantilla Hello World es una muestra de Meta: no se puede editar.",
+                )
             # Solo el creador edita sus plantillas; admin/dev, cualquiera.
             # (Aprobar/rechazar es otro permiso y va por sus endpoints.)
             if not (_es_privilegiado(sesion) or _es_creador_plantilla(p, sesion)):
@@ -2460,6 +2471,11 @@ def eliminar_plantilla(plantilla_id: int, sesion: dict = Depends(exigir("plantil
         raise HTTPException(
             400,
             detail="El mensaje de call center no se puede eliminar desde acá.",
+        )
+    if _es_plantilla_protegida(objetivo):
+        raise HTTPException(
+            400,
+            detail="La plantilla Hello World es una muestra de Meta: no se puede eliminar.",
         )
     # Solo el creador elimina las suyas; admin/dev, cualquiera.
     if not (_es_privilegiado(sesion) or _es_creador_plantilla(objetivo, sesion)):
