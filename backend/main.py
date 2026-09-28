@@ -4379,8 +4379,8 @@ async def _bajar_csvs(urls: list[str]) -> list[str]:
                     r = await c.get(u)
                     if r.status_code == 200 and "chile" in r.text.lower():
                         out.append(r.text)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_error(f"tarifas: no se pudo descargar {u}", e)
         await asyncio.gather(*[uno(u) for u in urls])
     return out
 
