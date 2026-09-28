@@ -1,9 +1,12 @@
 """Servicios de configuración y correo del sistema."""
 
+import html as _html_mod
+import re
 import smtplib
 import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.utils import formatdate, make_msgid
 
 from db import config_all, config_get, entorno_valido, log_error, nombre_base
 
@@ -59,6 +62,35 @@ def config_correo() -> dict:
     }
 
 
+def html_a_texto(html: str) -> str:
+    """Versión texto plano de un HTML (para el multipart/alternative).
+    Los filtros antispam penalizan los correos solo-HTML."""
+    texto = re.sub(r"<br\s*/?>", "\n", html or "", flags=re.I)
+    texto = re.sub(r"</(p|div|h\d|li|tr)\s*>", "\n\n", texto, flags=re.I)
+    texto = re.sub(r"<[^>]+>", "", texto)
+    texto = _html_mod.unescape(texto)
+    lineas = [l.strip() for l in texto.splitlines()]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lineas)).strip()
+
+
+def armar_mensaje(subject: str, emisor: str, destino: str, html: str) -> MIMEMultipart:
+    """MIME multipart con parte de texto + parte HTML y cabeceras Date y
+    Message-ID (su ausencia también suma puntos de spam)."""
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = emisor
+    msg["To"] = destino
+    msg["Date"] = formatdate(localtime=True)
+    try:
+        dominio = emisor.split("@")[-1] if "@" in (emisor or "") else None
+        msg["Message-ID"] = make_msgid(domain=dominio)
+    except Exception:
+        msg["Message-ID"] = make_msgid()
+    msg.attach(MIMEText(html_a_texto(html), "plain", "utf-8"))
+    msg.attach(MIMEText(html, "html", "utf-8"))
+    return msg
+
+
 def enviar_correo(destino: str, subject: str, html: str) -> bool:
     """Entrega un correo HTML; registra el fallo sin exponer secretos."""
     c = config_correo()
@@ -70,11 +102,7 @@ def enviar_correo(destino: str, subject: str, html: str) -> bool:
         print(f"[CORREO SIMULADO] Para {destino} desde {emisor}: {subject}")
         return True
     try:
-        mensaje = MIMEMultipart("alternative")
-        mensaje["Subject"] = subject
-        mensaje["From"] = emisor
-        mensaje["To"] = destino
-        mensaje.attach(MIMEText(html, "html", "utf-8"))
+        mensaje = armar_mensaje(subject, emisor, destino, html)
         with smtplib.SMTP(c["host"], c["port"]) as servidor:
             if c["tls"]:
                 servidor.starttls(context=ssl.create_default_context())
