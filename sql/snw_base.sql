@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS envios (
   invalidos INT DEFAULT 0,
   estado ENUM('completado','cancelado','rechazado') NOT NULL DEFAULT 'completado',
   comentario VARCHAR(255) DEFAULT NULL,
-  especialidad_id INT DEFAULT NULL,
+  area_id INT DEFAULT NULL,
   tabla_pacientes VARCHAR(64) DEFAULT NULL,
   fecha_hora DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -81,12 +81,12 @@ CREATE TABLE IF NOT EXISTS log_envios (
   whatsapp_message_id VARCHAR(255) DEFAULT NULL,
   estado_whatsapp ENUM('sent','delivered','read','failed') DEFAULT NULL,
   descripcion_error VARCHAR(255) DEFAULT NULL,
-  especialidad_id INT DEFAULT NULL,
+  area_id INT DEFAULT NULL,
   tabla_pacientes VARCHAR(64) DEFAULT NULL,
   fecha_hora DATETIME DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_envio (envio_id),
   INDEX idx_paciente (paciente_id),
-  INDEX idx_log_especialidad (especialidad_id)
+  INDEX idx_log_especialidad (area_id)
 );
 
 CREATE TABLE IF NOT EXISTS whatsapp_eventos (
@@ -213,10 +213,10 @@ CREATE TABLE IF NOT EXISTS areas (
 
 CREATE TABLE IF NOT EXISTS roles_area (
   id INT AUTO_INCREMENT PRIMARY KEY,
-  especialidad_id INT NOT NULL,
+  area_id INT NOT NULL,
   nombre VARCHAR(150) NOT NULL,
   descripcion VARCHAR(255) NOT NULL DEFAULT '',
-  UNIQUE KEY uq_area (especialidad_id),
+  UNIQUE KEY uq_area (area_id),
   INDEX idx_rol_nombre (nombre)
 ) CHARACTER SET utf8mb4;
 
