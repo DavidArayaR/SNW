@@ -1965,12 +1965,16 @@ def _plantillas_visibles(sesion: dict, plantillas: list) -> list:
     plantillas = [p for p in plantillas
                   if p.get("area_id") is None or p.get("area_id") in permitidas]
     if sesion.get("rol") != "supervisor":
-        # Cuentas normales: solo lo que crearon y lo de sus areas
-        # asignadas (cualquier estado).
+        # Cuentas normales: globales aprobadas, lo de sus áreas asignadas
+        # (cualquier estado) y lo propio pendiente/rechazado (para corregirlo).
+        # Editar/eliminar sigue siendo solo del creador (salvo admin/dev).
         yo = (sesion.get("usuario") or "").strip().lower()
         plantillas = [p for p in plantillas
-                      if (p.get("creado_por") or "").strip().lower() == yo
-                      or p.get("area_id") in permitidas]
+                      if (p.get("area_id") is None
+                          and _aprobacion_plantilla(p) == "aprobada")
+                      or p.get("area_id") in permitidas
+                      or (_aprobacion_plantilla(p) != "aprobada"
+                          and (p.get("creado_por") or "").strip().lower() == yo)]
     return plantillas
 
 
@@ -2422,14 +2426,23 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
             lang_anterior = p.get("whatsapp_template_lang")
             template_id_anterior = p.get("whatsapp_template_id")
 
+            # El área es un valor local: cambiarla no toca Meta ni activa el
+            # enfriamiento de 24 h (solo cuentan texto, idioma y categoría).
+            nueva_lang = (body.whatsapp_template_lang or "").strip() or None
+            meta_cambio = (
+                body.texto != (p.get("texto") or "")
+                or nueva_lang != p.get("whatsapp_template_lang")
+                or categoria != p.get("whatsapp_template_categoria")
+            )
             p["texto"] = body.texto
             p["area_id"] = _validar_plantilla_area(sesion, body.area_id)
             p["whatsapp_template"] = p.get("whatsapp_template") or (slug(p.get("nombre", "")) or None)
-            p["whatsapp_template_lang"] = (body.whatsapp_template_lang or "").strip() or None
+            p["whatsapp_template_lang"] = nueva_lang
             p["whatsapp_template_categoria"] = categoria
             p["actualizada"] = int(time.time() * 1000)
-            p["ultima_edicion"] = p["actualizada"]
-            p = _registrar_template_meta(p, nombre_template_anterior, lang_anterior, template_id_anterior)
+            if meta_cambio:
+                p["ultima_edicion"] = p["actualizada"]
+                p = _registrar_template_meta(p, nombre_template_anterior, lang_anterior, template_id_anterior)
             escribir_plantillas(plantillas)
             return p
 
