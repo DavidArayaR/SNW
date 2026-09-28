@@ -70,7 +70,7 @@ echo  Primero se respalda la base actual.
 call :HACER_BACKUP
 if errorlevel 1 goto FIN
 set "N=0"
-for %%F in ("%~dp0backups\snw_base_*.sql") do (
+for %%F in ("%~dp0backups\*.sql") do (
   set /a N+=1
   set "BK!N!=%%F"
   echo    [!N!] %%~nxF
@@ -104,12 +104,23 @@ if errorlevel 1 goto ERROR_SQL
 echo  [OK] snw_base.sql cargado (10 tablas + cuentas admin/usuario/dev + 2 numeros autorizados).
 goto CHECKEAR_DEPS
 
-REM Subrutina: respalda snw_base completa en backups\. Devuelve errorlevel 1 si falla.
+REM Subrutina: respalda snw_base completa en backups\. Pide un nombre (vacío =
+REM por defecto); si se indica, se le agrega la fecha automáticamente.
+REM Devuelve errorlevel 1 si falla.
 :HACER_BACKUP
 for /f "tokens=2 delims==" %%I in ('wmic os get localdatetime /value 2^>nul') do set "FECHA=%%I"
 if not defined FECHA set "FECHA=manual"
 set "FECHA=%FECHA:~0,8%_%FECHA:~8,6%"
-set "RESPALDO=%~dp0backups\snw_base_%FECHA%.sql"
+set /p "NOMBRE=Nombre del backup (vacio = por defecto): "
+if defined NOMBRE (
+  REM Sanea: espacios a _ y fuera \ / : * ? " < > | !
+  for /f "delims=" %%S in ('powershell -NoProfile -Command "$n=$env:NOMBRE; $n = ($n.ToCharArray() | Where-Object { [IO.Path]::GetInvalidFileNameChars() -notcontains $_ }) -join ''; $n = $n -replace '%%',''; $n = $n -replace ' ','_'; Write-Output $n" 2^>nul') do set "NOMBRE=%%S"
+)
+if not defined NOMBRE (
+  set "RESPALDO=%~dp0backups\snw_base_%FECHA%.sql"
+) else (
+  set "RESPALDO=%~dp0backups\%NOMBRE%_%FECHA%.sql"
+)
 echo       Respaldando en %RESPALDO% ...
 "%MYSQLDUMP%" -u root -h 127.0.0.1 -P 3306 --default-character-set=utf8mb4 --routines snw_base > "%RESPALDO%" 2>nul
 if errorlevel 1 (

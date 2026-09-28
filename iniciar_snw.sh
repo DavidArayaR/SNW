@@ -33,11 +33,23 @@ if [ ! -x "$MYSQLDUMP" ]; then MYSQLDUMP="mysqldump"; fi
 mkdir -p backups
 
 # --- Respaldo de snw_base ---------------------------------------------
-# Devuelve 0 si queda el .sql, 1 si falla (en ese caso no se sigue).
+# Pide un nombre (vacío = por defecto); si se indica, se le agrega la fecha
+# automáticamente. Devuelve 0 si queda el .sql, 1 si falla.
 hacer_backup() {
-  local stamp
+  local stamp nombre base
   stamp="$(date +%Y%m%d_%H%M%S)"
-  local destino="backups/snw_base_${stamp}.sql"
+  nombre=""
+  if [ -t 0 ]; then
+    printf "Nombre del backup (vacío = por defecto): "
+    read -r nombre
+    nombre="$(printf '%s' "$nombre" | tr ' ' '_' | tr -cd 'A-Za-z0-9._-')"
+  fi
+  if [ -z "$nombre" ]; then
+    base="snw_base_${stamp}"
+  else
+    base="${nombre}_${stamp}"
+  fi
+  local destino="backups/${base}.sql"
   echo "      Respaldando en $destino ..."
   if "$MYSQLDUMP" -u root -h 127.0.0.1 -P 3306 --default-character-set=utf8mb4 --routines snw_base > "$destino" 2>/dev/null; then
     echo " [OK] Respaldo creado."
@@ -85,7 +97,7 @@ else
       4)
         echo " Primero se respalda la base actual."
         if hacer_backup; then
-        archivos=(backups/snw_base_*.sql)
+        archivos=(backups/*.sql)
         if [ ! -e "${archivos[0]}" ]; then
           echo " [!!] No hay respaldos en backups/."
         else
