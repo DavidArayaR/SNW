@@ -27,6 +27,26 @@ MYSQL="mysql"
 for c in /opt/lampp/bin/mysql /usr/local/mysql/bin/mysql /usr/bin/mysql; do
   if [ -x "$c" ]; then MYSQL="$c"; break; fi
 done
+# mysqldump junto al cliente si existe, si no el del PATH
+MYSQLDUMP="$(dirname "$MYSQL")/mysqldump"
+if [ ! -x "$MYSQLDUMP" ]; then MYSQLDUMP="mysqldump"; fi
+mkdir -p backups
+
+# --- Respaldo de snw_base ---------------------------------------------
+# Devuelve 0 si queda el .sql, 1 si falla (en ese caso no se sigue).
+hacer_backup() {
+  local stamp
+  stamp="$(date +%Y%m%d_%H%M%S)"
+  local destino="backups/snw_base_${stamp}.sql"
+  echo "      Respaldando en $destino ..."
+  if "$MYSQLDUMP" -u root -h 127.0.0.1 -P 3306 --default-character-set=utf8mb4 --routines snw_base > "$destino" 2>/dev/null; then
+    echo " [OK] Respaldo creado."
+    return 0
+  fi
+  echo " [!!] No se pudo crear el respaldo. Por seguridad no se sigue."
+  rm -f "$destino"
+  return 1
+}
 
 # --- 1/4 MySQL escuchando en 3306 ------------------------------------
 echo " [1/4] Verificando MySQL en 127.0.0.1:3306 ..."
@@ -35,16 +55,44 @@ if ! "$PYTHON" -c "import socket;s=socket.socket();s.settimeout(2);s.connect(('1
 else
   echo " [OK] MySQL activo."
 
-  # --- 2/4 Inicializar la base SOLO la primera vez -----------------
+  # --- 2/4 Base de datos: primera vez, flujo normal; si ya existe, menú
   echo " [2/4] Verificando base de datos..."
   if "$MYSQL" -u root -h 127.0.0.1 -P 3306 -e "SELECT 1 FROM snw_base.pacientes_prod LIMIT 1;" >/dev/null 2>&1; then
-    echo " [OK] Base ya inicializada, se omite snw_base.sql."
+    echo
+    echo " La base de datos ya fue inicializada antes. ¿Qué deseas hacer?"
+    echo "  [1] Backup e iniciar desde cero (borra y recrea snw_base)"
+    echo "  [2] Backup y seguir como está (no se toca la base)"
+    echo "  [3] Seguir sin backup (no se respalda nada)"
+    echo
+    opcion=""
+    if [ -t 0 ]; then
+      printf "Elige una opción [1/2/3] (por defecto 2): "
+      read -r opcion
+    fi
+    case "$opcion" in
+      1)
+        if hacer_backup; then
+          echo "      Borrando y recreando snw_base..."
+          "$MYSQL" -u root -h 127.0.0.1 -P 3306 -e "DROP DATABASE IF EXISTS snw_base; CREATE DATABASE snw_base CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" >/dev/null 2>&1 &&
+          "$MYSQL" --default-character-set=utf8mb4 -u root -h 127.0.0.1 -P 3306 < sql/snw_base.sql >/dev/null 2>&1 &&
+          echo " [OK] Base recreada desde cero."
+        fi
+        ;;
+      3)
+        echo " [!!] Se sigue SIN respaldo."
+        ;;
+      *)
+        if hacer_backup; then
+          echo " [OK] Se sigue con la base actual (no se crea nada)."
+        fi
+        ;;
+    esac
   else
-    echo "      Primera ejecucion: cargando snw_base.sql..."
+    echo "      Primera ejecución: cargando snw_base.sql..."
     if "$MYSQL" --default-character-set=utf8mb4 -u root -h 127.0.0.1 -P 3306 < sql/snw_base.sql >/dev/null 2>&1; then
       echo " [OK] snw_base.sql cargado (10 tablas + cuentas admin/usuario/dev + 2 numeros autorizados)."
     else
-      echo " [!!] Error al cargar snw_base.sql. Revisa que MySQL este activo."
+      echo " [!!] Error al cargar snw_base.sql. Revisa que MySQL esté activo."
     fi
   fi
 fi
