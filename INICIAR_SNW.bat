@@ -38,7 +38,7 @@ echo    [2] Backup y seguir como esta (no se toca la base)
 echo    [3] Seguir sin backup (no se respalda nada)
 echo    [4] Elegir un backup e iniciar con ese backup (primero respalda la actual)
 echo.
-choice /C 1234 /N /T 60 /D 2 /M "Elige una opcion [1/2/3/4] (por defecto 2 en 60 s): "
+choice /C 1234 /N /T 60 /D 3 /M "Elige una opcion [1/2/3/4] (por defecto 3 en 60 s): "
 if errorlevel 4 goto ELEGIR_BACKUP
 if errorlevel 3 goto SEGUIR_SIN_BACKUP
 if errorlevel 2 goto SOLO_BACKUP

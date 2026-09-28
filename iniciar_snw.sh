@@ -79,9 +79,10 @@ else
     echo
     opcion=""
     if [ -t 0 ]; then
-      printf "Elige una opción [1/2/3/4] (por defecto 2): "
+      printf "Elige una opción [1/2/3/4] (por defecto 3): "
       read -r opcion
     fi
+    [ -z "$opcion" ] && opcion=3
     case "$opcion" in
       1)
         if hacer_backup; then
