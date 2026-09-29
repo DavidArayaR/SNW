@@ -4717,17 +4717,20 @@ def estadisticas_costos(granularidad: str = Query("mes"), area_id: int | None = 
             continue
         tarifa = _tarifa_para_fecha(tarifas, per if len(per) >= 7 else per + "-12")
         if cat == "service":
-            # Servicio (no-plantilla, ventana 24 h): tarifa explícita o la de
-            # utility como respaldo; gratuito antes del 01-10-2026. Los rate
-            # cards anteriores traen service en 0/vacío y esos mensajes siguen
-            # excluyéndose.
+            # Servicio (no-plantilla, ventana 24 h) SIEMPRE cuenta: mensajes y
+            # desglose por categoría. El costo aplica la tarifa del período
+            # (0 mientras Meta no lo cobraba, antes del 01-10-2026).
             rate = _rate_servicio(tarifa, per)
-        else:
-            rate = (tarifa.get(cat) if tarifa else None) or 0.0
-        if rate <= 0 and cat == "service":
-            excluidos += n
-            periodos.setdefault(per, _nuevo_periodo(per))["excluidos"] += n
+            costo = n * rate
+            p = periodos.setdefault(per, _nuevo_periodo(per))
+            p["mensajes"] += n
+            p["costo"] = round(p["costo"] + costo, 4)
+            p["por_categoria"][cat] += n
+            tot["mensajes"] += n
+            tot["costo"] = round(tot["costo"] + costo, 4)
+            tot["por_categoria"][cat] += n
             continue
+        rate = (tarifa.get(cat) if tarifa else None) or 0.0
         costo = n * rate
 
         p = periodos.setdefault(per, _nuevo_periodo(per))
