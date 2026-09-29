@@ -37,11 +37,9 @@ function toast(msg, tipo = "ok") {
   clearTimeout(toastTimer);
   toastEl.textContent = msg;
   toastEl.className = `toast visible toast--${tipo}`;
-  if (tipo === "ok") {
   // Los errores no se desvanecen solos: se cierran con click para leerlos bien.
   if (tipo === "ok") {
     toastTimer = setTimeout(() => toastEl.classList.remove("visible"), 3200);
-  }
   }
 }
 
@@ -285,12 +283,17 @@ function render() {
   renderDetalle();
 }
 
+let tabUsr = localStorage.getItem("snw_tab_usuarios") || "cuenta";
+if (["cuenta", "permisos", "auditoria"].indexOf(tabUsr) === -1) tabUsr = "cuenta";
+
 function renderDetalle() {
   const u = (estado.usuarios || []).find((x) => x.usuario === seleccion);
   if (!u) { detalleEl.innerHTML = ""; return; }
   const bloqueada = !u.editable;
+  const tabActiva = (t) => (t === tabUsr ? " activo" : "");
+  const panelOculto = (t) => (t === tabUsr ? "" : " hidden");
   detalleEl.innerHTML =
-    // Card 1: la cuenta en sí (datos + permisos + acciones).
+    // Card única con pestañas: Cuenta (datos), Permisos y Auditoría.
     `<div class="usr-card${bloqueada ? " usr-card--bloqueada" : ""}" data-correo="${esc(u.usuario)}">` +
       `<div class="usr-card__cab">` +
         `<span class="usr-card__correo">${esc(u.usuario)}</span>` +
@@ -298,12 +301,15 @@ function renderDetalle() {
         (estado.puede_cambiar_rol && u.editable ? "" : `<span class="usr-tag usr-tag--${esc(u.rol)}">${esc(ROL_LABEL[u.rol] || u.rol)}</span>`) +
         (u.activo === false ? `<span class="usr-tag usr-tag--inactivo">Desactivada</span>` : "") +
       `</div>` +
-      `<div class="usr-grid">` +
+      `<div class="usr-tabs" role="tablist">` +
+        `<button type="button" class="usr-tab${tabActiva("cuenta")}" data-tab="cuenta" role="tab">Cuenta</button>` +
+        `<button type="button" class="usr-tab${tabActiva("permisos")}" data-tab="permisos" role="tab">Permisos</button>` +
+        `<button type="button" class="usr-tab${tabActiva("auditoria")}" data-tab="auditoria" role="tab">Auditoría</button>` +
+      `</div>` +
+      `<div class="usr-grid" data-panel="cuenta"${panelOculto("cuenta")}>` +
         `<label>Nombre</label>` +
         `<div><input type="text" data-nombre value="${esc(u.nombre)}" maxlength="120"${u.editable ? "" : " disabled"}></div>` +
         (estado.puede_cambiar_rol && u.editable ? `<label>Rol</label><div>${rolControl(u)}</div>` : "") +
-        `<label>Permisos</label>` +
-        `<div id="permWrap">${permisosCheckboxes(u.rol, u.permisos, u.editable)}</div>` +
         `<label>Áreas</label>` +
         `<div>${(u.areas && u.areas.length ? u.areas.map((e) =>
             `<span class="usr-tag">${esc(e.nombre_visible)}</span>`).join(" ")
@@ -329,27 +335,31 @@ function renderDetalle() {
           `</div>`
           : "") +
       `</div>` +
+      `<div data-panel="permisos"${panelOculto("permisos")}>` +
+        `<div id="permWrap">${permisosCheckboxes(u.rol, u.permisos, u.editable)}</div>` +
+      `</div>` +
+      `<div data-panel="auditoria"${panelOculto("auditoria")}>` +
+        `<div class="usr-card--envios">` +
+          `<h4>Envíos realizados</h4>` +
+          `<div id="usrEnvios" class="usr-envios__cont">Cargando envíos…</div>` +
+        `</div>` +
+        `<div class="usr-card--envios" style="margin-top:16px;">` +
+          `<h4>Actividad</h4>` +
+          `<p style="margin: 0 0 8px; font-size: .84rem; color: var(--texto-suave);">Acciones que hizo esta cuenta (a quién invitó, editó, eliminó, qué plantilla creó...).</p>` +
+          `<div id="usrAuditoria" class="usr-envios__cont">Cargando actividad…</div>` +
+        `</div>` +
+      `</div>` +
       `<div class="usr-card__pie">` +
         (bloqueada ? `<span class="usr-card__bloqueo">${esc(u.motivo_bloqueo || "No puedes gestionar esta cuenta.")}</span>` : "") +
         `<span class="usr-card__sep"></span>` +
         (u.editable ? `<button type="button" class="btn btn--danger-ghost" data-borrar>Eliminar</button>` : "") +
         (u.editable ? `<button type="button" class="btn btn--primary" data-guardar>Guardar cambios</button>` : "") +
       `</div>` +
-    `</div>` +
-    // Card 2: Envíos realizados (de solo lectura).
-    `<div class="usr-card usr-card--envios">` +
-      `<h4>Envíos realizados</h4>` +
-      `<div id="usrEnvios" class="usr-envios__cont">Cargando envíos…</div>` +
-    `</div>` +
-    // Card 3: Actividad (de solo lectura).
-    `<div class="usr-card usr-card--envios">` +
-      `<h4>Actividad</h4>` +
-      `<p style="margin: 0 0 8px; font-size: .84rem; color: var(--texto-suave);">Acciones que hizo esta cuenta (a quién invitó, editó, eliminó, qué plantilla creó...).</p>` +
-      `<div id="usrAuditoria" class="usr-envios__cont">Cargando actividad…</div>` +
     `</div>`;
 
-  cargarEnviosUsuario(u.usuario, detalleEl.querySelector("#usrEnvios"));
-  cargarAuditoriaUsuario(u.usuario, detalleEl.querySelector("#usrAuditoria"));
+  // La auditoría se carga solo al abrir su pestaña (carga diferida).
+  const card = detalleEl.querySelector(".usr-card");
+  if (tabUsr === "auditoria") cargarAuditoriaPanel(card, u.usuario);
 
   // Al cambiar el rol: si pasa a «usuario», se muestran los permisos con los
   // básicos ya marcados; si pasa a un rol total, se muestra la nota.
@@ -363,6 +373,16 @@ function renderDetalle() {
         permisosCheckboxes(nuevoRol, permisos, u.editable);
     });
   }
+}
+
+// Carga envíos + actividad una vez por cuenta (se repite si cambia la cuenta).
+function cargarAuditoriaPanel(card, correo) {
+  if (!card) return;
+  const panel = card.querySelector('[data-panel="auditoria"]');
+  if (!panel || panel.dataset.cargadoPara === correo) return;
+  panel.dataset.cargadoPara = correo;
+  cargarEnviosUsuario(correo, card.querySelector("#usrEnvios"));
+  cargarAuditoriaUsuario(correo, card.querySelector("#usrAuditoria"));
 }
 
 async function guardar(card) {
@@ -429,6 +449,15 @@ selEl.addEventListener("change", () => {
 detalleEl.addEventListener("click", (e) => {
   const card = e.target.closest(".usr-card");
   if (!card) return;
+  const tab = e.target.closest("[data-tab]");
+  if (tab) {
+    tabUsr = tab.dataset.tab;
+    try { localStorage.setItem("snw_tab_usuarios", tabUsr); } catch { /* sin almacenamiento */ }
+    card.querySelectorAll(".usr-tab").forEach((t) => t.classList.toggle("activo", t === tab));
+    card.querySelectorAll("[data-panel]").forEach((p) => { p.hidden = p.dataset.panel !== tabUsr; });
+    if (tabUsr === "auditoria") cargarAuditoriaPanel(card, card.dataset.correo);
+    return;
+  }
   if (e.target.closest("[data-guardar]")) guardar(card);
   if (e.target.closest("[data-borrar]")) {
     borrarCorreo = card.dataset.correo;
