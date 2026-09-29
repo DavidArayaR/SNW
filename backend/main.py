@@ -4238,6 +4238,16 @@ def _pacientes_por_respuesta(ambiente: str, tabla: str | None = None) -> dict:
 # desarrollo/pruebas. Cada fila de log_envios se ata a su lote (envios.base_datos).
 _SOLO_PROD = "envio_id IN (SELECT id FROM envios WHERE base_datos = 'pacientes_prod')"
 
+# Respuestas automáticas del sistema (texto libre, ventana de 24 h): no son
+# parte de un lote (envio_id NULL) y siempre cuentan como servicio.
+_CLAVES_RESPUESTA_AUTO = ("call_center", "baja_aviso", "retractacion_aviso")
+# En costos entran aunque no tengan lote: si salieron por api_oficial, Meta
+# las cobró de verdad (las simuladas se excluyen por no tener message_id).
+_SOLO_PROD_O_AUTO = (
+    f"({_SOLO_PROD} OR (envio_id IS NULL AND plantilla_clave IN"
+    f" ({', '.join(repr(c) for c in _CLAVES_RESPUESTA_AUTO)})))"
+)
+
 
 def _filtro_esp_estadisticas(sesion: dict, area_id: int | None) -> tuple[str, tuple, dict | None]:
     """Filtro SQL por area para estadísticas (solo admin/dev).
@@ -4638,8 +4648,11 @@ def _categorias_por_clave() -> dict:
         tiene_template = bool((p.get("whatsapp_template") or "").strip())
         if p.get("clave") and tiene_template and cat in _CATS_FACTURABLES:
             m[p["clave"]] = cat
-    # Respuesta automática de call center: mensaje de servicio (no-plantilla).
-    m[CALL_CENTER_CLAVE] = "service"
+    # Respuestas automáticas del sistema (texto libre, ventana de 24 h):
+    # mensaje de servicio (no-plantilla). Toda respuesta automática cuenta
+    # para servicio: call center, despedida por baja y bienvenida de vuelta.
+    for _c in _CLAVES_RESPUESTA_AUTO:
+        m[_c] = "service"
     return m
 
 
@@ -4669,7 +4682,7 @@ def estadisticas_costos(granularidad: str = Query("mes"), area_id: int | None = 
             " FROM log_envios"
             " WHERE estado_envio = 'enviado'"
             "   AND plantilla_clave NOT IN ('respuesta', 'ajuste_manual')"
-            f"   AND {_SOLO_PROD}"
+            f"   AND {_SOLO_PROD_O_AUTO}"
             f"{filtro_esp}"
             " GROUP BY periodo, plantilla_clave ORDER BY periodo",
             args_esp or None,
