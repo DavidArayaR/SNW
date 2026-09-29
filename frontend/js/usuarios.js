@@ -241,6 +241,26 @@ function rolControl(u) {
   return `<span class="usr-tag usr-tag--${esc(u.rol)}">${esc(ROL_LABEL[u.rol] || u.rol)}</span>`;
 }
 
+// Cuentas agrupadas por rol para el select (Desarrolladores,
+// Administradores, Supervisores, Usuarios; roles nuevos al final).
+const ORDEN_ROLES = ["desarrollador", "administrador", "supervisor", "usuario"];
+const GRUPO_ROL_LABEL = {
+  desarrollador: "Desarrolladores",
+  administrador: "Administradores",
+  supervisor: "Supervisores",
+  usuario: "Usuarios",
+};
+function gruposCuentas(us) {
+  const grupos = [];
+  for (const r of ORDEN_ROLES) {
+    const cuentas = us.filter((u) => u.rol === r);
+    if (cuentas.length) grupos.push({ etiqueta: GRUPO_ROL_LABEL[r], cuentas });
+  }
+  const resto = us.filter((u) => ORDEN_ROLES.indexOf(u.rol) === -1);
+  if (resto.length) grupos.push({ etiqueta: "Otras cuentas", cuentas: resto });
+  return grupos;
+}
+
 function render() {
   const us = estado.usuarios || [];
   vacioEl.hidden = us.length > 0;
@@ -253,9 +273,12 @@ function render() {
     seleccion = (primeraEditable || us[0] || {}).usuario || null;
   }
 
-  selEl.innerHTML = us.map((u) => {
-    const etq = `${u.usuario} — ${ROL_LABEL[u.rol] || u.rol}` + (u.es_actual ? " (tú)" : "");
-    return `<option value="${esc(u.usuario)}"${u.usuario === seleccion ? " selected" : ""}>${esc(etq)}</option>`;
+  selEl.innerHTML = gruposCuentas(us).map((g) => {
+    const ops = g.cuentas.map((u) => {
+      const etq = u.usuario + (u.es_actual ? " (tú)" : "");
+      return `<option value="${esc(u.usuario)}"${u.usuario === seleccion ? " selected" : ""}>${esc(etq)}</option>`;
+    }).join("");
+    return `<optgroup label="${esc(g.etiqueta)}">${ops}</optgroup>`;
   }).join("");
   if (seleccion) selEl.value = seleccion;
 
