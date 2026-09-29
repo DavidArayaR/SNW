@@ -44,6 +44,22 @@
         </select>
         <input type="search" id="buscador" placeholder="Buscar por base de datos o plantilla..." autocomplete="off">
         <span id="contador" class="contador-sel"></span>
+        <span class="pag-grupo">
+          <span id="pagInfoHist" class="pag-info"></span>
+          <span class="pag-fila">
+            <button type="button" class="btn btn--ghost" id="pagAntHist" title="Página anterior" aria-label="Página anterior"><i class="fa-solid fa-chevron-left"></i></button>
+            <button type="button" class="btn btn--ghost" id="pagSigHist" title="Página siguiente" aria-label="Página siguiente"><i class="fa-solid fa-chevron-right"></i></button>
+          </span>
+          <span class="pag-fila">
+            <label class="pag-label" for="selPageSizeHist">Por p&aacute;gina:</label>
+            <select id="selPageSizeHist" aria-label="Envíos por página">
+              <option value="10">10</option>
+              <option value="25">25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </span>
+        </span>
       </div>
 
       <div class="tabla-wrap">

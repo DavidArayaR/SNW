@@ -8,6 +8,8 @@ if (!localStorage.getItem("snw_token")) location.replace("login.html");
 
 let registros = [];
 let filtro = "";
+let paginaHist = 1;
+let pageSizeHist = Math.min(100, Math.max(10, Number(localStorage.getItem("snw_page_size_hist")) || 10));
 let ambienteDetalle = "produccion";
 let areaDetalle = null; // area del envío abierto (para sus mensajes)
 let pacienteMsgActual = null; // { id, ambiente, interesado }
@@ -68,8 +70,29 @@ if (selBaseHist) selBaseHist.addEventListener("change", () => {
   } else {
     localStorage.removeItem("snw_base_historial");
   }
+  paginaHist = 1;
   cargar();
 });
+
+const pagAntHist = $("#pagAntHist");
+if (pagAntHist) pagAntHist.addEventListener("click", () => {
+  if (paginaHist > 1) { paginaHist -= 1; render(); }
+});
+const pagSigHist = $("#pagSigHist");
+if (pagSigHist) pagSigHist.addEventListener("click", () => {
+  paginaHist += 1;
+  render();
+});
+const selPageSizeHist = $("#selPageSizeHist");
+if (selPageSizeHist) {
+  selPageSizeHist.value = String(pageSizeHist);
+  selPageSizeHist.addEventListener("change", () => {
+    pageSizeHist = Math.min(100, Math.max(10, Number(selPageSizeHist.value) || 10));
+    localStorage.setItem("snw_page_size_hist", String(pageSizeHist));
+    paginaHist = 1;
+    render();
+  });
+}
 
 const tbodyEl = $("#tablaHistorial tbody");
 const vacioEl = $("#tablaVacia");
@@ -95,11 +118,29 @@ async function cargar() {
     if (rh.status === 401 || rc.status === 401) { window.snwSesionExpirada(); return; }
     if (!rh.ok || !rc.ok) throw new Error();
     registros = await rh.json();
+    paginaHist = 1;
     render();
   } catch {
     console.error("[historial.js cargar()]");
     toast("Error al conectar con el servidor.", "error");
   }
+}
+
+function totalPaginasHist(n) {
+  return Math.max(1, Math.ceil(n / pageSizeHist));
+}
+
+function pintarPaginadorHist(total) {
+  const info = $("#pagInfoHist");
+  const btnAnt = $("#pagAntHist");
+  const btnSig = $("#pagSigHist");
+  const selTam = $("#selPageSizeHist");
+  if (!info && !btnAnt && !btnSig && !selTam) return; // HTML antiguo en caché
+  const paginas = totalPaginasHist(total);
+  if (info) info.textContent = `Página ${paginaHist} de ${paginas} · ${total} envío${total === 1 ? "" : "s"}`;
+  if (btnAnt) btnAnt.disabled = paginaHist <= 1;
+  if (btnSig) btnSig.disabled = paginaHist >= paginas;
+  if (selTam) selTam.value = String(pageSizeHist);
 }
 
 function render() {
@@ -111,9 +152,14 @@ function render() {
         .some((v) => v.toLowerCase().includes(q))
   );
 
+  const paginas = totalPaginasHist(visibles.length);
+  if (paginaHist > paginas) paginaHist = paginas;
+  if (paginaHist < 1) paginaHist = 1;
+  const parte = visibles.slice((paginaHist - 1) * pageSizeHist, paginaHist * pageSizeHist);
+
   tbodyEl.innerHTML = "";
 
-  for (const r of visibles) {
+  for (const r of parte) {
     const tr = document.createElement("tr");
     tr.dataset.id = String(r.id);
     tr.dataset.amb = (r.base_datos ?? "").includes("prod") ? "produccion" : "desarrollo";
@@ -145,6 +191,7 @@ function render() {
 
   vacioEl.hidden = visibles.length > 0;
   contadorEl.textContent = `${visibles.length} envío${visibles.length === 1 ? "" : "s"}`;
+  pintarPaginadorHist(visibles.length);
 
   const totalEnvios = registros.length;
   statsEl.innerHTML =
@@ -309,6 +356,7 @@ $("#modalMensajes").addEventListener("click", (e) => { if (e.target === $("#moda
 
 buscadorEl.addEventListener("input", () => {
   filtro = buscadorEl.value;
+  paginaHist = 1;
   render();
 });
 
