@@ -3973,11 +3973,18 @@ def envios_en_curso(sesion: dict = Depends(exigir("mensajeria"))):
     for job_id, job in jobs:
         if job.get("estado") not in ESTADOS_ENVIO_EN_CURSO:
             continue
+        area_nombre = ""
+        if job.get("area_id") is not None:
+            _a = servicio_areas.obtener_area(job["area_id"])
+            if _a:
+                area_nombre = _a.get("nombre_visible") or ""
         activos.append({
             "job_id": job_id,
             "estado": job.get("estado"),
             "ambiente": job.get("ambiente"),
             "base": job.get("base", job.get("ambiente")),
+            "area_id": job.get("area_id"),
+            "area": area_nombre,
             "plantilla": (job.get("plantilla") or {}).get("nombre") or "",
             "total": job.get("total", 0),
             "enviados": job.get("enviados", 0),

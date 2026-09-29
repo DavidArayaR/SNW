@@ -203,12 +203,24 @@ function poblarSelectArea() {
   inpArea.innerHTML =
     (esUsuario ? "" : `<option value="">Global (todas las bases)</option>`) +
     misAreas.map((e) => `<option value="${e.id}">${escaparHtml(e.nombre_visible)}</option>`).join("");
-  if (actual && misAreas.some((e) => String(e.id) === actual)) {
+  const vals = [...inpArea.options].map((o) => o.value);
+  if (actual && vals.indexOf(actual) === -1) {
+    // La plantilla abierta es de un área que no está en la lista (se abrió
+    // antes de que cargaran): se conserva su opción para no perder el valor.
+    inpArea.add(new Option(nombreArea(Number(actual)) || "Área", actual));
+  }
+  if (actual && [...inpArea.options].some((o) => o.value === actual)) {
     inpArea.value = actual;
-  } else if (esUsuario && misAreas.length) {
+  } else if (!activaId && esUsuario && misAreas.length) {
+    // Solo al crear una plantilla nueva: el usuario necesita un área
+    // por defecto. Editando una existente no se toca el valor.
     inpArea.value = String(misAreas[0].id);
   }
   refrescarAvisoSinArea();
+  // La reconstrucción de la lista no es una edición del usuario: si cambió
+  // el valor del select, se re-toma el snapshot para no avisar "cambios sin
+  // guardar" falsos al cambiar de plantilla.
+  if (snapshot !== null && inpArea.value !== actual) marcarSnapshot();
 }
 
 // Sin áreas asignadas el usuario no puede crear plantillas: se le
@@ -1891,9 +1903,22 @@ if (btnSincronizarMeta) {
 // página), Mensajería muestra los envíos activos y permite retomarlos.
 let jobBannerActual = null;
 
+let jobsEnCurso = [];
+
+function textoJobEnCurso(job) {
+  const hechos = (job.enviados || 0) + (job.fallidos || 0);
+  return (
+    `Envío en curso: ${job.plantilla || "plantilla"} (${hechos}/${job.total})` +
+    (job.estado === "pausado" ? " · pausado" : "") +
+    (job.nombre_enviador ? ` · por ${job.nombre_enviador}` : "") +
+    (job.area ? ` · ${job.area}` : (job.base ? ` · ${job.base}` : ""))
+  );
+}
+
 async function actualizarBannerEnvioEnCurso() {
   const banner = $("#bannerEnvioEnCurso");
   const texto = $("#bannerEnvioTexto");
+  const lista = $("#listaEnviosEnCurso");
   if (!banner || !texto) return;
   try {
     const res = await fetch("api/notificaciones/envio-en-curso", {
@@ -1901,30 +1926,43 @@ async function actualizarBannerEnvioEnCurso() {
     });
     if (res.status === 401) { window.snwSesionExpirada(); return; }
     if (!res.ok) throw new Error();
-    const jobs = await res.json();
-    const job = (Array.isArray(jobs) ? jobs : [])[0] || null;
-    jobBannerActual = job;
-    // Si el modal ya sigue ese mismo envío, el banner sobra.
-    if (!job || (envioEnCursoConf && jobIdActualConf === job.job_id)) {
+    const todos = await res.json();
+    // Si el modal ya sigue un envío, ese sobra en la vista.
+    const jobs = (Array.isArray(todos) ? todos : [])
+      .filter((j) => !(envioEnCursoConf && jobIdActualConf === j.job_id));
+    jobsEnCurso = jobs;
+    if (!jobs.length) {
       banner.hidden = true;
+      if (lista) lista.innerHTML = "";
+      jobBannerActual = null;
       return;
     }
-    const hechos = (job.enviados || 0) + (job.fallidos || 0);
-    texto.textContent =
-      `Envío en curso: ${job.plantilla || "plantilla"} (${hechos}/${job.total})` +
-      (job.estado === "pausado" ? " · pausado" : "") +
-      (job.nombre_enviador ? ` · por ${job.nombre_enviador}` : "");
+    // Admin/dev ven TODOS los envíos en curso (puede haber varios a la vez
+    // en distintas bases); el resto sigue viendo uno solo como antes.
+    if (!!window.snwEsPrivilegiado && jobs.length > 1 && lista) {
+      banner.hidden = true;
+      jobBannerActual = null;
+      lista.innerHTML = jobs.map((job) =>
+        `<div class="aviso-envio-curso"><span>${escaparHtml(textoJobEnCurso(job))}</span>` +
+        `<button type="button" class="btn btn--sm btn--primary" data-ver-job="${escaparHtml(job.job_id)}">Ver</button></div>`
+      ).join("");
+      return;
+    }
+    if (lista) lista.innerHTML = "";
+    const job = jobs[0];
+    jobBannerActual = job;
+    texto.textContent = textoJobEnCurso(job);
     banner.hidden = false;
   } catch {
     console.error("[app.js actualizarBannerEnvioEnCurso()]");
     banner.hidden = true;
+    if (lista) lista.innerHTML = "";
     jobBannerActual = null;
+    jobsEnCurso = [];
   }
 }
 
-const btnVerEnvio = $("#btnVerEnvioEnCurso");
-if (btnVerEnvio) btnVerEnvio.addEventListener("click", async () => {
-  const job = jobBannerActual;
+async function retomarJob(job) {
   if (!job) return;
   // Verifica que siga activo antes de enganchar el modal.
   try {
@@ -1948,9 +1986,18 @@ if (btnVerEnvio) btnVerEnvio.addEventListener("click", async () => {
     setBloqueoEnvioConf(true);
     seguirProgresoConf(job.job_id, job.total);
   } catch {
-    console.error("[app.js actualizarBannerEnvioEnCurso()]");
+    console.error("[app.js retomarJob()]");
     toast("No se pudo retomar el envío.", "error");
   }
+}
+
+const btnVerEnvio = $("#btnVerEnvioEnCurso");
+if (btnVerEnvio) btnVerEnvio.addEventListener("click", () => retomarJob(jobBannerActual));
+const listaEnviosEl = $("#listaEnviosEnCurso");
+if (listaEnviosEl) listaEnviosEl.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-ver-job]");
+  if (!b) return;
+  retomarJob(jobsEnCurso.find((j) => j.job_id === b.dataset.verJob) || null);
 });
 
 setInterval(() => {
