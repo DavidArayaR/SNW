@@ -1035,9 +1035,9 @@ $("#btnModalConfirmar").addEventListener("click", async () => {
 $("#btnCancelar").addEventListener("click", cancelarEdicion);
 
 async function aprobarPlantillaActiva() {
-  if (!activaId) return;
-  const btn = $("#btnAprobar");
-  if (btn) btn.disabled = true;
+  if (!activaId || revisionEnCurso) return;
+  revisionEnCurso = true;
+  bloquearBotonesRevision(true);
   try {
     const res = await fetch(`${API_URL}/${activaId}/aprobar`, {
       method: "POST", headers: authHeaders(),
@@ -1053,14 +1053,15 @@ async function aprobarPlantillaActiva() {
     console.error("[app.js aprobarPlantillaActiva()]", err);
     toast(`No se pudo aprobar: ${err.message}`, "error");
   } finally {
-    if (btn) btn.disabled = false;
+    revisionEnCurso = false;
+    bloquearBotonesRevision(false);
   }
 }
 
 async function rechazarPlantillaActiva(motivo) {
-  if (!activaId) return;
-  const btn = $("#btnRechazar");
-  if (btn) btn.disabled = true;
+  if (!activaId || revisionEnCurso) return;
+  revisionEnCurso = true;
+  bloquearBotonesRevision(true);
   try {
     const res = await fetch(`${API_URL}/${activaId}/rechazar`, {
       method: "POST",
@@ -1078,7 +1079,19 @@ async function rechazarPlantillaActiva(motivo) {
     console.error("[app.js rechazarPlantillaActiva()]", err);
     toast(`No se pudo rechazar: ${err.message}`, "error");
   } finally {
-    if (btn) btn.disabled = false;
+    revisionEnCurso = false;
+    bloquearBotonesRevision(false);
+  }
+}
+
+// Mientras aprobar/rechazar está en curso se bloquean ambos botones (y sus
+// confirmaciones en los modales) para que no se disparen las dos acciones
+// a la vez ni se pulse dos veces la misma.
+let revisionEnCurso = false;
+function bloquearBotonesRevision(bloquear) {
+  for (const id of ["btnAprobar", "btnRechazar", "btnConfirmarAprobar", "btnConfirmarRechazar"]) {
+    const b = document.getElementById(id);
+    if (b) b.disabled = bloquear;
   }
 }
 

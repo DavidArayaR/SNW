@@ -46,5 +46,27 @@
     "area_id": null,
     "ultima_edicion": 1790617613535,
     "whatsapp_template_aprobada_en": 1790617655686
+  },
+  {
+    "id": 5,
+    "clave": "testes",
+    "nombre": "testes",
+    "texto": "Hola {nombre}, promocion 2x1 si te interesa escribe Me interesa",
+    "area_id": 1,
+    "whatsapp_template": "testes",
+    "whatsapp_template_lang": "es",
+    "whatsapp_template_categoria": "MARKETING",
+    "actualizada": 1790695489535,
+    "creado_por": "usuario",
+    "creada_en": 1790695489535,
+    "aprobacion_estado": "aprobada",
+    "aprobada_por": "david.a@saludmentalparatodos.com",
+    "aprobada_en": 1790695501228,
+    "rechazo_motivo": null,
+    "whatsapp_template_id": "1564590038301709",
+    "whatsapp_template_status": "APPROVED",
+    "whatsapp_template_error": null,
+    "whatsapp_template_aprobada_en": 1790695714522,
+    "whatsapp_template_rejected_reason": null
   }
 ]

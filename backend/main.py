@@ -3087,23 +3087,34 @@ def _costo_estimado_por_clave(clave: str, total: int) -> dict | None:
 
 
 def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, plantilla_texto: str,
-                                ambiente: str, plantilla_clave: str = "", solicitante: str = "",
-                                destinos_extra: list | None = None,
-                                area_nombre: str = "") -> bool:
+                                 ambiente: str, plantilla_clave: str = "", solicitante: str = "",
+                                 destinos_extra: list | None = None,
+                                 area_nombre: str = "") -> bool:
     c = _config_correo()
-    emisor, destino = c["emisor"], c["destino"]
+    emisor, destino_global = c["emisor"], c["destino"]
     base = url_base()
-    if not emisor or not destino:
-        print(f"[CORREO] Emisor o destino no configurado. Token {token} -> {base}/api/notificaciones/confirmar/{token}")
-        return False
-    # Supervisores de la area (Fase 3): también reciben la solicitud.
-    # Los enlaces por token no requieren sesión, así que cualquiera de los
-    # destinatarios puede confirmar o rechazar.
-    destinos = [destino]
-    for d in destinos_extra or []:
-        d = (d or "").strip().lower()
-        if d and d not in destinos:
-            destinos.append(d)
+    # Envío de un área: los ÚNICOS destinatarios son sus supervisores, nadie más.
+    # Envío legacy (sin área): se mantiene el destino global configurado.
+    solo_supervisores = destinos_extra is not None
+    if solo_supervisores:
+        destinos = []
+        for d in destinos_extra or []:
+            d = (d or "").strip().lower()
+            if d and d not in destinos:
+                destinos.append(d)
+        if not destinos:
+            log_error(f"_enviar_correo_confirmacion sin supervisores (token {token})")
+            return False
+        if not emisor:
+            print(f"[CORREO] Emisor no configurado. Token {token} -> {base}/api/notificaciones/confirmar/{token}")
+            return False
+    else:
+        if not emisor or not destino_global:
+            print(f"[CORREO] Emisor o destino no configurado. Token {token} -> {base}/api/notificaciones/confirmar/{token}")
+            return False
+        # Los enlaces por token no requieren sesión, así que el destinatario
+        # puede confirmar o rechazar.
+        destinos = [destino_global]
     host, port, user, pwd, tls = c["host"], c["port"], c["user"], c["pwd"], c["tls"]
 
     costo = _costo_estimado_por_clave(plantilla_clave, total)
@@ -3115,7 +3126,7 @@ def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, p
 
     if not host or not pwd:
         # Modo simulado: logear URL para pruebas sin SMTP real
-        print(f"[CORREO SIMULADO] Para {destino} desde {emisor}: solicitado por {quien} - confirmar {base}/api/notificaciones/confirmar/{token} | rechazar {base}/api/notificaciones/rechazar/{token} - {total} personas, plantilla '{plantilla_nombre}', base {ambiente}, costo aprox. {costo_txt}")
+        print(f"[CORREO SIMULADO] Para {', '.join(destinos)} desde {emisor}: solicitado por {quien} - confirmar {base}/api/notificaciones/confirmar/{token} | rechazar {base}/api/notificaciones/rechazar/{token} - {total} personas, plantilla '{plantilla_nombre}', base {ambiente}, costo aprox. {costo_txt}")
         return True
 
     confirm_url = f"{base}/api/notificaciones/confirmar/{token}"
@@ -3659,15 +3670,20 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
             solicitante = f"{nombre_sol} ({correo_sol})"
         else:
             solicitante = nombre_sol or correo_sol or "usuario desconocido"
-        # Supervisores de la area también reciben la solicitud (Fase 3).
-        destinos_extra: list[str] = []
+        # Solo los supervisores del área reciben la solicitud, nadie más.
+        # Sin supervisores con correo no hay a quién avisar: se avisa al
+        # solicitante en vez de dejar la solicitud pendiente para siempre.
+        correos_sup: list[str] | None = None
         if esp:
+            correos_sup = []
             for _sup in servicio_areas.correos_supervisores_area(esp["id"]):
-                if _sup["correo"] not in destinos_extra:
-                    destinos_extra.append(_sup["correo"])
+                if _sup["correo"] not in correos_sup:
+                    correos_sup.append(_sup["correo"])
+            if not correos_sup:
+                raise HTTPException(409, detail="El área no tiene supervisores con correo configurado: no se puede pedir confirmación.")
         _enviar_correo_confirmacion(token, len(destinatarios), plantilla["nombre"], plantilla["texto"],
                                     amb, plantilla["clave"], solicitante,
-                                    destinos_extra=destinos_extra,
+                                    destinos_extra=correos_sup,
                                     area_nombre=(esp["nombre_visible"] if esp else ""))
         return {"requiere_confirmacion": True, "solicitud_id": token, "total": len(destinatarios),
                 "ambiente": amb, "rechazados": rechazados, "aviso_limite_mensajeria": aviso_limite,
