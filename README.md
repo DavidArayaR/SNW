@@ -201,7 +201,11 @@ que descarga la [página de precios de Meta](https://developers.facebook.com/doc
 baja los CSV de rate card, extrae la fila «Chile» y detecta si hay tarifas nuevas o futuras.
 Se usa en la sección **Costos** de Estadísticas (permiso `tarifas_editar`) para estimar el gasto por
 día / mes / año aplicando a cada mensaje enviado la tarifa vigente en su fecha según la
-categoría de su plantilla.
+categoría de su plantilla. Los mensajes de servicio (respuestas automáticas de call center,
+texto libre en ventana de 24 h) siempre se muestran y calculan a la tarifa `service`, o a la
+de Utility como respaldo cuando el card no trae `service` propia (regla de Meta, sin tramos
+por volumen; rige desde el 01-10-2026: Chile CLP 17.6584 por mensaje, igual que
+Utility/Authentication; antes eran gratuitos y se excluyen).
 
 **`call_center_log`** — una fila por cada respuesta de call center enviada a un paciente
 interesado, con el `numero_call_center` que le asignó el servicio de `call_center_url`, si
@@ -423,7 +427,7 @@ Las cuentas `usuario` y `supervisor` reciben 403 en estos endpoints (y la migrac
 |---|---|---|
 | GET | `/api/estadisticas` | Resumen para Estadísticas (**solo envíos de producción**): mensajes `enviado` del mes, desglose, totales, `pacientes_por_respuesta` (cuántos pacientes de producción respondieron / se dieron de baja / no han respondido) y `webhook` (cuándo llegó el último evento de Meta — sirve para detectar que el webhook dejó de recibir). Con `?area_id=` filtra a esa especialidad |
 | GET | `/api/estadisticas/envios?granularidad=dia\|mes\|anio` | Mensajes enviados de producción agrupados por periodo, para el gráfico de barras (día = últimos 30, mes = últimos 12, año = últimos 6). Acepta `&area_id=` |
-| GET | `/api/estadisticas/costos?granularidad=dia\|mes\|anio` | (permiso `tarifas_editar`) Costo estimado agrupado por periodo. Acepta `&area_id`. **Solo cuenta mensajes de plantilla Marketing** (la única categoría que usa el sistema), aplicando la tarifa de `tarifas_whatsapp` vigente en su fecha. El resto (texto libre, otras categorías) va a `excluidos` |
+| GET | `/api/estadisticas/costos?granularidad=dia\|mes\|anio` | (permiso `tarifas_editar`) Costo estimado agrupado por periodo. Acepta `&area_id` y `&categoria=marketing\|utility\|authentication\|service` (filtra; lo no coincidente no se cuenta). Factura cada categoría a su tarifa de `tarifas_whatsapp` vigente en su fecha; servicio usa la tarifa `service` o la de Utility como respaldo (rigen desde el 01-10-2026). Sin categoría facturable o servicio gratuito en ese periodo va a `excluidos` |
 | GET | `/api/tarifas` | (permiso `tarifas_editar`) Tarifas guardadas: `vigente`, `proxima` (tarifa futura ya publicada por Meta), `usd_vigente`, `historial`, moneda de la cuenta y fecha de la última descarga |
 | POST | `/api/tarifas/actualizar` | (permiso `tarifas_editar`) Descarga la página de precios de Meta y sus CSV, guarda los rate cards nuevos de Chile (`INSERT IGNORE` por hash), autodetecta la moneda de facturación (`GET {waba}?fields=currency` → `wa_moneda`) y devuelve si hubo cambio |
 | GET | `/api/tarifas/chile.csv` | (permiso `tarifas_editar`) Descarga el CSV original del rate card de Chile (prefiere la moneda de la cuenta, si no USD) |
@@ -953,8 +957,9 @@ claro** de la sidebar, o con el botón flotante en la portada y el login (págin
   admin/dev) se ve además el panel **"Costos de mensajes de WhatsApp"**:
   tarifas vigentes de Meta para Chile por categoría, aviso cuando hay un cambio o una
   tarifa futura, descarga del CSV de Chile y el mismo gráfico de barras aplicado al costo
-  estimado por día / mes / año (solo mensajes de plantilla facturables; los de texto libre
-  de la ventana de 24 h se excluyen y se indican bajo el total).
+   estimado por día / mes / año (solo mensajes de plantilla facturables y mensajes de
+   servicio con tarifa vigente; el resto del texto libre de la ventana de 24 h
+   se excluye y se indica bajo el total).
   La pestaña **Configuración** (dentro de `administracion.html`, **solo rol desarrollador** —
   la pestaña ni se crea para un administrador): edita **todas** las claves de la
   tabla `configuracion` por secciones (Aplicación, URL pública, Correo/SMTP, WhatsApp).

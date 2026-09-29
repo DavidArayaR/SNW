@@ -341,6 +341,10 @@ async function cargarEnvios(gran) {
 
 /* -- Costos de mensajes de WhatsApp (solo administrador) ----------- */
 let granCostos = "mes";
+let catCostos = localStorage.getItem("snw_cat_costos") || "todas";
+if (["todas", "marketing", "utility", "authentication", "service"].indexOf(catCostos) === -1) {
+  catCostos = "todas";
+}
 
 async function cargarTarifas() {
   try {
@@ -405,7 +409,9 @@ function renderTarifas(d) {
     alerta.classList.add("webhook-salud--alerta");
     alerta.textContent =
       `⚠ Meta publicó una tarifa nueva que entra en vigor el ${fechaDMA(d.proxima.efectiva_desde)}: ` +
-      `Marketing ${fmtMoneda(d.proxima.marketing, d.proxima.moneda)}.`;
+      `Marketing ${fmtMoneda(d.proxima.marketing, d.proxima.moneda)}` +
+      (d.proxima.service > 0 ? ` · Servicio ${fmtMoneda(d.proxima.service, d.proxima.moneda)}` : "") +
+      ".";
   }
 
   if (!v) {
@@ -415,14 +421,23 @@ function renderTarifas(d) {
     return;
   }
 
-  const cats = ["marketing"];
+  const cats = ["marketing", "utility", "authentication", "service"];
+  // Servicio: tarifa explícita si trae valor; si no, la de utility
+  // (regla de Meta: el servicio cuesta lo mismo que utility/auth).
+  const srvExplicito = v.service > 0;
+  const srvRate = srvExplicito ? v.service
+    : (v.utility > 0 ? v.utility : (v.authentication > 0 ? v.authentication : null));
+  const precio = (c) => {
+    if (c === "service") return srvRate != null ? fmtMoneda(srvRate, v.moneda) : "—";
+    return v[c] != null ? fmtMoneda(v[c], v.moneda) : "—";
+  };
   $("#tarifasVigente").innerHTML = cats
     .map(
       (c) => `
       <div class="tarifa-card">
         <span class="tarifa-card__cat">${CAT_LABEL[c]}</span>
-        <span class="tarifa-card__precio">${v[c] != null ? fmtMoneda(v[c], v.moneda) : "—"}</span>
-        <span class="tarifa-card__unidad">por mensaje</span>
+        <span class="tarifa-card__precio">${precio(c)}</span>
+        <span class="tarifa-card__unidad">por mensaje${c === "service" && !srvExplicito && srvRate != null ? " (= Utility)" : ""}</span>
       </div>`
     )
     .join("");
@@ -431,7 +446,10 @@ function renderTarifas(d) {
     `Moneda de facturación: <strong>${d.moneda}</strong> · ` +
     `vigente desde ${fechaDMA(v.efectiva_desde)} · ` +
     `actualizado ${d.ultima_descarga || "—"} · ` +
-    '<a href="#" id="btnCsvChile">Descargar CSV de Chile</a>';
+    '<a href="#" id="btnCsvChile">Descargar CSV de Chile</a>' +
+    (!srvExplicito && srvRate != null
+      ? '<br><span class="costos-nota">Servicio sin tarifa propia en este card: se calcula con la de Utility (regla de Meta; cobra desde el 01-10-2026).</span>'
+      : "");
   $("#btnCsvChile").addEventListener("click", descargarCsvChile);
 }
 
@@ -489,7 +507,8 @@ async function cargarCostos(gran) {
     b.classList.toggle("activo", b.dataset.gran === gran)
   );
   try {
-    const res = await fetch(`api/estadisticas/costos?granularidad=${gran}${qsEspEst()}`, {
+    const qsCat = catCostos !== "todas" ? `&categoria=${encodeURIComponent(catCostos)}` : "";
+    const res = await fetch(`api/estadisticas/costos?granularidad=${gran}${qsEspEst()}${qsCat}`, {
       headers: authHeaders(), cache: "no-store",
     });
     if (res.status === 401) { window.snwSesionExpirada(); return; }
@@ -536,8 +555,9 @@ function renderCostos(d) {
     .map(([c, n]) => `${CAT_LABEL[c] || c}: ${num(n)}`)
     .join(" · ");
   const excl = Number(t.excluidos || 0);
+  const alcance = catCostos !== "todas" ? ` de ${CAT_LABEL[catCostos] || catCostos}` : " de plantilla";
   $("#costosTotal").innerHTML =
-    `<strong>Total:</strong> ${fmtMoneda(t.costo, mon)} · ${num(t.mensajes)} mensajes de plantilla` +
+    `<strong>Total:</strong> ${fmtMoneda(t.costo, mon)} · ${num(t.mensajes)} mensajes${alcance}` +
     (desglose ? ` · ${desglose}` : "") +
     (excl
       ? `<br><span class="costos-nota">No se cuentan ${num(excl)} mensaje(s) de texto libre ` +
@@ -557,6 +577,15 @@ if (ES_ADMIN && $("#panelCostos")) {
   document.querySelectorAll("#costosTabs button").forEach((b) =>
     b.addEventListener("click", () => cargarCostos(b.dataset.gran))
   );
+  const selCatCostos = $("#selCatCostos");
+  if (selCatCostos) {
+    selCatCostos.value = catCostos;
+    selCatCostos.addEventListener("change", () => {
+      catCostos = selCatCostos.value;
+      localStorage.setItem("snw_cat_costos", catCostos);
+      cargarCostos(granCostos);
+    });
+  }
 }
 
 window.snwConCooldown($("#btnActualizarEstadisticas"), cargar);

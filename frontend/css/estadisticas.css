@@ -147,6 +147,7 @@
   border-top: 1px solid var(--borde);
 }
 .costos-cabecera h3 { margin: 0; font-size: 1rem; }
+.costos-cat { font-size: .85rem; font-weight: 600; color: var(--texto); }
 
 .grafico-tabs {
   display: inline-flex;

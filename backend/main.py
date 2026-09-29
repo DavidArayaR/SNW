@@ -3065,16 +3065,41 @@ def _fmt_moneda(monto: float, moneda: str) -> str:
     return f"{s} {moneda}"
 
 
+def _rate_servicio(tarifa: dict | None, periodo: str) -> float:
+    """Tarifa aplicable a mensajes de servicio (no-plantilla, ventana 24 h).
+
+    Regla de Meta: el servicio cuesta lo mismo que utility/auth del mercado,
+    sin tramos por volumen. Se usa la `service` explícita del rate card si
+    trae valor; si no, se usa la de utility (respaldo: authentication).
+    Solo desde el 01-10-2026 (antes era gratuito); `periodo` es inicio del
+    período en formato comparable ("2026-10-01", "2026-10" o "2026").
+    """
+    ini = periodo if len(periodo) >= 10 else (periodo + "-01" if len(periodo) == 7 else periodo + "-01-01")
+    srv = (tarifa.get("service") if tarifa else None) or 0.0
+    if srv > 0:
+        return srv
+    if ini < "2026-10-01":
+        return 0.0
+    return ((tarifa.get("utility") if tarifa else None)
+            or (tarifa.get("authentication") if tarifa else None) or 0.0)
+
+
 def _costo_estimado_por_clave(clave: str, total: int) -> dict | None:
     """Costo aproximado de enviar `total` mensajes de esta plantilla, en la
-    moneda de facturación de la cuenta. None si no hay tarifas descargadas o la
-    plantilla no se factura (texto libre / sin template)."""
+    moneda de facturación de la cuenta (rate card CLP vigente en su fecha).
+    Los mensajes de servicio usan `_rate_servicio` (tarifa explícita o la de
+    utility como respaldo, desde el 01-10-2026).
+    None si no hay tarifas descargadas o la plantilla no mapea a categoría
+    (texto libre sin clave conocida)."""
     cat = _categorias_por_clave().get(clave)
     if not cat:
         return None
     moneda = _moneda_cuenta()
     vig = _tarifa_vigente(_tarifas_guardadas(moneda) or _tarifas_guardadas("USD"))
-    rate = (vig or {}).get(cat)
+    if cat == "service":
+        rate = _rate_servicio(vig, time.strftime("%Y-%m-%d"))
+    else:
+        rate = (vig or {}).get(cat)
     if rate is None:
         return None
     return {
@@ -4598,10 +4623,14 @@ _CATS_FACTURABLES = ("marketing", "utility", "authentication")
 def _categorias_por_clave() -> dict:
     """clave de plantilla -> categoría facturable de Meta.
 
-    SOLO incluye plantillas que se envían como *template* aprobado (tienen un
-    `whatsapp_template` configurado) y con categoría facturable. Los mensajes de
-    texto libre —las respuestas dentro de la ventana de 24 h de atención al
-    cliente— son gratuitos desde nov-2024, así que no entran en el costo.
+    Incluye plantillas que se envían como *template* aprobado (tienen un
+    `whatsapp_template` configurado) y con categoría facturable, MÁS los
+    mensajes de servicio (texto libre): las respuestas automáticas de call
+    center van dentro de la ventana de 24 h y Meta las cobra desde el
+    01-10-2026 a la tarifa `service` del rate card (antes eran gratuitas
+    desde nov-2024, ver documentación de precios de mensajes no-plantilla).
+    Si el rate card vigente no trae tarifa de servicio (0/vacía), esos
+    mensajes se siguen excluyendo del costo en `estadisticas_costos`.
     """
     m = {}
     for p in leer_plantillas():
@@ -4609,13 +4638,20 @@ def _categorias_por_clave() -> dict:
         tiene_template = bool((p.get("whatsapp_template") or "").strip())
         if p.get("clave") and tiene_template and cat in _CATS_FACTURABLES:
             m[p["clave"]] = cat
+    # Respuesta automática de call center: mensaje de servicio (no-plantilla).
+    m[CALL_CENTER_CLAVE] = "service"
     return m
 
 
 def estadisticas_costos(granularidad: str = Query("mes"), area_id: int | None = Query(None),
+                        categoria: str | None = Query(None),
                         sesion: dict = Depends(solo_admin)):
     if granularidad not in ("dia", "mes", "anio"):
         raise HTTPException(400, detail="granularidad debe ser dia, mes o anio")
+    if categoria is not None:
+        categoria = (categoria or "").strip().lower()
+        if categoria not in _CATS:
+            raise HTTPException(400, detail="categoría debe ser marketing, utility, authentication o service")
     fmt = {"dia": "%Y-%m-%d", "mes": "%Y-%m", "anio": "%Y"}[granularidad]
     filtro_esp, args_esp, esp = _filtro_esp_estadisticas(sesion, area_id)
 
@@ -4638,14 +4674,15 @@ def estadisticas_costos(granularidad: str = Query("mes"), area_id: int | None = 
 
     periodos: dict[str, dict] = {}
     tot = {"mensajes": 0, "costo": 0.0, "por_categoria": {c: 0 for c in _CATS}}
-    excluidos = 0  # mensajes de texto libre / ventana 24 h (no facturables)
+    excluidos = 0  # mensajes sin categoría facturable o servicio aún gratuito
     for r in crudo:
         per = r["periodo"]
         n = int(r["n"] or 0)
         cat = cats_clave.get(r["clave"])
-        if cat != "marketing":
-            # El sistema solo usa plantillas MARKETING: cualquier otra
-            # categoría (o texto libre) no se cobra acá y va a excluidos.
+        if categoria and cat != categoria:
+            continue  # fuera del filtro por categoría: no se cuenta en nada
+        if cat not in ("marketing", "utility", "authentication", "service"):
+            # Sin categoría facturable (texto libre sin clave, etc.): no se cobra.
             excluidos += n
             periodos.setdefault(per, {
                 "periodo": per, "mensajes": 0, "costo": 0.0, "excluidos": 0,
@@ -4653,7 +4690,21 @@ def estadisticas_costos(granularidad: str = Query("mes"), area_id: int | None = 
             })["excluidos"] += n
             continue
         tarifa = _tarifa_para_fecha(tarifas, per if len(per) >= 7 else per + "-12")
-        rate = (tarifa.get(cat) if tarifa else None) or 0.0
+        if cat == "service":
+            # Servicio (no-plantilla, ventana 24 h): tarifa explícita o la de
+            # utility como respaldo; gratuito antes del 01-10-2026. Los rate
+            # cards anteriores traen service en 0/vacío y esos mensajes siguen
+            # excluyéndose.
+            rate = _rate_servicio(tarifa, per)
+        else:
+            rate = (tarifa.get(cat) if tarifa else None) or 0.0
+        if rate <= 0 and cat == "service":
+            excluidos += n
+            periodos.setdefault(per, {
+                "periodo": per, "mensajes": 0, "costo": 0.0, "excluidos": 0,
+                "por_categoria": {c: 0 for c in _CATS},
+            })["excluidos"] += n
+            continue
         costo = n * rate
 
         p = periodos.setdefault(per, {
