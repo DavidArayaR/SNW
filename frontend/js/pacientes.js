@@ -460,6 +460,7 @@ tbodyEl.addEventListener("change", async (e) => {
     return;
   }
   sel.disabled = true;
+  marcarFilasActualizando([id], true);
   try {
     const res = await fetch(`api/pacientes/${id}/respuesta?${qsBase()}`, {
       method: "PUT",
@@ -478,6 +479,7 @@ tbodyEl.addEventListener("change", async (e) => {
   } catch (err) {
     console.error("[pacientes.js:477]", err);
     toast(err.message || "No se pudo actualizar la respuesta", "error");
+    marcarFilasActualizando([id], false);
     if (paciente) sel.value = anterior || "pendiente";
     const badge = tbodyEl.querySelector(`.respuesta-badge[data-id="${id}"]`);
     if (badge) badge.hidden = false;
@@ -502,6 +504,7 @@ tbodyEl.addEventListener("change", async (e) => {
     return;
   }
   sel.disabled = true;
+  marcarFilasActualizando([id], true);
   try {
     const res = await fetch(`api/pacientes/${id}?${qsBase()}`, {
       method: "PUT",
@@ -523,6 +526,7 @@ tbodyEl.addEventListener("change", async (e) => {
   } catch (err) {
     console.error("[pacientes.js:521]", err);
     toast(err.message || "No se pudo actualizar el estado", "error");
+    marcarFilasActualizando([id], false);
     if (paciente) sel.value = estadoAnterior || "pendiente";
     const badge = tbodyEl.querySelector(`.estado-badge[data-id="${id}"]`);
     if (badge) badge.hidden = false;
@@ -603,19 +607,52 @@ if (selPageSizePac) selPageSizePac.addEventListener("change", () => {
 const ESTADO_LABEL = { pendiente: "pendiente", enviado: "enviado", error: "error" };
 const RESPUESTA_LABEL = { pendiente: "sin respuesta", respondio: "respondió", baja: "dado de baja" };
 
-async function aplicarMasivo(sel, url, campo, etiquetas) {
+// Feedback visual mientras se aplica un cambio: las filas afectadas pulsan
+// hasta que la tabla se vuelve a dibujar (ver .fila-actualizando en CSS).
+function marcarFilasActualizando(ids, on) {
+  for (const id of ids) {
+    const chk = tbodyEl.querySelector(`input[type="checkbox"][data-id="${id}"]`);
+    const tr = chk ? chk.closest("tr") : null;
+    if (tr) tr.classList.toggle("fila-actualizando", on);
+  }
+}
+
+let masivoPendiente = null;
+
+function pedirConfirmacionMasiva(sel, url, campo) {
   const valor = sel.value;
   if (!valor) return;
   const ids = [...seleccionados];
-  const cantidad = ids.length;
-  const pregunta = campo === "estado"
-    ? `¿Cambiar el estado de ${cantidad} paciente${cantidad === 1 ? "" : "s"} a "${etiquetas[valor]}"?`
-    : `¿Cambiar la respuesta de ${cantidad} paciente${cantidad === 1 ? "" : "s"} a "${etiquetas[valor]}"?`;
-  if (!confirm(pregunta)) {
+  if (!ids.length) {
     sel.value = "";
+    toast("Selecciona al menos un paciente primero.", "error");
     return;
   }
+  const etiquetas = campo === "estado" ? ESTADO_LABEL : RESPUESTA_LABEL;
+  const cantidad = ids.length;
+  masivoPendiente = { sel, url, campo, valor, ids };
+  $("#masivoTitulo").textContent = campo === "estado" ? "Cambiar estado" : "Cambiar respuesta";
+  $("#masivoTexto").textContent = campo === "estado"
+    ? `¿Cambiar el estado de ${cantidad} paciente${cantidad === 1 ? "" : "s"} a "${etiquetas[valor]}"?`
+    : `¿Cambiar la respuesta de ${cantidad} paciente${cantidad === 1 ? "" : "s"} a "${etiquetas[valor]}"?`;
+  $("#modalConfirmarMasivo").hidden = false;
+}
+
+function cerrarModalMasivo(revertirSelect) {
+  const op = masivoPendiente;
+  masivoPendiente = null;
+  $("#modalConfirmarMasivo").hidden = true;
+  if (revertirSelect && op) op.sel.value = "";
+}
+
+async function ejecutarMasivo() {
+  const op = masivoPendiente;
+  masivoPendiente = null;
+  if (!op) return;
+  $("#modalConfirmarMasivo").hidden = true;
+  const { sel, url, campo, valor, ids } = op;
   sel.disabled = true;
+  marcarFilasActualizando(ids, true);
   try {
     const res = await fetch(`${url}?${qsBase()}`, {
       method: "PUT",
@@ -632,8 +669,9 @@ async function aplicarMasivo(sel, url, campo, etiquetas) {
     toast(msg, data.bloqueados ? "error" : "ok");
     await cargar();
   } catch (err) {
-    console.error("[pacientes.js aplicarMasivo()]", err);
+    console.error("[pacientes.js ejecutarMasivo()]", err);
     toast(err.message || "No se pudo aplicar el cambio", "error");
+    marcarFilasActualizando(ids, false);
   } finally {
     sel.value = "";
     sel.disabled = false;
@@ -642,21 +680,64 @@ async function aplicarMasivo(sel, url, campo, etiquetas) {
 
 if (selEstadoMasivo) {
   selEstadoMasivo.addEventListener("change", () =>
-    aplicarMasivo(selEstadoMasivo, "api/pacientes/estado-masivo", "estado", ESTADO_LABEL));
+    pedirConfirmacionMasiva(selEstadoMasivo, "api/pacientes/estado-masivo", "estado"));
 }
 if (selRespuestaMasivo) {
   selRespuestaMasivo.addEventListener("change", () =>
-    aplicarMasivo(selRespuestaMasivo, "api/pacientes/respuesta-masiva", "respuesta", RESPUESTA_LABEL));
+    pedirConfirmacionMasiva(selRespuestaMasivo, "api/pacientes/respuesta-masiva", "respuesta"));
 }
+$("#btnConfirmarMasivo").addEventListener("click", () => {
+  if (eliminarPendiente) ejecutarEliminacion();
+  else ejecutarMasivo();
+});
+function cerrarModalesMasivo() {
+  cerrarModalMasivo(true);
+  cerrarModalEliminar();
+}
+$("#btnCancelarMasivo").addEventListener("click", cerrarModalesMasivo);
+$("#modalConfirmarMasivo").addEventListener("click", (e) => {
+  if (e.target.id === "modalConfirmarMasivo") cerrarModalesMasivo();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !$("#modalConfirmarMasivo").hidden) cerrarModalesMasivo();
+});
 
 // --- Eliminar registros en bloque (solo tablas de área;
-// esta página es exclusiva admin/dev) ----------------------------------------
+// esta página es exclusiva admin/dev): mismo modal de confirmación y
+// animación de filas que el cambio masivo. ------------------------------------
+let eliminarPendiente = null;
+
 const btnEliminarMasivo = $("#btnEliminarMasivo");
-if (btnEliminarMasivo) btnEliminarMasivo.addEventListener("click", async () => {
+if (btnEliminarMasivo) btnEliminarMasivo.addEventListener("click", () => {
   const esp = espPacId();
   const ids = [...seleccionados];
   if (esp == null || !ids.length) return;
-  if (!confirm(`¿Eliminar ${ids.length} registro${ids.length === 1 ? "" : "s"} de esta área? Esta acción no se puede deshacer.`)) return;
+  eliminarPendiente = { esp, ids };
+  $("#masivoTitulo").textContent = "Eliminar registros";
+  $("#masivoTexto").textContent =
+    `¿Eliminar ${ids.length} registro${ids.length === 1 ? "" : "s"} de esta área? Esta acción no se puede deshacer.`;
+  $("#btnConfirmarMasivo").classList.remove("btn--primary");
+  $("#btnConfirmarMasivo").classList.add("btn--danger");
+  $("#modalConfirmarMasivo").hidden = false;
+});
+
+function cerrarModalEliminar() {
+  eliminarPendiente = null;
+  $("#modalConfirmarMasivo").hidden = true;
+  $("#btnConfirmarMasivo").classList.add("btn--primary");
+  $("#btnConfirmarMasivo").classList.remove("btn--danger");
+}
+
+async function ejecutarEliminacion() {
+  const op = eliminarPendiente;
+  eliminarPendiente = null;
+  if (!op) return;
+  $("#modalConfirmarMasivo").hidden = true;
+  $("#btnConfirmarMasivo").classList.add("btn--primary");
+  $("#btnConfirmarMasivo").classList.remove("btn--danger");
+  const { esp, ids } = op;
+  btnEliminarMasivo.disabled = true;
+  marcarFilasActualizando(ids, true);
   let ok = 0, mal = 0;
   for (const id of ids) {
     try {
@@ -670,8 +751,9 @@ if (btnEliminarMasivo) btnEliminarMasivo.addEventListener("click", async () => {
   }
   toast(mal ? `${ok} eliminados, ${mal} fallaron.` : `${ok} registro${ok === 1 ? "" : "s"} eliminado${ok === 1 ? "" : "s"}.`, mal ? "error" : "ok");
   todoMarcado = false;
+  btnEliminarMasivo.disabled = false;
   cargar();
-});
+}
 
 let toastTimer;
 function toast(msg, tipo = "ok") {

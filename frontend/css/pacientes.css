@@ -116,6 +116,22 @@
 
 .contador-sel { font-size: .85rem; font-weight: 700; color: var(--verde-oscuro); }
 
+/* Feedback mientras se aplica un cambio de estado/respuesta: las filas
+   afectadas pulsan hasta que la tabla se vuelve a dibujar. */
+@keyframes fila-pulso {
+  0%, 100% { background-color: transparent; }
+  50% { background-color: var(--brand-tint); }
+}
+#tablaPacientes tr.fila-actualizando > td {
+  animation: fila-pulso 1.1s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  #tablaPacientes tr.fila-actualizando > td {
+    animation: none;
+    background-color: var(--brand-tint);
+  }
+}
+
 .toolbar-masivo {
   display: flex;
   flex-wrap: wrap;
