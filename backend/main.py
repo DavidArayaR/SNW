@@ -4659,9 +4659,13 @@ def estadisticas_costos(granularidad: str = Query("mes"), area_id: int | None = 
     tarifas = _tarifas_guardadas(moneda) or _tarifas_guardadas("USD")
     cats_clave = _categorias_por_clave()
 
+    # Solo api_oficial se factura: el motor simulado no deja message_id.
+    # (En bases antiguas sin la columna no se puede distinguir: se cuenta todo.)
+    tiene_msgid = "whatsapp_message_id" in columnas_tabla("log_envios")
+    col_sim = ", SUM(whatsapp_message_id IS NULL) AS n_sim" if tiene_msgid else ""
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(
-            f"SELECT DATE_FORMAT(fecha_hora, '{fmt}') AS periodo, plantilla_clave AS clave, COUNT(*) AS n"
+            f"SELECT DATE_FORMAT(fecha_hora, '{fmt}') AS periodo, plantilla_clave AS clave, COUNT(*) AS n{col_sim}"
             " FROM log_envios"
             " WHERE estado_envio = 'enviado'"
             "   AND plantilla_clave NOT IN ('respuesta', 'ajuste_manual')"
@@ -4675,19 +4679,28 @@ def estadisticas_costos(granularidad: str = Query("mes"), area_id: int | None = 
     periodos: dict[str, dict] = {}
     tot = {"mensajes": 0, "costo": 0.0, "por_categoria": {c: 0 for c in _CATS}}
     excluidos = 0  # mensajes sin categoría facturable o servicio aún gratuito
+    simulados = 0  # motor simulado: Meta no los cobra ni se cuentan
+    def _nuevo_periodo(per):
+        return {
+            "periodo": per, "mensajes": 0, "costo": 0.0, "excluidos": 0,
+            "simulados": 0, "por_categoria": {c: 0 for c in _CATS},
+        }
     for r in crudo:
         per = r["periodo"]
-        n = int(r["n"] or 0)
+        n_sim = int(r.get("n_sim") or 0) if tiene_msgid else 0
+        if n_sim:
+            simulados += n_sim
+            periodos.setdefault(per, _nuevo_periodo(per))["simulados"] += n_sim
+        n = int(r["n"] or 0) - n_sim
+        if n <= 0:
+            continue
         cat = cats_clave.get(r["clave"])
         if categoria and cat != categoria:
             continue  # fuera del filtro por categoría: no se cuenta en nada
         if cat not in ("marketing", "utility", "authentication", "service"):
             # Sin categoría facturable (texto libre sin clave, etc.): no se cobra.
             excluidos += n
-            periodos.setdefault(per, {
-                "periodo": per, "mensajes": 0, "costo": 0.0, "excluidos": 0,
-                "por_categoria": {c: 0 for c in _CATS},
-            })["excluidos"] += n
+            periodos.setdefault(per, _nuevo_periodo(per))["excluidos"] += n
             continue
         tarifa = _tarifa_para_fecha(tarifas, per if len(per) >= 7 else per + "-12")
         if cat == "service":
@@ -4700,17 +4713,11 @@ def estadisticas_costos(granularidad: str = Query("mes"), area_id: int | None = 
             rate = (tarifa.get(cat) if tarifa else None) or 0.0
         if rate <= 0 and cat == "service":
             excluidos += n
-            periodos.setdefault(per, {
-                "periodo": per, "mensajes": 0, "costo": 0.0, "excluidos": 0,
-                "por_categoria": {c: 0 for c in _CATS},
-            })["excluidos"] += n
+            periodos.setdefault(per, _nuevo_periodo(per))["excluidos"] += n
             continue
         costo = n * rate
 
-        p = periodos.setdefault(per, {
-            "periodo": per, "mensajes": 0, "costo": 0.0, "excluidos": 0,
-            "por_categoria": {c: 0 for c in _CATS},
-        })
+        p = periodos.setdefault(per, _nuevo_periodo(per))
         p["mensajes"] += n
         p["costo"] = round(p["costo"] + costo, 4)
         p["por_categoria"][cat] += n
@@ -4727,7 +4734,8 @@ def estadisticas_costos(granularidad: str = Query("mes"), area_id: int | None = 
         "sin_tarifas": not tarifas,
         "filas": [periodos[k] for k in sorted(periodos)],
         "total": {"mensajes": tot["mensajes"], "costo": round(tot["costo"], 4),
-                  "excluidos": excluidos, "por_categoria": tot["por_categoria"]},
+                  "excluidos": excluidos, "simulados": simulados,
+                  "por_categoria": tot["por_categoria"]},
     }
 
 

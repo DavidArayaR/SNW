@@ -555,6 +555,7 @@ function renderCostos(d) {
     .map(([c, n]) => `${CAT_LABEL[c] || c}: ${num(n)}`)
     .join(" · ");
   const excl = Number(t.excluidos || 0);
+  const sim = Number(t.simulados || 0);
   const alcance = catCostos !== "todas" ? ` de ${CAT_LABEL[catCostos] || catCostos}` : " de plantilla";
   $("#costosTotal").innerHTML =
     `<strong>Total:</strong> ${fmtMoneda(t.costo, mon)} · ${num(t.mensajes)} mensajes${alcance}` +
@@ -562,6 +563,10 @@ function renderCostos(d) {
     (excl
       ? `<br><span class="costos-nota">No se cuentan ${num(excl)} mensaje(s) de texto libre ` +
         `(respuestas dentro de la ventana de 24 h): Meta no los cobra.</span>`
+      : "") +
+    (sim
+      ? `<br><span class="costos-nota">No se cuentan ${num(sim)} mensaje(s) simulado(s): ` +
+        `solo se factura lo enviado por api_oficial.</span>`
       : "");
 }
 

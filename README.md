@@ -205,7 +205,9 @@ categoría de su plantilla. Los mensajes de servicio (respuestas automáticas de
 texto libre en ventana de 24 h) siempre se muestran y calculan a la tarifa `service`, o a la
 de Utility como respaldo cuando el card no trae `service` propia (regla de Meta, sin tramos
 por volumen; rige desde el 01-10-2026: Chile CLP 17.6584 por mensaje, igual que
-Utility/Authentication; antes eran gratuitos y se excluyen).
+Utility/Authentication; antes eran gratuitos y se excluyen). Solo se cuenta lo enviado por
+`api_oficial` (con `whatsapp_message_id`): lo simulado se informa aparte como `simulados`
+y no se factura.
 
 **`call_center_log`** — una fila por cada respuesta de call center enviada a un paciente
 interesado, con el `numero_call_center` que le asignó el servicio de `call_center_url`, si
