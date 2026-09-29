@@ -342,7 +342,7 @@ async function cargarEnvios(gran) {
 /* -- Costos de mensajes de WhatsApp (solo administrador) ----------- */
 let granCostos = "mes";
 let catCostos = localStorage.getItem("snw_cat_costos") || "todas";
-if (["todas", "marketing", "utility", "authentication", "service"].indexOf(catCostos) === -1) {
+if (["todas", "marketing", "service"].indexOf(catCostos) === -1) {
   catCostos = "todas";
 }
 
@@ -421,7 +421,7 @@ function renderTarifas(d) {
     return;
   }
 
-  const cats = ["marketing", "utility", "authentication", "service"];
+  const cats = ["marketing", "service"];
   // Servicio: tarifa explícita si trae valor; si no, la de utility
   // (regla de Meta: el servicio cuesta lo mismo que utility/auth).
   const srvExplicito = v.service > 0;

@@ -147,7 +147,17 @@
   border-top: 1px solid var(--borde);
 }
 .costos-cabecera h3 { margin: 0; font-size: 1rem; }
-.costos-cat { font-size: .85rem; font-weight: 600; color: var(--texto); }
+.costos-cat { font-size: .85rem; font-weight: 600; color: var(--texto); white-space: nowrap; }
+/* Filtros juntos en la misma fila (periodo + categoría); el grupo no se
+   parte y el select se encoge en pantallas angostas. */
+.costos-filtros {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.costos-filtros select { min-width: 0; }
 
 .grafico-tabs {
   display: inline-flex;

@@ -103,19 +103,19 @@
 
           <div class="costos-cabecera">
             <h3>Costo estimado por periodo</h3>
-            <div class="grafico-tabs" id="costosTabs">
-              <button type="button" data-gran="dia">D&iacute;a</button>
-              <button type="button" data-gran="mes" class="activo">Mes</button>
-              <button type="button" data-gran="anio">A&ntilde;o</button>
+            <div class="costos-filtros">
+              <div class="grafico-tabs" id="costosTabs">
+                <button type="button" data-gran="dia">D&iacute;a</button>
+                <button type="button" data-gran="mes" class="activo">Mes</button>
+                <button type="button" data-gran="anio">A&ntilde;o</button>
+              </div>
+              <label class="costos-cat" for="selCatCostos">Categor&iacute;a:</label>
+              <select id="selCatCostos" class="badge badge--select" aria-label="Categoría">
+                <option value="todas">Todas</option>
+                <option value="marketing">Marketing</option>
+                <option value="service">Servicio</option>
+              </select>
             </div>
-            <label class="costos-cat" for="selCatCostos">Categor&iacute;a:</label>
-            <select id="selCatCostos" class="badge badge--select" aria-label="Categoría">
-              <option value="todas">Todas</option>
-              <option value="marketing">Marketing</option>
-              <option value="utility">Utilidad</option>
-              <option value="authentication">Autenticaci&oacute;n</option>
-              <option value="service">Servicio</option>
-            </select>
           </div>
 
           <div class="grafico-barras" id="costosBarras"></div>
