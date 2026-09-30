@@ -175,6 +175,7 @@ async function cargarAreas() {
   }
   poblarSelectArea();
   poblarFiltroArea();
+  poblarFormProg();
 }
 
 function poblarFiltroArea() {
@@ -329,7 +330,21 @@ async function cargar() {
       // Las plantillas de call center se gestionan desde el Historial.
       plantillas = datos.filter((p) => !p.especial && esPlantillaValida(p));
       renderLista(buscadorEl.value);
-      if (activaId === null) seleccionarDefault();
+      // Restaura la selección guardada (si la plantilla sigue existiendo).
+      try {
+        const guardada = Number(localStorage.getItem("snw_tpl_sel") || 0) || null;
+        if (guardada && plantillas.some((p) => p.id === guardada)) {
+          tplSelId = guardada;
+          renderLista(buscadorEl.value);
+          if (tabMsg === "envios") abrirModalConf(guardada);
+          else if (tabMsg === "programados") actualizarProgPlantilla();
+        }
+      } catch { /* sin almacenamiento */ }
+      if (activaId === null) {
+        const rest = plantillas.find((p) => p.id === tplSelId);
+        if (rest) abrir(rest.id);
+        else seleccionarDefault();
+      }
       return;
     } catch (err) {
       console.error("[app.js cargar()]", err);
@@ -477,14 +492,17 @@ function clicPlantilla(id) {
     tplSelId = id;
     renderLista(buscadorEl.value);
     abrirModalConf(id);
+    guardarSelTpl();
     return;
   }
   if (tabMsg === "programados") {
     tplSelId = id;
     seleccionarParaProgramar(id);
+    guardarSelTpl();
     return;
   }
   if (intentarAbrir(id)) tplSelId = id;
+  guardarSelTpl();
   renderLista(buscadorEl.value);
 }
 
@@ -837,6 +855,7 @@ function abrir(id) {
   if (!p) return;
   activaId = id;
   tplSelId = id;
+  guardarSelTpl();
   estadoVacio.style.display = "none";
   formEl.style.display = "";
   tituloForm.textContent = (PUEDE_EDITAR_PLANTILLAS && esPlantillaEditable(p)) ? `Editando: ${p.nombre}` : p.nombre;
@@ -943,6 +962,7 @@ function cancelarEdicion() {
   if (hayCambios() && !confirm("¿Descartar los cambios?")) return;
   // Cancelar siempre deselecciona la plantilla (no la vuelve a abrir).
   modoVacia();
+  guardarSelTpl();
 }
 
 formEl.addEventListener("submit", async (e) => {
@@ -1398,7 +1418,7 @@ function abrirModalConf(id = tplSelId) {
 function resetearCardEnvio() {
   clearInterval(timerPollingConf);
   tplSelId = null;
-  confPlantillaId = null;
+  guardarSelTpl();
   actualizarProgPlantilla();
   $("#confProgreso").hidden = true;
   $("#listaRechazadosConf").innerHTML = "";
@@ -1986,7 +2006,14 @@ if (btnSincronizarMeta) {
 /* ---------- Tabs de Mensajería ---------- */
 let tabMsg = localStorage.getItem("snw_tab_msg") || "plantillas";
 if (["plantillas", "envios", "programados"].indexOf(tabMsg) === -1) tabMsg = "plantillas";
-let tplSelId = null; // plantilla seleccionada (persiste entre tabs)
+let tplSelId = null; // plantilla seleccionada (persiste entre tabs y recargas)
+
+function guardarSelTpl() {
+  try {
+    if (tplSelId) localStorage.setItem("snw_tpl_sel", String(tplSelId));
+    else localStorage.removeItem("snw_tpl_sel");
+  } catch { /* sin almacenamiento */ }
+}
 
 function pintarTabsMsg() {
   document.querySelectorAll("[data-msgtab]").forEach((b) =>
@@ -2281,4 +2308,5 @@ modoVacia();
 cargarMiUsuario();
 cargarAreas();
 cargar();
+cargarProgramados();
 setInterval(revisarPlantillasEnSegundoPlano, 30000);
