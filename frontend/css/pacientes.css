@@ -1,5 +1,17 @@
 /* Solo Base de datos (pacientes.html). Lo compartido vive en componentes.css. */
 
+/* Cargar + Gestionar lado a lado (se apilan en pantallas angostas). */
+.pac-dual {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+  margin-top: 20px;
+}
+@media (max-width: 900px) {
+  .pac-dual { grid-template-columns: minmax(0, 1fr); }
+}
+
 #tablaPacientes tr.fila-actualizando > td {
   animation: fila-pulso 1.1s ease-in-out infinite;
 }
