@@ -3932,22 +3932,22 @@ def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensaj
     t = (esp["nombre_tabla_base"] if esp else tabla_pacientes(amb))
     amb_q = "produccion" if esp else amb
     with conectar(amb) as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT COUNT(*) AS total FROM {t}")
+        total = int((cur.fetchone() or {}).get("total") or 0)
+        # Elegibles = lo que realmente se va a enviar: pendientes, sin
+        # opt-out y sin baja (igual que en iniciar_envio, en todo ambiente).
+        conds = []
         if columna_existe(t, "estado", amb_q):
-            cur.execute(
-                f"SELECT COUNT(*) AS total,"
-                f" SUM(estado = 'pendiente') AS pendientes"
-                f" FROM {t}"
-            )
-        else:
-            cur.execute(
-                f"SELECT COUNT(*) AS total, COUNT(*) AS pendientes FROM {t}"
-            )
-        fila = cur.fetchone()
-
-    total = int(fila["total"] or 0)
-    # En desarrollo se envía sin importar el estado, así que "elegibles" = todos los pacientes.
-    # En producción (y en areas) se respeta el filtro de solo pendientes.
-    elegibles = total if amb_q == "desarrollo" else int(fila["pendientes"] or 0)
+            conds.append("estado = 'pendiente'")
+        if columna_existe(t, "whatsapp_opt_out", amb_q):
+            conds.append("whatsapp_opt_out = 0")
+        if columna_existe(t, "respuesta", amb_q):
+            conds.append("(respuesta IS NULL OR respuesta <> 'baja')")
+        cur.execute(
+            f"SELECT COUNT(*) AS pendientes FROM {t}"
+            + (" WHERE " + " AND ".join(conds) if conds else "")
+        )
+        elegibles = int((cur.fetchone() or {}).get("pendientes") or 0)
 
     costo = None
     if body.plantilla_id is not None and tiene_permiso(sesion, "tarifas_editar"):
