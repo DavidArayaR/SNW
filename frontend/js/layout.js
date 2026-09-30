@@ -163,7 +163,6 @@
   const LINKS_BASE = [
     { pagina: "inicio",       href: "index.html",        icono: "fa-house",             texto: "Inicio" },
     { pagina: "mensajeria",   href: "mensajeria.html",   icono: "fa-paper-plane",       texto: "Mensajería y plantillas", perm: "mensajeria" },
-    { pagina: "carga",        href: "carga.html",        icono: "fa-upload",            texto: "Cargar base de datos", perm: "mensajeria" },
     { pagina: "historial",    href: "historial.html",    icono: "fa-clock-rotate-left", texto: "Historial", perm: "historial" },
     { pagina: "pacientes",    href: "pacientes.html",    icono: "fa-database",          texto: "Base de datos", perm: "mensajeria", soloNoPriv: true },
   ];

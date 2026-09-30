@@ -111,6 +111,42 @@
           </div>
         </section>
 
+        <section class="panel" id="cardCargarCsv">
+          <div class="panel__head">
+            <h2>Cargar base de datos (CSV)</h2>
+          </div>
+
+          <p class="field__hint" style="margin:12px 18px 0;">
+            Sube un archivo CSV con columnas <strong>nombre, apellido, telefono</strong>
+            (UTF-8, máx. 5 MB) a una de tus áreas asignadas. Los teléfonos se
+            normalizan a <strong>+569XXXXXXXX</strong> y los duplicados se omiten.
+          </p>
+          <p id="csvSinEsp" class="warn" hidden style="margin:12px 18px 0;">
+            No tienes áreas asignadas: pídele a un administrador que te asigne
+            una para poder cargar datos.
+          </p>
+
+          <div class="field" style="margin:14px 18px 0; max-width:640px;">
+            <label for="selEspCarga">Área destino</label>
+            <select id="selEspCarga"></select>
+          </div>
+
+          <div class="field" style="margin:14px 18px 0; max-width:640px;">
+            <label>Archivo CSV</label>
+            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+              <label for="csvArchivoCarga" class="btn btn--ghost" id="lblArchivoCarga" style="cursor:pointer; margin:0;">Elegir archivo</label>
+              <span id="nombreArchivoCarga" class="field__hint" style="margin:0;">No se ha seleccionado ningún archivo</span>
+            </div>
+            <input type="file" id="csvArchivoCarga" accept=".csv" hidden>
+          </div>
+
+          <div style="margin:14px 18px 0;">
+            <button id="btnSubirCsv" class="btn btn--primary" type="button">Cargar base de datos</button>
+          </div>
+
+          <div id="csvResultado" style="margin:14px 18px 20px;"></div>
+        </section>
+
         <section class="panel" id="cardGestionTabla" hidden>
           <div class="panel__head">
             <h2>Gestionar tabla</h2>
