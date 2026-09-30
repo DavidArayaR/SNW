@@ -152,8 +152,7 @@ python -m pip install -r "%~dp0requirements.txt"
 
 :INICIAR
 echo  [4/4] Iniciando servidor en http://127.0.0.1:8000 ...
-timeout /t 2 /nobreak >nul
-start "" "http://127.0.0.1:8000"
+echo  Abre esa direccion en tu navegador.
 
 REM Levantar uvicorn en esta misma ventana
 python -m uvicorn main:app --app-dir backend --host 127.0.0.1 --port 8000

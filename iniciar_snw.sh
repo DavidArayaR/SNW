@@ -150,11 +150,6 @@ fi
 
 # --- 4/4 Servidor -------------------------------------------------------
 echo " [4/4] Iniciando servidor en http://127.0.0.1:8000 ..."
-(
-  sleep 2
-  if command -v xdg-open >/dev/null 2>&1; then xdg-open "http://127.0.0.1:8000" >/dev/null 2>&1
-  elif command -v open >/dev/null 2>&1; then open "http://127.0.0.1:8000" >/dev/null 2>&1
-  fi
-) &
+echo " Abre esa direccion en tu navegador."
 
 exec "$PYTHON" -m uvicorn main:app --app-dir backend --host 127.0.0.1 --port 8000
