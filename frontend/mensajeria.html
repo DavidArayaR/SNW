@@ -159,9 +159,11 @@
           <h2>Iniciar envío</h2>
         </div>
         <div id="cardEnvio" class="card-envio">
-          <p class="field__hint" id="envioSinPlantilla" style="margin:12px 18px;">
-            Elige una plantilla de la lista para preparar el envío.
-          </p>
+          <div class="envio-vacio" id="envioSinPlantilla">
+            <i class="fa-regular fa-file-lines"></i>
+            <p class="envio-vacio__titulo">Selecciona una plantilla para iniciar un envío</p>
+            <p class="envio-vacio__pista">Elige una de la lista de la izquierda.</p>
+          </div>
           <div id="envioContenido" hidden>
           <dl class="detalles">
             <div class="detalle-fila">
