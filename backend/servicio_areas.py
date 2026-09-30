@@ -178,7 +178,15 @@ def listar_areas() -> list[dict]:
                 " LEFT JOIN roles_area r ON r.area_id = e.id"
                 " ORDER BY e.nombre_visible"
             )
-            return cur.fetchall()
+            filas = cur.fetchall()
+            for esp in filas:
+                if tabla_valida(esp["nombre_tabla_base"]) \
+                        and _tabla_fisica_existe(cur, esp["nombre_tabla_base"]):
+                    cur.execute(f"SELECT COUNT(*) AS n FROM {esp['nombre_tabla_base']}")
+                    esp["total_pacientes"] = int((cur.fetchone() or {}).get("n", 0))
+                else:
+                    esp["total_pacientes"] = 0
+            return filas
     except Exception as e:
         log_error("listar_areas", e)
         return []
@@ -344,7 +352,15 @@ def areas_de_usuario(usuario_id: int) -> list[dict]:
                 " ORDER BY e.nombre_visible",
                 (int(usuario_id),),
             )
-            return cur.fetchall()
+            filas = cur.fetchall()
+            for esp in filas:
+                if tabla_valida(esp["nombre_tabla_base"]) \
+                        and _tabla_fisica_existe(cur, esp["nombre_tabla_base"]):
+                    cur.execute(f"SELECT COUNT(*) AS n FROM {esp['nombre_tabla_base']}")
+                    esp["total_pacientes"] = int((cur.fetchone() or {}).get("n", 0))
+                else:
+                    esp["total_pacientes"] = 0
+            return filas
     except Exception as e:
         log_error("areas_de_usuario", e)
         return []
@@ -438,6 +454,29 @@ def eliminar_tabla_area(area_id: int) -> dict:
         conn.commit()
     return {"id": int(area_id), "nombre_visible": esp["nombre_visible"],
             "nombre_tabla_base": tabla}
+
+
+def vaciar_tabla_area(area_id: int) -> dict:
+    """Borra SOLO los pacientes de la tabla de la area (los datos que se
+    cargaron), sin eliminar la tabla física, el rol, las asignaciones ni el
+    registro de la area. Como el borrado de un paciente, también limpia el
+    log de esa tabla (IDs huérfanos); la trazabilidad masiva (`envios`) se
+    conserva."""
+    esp = obtener_area(int(area_id))
+    if not esp:
+        raise ValueError("no_existe")
+    tabla = esp["nombre_tabla_base"]
+    if not tabla_valida(tabla):
+        raise ValueError("tabla_invalida")
+    with conectar() as conn, conn.cursor() as cur:
+        if not _tabla_fisica_existe(cur, tabla):
+            raise ValueError("no_existe")
+        cur.execute(f"DELETE FROM {tabla}")
+        vaciados = (cur.rowcount or 0)
+        cur.execute("DELETE FROM log_envios WHERE tabla_pacientes = %s", (tabla,))
+        conn.commit()
+    return {"id": int(area_id), "nombre_visible": esp["nombre_visible"],
+            "nombre_tabla_base": tabla, "pacientes_eliminados": vaciados}
 
 
 def importar_pacientes_csv(area_id: int, datos: bytes) -> dict:

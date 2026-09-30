@@ -2187,6 +2187,10 @@ const ESTADO_PROG_LABEL = {
 function progItemHtml(p) {
   const motivo = (p.estado === "rechazado" || p.estado === "error") && p.motivo
     ? `<div class="prog-item__motivo">${escaparHtml(p.motivo)}</div>` : "";
+  const costo = p.costo && p.puede_ver_costo
+    ? `<div class="prog-item__costo" title="Cuando se realice el envío se cobrará la tarifa vigente por ${p.costo.elegibles} mensajes.">` +
+        `Costo aprox.: <b>${fmtMoneda(p.costo.costo, p.costo.moneda)}</b>` +
+        `<span class="prog-item__costo-aviso">(se cobra al realizarse el envío)</span></div>` : "";
   const decided = p.decidido_por && (p.estado === "aprobado" || p.estado === "rechazado" || p.estado === "cancelado")
     ? ` · decidido por ${escaparHtml(p.decidido_por)}` : "";
   const botones =
@@ -2202,7 +2206,7 @@ function progItemHtml(p) {
     (p.area ? ` · ${escaparHtml(p.area)}` : "") +
     (p.limite ? ` · límite ${p.limite}` : "") +
     (p.creador_nombre ? ` · por ${escaparHtml(p.creador_nombre)}` : "") + decided + `</div>` +
-    motivo +
+    motivo + costo +
     (botones ? `<div class="prog-item__acciones">${botones}</div>` : "") +
     `</div>`;
 }
@@ -2362,7 +2366,8 @@ pintarTabsMsg();
 aplicarModoSoloLecturaPlantillas();
 modoVacia();
 cargarMiUsuario();
-cargarAreas();
-cargar();
+// Las áreas primero: la restauración de la plantilla seleccionada necesita
+// misAreas (card de envío / formulario de programar).
+cargarAreas().then(cargar);
 cargarProgramados();
 setInterval(revisarPlantillasEnSegundoPlano, 30000);

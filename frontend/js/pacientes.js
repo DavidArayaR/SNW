@@ -848,6 +848,80 @@ if (btnConfirmarDelTabla) btnConfirmarDelTabla.addEventListener("click", async (
   }
 });
 
+// --- Vaciar SOLO los pacientes del área elegida en la card de carga -----
+const btnVaciarBase = $("#btnVaciarBase");
+const selEspCarga = $("#selEspCarga");
+const modalVaciarTabla = $("#modalVaciarTabla");
+let timerVaciarTabla = null;
+
+function habilitarVaciarBase() {
+  if (!btnVaciarBase) return;
+  const hayAreas = !!selEspCarga && selEspCarga.options.length > 0 && !selEspCarga.disabled;
+  btnVaciarBase.disabled = !hayAreas;
+}
+
+function cerrarModalVaciarTabla() {
+  if (timerVaciarTabla) { clearInterval(timerVaciarTabla); timerVaciarTabla = null; }
+  if (modalVaciarTabla) modalVaciarTabla.hidden = true;
+}
+
+if (btnVaciarBase) btnVaciarBase.addEventListener("click", () => {
+  if (!selEspCarga || !selEspCarga.value || !modalVaciarTabla) return;
+  const espId = Number(selEspCarga.value);
+  const e = areas.find((x) => x.id === espId);
+  $("#vaciarTablaNombre").textContent = e ? `${e.nombre_visible} (${e.nombre_tabla_base})` : "área";
+  $("#vaciarTablaTotal").textContent =
+    e && Number.isFinite(e.total_pacientes) ? String(e.total_pacientes) : "…";
+  const btnConf = $("#btnConfirmarVaciarTabla");
+  const btnCanc = $("#btnCancelarVaciarTabla");
+  btnConf.disabled = true;
+  let restantes = 10;
+  btnConf.textContent = `Confirmar (${restantes})`;
+  if (timerVaciarTabla) clearInterval(timerVaciarTabla);
+  timerVaciarTabla = setInterval(() => {
+    restantes -= 1;
+    if (restantes <= 0) {
+      clearInterval(timerVaciarTabla);
+      timerVaciarTabla = null;
+      btnConf.disabled = false;
+      btnConf.textContent = "Confirmar";
+    } else {
+      btnConf.textContent = `Confirmar (${restantes})`;
+    }
+  }, 1000);
+  btnCanc.disabled = false;
+  modalVaciarTabla.hidden = false;
+});
+
+const btnCancelarVaciarTabla = $("#btnCancelarVaciarTabla");
+if (btnCancelarVaciarTabla) btnCancelarVaciarTabla.addEventListener("click", cerrarModalVaciarTabla);
+if (modalVaciarTabla) modalVaciarTabla.addEventListener("click", (e) => {
+  if (e.target === modalVaciarTabla) cerrarModalVaciarTabla();
+});
+
+const btnConfirmarVaciarTabla = $("#btnConfirmarVaciarTabla");
+if (btnConfirmarVaciarTabla) btnConfirmarVaciarTabla.addEventListener("click", async () => {
+  const espId = selEspCarga ? Number(selEspCarga.value) : null;
+  if (!Number.isFinite(espId)) { cerrarModalVaciarTabla(); return; }
+  btnConfirmarVaciarTabla.disabled = true;
+  try {
+    const res = await fetch(`api/areas/${espId}/tabla/datos`, {
+      method: "DELETE", headers: authHeaders(),
+    });
+    if (res.status === 401) { window.snwSesionExpirada(); return; }
+    if (!res.ok) throw new Error(`Error ${res.status}`);
+    const data = await res.json().catch(() => ({}));
+    toast(`Base de datos vaciada (${data.pacientes_eliminados ?? 0} pacientes eliminados).`, "ok");
+    cerrarModalVaciarTabla();
+    await cargarBasesPac();
+    cargar();
+  } catch (err) {
+    console.error("[pacientes.js btnConfirmarVaciarTabla()]", err);
+    cerrarModalVaciarTabla();
+    toast(err.message || "No se pudo vaciar.", "error");
+  }
+});
+
 // --- Carga CSV en el área seleccionada ---------------------
 const csvInput = $("#csvArchivo");
 if (csvInput) csvInput.addEventListener("change", async () => {
@@ -907,6 +981,7 @@ async function initCargaCsv() {
   selEsp.disabled = sinAsignadas;
   inpArchivo.disabled = sinAsignadas;
   btnSubir.disabled = sinAsignadas;
+  habilitarVaciarBase();
   const lblArchivo = $("#lblArchivoCarga");
   if (lblArchivo) lblArchivo.classList.toggle("is-disabled", sinAsignadas);
 

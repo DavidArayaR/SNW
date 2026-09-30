@@ -9,6 +9,7 @@ RUTAS = (
     ("/api/areas/{area_id}/roles/{usuario}", "DELETE", "retirar_rol_area", None),
     ("/api/areas/{area_id}/pacientes/{paciente_id}", "DELETE", "eliminar_paciente_area", None),
     ("/api/areas/{area_id}/tabla", "DELETE", "eliminar_tabla_area", None),
+    ("/api/areas/{area_id}/tabla/datos", "DELETE", "vaciar_tabla_area", None),
     ("/api/areas/{area_id}/pacientes/csv", "POST", "importar_pacientes_csv", 201),
 )
 

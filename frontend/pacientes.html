@@ -145,7 +145,17 @@
             <button id="btnSubirCsv" class="btn btn--primary" type="button">Cargar base de datos</button>
           </div>
 
-          <div id="csvResultado" style="margin:14px 18px 20px;"></div>
+          <div style="margin:18px 18px 20px; border-top:1px solid var(--borde, #e5e7eb); padding-top:14px;">
+            <button id="btnVaciarBase" class="btn btn--danger-ghost" type="button" disabled>
+              <i class="fa-solid fa-broom"></i> Vaciar base de datos del área
+            </button>
+            <p class="field__hint" style="margin:8px 0 0;">
+              Borra <strong>solo los pacientes</strong> del área elegida arriba (los datos cargados);
+              no elimina el área, su tabla, su rol ni el historial de envíos. Sin confirmar no se hace nada.
+            </p>
+          </div>
+
+          <div id="csvResultado" style="margin:0 18px 20px;"></div>
         </section>
 
         <section class="panel" id="cardGestionTabla" hidden>
@@ -179,6 +189,23 @@
       <div class="modal__actions">
         <button type="button" class="btn btn--ghost" id="btnCancelarDelTabla">Cancelar</button>
         <button type="button" class="btn btn--danger" id="btnConfirmarDelTabla" disabled>Confirmar (10)</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalVaciarTabla" class="modal" hidden>
+    <div class="modal__card" role="dialog" aria-modal="true">
+      <h3>Vaciar base de datos del área</h3>
+      <p style="margin: 0 0 12px; font-size: .92rem; line-height: 1.5;">
+        Vas a borrar DEFINITIVAMENTE los <strong id="vaciarTablaTotal">…</strong> pacientes
+        de <strong id="vaciarTablaNombre">…</strong>.
+        El área, su tabla, su rol y las asignaciones siguen intactos; el historial de envíos se conserva.
+        Esta acción no se puede deshacer.
+      </p>
+      <p class="field__hint">Por seguridad, el botón Confirmar se activa después de 10 segundos.</p>
+      <div class="modal__actions">
+        <button type="button" class="btn btn--ghost" id="btnCancelarVaciarTabla">Cancelar</button>
+        <button type="button" class="btn btn--danger" id="btnConfirmarVaciarTabla" disabled>Confirmar (10)</button>
       </div>
     </div>
   </div>

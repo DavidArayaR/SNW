@@ -285,6 +285,16 @@ select.badge--select {
   padding: 6px 10px;
 }
 .prog-item__acciones { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.prog-item__costo {
+  margin-top: 8px;
+  font-size: .82rem;
+  background: var(--brand-tint, rgba(9, 180, 124, .08));
+  border: 1px solid var(--brand-bd, rgba(9, 180, 124, .25));
+  color: var(--texto, #1f2937);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+.prog-item__costo-aviso { display: block; color: var(--texto-suave); margin-top: 2px; }
 /* Feedback mientras se actualiza la lista (igual que en Base de datos). */
 .prog-item.actualizando { animation: fila-pulso 1.1s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {

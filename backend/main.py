@@ -1000,6 +1000,29 @@ def eliminar_tabla_area(area_id: int, sesion: dict = Depends(solo_admin)):
     return {"ok": True, **info}
 
 
+def vaciar_tabla_area(area_id: int, sesion: dict = Depends(sesion_actual)):
+    """Vacía SOLO los pacientes de la tabla de la area (los datos que se
+    cargaron). Igual que importar CSV: admin/dev, supervisores y usuarios con
+    acceso al área pueden vaciarla. No toca la tabla física, el rol, las
+    asignaciones ni el registro de la area; el historial de envíos de conserva."""
+    esp = servicio_areas.obtener_area(area_id)
+    if not esp:
+        raise HTTPException(404, detail="Área no encontrada.")
+    privilegiado = _es_privilegiado(sesion)
+    if not privilegiado and not tiene_permiso(sesion, "mensajeria"):
+        raise HTTPException(403, detail="No tienes permiso para cargar o vaciar pacientes.")
+    uid = servicio_areas.usuario_id_por_correo(sesion.get("usuario", ""))
+    if not servicio_areas.puede_acceder_area(privilegiado, uid, area_id):
+        raise HTTPException(403, detail="No tienes acceso a esta área.")
+    try:
+        info = servicio_areas.vaciar_tabla_area(area_id)
+    except ValueError as e:
+        raise _error_area(str(e))
+    auditoria_registrar(sesion.get("usuario", ""), "area_vaciar", esp["nombre_visible"],
+                        f"{info['pacientes_eliminados']} pacientes vaciados de {info['nombre_tabla_base']}")
+    return {"ok": True, **info}
+
+
 async def importar_pacientes_csv(area_id: int, archivo: UploadFile = File(...),
                                  sesion: dict = Depends(sesion_actual)):
     """Carga pacientes vía CSV en la tabla de la area.
@@ -3920,22 +3943,12 @@ class DestinosIn(BaseModel):
     area_id: int | None = None
 
 
-def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensajeria"))):
-    try:
-        amb = entorno_valido(body.ambiente)
-    except ValueError:
-        raise HTTPException(400, detail=f"Entorno inválido: '{body.ambiente}'")
-
-    esp = None
-    if body.area_id is not None:
-        esp = _exigir_area(sesion, body.area_id)
-    t = (esp["nombre_tabla_base"] if esp else tabla_pacientes(amb))
-    amb_q = "produccion" if esp else amb
+def _contar_elegibles_tabla(t: str, amb_q: str, amb: str) -> tuple[int, int]:
+    """(total, elegibles) de una tabla: elegibles = pendientes, sin opt-out
+    y sin baja — lo que realmente se va a enviar (igual que iniciar_envio)."""
     with conectar(amb) as conn, conn.cursor() as cur:
         cur.execute(f"SELECT COUNT(*) AS total FROM {t}")
         total = int((cur.fetchone() or {}).get("total") or 0)
-        # Elegibles = lo que realmente se va a enviar: pendientes, sin
-        # opt-out y sin baja (igual que en iniciar_envio, en todo ambiente).
         conds = []
         if columna_existe(t, "estado", amb_q):
             conds.append("estado = 'pendiente'")
@@ -3948,6 +3961,21 @@ def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensaj
             + (" WHERE " + " AND ".join(conds) if conds else "")
         )
         elegibles = int((cur.fetchone() or {}).get("pendientes") or 0)
+    return total, elegibles
+
+
+def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensajeria"))):
+    try:
+        amb = entorno_valido(body.ambiente)
+    except ValueError:
+        raise HTTPException(400, detail=f"Entorno inválido: '{body.ambiente}'")
+
+    esp = None
+    if body.area_id is not None:
+        esp = _exigir_area(sesion, body.area_id)
+    t = (esp["nombre_tabla_base"] if esp else tabla_pacientes(amb))
+    amb_q = "produccion" if esp else amb
+    total, elegibles = _contar_elegibles_tabla(t, amb_q, amb)
 
     costo = None
     if body.plantilla_id is not None and tiene_permiso(sesion, "tarifas_editar"):
@@ -4137,6 +4165,12 @@ def _prog_a_respuesta(f: dict, sesion: dict) -> dict:
             puede_cancelar = True
         elif (sesion.get("usuario") or "").strip().lower() == (f.get("creador") or "").strip().lower():
             puede_cancelar = True
+    # Costo aproximado solo para admin/dev/supervisor y mientras el envío
+    # todavía no se ejecutó. Se cobra cuando el envío se realice.
+    puede_ver_costo = priv or es_sup
+    costo = None
+    if puede_ver_costo and f["estado"] in ("pendiente", "aprobado", "enviando"):
+        costo = _prog_costo_estimado(f, plantilla_nombre=f.get("plantilla_nombre") or "")
     return {
         "id": f["id"], "area_id": f.get("area_id"),
         "area": (esp.get("nombre_visible") if esp else ""),
@@ -4150,7 +4184,34 @@ def _prog_a_respuesta(f: dict, sesion: dict) -> dict:
         "decidido_por": f.get("decidido_por") or "", "motivo": f.get("motivo") or "",
         "job_id": f.get("job_id") or "",
         "puede_decidir": puede_decidir, "puede_cancelar": puede_cancelar,
+        "puede_ver_costo": puede_ver_costo, "costo": costo,
     }
+
+
+def _prog_costo_estimado(f: dict, plantilla_nombre: str = "") -> dict | None:
+    """Costo aproximado de ejecutar este envío programado hoy: se cuentan los
+    elegibles (pendientes, sin opt-out ni baja) de la tabla que se va a usar y
+    se estima contra la tarifa vigente de la plantilla. None si no hay tarifa
+    o plantilla. El cobro real ocurre cuando el envío se ejecuta."""
+    try:
+        amb = f.get("ambiente") or "produccion"
+        tabla = f.get("tabla") or nombre_base(amb)
+        if not tabla:
+            return None
+        amb_q = "produccion" if f.get("area_id") is not None else amb
+        _, elegibles = _contar_elegibles_tabla(tabla, amb_q, amb)
+        plantilla = next((p for p in leer_plantillas() if p.get("id") == f.get("plantilla_id")), None)
+        if plantilla is None:
+            return None
+        costo = _costo_estimado_por_clave(plantilla.get("clave", ""), elegibles)
+        if not costo:
+            return None
+        costo["elegibles"] = elegibles
+        costo["aviso_de_cobro"] = True
+        return costo
+    except Exception as e:
+        log_error(f"costo programado {f.get('id')}", e)
+        return None
 
 
 def _exigir_prog_decisor(sesion: dict, f: dict) -> None:
