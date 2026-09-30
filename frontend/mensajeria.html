@@ -7,9 +7,9 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
   <link rel="stylesheet" href="css/tema.css">
-  <link rel="stylesheet" href="css/styles.css">
-  <link rel="stylesheet" href="css/pacientes.css">
-  <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/styles.css?v=tabs3">
+  <link rel="stylesheet" href="css/pacientes.css?v=tabs3">
+  <link rel="stylesheet" href="css/layout.css?v=tabs3">
   <script src="js/tema.js"></script>
 </head>
 <body data-pagina="mensajeria">
@@ -24,13 +24,17 @@
           <i class="fa-solid fa-bars"></i>
         </button>
         <span class="app-topbar__titulo">Mensajer&iacute;a y plantillas</span>
+        <div class="msg-tabs" role="tablist">
+          <button type="button" class="msg-tab activo" data-msgtab="plantillas" role="tab">Plantillas</button>
+          <button type="button" class="msg-tab" data-msgtab="envios" role="tab">Envío manual</button>
+          <button type="button" class="msg-tab" data-msgtab="programados" role="tab">Envíos programados</button>
+        </div>
         <span class="app-topbar__sep"></span>
       </header>
 
   <main class="layout">
 
-    <aside class="panel panel--list">
-      <div class="panel__head">
+    <aside class="panel panel--list" id="panelPlantillas">      <div class="panel__head">
         <h2>Plantillas</h2>
         <div class="panel__actions">
           <button id="btnSincronizarMeta" class="btn btn--ghost" type="button" title="Trae los templates que existen en Meta: actualiza el estado de los que ya conoces e importa como plantilla nueva los que falten">Sincronizar</button>
@@ -42,11 +46,6 @@
       <div class="searchbox">
         <input type="search" id="buscador" placeholder="Buscar..." autocomplete="off">
       </div>
-      <div id="bannerEnvioEnCurso" class="aviso-envio-curso" hidden>
-        <span id="bannerEnvioTexto"></span>
-        <button type="button" class="btn btn--sm btn--primary" id="btnVerEnvioEnCurso">Ver</button>
-      </div>
-      <div id="listaEnviosEnCurso"></div>
       <div class="filtro-area">
         <label for="selFiltroArea">Filtrar por área:</label>
         <select id="selFiltroArea" class="badge badge--select" aria-label="Filtrar por área">
@@ -57,7 +56,7 @@
       <ul id="listaPlantillas" class="tpl-list" aria-label="Listado de plantillas"></ul>
     </aside>
 
-    <section class="panel panel--editor">
+    <section class="panel panel--editor" id="panelEditor">
       <div class="panel__head">
         <h2 id="tituloFormulario">Nueva plantilla</h2>
         <div class="panel__actions">
@@ -155,6 +154,124 @@
       </div>
     </section>
 
+      <section class="panel" id="panelEnvio">
+        <div class="panel__head">
+          <h2>Iniciar envío</h2>
+        </div>
+        <div id="cardEnvio" class="card-envio">
+          <p class="field__hint" id="envioSinPlantilla" style="margin:12px 18px;">
+            Elige una plantilla de la lista para preparar el envío.
+          </p>
+          <div id="envioContenido" hidden>
+          <dl class="detalles">
+            <div class="detalle-fila">
+              <dt>Plantilla</dt>
+              <dd id="confNombre">&mdash;</dd>
+            </div>
+            <div class="detalle-fila">
+              <dt>Destinatarios</dt>
+              <dd id="confDestinatarios">Contando...</dd>
+            </div>
+            <div class="detalle-fila" id="filaCostoConf" hidden>
+              <dt>Costo aproximado</dt>
+              <dd id="confCosto">&mdash;</dd>
+            </div>
+            <div class="detalle-fila">
+              <dt>Base de datos</dt>
+              <dd><select id="selBaseConf" class="badge badge--select" aria-label="Base de datos"></select></dd>
+            </div>
+            <div class="detalle-fila conf-limite-fila" id="filaLimiteConf" hidden>
+              <dt>Cu&aacute;ntos enviar</dt>
+              <dd class="conf-limite">
+                <input type="range" id="limiteRangeConf" min="1" value="1" step="1">
+                <div class="conf-limite__abajo">
+                  <input type="number" id="limiteNumConf" min="1" value="1" step="1">
+                  <span>de <strong id="limiteMaxConf">0</strong> a enviar</span>
+                </div>
+                <p class="conf-limite__nota" id="limiteNotaConf" hidden></p>
+              </dd>
+            </div>
+            <div class="detalle-fila conf-limite-fila" id="filaLimiteAdminConf" hidden>
+              <dt>L&iacute;mite diario (Meta)</dt>
+              <dd class="conf-limite">
+                <div class="conf-limite__abajo">
+                  <input type="number" id="limiteAdminNumConf" min="0" step="1000" value="0">
+                  <button type="button" class="btn btn--ghost" id="btnGuardarLimiteConf">Guardar</button>
+                </div>
+                <p class="field__hint">Usuarios &uacute;nicos que se pueden contactar cada 24 h, seg&uacute;n el dashboard de Meta (250, 1000, 2000, 10000, 100000). 0 = ilimitado. Es de la cuenta: aplica a producci&oacute;n y desarrollo.</p>
+              </dd>
+            </div>
+          </dl>
+
+          <div class="aviso-dev" id="confAvisoDev" hidden></div>
+          <div class="aviso-limite" id="confAvisoLimite" hidden></div>
+          <div class="aviso-admin" id="confAvisoAdmin" hidden></div>
+
+          <div id="confProgreso" hidden>
+            <div class="progreso-info">
+              <span id="progresoTextoConf">Preparando env&iacute;o...</span>
+              <span id="progresoNumerosConf" class="progreso-numeros"></span>
+            </div>
+            <div class="barra"><div class="barra__fill" id="barraFillConf"></div></div>
+          </div>
+
+          <ul id="listaRechazadosConf" class="rechazados" hidden></ul>
+
+          <div class="modal__actions">
+            <div class="acciones-izq">
+              <button type="button" class="btn btn--ghost" id="btnCerrarConf">Limpiar</button>
+              <button type="button" class="btn btn--danger" id="btnCancelarConf">Cancelar</button>
+            </div>
+            <div class="acciones-derecha">
+              <button type="button" class="btn btn--primary" id="btnLanzarConf" disabled>Iniciar Env&iacute;o</button>
+            </div>
+          </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="prog-columna" id="progColumna">      <section class="panel">
+        <div class="panel__head">
+          <h2>Envíos programados</h2>
+          <button id="btnActualizarProg" class="btn btn--ghost" type="button">Actualizar</button>
+        </div>
+        <div id="listaProgramados" class="prog-lista"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel__head">
+          <h2>Programar envío</h2>
+        </div>
+        <p class="field__hint" style="margin:12px 18px 0;">
+          El envío se ejecuta solo en la fecha indicada. Si lo crea un usuario, queda
+          <strong>pendiente</strong> hasta que un superior lo apruebe (se avisa por correo
+          a los supervisores del área); admin y supervisores programan directo.
+        </p>
+        <div class="prog-form">
+          <div class="field">
+            <label for="selProgArea">Área</label>
+            <select id="selProgArea"></select>
+          </div>
+          <div class="field">
+            <label>Plantilla</label>
+            <div class="prog-tpl-elegida"><strong id="progPlantillaNombre">—</strong>
+              <span class="field__hint">Elígela de la lista de la izquierda.</span>
+            </div>
+          </div>
+          <div class="field">
+            <label for="inpProgFecha">Fecha y hora (hora del servidor)</label>
+            <input type="datetime-local" id="inpProgFecha">
+          </div>
+          <div class="field">
+            <label for="inpProgLimite">Límite de mensajes (vacío = sin límite)</label>
+            <input type="number" id="inpProgLimite" min="1" step="1" placeholder="Sin límite">
+          </div>
+          <div class="form-actions">
+            <button type="button" id="btnProgramar" class="btn btn--primary btn--lg">Programar envío</button>
+          </div>
+        </div>
+      </section>
+      </div>
       </main>
     </div>
   </div>
@@ -195,72 +312,17 @@
     </div>
   </div>
 
-  <div id="modalConfirmar" class="modal" hidden>
-    <div class="modal__card modal__card--envio" role="dialog" aria-modal="true">
-      <h3>Confirmar env&iacute;o</h3>
-
-      <dl class="detalles">
-        <div class="detalle-fila">
-          <dt>Plantilla</dt>
-          <dd id="confNombre">&mdash;</dd>
-        </div>
-        <div class="detalle-fila">
-          <dt>Destinatarios</dt>
-          <dd id="confDestinatarios">Contando...</dd>
-        </div>
-        <div class="detalle-fila" id="filaCostoConf" hidden>
-          <dt>Costo aproximado</dt>
-          <dd id="confCosto">&mdash;</dd>
-        </div>
-        <div class="detalle-fila">
-          <dt>Base de datos</dt>
-          <dd><select id="selBaseConf" class="badge badge--select" aria-label="Base de datos"></select></dd>
-        </div>
-        <div class="detalle-fila conf-limite-fila" id="filaLimiteConf" hidden>
-          <dt>Cu&aacute;ntos enviar</dt>
-          <dd class="conf-limite">
-            <input type="range" id="limiteRangeConf" min="1" value="1" step="1">
-            <div class="conf-limite__abajo">
-              <input type="number" id="limiteNumConf" min="1" value="1" step="1">
-              <span>de <strong id="limiteMaxConf">0</strong> a enviar</span>
-            </div>
-            <p class="conf-limite__nota" id="limiteNotaConf" hidden></p>
-          </dd>
-        </div>
-        <div class="detalle-fila conf-limite-fila" id="filaLimiteAdminConf" hidden>
-          <dt>L&iacute;mite diario (Meta)</dt>
-          <dd class="conf-limite">
-            <div class="conf-limite__abajo">
-              <input type="number" id="limiteAdminNumConf" min="0" step="1000" value="0">
-              <button type="button" class="btn btn--ghost" id="btnGuardarLimiteConf">Guardar</button>
-            </div>
-            <p class="field__hint">Usuarios &uacute;nicos que se pueden contactar cada 24 h, seg&uacute;n el dashboard de Meta (250, 1000, 2000, 10000, 100000). 0 = ilimitado. Es de la cuenta: aplica a producci&oacute;n y desarrollo.</p>
-          </dd>
-        </div>
-      </dl>
-
-      <div class="aviso-dev" id="confAvisoDev" hidden></div>
-      <div class="aviso-limite" id="confAvisoLimite" hidden></div>
-      <div class="aviso-admin" id="confAvisoAdmin" hidden></div>
-
-      <div id="confProgreso" hidden>
-        <div class="progreso-info">
-          <span id="progresoTextoConf">Preparando env&iacute;o...</span>
-          <span id="progresoNumerosConf" class="progreso-numeros"></span>
-        </div>
-        <div class="barra"><div class="barra__fill" id="barraFillConf"></div></div>
+  <div id="modalProgRechazar" class="modal" hidden>
+    <div class="modal__card" role="dialog" aria-modal="true">
+      <h3>Rechazar envío programado</h3>
+      <p id="progRechazarTexto" style="margin: 0 0 12px; font-size: .92rem;"></p>
+      <div class="field">
+        <label for="progRechazoMotivo">Motivo (opcional, lo ver&aacute; quien lo cre&oacute;)</label>
+        <textarea id="progRechazoMotivo" rows="3" maxlength="255" placeholder="Ej: mejor moverlo a la próxima semana..."></textarea>
       </div>
-
-      <ul id="listaRechazadosConf" class="rechazados" hidden></ul>
-
       <div class="modal__actions">
-        <div class="acciones-izq">
-          <button type="button" class="btn btn--ghost" id="btnCerrarConf">Cerrar</button>
-          <button type="button" class="btn btn--danger" id="btnCancelarConf">Cancelar</button>
-        </div>
-        <div class="acciones-derecha">
-          <button type="button" class="btn btn--primary" id="btnLanzarConf" disabled>Iniciar Env&iacute;o</button>
-        </div>
+        <button type="button" class="btn btn--ghost" id="btnCancelarProgRechazar">Cancelar</button>
+        <button type="button" class="btn btn--danger" id="btnConfirmarProgRechazar">Rechazar</button>
       </div>
     </div>
   </div>
@@ -268,7 +330,7 @@
   <div id="modalEspera" class="modal" hidden>
     <div class="modal__card" style="text-align:center; max-width:480px;">
       <h3>Esperando respuesta de supervisor</h3>
-      <p>Se ha enviado un correo a <strong id="correoEsperaMsg">supervisor</strong> solicitando confirmación.</p>
+      <p>Se ha enviado un correo a <strong>supervisor</strong> solicitando confirmación.</p>
       <p><strong>Por favor no cerrar esta ventana.</strong></p>
       <div style="margin:20px auto; width:40px; height:40px; border:4px solid #dde1e6; border-top-color:#128c7e; border-radius:50%; animation:spin 1s linear infinite;"></div>
       <p style="font-size:13px; color:#66757f;">Cuando el supervisor confirme desde su correo, el envío iniciará automáticamente.</p>
@@ -284,6 +346,17 @@
       <div class="modal__actions" style="justify-content:center; margin-top:20px;">
         <button type="button" class="btn btn--ghost" id="btnNoCancelarConf">No, continuar</button>
         <button type="button" class="btn btn--primary" id="btnConfirmarCancelarConf" style="background:#b23b37;">Sí, cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalIniciarConf" class="modal" hidden>
+    <div class="modal__card" style="text-align:center; max-width:460px;" role="dialog" aria-modal="true">
+      <h3>Iniciar envío</h3>
+      <p id="mensajeIniciarConf"></p>
+      <div class="modal__actions" style="justify-content:center; margin-top:20px;">
+        <button type="button" class="btn btn--ghost" id="btnNoIniciarConf">Volver</button>
+        <button type="button" class="btn btn--primary" id="btnConfirmarIniciarConf">Sí, iniciar</button>
       </div>
     </div>
   </div>
@@ -309,9 +382,9 @@
     #badgeEstadoMeta.estado-DESCONOCIDO { background: #eef1f4; color: #66757f; border: 1px solid #dde1e6; }
   </style>
 
-  <script src="js/layout.js"></script>
+  <script src="js/layout.js?v=tabs3"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/app.js"></script>
+  <script src="js/app.js?v=tabs3"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>

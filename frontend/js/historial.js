@@ -10,11 +10,159 @@ let registros = [];
 let filtro = "";
 let paginaHist = 1;
 let pageSizeHist = Math.min(100, Math.max(10, Number(localStorage.getItem("snw_page_size_hist")) || 10));
+
+const $ = (sel) => document.querySelector(sel);
+
+/* ---------- Envíos en progreso (manual + programados activos) ---------- */
+let firmaProgreso = null; // firma de la última foto (origen:id:estado) para detectar términos
+const ESTADO_PROG_LABEL = {
+  en_proceso: "En proceso", pausado: "Pausado", pendiente: "Pendiente",
+  aprobado: "Aprobado", enviando: "Enviando", enviado: "Enviado",
+  error: "Error", cancelado: "Cancelado", rechazado: "Rechazado",
+};
+
+function progEnProgresoHtml(it) {
+  const hechos = (it.enviados || 0) + (it.fallidos || 0);
+  const total = it.total || 0;
+  const pct = total > 0 ? Math.min(100, Math.round((hechos / total) * 100)) : 0;
+  const barra = total > 0
+    ? `<div class="progreso-info"><span>${hechos}/${total}</span>` +
+      `<span class="progreso-numeros">${pct}%</span></div>` +
+      `<div class="barra"><div class="barra__fill" style="width:${pct}%"></div></div>`
+    : (it.programado_para ? `<div class="prog-item__meta">Programado para ${escaparHtml(it.programado_para)}</div>` : "");
+  const cancelaJob = it.job_id && it.puede_cancelar;
+  const cancelaProg = !it.job_id && it.origen === "programado" && it.puede_cancelar && it.id != null;
+  return `<div class="prog-item" data-prog-item="${it.origen}-${it.id ?? it.job_id}">` +
+    `<div class="prog-item__cab">` +
+      `<span class="prog-origen prog-origen--${it.origen}">${it.origen === "manual" ? "Manual" : "Programado"}</span>` +
+      `<span class="prog-estado prog-estado--${it.estado}">${ESTADO_PROG_LABEL[it.estado] || it.estado}</span>` +
+      `<span>${escaparHtml(it.plantilla || "—")}</span></div>` +
+    `<div class="prog-item__meta">` +
+      (it.quien_envio ? `por ${escaparHtml(it.quien_envio)}` : "") +
+      (it.quien_aprobo ? ` · aprobado por ${escaparHtml(it.quien_aprobo)}` : "") +
+      (it.area ? ` · ${escaparHtml(it.area)}` : (it.base ? ` · ${escaparHtml(it.base)}` : "")) +
+    `</div>` + barra +
+    ((cancelaJob || cancelaProg)
+      ? `<div class="prog-item__acciones">` +
+        (cancelaJob
+          ? `<button type="button" class="btn btn--sm btn--danger-ghost" data-cancel-job="${escaparHtml(it.job_id)}">Cancelar envío</button>`
+          : `<button type="button" class="btn btn--sm btn--danger-ghost" data-cancel-prog="${it.id}">Cancelar envío</button>`) +
+        `</div>`
+      : "") +
+    `</div>`;
+}
+
+async function cancelarEnProgreso(url, btn) {
+  btn.disabled = true;
+  try {
+    const r = await fetch(url, { method: "POST", headers: authHeaders(), cache: "no-store" });
+    const data = await r.json().catch(() => ({}));
+    if (r.status === 401) { window.snwSesionExpirada(); return; }
+    if (!r.ok) throw new Error(data.detail || "No se pudo cancelar.");
+    toast("Envío cancelado.", "ok");
+    cargarEnProgreso();
+    cargar();
+  } catch (err) {
+    console.error("[historial.js cancelarEnProgreso()]", err);
+    toast(err.message || "No se pudo cancelar.", "error");
+    btn.disabled = false;
+  }
+}
+
+function firmaItemProgreso(it) {
+  return `${it.origen}:${it.id ?? it.job_id}:${it.estado}:${it.enviados || 0}:${it.fallidos || 0}:${it.total || 0}`;
+}
+
+function asegurarContenedorProgreso(lista) {
+  let cont = lista.querySelector(":scope > .prog-lista-scroll");
+  if (!cont) {
+    lista.innerHTML = `<div class="prog-lista-scroll"></div>`;
+    cont = lista.querySelector(":scope > .prog-lista-scroll");
+  }
+  const vacio = lista.querySelector(":scope > .prog-vacio");
+  if (vacio) vacio.remove();
+  return cont;
+}
+
+function mostrarVacioProgreso(lista) {
+  if (!lista.querySelector(":scope > .prog-vacio")) {
+    lista.innerHTML =
+      `<div class="prog-vacio"><i class="fa-solid fa-paper-plane"></i><p>Sin envíos en progreso.</p></div>`;
+  }
+}
+
+async function cargarEnProgreso() {
+  const lista = $("#listaEnProgreso");
+  if (!lista) return;
+  let items;
+  try {
+    const r = await fetch("api/notificaciones/envios-en-progreso", {
+      headers: authHeaders(), cache: "no-store",
+    });
+    if (r.status === 401) { window.snwSesionExpirada(); return; }
+    if (!r.ok) throw new Error();
+    items = await r.json();
+  } catch {
+    console.error("[historial.js cargarEnProgreso()]");
+    return; // se conserva lo último mostrado, sin mensajes ni saltos
+  }
+  // Si algo terminó o cambió, la tabla se recarga sola (sin mover página ni avisar).
+  const firma = items.map((it) => `${it.origen}:${it.id ?? it.job_id}:${it.estado}`).join("|");
+  if (firmaProgreso !== null && firmaProgreso !== firma) cargar(true);
+  firmaProgreso = firma;
+  if (!items.length) {
+    mostrarVacioProgreso(lista);
+    return;
+  }
+  // Actualización quirúrgica: solo se toca la fila que cambió; el resto del
+  // DOM (y el alto de la card) queda intacto.
+  const cont = asegurarContenedorProgreso(lista);
+  const vistos = new Set();
+  for (const it of items) {
+    const llave = `${it.origen}:${it.id ?? it.job_id}`;
+    const firmaFila = firmaItemProgreso(it);
+    vistos.add(llave);
+    let fila = cont.querySelector(`[data-k="${llave}"]`);
+    if (fila && fila.dataset.firma !== firmaFila) {
+      const nueva = document.createElement("div");
+      nueva.innerHTML = progEnProgresoHtml(it);
+      const reemplazo = nueva.firstElementChild;
+      reemplazo.dataset.k = llave;
+      reemplazo.dataset.firma = firmaFila;
+      fila.replaceWith(reemplazo);
+    } else if (!fila) {
+      const tmp = document.createElement("div");
+      tmp.innerHTML = progEnProgresoHtml(it);
+      fila = tmp.firstElementChild;
+      fila.dataset.k = llave;
+      fila.dataset.firma = firmaFila;
+      cont.appendChild(fila);
+    } else {
+      cont.appendChild(fila); // mantiene el orden de respuesta sin parpadeo
+    }
+  }
+  cont.querySelectorAll(".prog-item").forEach((el) => {
+    if (!vistos.has(el.dataset.k)) el.remove();
+  });
+}
+
+window.snwConCooldown($("#btnActualizarProgreso"), cargarEnProgreso);
+setInterval(() => {
+  if (!document.hidden) cargarEnProgreso();
+}, 3000);
+
+document.addEventListener("click", (e) => {
+  const bj = e.target.closest("#listaEnProgreso [data-cancel-job]");
+  const bp = e.target.closest("#listaEnProgreso [data-cancel-prog]");
+  if (bj) {
+    cancelarEnProgreso(`api/notificaciones/jobs/${encodeURIComponent(bj.dataset.cancelJob)}/cancelar`, bj);
+  } else if (bp) {
+    cancelarEnProgreso(`api/notificaciones/programados/${bp.dataset.cancelProg}/cancelar`, bp);
+  }
+});
 let ambienteDetalle = "produccion";
 let areaDetalle = null; // area del envío abierto (para sus mensajes)
 let pacienteMsgActual = null; // { id, ambiente, interesado }
-
-const $ = (sel) => document.querySelector(sel);
 
 let basesHist = [];
 const selBaseHist = $("#selBaseHist");
@@ -107,7 +255,7 @@ function escaparHtml(texto) {
   return div.innerHTML;
 }
 
-async function cargar() {
+async function cargar(mantenerPagina = false) {
   try {
     const base = (selBaseHist && selBaseHist.value) || "todos";
     const qs = base !== "todos" ? `tabla=${encodeURIComponent(base)}` : "ambiente=todos";
@@ -118,11 +266,11 @@ async function cargar() {
     if (rh.status === 401 || rc.status === 401) { window.snwSesionExpirada(); return; }
     if (!rh.ok || !rc.ok) throw new Error();
     registros = await rh.json();
-    paginaHist = 1;
+    if (!mantenerPagina) paginaHist = 1;
     render();
   } catch {
     console.error("[historial.js cargar()]");
-    toast("Error al conectar con el servidor.", "error");
+    if (!mantenerPagina) toast("Error al conectar con el servidor.", "error");
   }
 }
 
@@ -171,13 +319,16 @@ function render() {
     const invalidos = r.invalidos ?? 0;
     const estado = r.estado || "completado";
     const estadoLabel =
-      { cancelado: "Cancelado", rechazado: "Rechazado" }[estado] || "Completado";
+      { cancelado: "Cancelado", rechazado: "Rechazado", pendiente: "Pendiente",
+        aprobado: "Aprobado", enviando: "Enviando", enviado: "Enviado",
+        en_progreso: "En progreso" }[estado] || "Completado";
     const comentario = (r.comentario ?? "").trim();
     const notaRechazo = estado === "rechazado"
       ? `<div class="hist-rechazo">Rechazado por el supervisor${comentario ? `: «${escaparHtml(comentario)}»` : " (sin comentario)"}</div>`
       : "";
     tr.innerHTML =
       `<td class="campo-fecha">${escaparHtml(r.fecha)}</td>` +
+      `<td><span class="badge badge--origen">${r.origen === "programado" ? "Programado" : "Manual"}</span></td>` +
       `<td><span class="badge badge--db">${escaparHtml(r.base_datos ?? "—")}</span></td>` +
       `<td>${escaparHtml(r.plantilla_nombre ?? r.plantilla_clave ?? "—")}${notaRechazo}</td>` +
       `<td><span class="estado-envio estado-envio--${escaparHtml(estado)}">${escaparHtml(estadoLabel)}</span></td>` +
@@ -421,3 +572,4 @@ if (panelCCLogEl) {
 cargarBasesHist();
 cargar();
 cargarLogCC();
+cargarEnProgreso();

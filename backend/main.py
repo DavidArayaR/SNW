@@ -1,4 +1,5 @@
 ﻿import asyncio
+import datetime
 import csv as _csv
 import hashlib
 import math
@@ -3964,36 +3965,83 @@ def estado_job(job_id: str, sesion: dict = Depends(exigir("mensajeria"))):
     return {k: v for k, v in job.items() if k != "destinatarios"}
 
 
-def envios_en_curso(sesion: dict = Depends(exigir("mensajeria"))):
-    """Envíos masivos activos (en proceso o pausados) para mostrarlos en
-    Mensajería aunque se haya cerrado el modal. Sin destinatarios."""
-    activos = []
+def envios_en_progreso(sesion: dict = Depends(exigir("mensajeria"))):
+    """Tab «Envíos en progreso»: jobs manuales activos + programados
+    pendientes de ejecutar o ejecutándose, cada uno con su origen
+    (manual/programado), plantilla, quién envió, quién aprobó, base y avance.
+    Visibilidad: admin/dev/supervisor todo; usuario solo lo suyo y su area."""
+    ver_todo = _es_privilegiado(sesion) or sesion.get("rol") == "supervisor"
+    yo = (sesion.get("usuario") or "").strip().lower()
+    mias = set(sesion.get("area_ids") or [])
+
+    def _area_nombre(area_id):
+        if area_id is None:
+            return ""
+        try:
+            _a = servicio_areas.obtener_area(int(area_id))
+        except (TypeError, ValueError):
+            return ""
+        return (_a.get("nombre_visible") if _a else "") or ""
+
+    items = []
+    prog_vivos = []
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT * FROM envios_programados"
+            " WHERE estado IN ('aprobado', 'enviando')"
+            " ORDER BY programado_para, id"
+        )
+        prog_vivos = cur.fetchall()
+    jobs_reclamados: set[str] = set()
+    for f in prog_vivos:
+        if not ver_todo and (f.get("creador") or "").strip().lower() != yo \
+                and (f.get("area_id") is None or f["area_id"] not in mias):
+            continue
+        if f.get("job_id"):
+            jobs_reclamados.add(str(f["job_id"]))
+        total = enviados = fallidos = 0
+        estado = f.get("estado") or ""
+        with JOBS_LOCK:
+            job = JOBS.get(f["job_id"]) if f.get("job_id") else None
+            vivo = dict(job) if job and job.get("estado") in ESTADOS_ENVIO_EN_CURSO else None
+        if vivo:
+            total, enviados, fallidos = vivo.get("total", 0), vivo.get("enviados", 0), vivo.get("fallidos", 0)
+            estado = vivo.get("estado") or estado
+        pc = _prog_a_respuesta(f, sesion)
+        items.append({
+            "origen": "programado", "id": f["id"], "job_id": f.get("job_id") or "",
+            "puede_cancelar": pc["puede_cancelar"],
+            "plantilla": f.get("plantilla_nombre") or "", "estado": estado,
+            "total": total, "enviados": enviados, "fallidos": fallidos,
+            "quien_envio": f.get("creador_nombre") or f.get("creador") or "",
+            "quien_aprobo": f.get("decidido_por") or "",
+            "base": f.get("tabla") or "", "area": _area_nombre(f.get("area_id")),
+            "programado_para": f["programado_para"].strftime("%d-%m-%Y %H:%M") if f.get("programado_para") else "",
+        })
+
     with JOBS_LOCK:
         jobs = list(JOBS.items())
     for job_id, job in jobs:
         if job.get("estado") not in ESTADOS_ENVIO_EN_CURSO:
             continue
-        area_nombre = ""
-        if job.get("area_id") is not None:
-            _a = servicio_areas.obtener_area(job["area_id"])
-            if _a:
-                area_nombre = _a.get("nombre_visible") or ""
-        activos.append({
-            "job_id": job_id,
-            "estado": job.get("estado"),
-            "ambiente": job.get("ambiente"),
-            "base": job.get("base", job.get("ambiente")),
-            "area_id": job.get("area_id"),
-            "area": area_nombre,
+        if str(job_id) in jobs_reclamados:
+            continue  # ya sale con su tag programado
+        if not ver_todo and (job.get("usuario") or "").strip().lower() != yo \
+                and job.get("area_id") not in mias:
+            continue
+        items.append({
+            "origen": "manual", "id": None, "job_id": job_id,
+            "puede_cancelar": bool(tiene_permiso(sesion, "mensajeria")),
             "plantilla": (job.get("plantilla") or {}).get("nombre") or "",
-            "total": job.get("total", 0),
-            "enviados": job.get("enviados", 0),
+            "estado": job.get("estado"),
+            "total": job.get("total", 0), "enviados": job.get("enviados", 0),
             "fallidos": job.get("fallidos", 0),
-            "pausado": bool(job.get("pausado")),
-            "usuario": job.get("usuario", ""),
-            "nombre_enviador": job.get("nombre_enviador", ""),
+            "quien_envio": job.get("nombre_enviador") or job.get("usuario") or "",
+            "quien_aprobo": "",
+            "base": job.get("base", job.get("ambiente")) or "",
+            "area": _area_nombre(job.get("area_id")), "programado_para": "",
         })
-    return activos
+    return items
 
 
 def cancelar_job(job_id: str, sesion: dict = Depends(exigir("mensajeria"))):
@@ -4025,6 +4073,501 @@ def reanudar_job(job_id: str, sesion: dict = Depends(exigir("mensajeria"))):
     job["pausado"] = False
     return {"ok": True, "estado": "en_proceso"}
 
+
+# ---------------------------------------------------------------------------
+# Envíos masivos programados (pestaña Programados en Mensajería).
+# El usuario crea solo para su area y requiere aprobación de un superior
+# (correo solo a supervisores del area); admin/supervisor crean en cualquier
+# area sin confirmación. El scheduler los ejecuta al vencer (solo aprobados).
+# ---------------------------------------------------------------------------
+ESTADOS_PROG_ACTIVOS = ("pendiente", "aprobado")
+ESTADOS_PROG_FINALES = ("rechazado", "cancelado", "enviado", "error")
+MAX_PROG_ACTIVOS_POR_CREADOR = 30
+
+
+class ProgCrearIn(BaseModel):
+    area_id: int | None = None
+    ambiente: str | None = None  # legacy cuando no hay area
+    plantilla_id: int
+    programado_para: str  # "YYYY-MM-DDTHH:MM" (hora del servidor)
+    limite: int | None = None
+
+
+def _validar_plantilla_programable(plantilla: dict | None, area_id: int | None) -> dict:
+    """La plantilla debe existir, no ser especial, estar aprobada por Meta y
+    con revisión interna aprobada; si es de un area, solo sirve en esa area."""
+    if plantilla is None:
+        raise HTTPException(404, detail="Plantilla no encontrada")
+    if plantilla.get("especial"):
+        raise HTTPException(400, detail="El mensaje de call center no se puede programar: se manda solo.")
+    if plantilla.get("whatsapp_template_status") != "APPROVED":
+        raise HTTPException(400, detail="Esta plantilla todavía no fue aprobada por Meta.")
+    if _aprobacion_plantilla(plantilla) == "pendiente":
+        raise HTTPException(400, detail="Esta plantilla está pendiente de aprobación interna.")
+    if _aprobacion_plantilla(plantilla) == "rechazada":
+        raise HTTPException(400, detail="Esta plantilla fue rechazada en la revisión interna.")
+    tpl_esp = plantilla.get("area_id")
+    if tpl_esp is not None and area_id != tpl_esp:
+        raise HTTPException(400, detail="Esta plantilla pertenece a otra área.")
+    return plantilla
+
+
+def _prog_a_respuesta(f: dict, sesion: dict) -> dict:
+    esp = servicio_areas.obtener_area(f["area_id"]) if f.get("area_id") is not None else None
+    priv = _es_privilegiado(sesion)
+    es_sup = sesion.get("rol") == "supervisor"
+    puede_decidir = False
+    if f["estado"] == "pendiente":
+        if priv:
+            puede_decidir = True
+        elif es_sup and f.get("area_id") is not None and f["area_id"] in (sesion.get("area_ids") or []):
+            puede_decidir = True
+    puede_cancelar = False
+    # Pendiente solo se acepta o rechaza; cancelar aplica una vez aprobado.
+    if f["estado"] == "aprobado":
+        if priv:
+            puede_cancelar = True
+        elif (sesion.get("usuario") or "").strip().lower() == (f.get("creador") or "").strip().lower():
+            puede_cancelar = True
+    return {
+        "id": f["id"], "area_id": f.get("area_id"),
+        "area": (esp.get("nombre_visible") if esp else ""),
+        "tabla": f.get("tabla") or "", "ambiente": f.get("ambiente") or "produccion",
+        "plantilla_id": f.get("plantilla_id"), "plantilla": f.get("plantilla_nombre") or "",
+        "limite": f.get("limite"),
+        "programado_para": f["programado_para"].strftime("%d-%m-%Y %H:%M") if f.get("programado_para") else "",
+        "estado": f.get("estado"), "creador": f.get("creador") or "",
+        "creador_nombre": f.get("creador_nombre") or "",
+        "creado": f["creado"].strftime("%d-%m-%Y %H:%M") if f.get("creado") else "",
+        "decidido_por": f.get("decidido_por") or "", "motivo": f.get("motivo") or "",
+        "job_id": f.get("job_id") or "",
+        "puede_decidir": puede_decidir, "puede_cancelar": puede_cancelar,
+    }
+
+
+def _exigir_prog_decisor(sesion: dict, f: dict) -> None:
+    """Quién puede aprobar/rechazar: admin/dev en cualquiera; supervisor solo
+    en sus areas (legacy sin area: solo admin/dev)."""
+    if _es_privilegiado(sesion):
+        return
+    if sesion.get("rol") == "supervisor" and f.get("area_id") is not None \
+            and f["area_id"] in (sesion.get("area_ids") or []):
+        return
+    raise HTTPException(403, detail="Solo un administrador o el supervisor del área puede decidir.")
+
+
+def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeria"))):
+    try:
+        cuando = datetime.datetime.strptime((body.programado_para or "").strip(), "%Y-%m-%dT%H:%M")
+    except ValueError:
+        raise HTTPException(422, detail="Fecha/hora inválida (usa el selector).")
+    if cuando <= datetime.datetime.now() + datetime.timedelta(seconds=60):
+        raise HTTPException(422, detail="Programa con al menos 1 minuto de anticipación.")
+    limite = None
+    if body.limite is not None:
+        try:
+            limite = int(body.limite)
+        except (TypeError, ValueError):
+            raise HTTPException(422, detail="Límite inválido.")
+        if limite < 1:
+            raise HTTPException(422, detail="El límite debe ser 1 o más (vacío = sin límite).")
+
+    esp = None
+    if body.area_id is not None:
+        esp = _exigir_area(sesion, body.area_id)  # 404/403 (usuario: solo sus areas)
+        amb, tabla = "produccion", esp["nombre_tabla_base"]
+    else:
+        try:
+            amb = entorno_valido(body.ambiente or "produccion")
+        except ValueError:
+            raise HTTPException(400, detail=f"Entorno inválido: '{body.ambiente}'")
+        if sesion.get("rol") == "usuario" and amb != "desarrollo":
+            raise HTTPException(403, detail="Solo puedes programar para tu área o la base de desarrollo.")
+        tabla = nombre_base(amb)
+
+    plantilla = _validar_plantilla_programable(
+        next((p for p in leer_plantillas() if p["id"] == body.plantilla_id), None),
+        esp["id"] if esp else None)
+
+    creador = (sesion.get("usuario") or "").strip().lower()
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT COUNT(*) AS n FROM envios_programados"
+            " WHERE creador = %s AND estado IN ('pendiente', 'aprobado')",
+            (creador,),
+        )
+        if int((cur.fetchone() or {}).get("n") or 0) >= MAX_PROG_ACTIVOS_POR_CREADOR:
+            raise HTTPException(429, detail="Tienes demasiados envíos programados pendientes: cancela alguno.")
+
+    # Admin/dev/supervisor crean directo aprobado; el usuario requiere
+    # aprobación de un superior (queda pendiente + correo a supervisores).
+    rol = sesion.get("rol") or ""
+    directo = _es_privilegiado(sesion) or rol == "supervisor"
+    estado = "aprobado" if directo else "pendiente"
+    token = None if directo else uuid.uuid4().hex
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO envios_programados (area_id, tabla, ambiente, plantilla_id, plantilla_nombre,"
+            " limite, programado_para, estado, creador, creador_nombre, decidido_por, token)"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            (esp["id"] if esp else None, tabla, amb, plantilla["id"], plantilla.get("nombre") or "",
+             limite, cuando.strftime("%Y-%m-%d %H:%M"), estado, creador,
+             (sesion.get("nombre") or "Usuario"), (creador if directo else ""), token),
+        )
+        prog_id = cur.lastrowid
+        conn.commit()
+
+    if not directo:
+        if not esp:
+            raise HTTPException(409, detail="Sin área no hay supervisores a quienes pedir confirmación.")
+        sups = [s["correo"] for s in servicio_areas.correos_supervisores_area(esp["id"]) if s.get("correo")]
+        if not sups:
+            with conectar() as conn, conn.cursor() as cur:
+                cur.execute("DELETE FROM envios_programados WHERE id = %s", (prog_id,))
+                conn.commit()
+            raise HTTPException(409, detail="El área no tiene supervisores con correo: no se puede pedir confirmación.")
+        _enviar_correo_prog(sups, prog_id, plantilla.get("nombre") or "", esp["nombre_visible"],
+                            cuando.strftime("%d-%m-%Y %H:%M"), limite,
+                            (sesion.get("nombre") or creador), token)
+    return {"ok": True, "id": prog_id, "estado": estado}
+
+
+def _enviar_correo_prog(destinatarios: list, prog_id: int, plantilla_nombre: str,
+                        area_nombre: str, cuando_txt: str, limite: int | None,
+                        solicitante: str, token: str) -> bool:
+    """Aviso a supervisores del area: aprueban/rechazan con enlaces por token."""
+    c = _config_correo()
+    emisor = c["emisor"]
+    base = url_base()
+    if not emisor:
+        print(f"[CORREO-PROG] Emisor no configurado. Programado {prog_id}")
+        return False
+    host, port, user, pwd, tls = c["host"], c["port"], c["user"], c["pwd"], c["tls"]
+    if not host or not pwd:
+        print(f"[CORREO-PROG SIMULADO] Para {', '.join(destinatarios)}: {solicitante} programó"
+              f" '{plantilla_nombre}' ({area_nombre}) para {cuando_txt} -"
+              f" aprobar {base}/api/notificaciones/programados/aprobar/{token} |"
+              f" rechazar {base}/api/notificaciones/programados/rechazar/{token}")
+        return True
+    limite_txt = f" (límite {limite} mensajes)" if limite else ""
+    subject = f"[SNW] {solicitante} programó un envío ({area_nombre}, {cuando_txt})"
+    html = f"""
+    <html><body style="font-family: Arial, sans-serif; color: #24303c;">
+      <h2>Envío masivo programado</h2>
+      <p><strong>{_html.escape(solicitante)}</strong> programó la plantilla
+      <strong>{_html.escape(plantilla_nombre)}</strong> en el área
+      <strong>{_html.escape(area_nombre)}</strong> para el
+      <strong>{_html.escape(cuando_txt)}</strong>{limite_txt}.</p>
+      <p>Si no se decide nada antes de la fecha, el envío <strong>no</strong> se ejecuta.</p>
+      <p style="margin:24px 0;">
+        <a href="{base}/api/notificaciones/programados/aprobar/{token}" style="display:inline-block; background:#128c7e; color:#fff; padding:12px 22px; border-radius:8px; text-decoration:none; font-weight:bold;">Aprobar envío</a>
+        &nbsp;&nbsp;
+        <a href="{base}/api/notificaciones/programados/rechazar/{token}" style="display:inline-block; background:#b23b37; color:#fff; padding:12px 22px; border-radius:8px; text-decoration:none; font-weight:bold;">Rechazar</a>
+      </p>
+      <p>Si no reconoces esta solicitud, ignora este correo.</p>
+    </body></html>
+    """
+    try:
+        msg = _armar_mensaje(subject, emisor, ", ".join(destinatarios), html)
+        context = ssl.create_default_context()
+        with smtplib.SMTP(host, port) as server:
+            if tls:
+                server.starttls(context=context)
+            if user and pwd:
+                server.login(user, pwd)
+            server.sendmail(emisor, destinatarios, msg.as_string())
+        print(f"[CORREO-PROG] Aviso de programado {prog_id} a {', '.join(destinatarios)}")
+        return True
+    except Exception as e:
+        log_error(f"_enviar_correo_prog {prog_id}", e)
+        return False
+
+
+def _prog_visible(sesion: dict, f: dict) -> bool:
+    """Visibilidad de un programado: admin/dev/supervisor todo; usuario solo
+    los suyos y los de su area."""
+    if _es_privilegiado(sesion) or sesion.get("rol") == "supervisor":
+        return True
+    yo = (sesion.get("usuario") or "").strip().lower()
+    mias = set(sesion.get("area_ids") or [])
+    return (f.get("creador") or "").strip().lower() == yo \
+        or (f.get("area_id") is not None and f["area_id"] in mias)
+
+
+def listar_programados(sesion: dict = Depends(exigir("mensajeria"))):
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT * FROM envios_programados ORDER BY programado_para DESC, id DESC LIMIT 200"
+        )
+        filas = cur.fetchall()
+    # Admin/dev lo ven todo; el supervisor también (decide en sus areas,
+    # pero ve el panorama completo como en el resto del sistema).
+    return [_prog_a_respuesta(f, sesion) for f in filas if _prog_visible(sesion, f)]
+
+
+def _traer_programado(prog_id: int) -> dict:
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("SELECT * FROM envios_programados WHERE id = %s", (int(prog_id),))
+        f = cur.fetchone()
+    if not f:
+        raise HTTPException(404, detail="Envío programado no encontrado.")
+    return f
+
+
+def aprobar_programado(prog_id: int, sesion: dict = Depends(exigir("mensajeria"))):
+    f = _traer_programado(prog_id)
+    if f["estado"] == "aprobado":
+        return _prog_a_respuesta(f, sesion)  # idempotente (doble click)
+    if f["estado"] != "pendiente":
+        raise HTTPException(409, detail=f"Ya está {f['estado']}: no se puede aprobar.")
+    _exigir_prog_decisor(sesion, f)
+    quien = (sesion.get("usuario") or "").strip().lower()
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE envios_programados SET estado = 'aprobado', decidido_por = %s, token = NULL"
+            " WHERE id = %s AND estado = 'pendiente'",
+            (quien, f["id"]),
+        )
+        conn.commit()
+    return _prog_a_respuesta(_traer_programado(f["id"]), sesion)
+
+
+def rechazar_programado(prog_id: int, body: dict | None = None, sesion: dict = Depends(exigir("mensajeria"))):
+    f = _traer_programado(prog_id)
+    if f["estado"] != "pendiente":
+        raise HTTPException(409, detail=f"Ya está {f['estado']}: no se puede rechazar.")
+    _exigir_prog_decisor(sesion, f)
+    motivo = str((body or {}).get("motivo") or "").strip()[:255]
+    quien = (sesion.get("usuario") or "").strip().lower()
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE envios_programados SET estado = 'rechazado', decidido_por = %s, motivo = %s, token = NULL"
+            " WHERE id = %s AND estado = 'pendiente'",
+            (quien, motivo, f["id"]),
+        )
+        conn.commit()
+    return _prog_a_respuesta(_traer_programado(f["id"]), sesion)
+
+
+def cancelar_programado(prog_id: int, sesion: dict = Depends(exigir("mensajeria"))):
+    # Solo se cancela una vez aprobado: lo pendiente solo se acepta o rechaza.
+    f = _traer_programado(prog_id)
+    if f["estado"] != "aprobado":
+        raise HTTPException(409, detail=f"Ya está {f['estado']}: no se puede cancelar.")
+    if not _es_privilegiado(sesion):
+        if sesion.get("rol") == "supervisor":
+            pass  # superiores cancelan cualquiera
+        elif (sesion.get("usuario") or "").strip().lower() != (f.get("creador") or "").strip().lower():
+            raise HTTPException(403, detail="Solo puedes cancelar los que creaste tú.")
+    quien = (sesion.get("usuario") or "").strip().lower()
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE envios_programados SET estado = 'cancelado', decidido_por = %s, token = NULL"
+            " WHERE id = %s AND estado = 'aprobado'",
+            (quien, f["id"]),
+        )
+        conn.commit()
+    return _prog_a_respuesta(_traer_programado(f["id"]), sesion)
+
+
+def _traer_programado_token(token: str) -> dict:
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("SELECT * FROM envios_programados WHERE token = %s", ((token or "").strip(),))
+        f = cur.fetchone()
+    if not f:
+        return {}
+    return f
+
+
+def aprobar_programado_token(token: str):
+    """Enlace del correo a supervisores: aprueba sin sesión (igual que la
+    confirmación de envíos inmediatos). De un solo uso."""
+    f = _traer_programado_token(token)
+    if not f:
+        return HTMLResponse("<html><body style='font-family:Arial; text-align:center; padding:40px;'><h3>Solicitud no encontrada o expirada</h3></body></html>", status_code=404)
+    if f["estado"] == "aprobado":
+        return HTMLResponse("<html><body style='font-family:Arial; text-align:center; padding:40px;'><h2>Este envío ya fue aprobado</h2></body></html>")
+    if f["estado"] != "pendiente":
+        return HTMLResponse(f"<html><body style='font-family:Arial; text-align:center; padding:40px;'><h2>Ya está {f['estado']}: no se puede aprobar</h2></body></html>")
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE envios_programados SET estado = 'aprobado', decidido_por = 'correo', token = NULL"
+            " WHERE id = %s AND estado = 'pendiente'",
+            (f["id"],),
+        )
+        conn.commit()
+    return HTMLResponse(f"""
+<html><head><meta charset='utf-8'><title>Envío aprobado</title></head>
+<body style='font-family: Segoe UI, Arial; text-align:center; padding:40px; background:#f0f2f5;'>
+<div style='background:#fff; max-width:520px; margin:40px auto; padding:32px; border-radius:14px; box-shadow:0 4px 20px rgba(0,0,0,0.1);'>
+<h2 style='color:#128c7e; margin-top:0;'>&#10003; Envío programado aprobado</h2>
+<p>Se ejecutará en la fecha programada.</p>
+<p style='color:#66757f; font-size:14px;'>Puedes cerrar esta ventana.</p>
+</div>
+</body></html>
+""")
+
+
+def form_rechazo_programado(token: str):
+    f = _traer_programado_token(token)
+    if not f:
+        return HTMLResponse("<html><body style='font-family:Arial; text-align:center; padding:40px;'><h3>Solicitud no encontrada o expirada</h3></body></html>", status_code=404)
+    if f["estado"] == "rechazado":
+        return HTMLResponse("<html><body style='font-family:Arial; text-align:center; padding:40px;'><h2>Este envío ya fue rechazado</h2></body></html>")
+    if f["estado"] != "pendiente":
+        return HTMLResponse(f"<html><body style='font-family:Arial; text-align:center; padding:40px;'><h2>Ya está {f['estado']}</h2></body></html>")
+    plantilla = _html.escape(f.get("plantilla_nombre") or "")
+    return HTMLResponse(f"""
+<html><head><meta charset='utf-8'><title>Rechazar envío programado</title></head>
+<body style='font-family: Segoe UI, Arial; text-align:center; padding:40px; background:#f0f2f5;'>
+<div style='background:#fff; max-width:520px; margin:40px auto; padding:32px; border-radius:14px; box-shadow:0 4px 20px rgba(0,0,0,0.1); text-align:left;'>
+<h2 style='color:#b23b37; margin-top:0;'>Rechazar envío programado</h2>
+<p>Vas a rechazar la plantilla <strong>{plantilla}</strong>.</p>
+<form method="POST" action="/api/notificaciones/programados/rechazar/{token}">
+  <label style="display:block; font-size:14px; color:#66757f; margin:14px 0 6px;">Motivo para el solicitante (opcional, máximo 255 caracteres):</label>
+  <textarea name="motivo" rows="4" maxlength="255" style="width:100%; padding:10px; font:inherit; font-size:14px; border:1px solid #dde1e6; border-radius:8px;"></textarea>
+  <div style="margin-top:20px; text-align:right;">
+    <button type="submit" style="background:#b23b37; color:#fff; border:none; padding:11px 22px; border-radius:10px; font-weight:700; cursor:pointer; font-family:inherit;">Rechazar</button>
+  </div>
+</form>
+</div>
+</body></html>
+""")
+
+
+def rechazar_programado_token(token: str, motivo: str = Form("")):
+    f = _traer_programado_token(token)
+    if not f:
+        return HTMLResponse("<html><body style='font-family:Arial; text-align:center; padding:40px;'><h3>Solicitud no encontrada o expirada</h3></body></html>", status_code=404)
+    if f["estado"] == "rechazado":
+        return HTMLResponse("<html><body style='font-family:Arial; text-align:center; padding:40px;'><h2>Este envío ya fue rechazado</h2></body></html>")
+    if f["estado"] != "pendiente":
+        return HTMLResponse(f"<html><body style='font-family:Arial; text-align:center; padding:40px;'><h2>Ya está {f['estado']}</h2></body></html>")
+    motivo = (motivo or "").strip()[:255]
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE envios_programados SET estado = 'rechazado', decidido_por = 'correo', motivo = %s, token = NULL"
+            " WHERE id = %s AND estado = 'pendiente'",
+            (motivo, f["id"]),
+        )
+        conn.commit()
+    return HTMLResponse("""
+<html><head><meta charset='utf-8'><title>Envío rechazado</title></head>
+<body style='font-family: Segoe UI, Arial; text-align:center; padding:40px; background:#f0f2f5;'>
+<div style='background:#fff; max-width:520px; margin:40px auto; padding:32px; border-radius:14px; box-shadow:0 4px 20px rgba(0,0,0,0.1);'>
+<h2 style='color:#b23b37; margin-top:0;'>Envío programado rechazado</h2>
+<p>No se ejecutará. Puedes cerrar esta ventana.</p>
+</div>
+</body></html>
+""")
+
+
+# ---------------------------------------------------------------------------
+# Scheduler: ejecuta los programados vencidos (solo aprobados). Corre en el
+# mismo proceso (un solo worker) cada 30 s; reclama cada fila con un UPDATE
+# atómico para no ejecutarla dos veces.
+# ---------------------------------------------------------------------------
+def _marcar_prog(fila_id: int, estado: str, motivo: str = "", job_id: str | None = None) -> None:
+    with conectar() as conn, conn.cursor() as cur:
+        if job_id:
+            cur.execute(
+                "UPDATE envios_programados SET estado = %s, motivo = %s, job_id = %s WHERE id = %s",
+                (estado, (motivo or "")[:255], job_id, int(fila_id)),
+            )
+        else:
+            cur.execute(
+                "UPDATE envios_programados SET estado = %s, motivo = %s WHERE id = %s",
+                (estado, (motivo or "")[:255], int(fila_id)),
+            )
+        conn.commit()
+
+
+def _ejecutar_programado(f: dict) -> None:
+    """Lanza un programado vencido reutilizando el pipeline normal (misma
+    elegibilidad, límites y registro). La sesión es del sistema con rol
+    administrador, pero el envío queda atribuido a quien lo programó."""
+    from schemas import EnvioIn
+
+    plantilla = next((p for p in leer_plantillas() if p["id"] == f.get("plantilla_id")), None)
+    try:
+        _validar_plantilla_programable(plantilla, f.get("area_id"))
+    except HTTPException as e:
+        _marcar_prog(f["id"], "error", e.detail)
+        return
+    body = EnvioIn(
+        ambiente=f.get("ambiente") or "produccion",
+        plantilla_id=f["plantilla_id"],
+        area_id=f.get("area_id"),
+        limite=f.get("limite"),
+    )
+    sesion_sistema = {
+        "usuario": f.get("creador") or "sistema",
+        "nombre": f.get("creador_nombre") or "Sistema",
+        "rol": "administrador",
+        "permisos": [],
+    }
+    bg = BackgroundTasks()
+    try:
+        resp = iniciar_envio(body, bg, sesion_sistema)
+    except HTTPException as e:
+        if e.status_code in (409, 429):
+            # Base ocupada o límite diario lleno: se reintenta en el próximo ciclo.
+            log_error(f"scheduler programado {f['id']}: reintento ({e.status_code})", e)
+            with conectar() as conn, conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE envios_programados SET estado = 'aprobado' WHERE id = %s AND estado = 'enviando'",
+                    (int(f["id"]),),
+                )
+                conn.commit()
+            return
+        _marcar_prog(f["id"], "error", e.detail)
+        return
+    job_id = (resp or {}).get("job_id")
+    if not job_id:
+        _marcar_prog(f["id"], "enviado", "sin destinatarios")
+        return
+    threading.Thread(target=lambda: asyncio.run(bg()), daemon=True).start()
+    _marcar_prog(f["id"], "enviado", "", job_id)
+
+
+def _revisar_programados() -> None:
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT * FROM envios_programados"
+            " WHERE estado = 'aprobado' AND programado_para <= NOW()"
+            " ORDER BY programado_para LIMIT 10"
+        )
+        vencidos = cur.fetchall()
+    for f in vencidos:
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute(
+                "UPDATE envios_programados SET estado = 'enviando'"
+                " WHERE id = %s AND estado = 'aprobado'",
+                (int(f["id"]),),
+            )
+            conn.commit()
+            if cur.rowcount != 1:
+                continue
+        try:
+            _ejecutar_programado(f)
+        except Exception as e:
+            log_error(f"scheduler programado {f['id']}", e)
+            _marcar_prog(f["id"], "error", str(e)[:255])
+
+
+async def _loop_programados() -> None:
+    await asyncio.sleep(10)
+    while True:
+        try:
+            _revisar_programados()
+        except Exception as e:
+            log_error("scheduler programados", e)
+        await asyncio.sleep(30)
+
+
+@app.on_event("startup")
+async def _arrancar_scheduler_programados() -> None:
+    asyncio.create_task(_loop_programados())
 
 def listar_historial(q: str | None = Query(None), estado: str | None = Query(None),
                      ambiente: str = Query("produccion"),
@@ -4104,12 +4647,92 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
         filas = cur.fetchall()
 
     for f in filas:
-        f["fecha"] = f.pop("fecha_hora").strftime("%d-%m-%Y %H:%M")
+        f["_orden"] = f.pop("fecha_hora")
+        f["origen"] = "envio"
+
+    # Programados (terminados o no): con su fecha programada, mismo formato.
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT * FROM envios_programados ORDER BY programado_para DESC, id DESC LIMIT 300"
+        )
+        for g in cur.fetchall():
+            if not _prog_visible(sesion, g):
+                continue
+            if tabla and (g.get("tabla") or "") != tabla:
+                continue
+            if not tabla and ambiente != "todos" and (g.get("ambiente") or "produccion") != ambiente:
+                continue
+            if area_id is not None and g.get("area_id") != int(area_id):
+                continue
+            if q and q.strip():
+                qq = q.strip().lower()
+                if qq not in (g.get("tabla") or "").lower() \
+                        and qq not in (g.get("plantilla_nombre") or "").lower():
+                    continue
+            g["_orden"] = g.get("programado_para")
+            g["origen"] = "programado"
+            filas.append(g)
+
+    filas.sort(key=lambda r: (r["_orden"] is not None, r["_orden"]), reverse=True)
+    filas = filas[:300]
+    with JOBS_LOCK:
+        vivos = {j.get("envio_id"): (jid, j.get("estado"))
+                 for jid, j in JOBS.items()
+                 if j.get("estado") in ESTADOS_ENVIO_EN_CURSO and j.get("envio_id")}
+    for f in filas:
+        orden = f.pop("_orden", None)
+        if f.get("origen") == "programado":
+            pc = _prog_a_respuesta(f, sesion)
+            f["puede_cancelar"] = pc["puede_cancelar"]
+            if f.get("estado") == "enviando":
+                f["estado"] = "en_progreso"
+            f["id"] = f"prog-{f['id']}"
+            f["base_datos"] = f.get("tabla") or ""
+            f["plantilla_clave"] = ""
+            f["plantilla_nombre"] = f.get("plantilla_nombre") or ""
+            f["total_pacientes"] = f.get("total_pacientes", 0) or 0
+            f["enviados"] = f.get("enviados", 0) or 0
+            f["fallidos"] = f.get("fallidos", 0) or 0
+            f["invalidos"] = 0
+            f["comentario"] = f.get("motivo") or ""
+            f["tabla_pacientes"] = f.get("tabla") or ""
+            f["fecha"] = orden.strftime("%d-%m-%Y %H:%M") if orden else "—"
+            for k in ("tabla", "ambiente", "plantilla_id", "plantilla", "limite",
+                      "programado_para", "creador", "creador_nombre", "creado",
+                      "decidido_por", "motivo", "token"):
+                f.pop(k, None)
+            f["job_id"] = f.get("job_id") or ""
+        else:
+            f["fecha"] = orden.strftime("%d-%m-%Y %H:%M") if orden else "—"
+            f.pop("fecha_hora", None)
+            jid, _jest = vivos.get(f["id"], (None, None))
+            if jid:
+                # Lote con job activo: se muestra En progreso (no Completado).
+                f["estado"] = "en_progreso"
+                f["job_id"] = jid
+                f["puede_cancelar"] = bool(tiene_permiso(sesion, "mensajeria"))
+            else:
+                f["job_id"] = ""
+                f["puede_cancelar"] = False
     return filas
 
 
-def detalle_historial(envio_id: int, ambiente: str = Query("produccion"),
+def detalle_historial(envio_id: str, ambiente: str = Query("produccion"),
                       sesion: dict = Depends(exigir("historial"))):
+    if str(envio_id).startswith("prog-"):
+        # Programado: sin detalle por paciente (aún no se ejecuta o nunca
+        # generó lote); el frontend muestra el aviso de vacío.
+        try:
+            _f = _traer_programado(int(str(envio_id)[5:]))
+        except (TypeError, ValueError):
+            raise HTTPException(404, detail="Envío no encontrado")
+        if not _prog_visible(sesion, _f):
+            raise HTTPException(403, detail="No tienes acceso a este envío.")
+        return []
+    try:
+        envio_id = int(envio_id)
+    except (TypeError, ValueError):
+        raise HTTPException(422, detail="Envío inválido.")
     # log_envios es única para todo el sistema; el detalle se busca por envio_id.
     # Para 'respuesta' se usa la señal EFECTIVA actual del paciente (respondió /
     # se dio de baja / sin respuesta), no el valor congelado en la fila de envío.

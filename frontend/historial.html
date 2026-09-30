@@ -29,6 +29,14 @@
 
   <main class="layout layout--ancho">
 
+    <section class="panel" id="panelEnProgreso">
+      <div class="panel__head">
+        <h2>Envíos en progreso</h2>
+        <button id="btnActualizarProgreso" class="btn btn--ghost" type="button">Actualizar</button>
+      </div>
+      <div id="listaEnProgreso" class="prog-lista"></div>
+    </section>
+
     <section class="panel">
       <div class="panel__head">
         <h2>Historial de env&iacute;os</h2>
@@ -67,6 +75,7 @@
           <thead>
             <tr>
               <th>Fecha</th>
+              <th>Origen</th>
               <th>Base de datos</th>
               <th>Plantilla</th>
               <th>Estado</th>

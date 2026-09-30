@@ -7,7 +7,7 @@ RUTAS = (
     ("/api/notificaciones/rechazar/{token}", "POST", "rechazar_envio", None),
     ("/api/notificaciones/confirmar/{token}", "GET", "confirmar_envio", None),
     ("/api/notificaciones/destinatarios", "POST", "contar_destinatarios", None),
-    ("/api/notificaciones/envio-en-curso", "GET", "envios_en_curso", None),
+    ("/api/notificaciones/envios-en-progreso", "GET", "envios_en_progreso", None),
     ("/api/notificaciones/jobs/{job_id}", "GET", "estado_job", None),
     ("/api/notificaciones/jobs/{job_id}/cancelar", "POST", "cancelar_job", None),
     ("/api/notificaciones/jobs/{job_id}/pausa", "POST", "pausar_job", None),
@@ -15,6 +15,14 @@ RUTAS = (
     ("/api/notificaciones/historial", "GET", "listar_historial", None),
     ("/api/notificaciones/historial/{envio_id}/detalle", "GET", "detalle_historial", None),
     ("/api/notificaciones/historial/{registro_id}/respuesta", "PUT", "actualizar_respuesta", None),
+    ("/api/notificaciones/programados", "POST", "crear_programado", None),
+    ("/api/notificaciones/programados", "GET", "listar_programados", None),
+    ("/api/notificaciones/programados/{prog_id}/aprobar", "POST", "aprobar_programado", None),
+    ("/api/notificaciones/programados/{prog_id}/rechazar", "POST", "rechazar_programado", None),
+    ("/api/notificaciones/programados/{prog_id}/cancelar", "POST", "cancelar_programado", None),
+    ("/api/notificaciones/programados/aprobar/{token}", "GET", "aprobar_programado_token", None),
+    ("/api/notificaciones/programados/rechazar/{token}", "GET", "form_rechazo_programado", None),
+    ("/api/notificaciones/programados/rechazar/{token}", "POST", "rechazar_programado_token", None),
 )
 
 def registrar(handlers): return crear_router("Notificaciones", handlers, RUTAS)

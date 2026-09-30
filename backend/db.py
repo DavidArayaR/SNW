@@ -251,6 +251,33 @@ def asegurar_tabla_config() -> None:
                 "  INDEX idx_aud_fecha (fecha_hora)"
                 ") CHARACTER SET utf8mb4"
             )
+            # Envíos masivos programados (pestaña Programados en Mensajería):
+            # un usuario los crea para su area (requieren aprobación de un
+            # superior); admin/supervisor en cualquier area sin confirmación.
+            # El scheduler los ejecuta al vencer (solo aprobados).
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS envios_programados ("
+                "  id INT AUTO_INCREMENT PRIMARY KEY,"
+                "  area_id INT NULL,"
+                "  tabla VARCHAR(64) NOT NULL,"
+                "  ambiente VARCHAR(12) NOT NULL DEFAULT 'produccion',"
+                "  plantilla_id INT NOT NULL,"
+                "  plantilla_nombre VARCHAR(150) NOT NULL DEFAULT '',"
+                "  limite INT NULL,"
+                "  programado_para DATETIME NOT NULL,"
+                "  estado VARCHAR(12) NOT NULL DEFAULT 'pendiente',"
+                "  creador VARCHAR(150) NOT NULL DEFAULT '',"
+                "  creador_nombre VARCHAR(150) NOT NULL DEFAULT '',"
+                "  creado DATETIME DEFAULT CURRENT_TIMESTAMP,"
+                "  decidido_por VARCHAR(150) NOT NULL DEFAULT '',"
+                "  motivo VARCHAR(255) NOT NULL DEFAULT '',"
+                "  token CHAR(32) NULL,"
+                "  job_id VARCHAR(16) NULL,"
+                "  INDEX idx_prog_estado_fecha (estado, programado_para),"
+                "  INDEX idx_prog_creador (creador),"
+                "  INDEX idx_prog_token (token)"
+                ") CHARACTER SET utf8mb4"
+            )
             _sembrar_usuarios(cur)
             # Si el login ya es un correo y no hay correo de recuperación, se copia.
             cur.execute(

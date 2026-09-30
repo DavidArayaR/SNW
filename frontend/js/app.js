@@ -233,7 +233,7 @@ function refrescarAvisoSinArea() {
   if (inpArea) inpArea.disabled = sinAsignadas;
 }
 
-// Selector único de base de datos del modal de envío (Fase 3): lista solo
+// Selector único de base de datos de la card de envío: lista solo
 // las bases disponibles —desarrollo/producción (según restricción) y una
 // opción por área—. Si hay una sola disponible, queda seleccionada.
 // Valores: "desarrollo" | "produccion" | "esp:<id>".
@@ -442,7 +442,7 @@ function crearItemPlantilla(p) {
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = "tpl-item" +
-    (p.id === activaId ? " tpl-item--activa" : "") +
+    (p.id === tplSelId ? " tpl-item--activa" : "") +
     (aprobada ? "" : " tpl-item--pendiente");
   let estadoTag = "";
   if (esPlantillaRechazada(p)) {
@@ -466,8 +466,45 @@ function crearItemPlantilla(p) {
   btn.innerHTML =
     `<span class="tpl-item__nombre">${escaparHtml(p.nombre ?? "(sin nombre)")}${estadoTag}</span>` +
     `<span class="tpl-item__vista">${escaparHtml(primeraLinea)}</span>`;
-  btn.addEventListener("click", () => intentarAbrir(p.id));
+  btn.addEventListener("click", () => clicPlantilla(p.id));
   return btn;
+}
+
+// Click en la lista según la tab: editor, envío o programar. La selección
+// (tplSelId) es única y persiste entre tabs.
+function clicPlantilla(id) {
+  if (tabMsg === "envios") {
+    tplSelId = id;
+    renderLista(buscadorEl.value);
+    abrirModalConf(id);
+    return;
+  }
+  if (tabMsg === "programados") {
+    tplSelId = id;
+    seleccionarParaProgramar(id);
+    return;
+  }
+  if (intentarAbrir(id)) tplSelId = id;
+  renderLista(buscadorEl.value);
+}
+
+function seleccionarParaProgramar(id) {
+  const p = (plantillas || []).find((x) => x.id === id);
+  const selA = document.getElementById("selProgArea");
+  if (p && selA && p.area_id != null &&
+      [...selA.options].some((o) => o.value === String(p.area_id))) {
+    selA.value = String(p.area_id);
+    selA.dataset.valor = selA.value;
+  }
+  actualizarProgPlantilla();
+  renderLista(buscadorEl.value);
+}
+
+function actualizarProgPlantilla() {
+  const el = document.getElementById("progPlantillaNombre");
+  if (!el) return;
+  const p = (plantillas || []).find((x) => x.id === tplSelId);
+  el.textContent = p ? p.nombre : "—";
 }
 
 function renderLista(filtro = "") {
@@ -799,6 +836,7 @@ function abrir(id) {
   const p = plantillas.find((x) => x.id === id);
   if (!p) return;
   activaId = id;
+  tplSelId = id;
   estadoVacio.style.display = "none";
   formEl.style.display = "";
   tituloForm.textContent = (PUEDE_EDITAR_PLANTILLAS && esPlantillaEditable(p)) ? `Editando: ${p.nombre}` : p.nombre;
@@ -876,6 +914,7 @@ function modoNueva() {
 
 function modoVacia() {
   activaId = null;
+  tplSelId = null;
   snapshot = null;
   formEl.style.display = "none";
   estadoVacio.style.display = "flex";
@@ -885,11 +924,12 @@ function modoVacia() {
 }
 
 function intentarAbrir(id) {
-  if (id === activaId) return;
+  if (id === activaId) return true;
   if (hayCambios() && !confirm("Tienes cambios sin guardar. ¿Deseas descartarlos?")) {
-    return;
+    return false;
   }
   abrir(id);
+  return true;
 }
 
 function intentarNueva() {
@@ -1228,8 +1268,6 @@ function setConsultandoEstado(consultando, boton, textoConsultando) {
   }
 }
 
-const badgeEntornoMensajeria = document.getElementById("badgeEntorno");
-const modalConf = $("#modalConfirmar");
 let ambienteConf = localStorage.getItem("snw_ambiente_admin") || localStorage.getItem("snw_ambiente") || "desarrollo";
 let entornoGlobal = null;
 let timerPollingConf = null;
@@ -1238,14 +1276,23 @@ let jobIdActualConf = null;
 let totalActualConf = 0;
 let hechosActualConf = 0;
 
+let confPlantillaId = null; // plantilla de la card de envío (puede diferir del editor)
+
+// Solo se bloquean los controles de envío de la card: el resto (tabs, lista,
+// programar, otras bases) sigue usable para lanzar otro envío en paralelo.
+const CONTROLES_ENVIO_CONF = ["btnLanzarConf", "selBaseConf", "limiteRangeConf", "limiteNumConf"];
 function setBloqueoEnvioConf(bloquear) {
   envioEnCursoConf = bloquear;
-  bloquearInterfaz(bloquear);
-  // Cancelar y Cerrar del modal de envío siempre quedan disponibles.
+  CONTROLES_ENVIO_CONF.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = bloquear;
+  });
+  // Cancelar y Limpiar de la card de envío siempre quedan disponibles.
   ["btnCancelarConf", "btnCerrarConf"].forEach((id) => {
     const b = document.getElementById(id);
     if (b) b.disabled = false;
   });
+  if (!bloquear) actualizarBloqueoCampos();
 }
 
 // Sincronizar con el entorno global de la configuración: si cambió a produccion/desarrollo, actualizar la selección
@@ -1302,7 +1349,7 @@ function usuarioRestringidoADesarrollo() {
   return !puedeProd && entornoGlobal === "desarrollo";
 }
 
-// Aplica la restricción de base de datos en el modal de envío.
+// Aplica la restricción de base de datos en la card de envío.
 function aplicarRestriccionAmbiente() {
   // Las opciones se reconstruyen al abrir el modal (construirOpcionesBaseConf
   // ya omite producción si hay restricción); acá solo se corrige la variable
@@ -1317,8 +1364,11 @@ function aplicarRestriccionAmbiente() {
   }
 }
 
-function abrirModalConf() {
-  const p = plantillas.find((x) => x.id === activaId);
+function abrirModalConf(id = tplSelId) {
+  const p = plantillas.find((x) => x.id === id);
+  if (!p) return;
+  tplSelId = id;
+  confPlantillaId = id;
   $("#confNombre").textContent = p?.nombre ?? "";
 
   aplicarRestriccionAmbiente();
@@ -1336,8 +1386,31 @@ function abrirModalConf() {
   $("#btnCerrarConf").disabled = false;
   $("#btnLanzarConf").disabled = true;
   $("#btnLanzarConf").hidden = false;
+  $("#envioSinPlantilla").hidden = true;
+  $("#envioContenido").hidden = false;
 
-  modalConf.hidden = false;
+  cambiarTabMsg("envios");
+  renderLista(buscadorEl.value);
+}
+
+// La card de envío es persistente (no un modal): "cerrar" la devuelve a su
+// estado inicial sin selección.
+function resetearCardEnvio() {
+  clearInterval(timerPollingConf);
+  tplSelId = null;
+  confPlantillaId = null;
+  actualizarProgPlantilla();
+  $("#confProgreso").hidden = true;
+  $("#listaRechazadosConf").innerHTML = "";
+  $("#listaRechazadosConf").hidden = true;
+  $("#btnCerrarConf").disabled = false;
+  $("#btnLanzarConf").disabled = true;
+  $("#btnLanzarConf").hidden = false;
+  const sinP = $("#envioSinPlantilla");
+  const conP = $("#envioContenido");
+  if (sinP) sinP.hidden = false;
+  if (conP) conP.hidden = true;
+  renderLista(buscadorEl.value);
 }
 
 $("#btnEnviarActual").addEventListener("click", () => {
@@ -1345,7 +1418,7 @@ $("#btnEnviarActual").addEventListener("click", () => {
   if (hayCambios()) {
     return toast("Hay cambios sin guardar. Presiona Guardar primero (Ctrl+S).", "error");
   }
-  abrirModalConf();
+  abrirModalConf(activaId);
 });
 
 const selBaseConfEl = $("#selBaseConf");
@@ -1474,7 +1547,7 @@ function fmtMoneda(monto, moneda) {
 }
 
 // Editor del límite diario (wa_messaging_limit_24h) para admin/dev. Se muestra
-// dentro del modal de envío para ajustarlo a lo que indique el dashboard de Meta.
+// dentro de la card de envío para ajustarlo a lo que indique el dashboard de Meta.
 function cargarLimiteAdminConf() {
   const fila = $("#filaLimiteAdminConf");
   if (!fila) return;
@@ -1548,7 +1621,7 @@ async function actualizarResumenConf() {
 
   try {
     const espId = areaEnvioId();
-    const cuerpoEnvio = { plantilla_id: activaId, ambiente: ambienteEnvioConf() };
+    const cuerpoEnvio = { plantilla_id: confPlantillaId, ambiente: ambienteEnvioConf() };
     if (espId != null) cuerpoEnvio.area_id = espId;
     const res = await fetch("api/notificaciones/destinatarios", {
       method: "POST",
@@ -1600,9 +1673,9 @@ $("#btnCancelarConf").addEventListener("click", () => {
     pausarJobConf(jobIdActualConf);
     return;
   }
-  // Sin envío en curso: se comporta como cerrar.
+  // Sin envío en curso: se comporta como limpiar la card.
   clearInterval(timerPollingConf);
-  modalConf.hidden = true;
+  resetearCardEnvio();
 });
 $("#btnNoCancelarConf").addEventListener("click", () => {
   $("#modalCancelarConf").hidden = true;
@@ -1632,24 +1705,17 @@ $("#btnConfirmarCancelarConf").addEventListener("click", async () => {
     jobIdActualConf = null;
     totalActualConf = 0;
     hechosActualConf = 0;
-    modalConf.hidden = true;
+    resetearCardEnvio();
   } else {
     toast("No se pudo cancelar el envío.", "error");
     if (jobIdActualConf) seguirProgresoConf(jobIdActualConf, totalActualConf);
-  }
-});
-modalConf.addEventListener("click", (e) => {
-  if (envioEnCursoConf) return;
-  if (e.target === modalConf) {
-    clearInterval(timerPollingConf);
-    modalConf.hidden = true;
   }
 });
 $("#btnCerrarConf").addEventListener("click", () => {
   clearInterval(timerPollingConf);
   // Si había un envío en curso, el trabajo sigue en el servidor (se ve en Historial).
   if (envioEnCursoConf) setBloqueoEnvioConf(false);
-  modalConf.hidden = true;
+  resetearCardEnvio();
 });
 $("#btnCerrarRechazoConf").addEventListener("click", () => ($("#modalRechazadoConf").hidden = true));
 const modalRechazadoConfEl = $("#modalRechazadoConf");
@@ -1657,13 +1723,32 @@ modalRechazadoConfEl.addEventListener("click", (e) => {
   if (e.target === modalRechazadoConfEl) modalRechazadoConfEl.hidden = true;
 });
 
-$("#btnLanzarConf").addEventListener("click", async () => {
-  if (envioEnCursoConf) return;
+$("#btnLanzarConf").addEventListener("click", () => {
+  const nombre = $("#confNombre").textContent || "plantilla";
+  const dest = $("#confDestinatarios").textContent || "";
+  const baseEl = $("#selBaseConf");
+  const base = baseEl && baseEl.selectedOptions.length
+    ? baseEl.selectedOptions[0].textContent : "";
+  $("#mensajeIniciarConf").textContent =
+    `¿Iniciar el envío de "${nombre}" a ${dest}${base ? ` (${base})` : ""}?`;
+  $("#modalIniciarConf").hidden = false;
+});
+$("#btnNoIniciarConf").addEventListener("click", () => {
+  $("#modalIniciarConf").hidden = true;
+});
+$("#modalIniciarConf").addEventListener("click", (e) => {
+  if (e.target.id === "modalIniciarConf") $("#modalIniciarConf").hidden = true;
+});
+$("#btnConfirmarIniciarConf").addEventListener("click", async () => {
+  $("#modalIniciarConf").hidden = true;
+  // Se puede lanzar otro envío aunque se siga uno en la card (el anterior
+  // sigue en el servidor y se ve en Historial); la base ocupada la rechaza el backend.
   $("#btnLanzarConf").hidden = true;
   setBloqueoEnvioConf(true);
 
   try {
-    const cuerpo = { plantilla_id: activaId, ambiente: ambienteEnvioConf() };
+    if (!confPlantillaId) throw new Error("Elige una plantilla primero.");
+    const cuerpo = { plantilla_id: confPlantillaId, ambiente: ambienteEnvioConf() };
     const espIdLanzar = areaEnvioId();
     if (espIdLanzar != null) cuerpo.area_id = espIdLanzar;
     const lim = limiteEnvioConf();
@@ -1684,7 +1769,6 @@ $("#btnLanzarConf").addEventListener("click", async () => {
     }
 
     if (data.requiere_confirmacion) {
-      modalConf.hidden = true;
       const espera = document.getElementById("modalEspera");
       espera.hidden = false;
       const linkEl = document.getElementById("linkConfirmacionEsperaMsg");
@@ -1704,7 +1788,7 @@ $("#btnLanzarConf").addEventListener("click", async () => {
             espera.hidden = true;
             alert("Envío confirmado por supervisor");
             await new Promise((res) => setTimeout(res, 1500));
-            modalConf.hidden = false;
+            cambiarTabMsg("envios");
             $("#confProgreso").hidden = false;
             jobIdActualConf = s.job_id;
             totalActualConf = s.total;
@@ -1899,115 +1983,302 @@ if (btnSincronizarMeta) {
   });
 }
 
-// Banner de envío en curso: aunque se cierre el modal (o se recargue la
-// página), Mensajería muestra los envíos activos y permite retomarlos.
-let jobBannerActual = null;
+/* ---------- Tabs de Mensajería ---------- */
+let tabMsg = localStorage.getItem("snw_tab_msg") || "plantillas";
+if (["plantillas", "envios", "programados"].indexOf(tabMsg) === -1) tabMsg = "plantillas";
+let tplSelId = null; // plantilla seleccionada (persiste entre tabs)
 
-let jobsEnCurso = [];
-
-function textoJobEnCurso(job) {
-  const hechos = (job.enviados || 0) + (job.fallidos || 0);
-  return (
-    `Envío en curso: ${job.plantilla || "plantilla"} (${hechos}/${job.total})` +
-    (job.estado === "pausado" ? " · pausado" : "") +
-    (job.nombre_enviador ? ` · por ${job.nombre_enviador}` : "") +
-    (job.area ? ` · ${job.area}` : (job.base ? ` · ${job.base}` : ""))
-  );
+function pintarTabsMsg() {
+  document.querySelectorAll("[data-msgtab]").forEach((b) =>
+    b.classList.toggle("activo", b.dataset.msgtab === tabMsg));
+  // La lista queda fija siempre en el mismo lugar; solo se alterna el panel
+  // derecho (editor / envío / columna de programados).
+  const pE = $("#panelEditor");
+  const pV = $("#panelEnvio");
+  const pG = $("#progColumna");
+  if (pE) pE.hidden = tabMsg !== "plantillas";
+  if (pV) pV.hidden = tabMsg !== "envios";
+  if (pG) pG.hidden = tabMsg !== "programados";
 }
 
-async function actualizarBannerEnvioEnCurso() {
-  const banner = $("#bannerEnvioEnCurso");
-  const texto = $("#bannerEnvioTexto");
-  const lista = $("#listaEnviosEnCurso");
-  if (!banner || !texto) return;
+function cambiarTabMsg(t) {
+  tabMsg = t;
+  try { localStorage.setItem("snw_tab_msg", tabMsg); } catch { /* sin almacenamiento */ }
+  pintarTabsMsg();
+  // Cada tab parte desde arriba: si no, el scroll heredado de la tab
+  // anterior (más larga) deja las cards en posiciones distintas, y la
+  // lista (sticky) queda pegada donde no corresponde.
+  window.scrollTo(0, 0);
+  renderLista(buscadorEl.value);
+  if (tabMsg === "programados") {
+    cargarProgramados();
+    actualizarProgPlantilla();
+  } else if (tabMsg === "envios") {
+    // La selección persiste: si hay plantilla elegida y la card está vacía, se prepara.
+    const vacia = document.getElementById("envioContenido");
+    if (tplSelId && vacia && vacia.hidden) abrirModalConf(tplSelId);
+  } else if (tabMsg === "plantillas") {
+    // El editor sigue a la selección: si se eligió en otra tab, se abre acá
+    // (con el resguardo de cambios sin guardar; si se cancela, se vuelve a
+    // resaltar lo que está abierto).
+    if (tplSelId && tplSelId !== activaId) {
+      if (!(plantillas || []).some((x) => x.id === tplSelId)) {
+        tplSelId = null;
+        renderLista(buscadorEl.value);
+      } else if (!intentarAbrir(tplSelId)) {
+        tplSelId = activaId;
+        renderLista(buscadorEl.value);
+      }
+    }
+  }
+}
+
+document.querySelectorAll("[data-msgtab]").forEach((b) =>
+  b.addEventListener("click", () => cambiarTabMsg(b.dataset.msgtab))
+);
+let programados = [];
+let progCreando = false; // candado anti doble-click/abuso
+let progRechazarId = null;
+
+
+function poblarFormProg() {
+  const selA = $("#selProgArea");
+  if (!selA) return;
+  const areas = misAreas || [];
+  selA.innerHTML = areas.map((e) =>
+    `<option value="${e.id}">${escaparHtml(e.nombre_visible)}</option>`).join("");
+  const guardada = selA.dataset.valor || "";
+  if (guardada && areas.some((e) => String(e.id) === guardada)) selA.value = guardada;
+  actualizarProgPlantilla();
+  const inpF = $("#inpProgFecha");
+  if (inpF && !inpF.value) {
+    const min = new Date(Date.now() + 5 * 60000);
+    min.setSeconds(0, 0);
+    const tz = new Date(min.getTime() - min.getTimezoneOffset() * 60000);
+    inpF.min = tz.toISOString().slice(0, 16);
+  }
+}
+
+const selProgAreaEl = $("#selProgArea");
+if (selProgAreaEl) selProgAreaEl.addEventListener("change", () => {
+  selProgAreaEl.dataset.valor = selProgAreaEl.value;
+});
+
+async function cargarProgramados() {
+  const lista = $("#listaProgramados");
+  poblarFormProg();
+  if (!lista) return;
+  // Si ya hay datos, se conservan visibles mientras se actualiza (con
+  // animación); solo se muestra "Cargando…" la primera vez.
+  const primera = !programados.length && !lista.querySelector(".prog-item");
+  if (primera) lista.innerHTML = `<p class="field__hint">Cargando…</p>`;
+  else marcarProgsActualizando(true);
   try {
-    const res = await fetch("api/notificaciones/envio-en-curso", {
+    const res = await fetch("api/notificaciones/programados", {
       headers: authHeaders(), cache: "no-store",
     });
     if (res.status === 401) { window.snwSesionExpirada(); return; }
     if (!res.ok) throw new Error();
-    const todos = await res.json();
-    // Si el modal ya sigue un envío, ese sobra en la vista.
-    const jobs = (Array.isArray(todos) ? todos : [])
-      .filter((j) => !(envioEnCursoConf && jobIdActualConf === j.job_id));
-    jobsEnCurso = jobs;
-    if (!jobs.length) {
-      banner.hidden = true;
-      if (lista) lista.innerHTML = "";
-      jobBannerActual = null;
-      return;
-    }
-    // Admin/dev ven TODOS los envíos en curso (puede haber varios a la vez
-    // en distintas bases); el resto sigue viendo uno solo como antes.
-    if (!!window.snwEsPrivilegiado && jobs.length > 1 && lista) {
-      banner.hidden = true;
-      jobBannerActual = null;
-      lista.innerHTML = jobs.map((job) =>
-        `<div class="aviso-envio-curso"><span>${escaparHtml(textoJobEnCurso(job))}</span>` +
-        `<button type="button" class="btn btn--sm btn--primary" data-ver-job="${escaparHtml(job.job_id)}">Ver</button></div>`
-      ).join("");
-      return;
-    }
-    if (lista) lista.innerHTML = "";
-    const job = jobs[0];
-    jobBannerActual = job;
-    texto.textContent = textoJobEnCurso(job);
-    banner.hidden = false;
+    programados = await res.json();
+    const listaProg = $("#listaProgramados");
+    if (listaProg) listaProg._pagina = 1;
+    renderProgramados();
   } catch {
-    console.error("[app.js actualizarBannerEnvioEnCurso()]");
-    banner.hidden = true;
-    if (lista) lista.innerHTML = "";
-    jobBannerActual = null;
-    jobsEnCurso = [];
+    console.error("[app.js cargarProgramados()]");
+    marcarProgsActualizando(false);
+    if (primera) lista.innerHTML = `<p class="field__hint">No se pudieron cargar.</p>`;
   }
 }
 
-async function retomarJob(job) {
-  if (!job) return;
-  // Verifica que siga activo antes de enganchar el modal.
+// Feedback mientras se actualiza: las filas visibles pulsan (igual que en
+// Base de datos). Al redibujar la lista la clase desaparece sola.
+function marcarProgsActualizando(on) {
+  document.querySelectorAll("#listaProgramados .prog-item").forEach((el) =>
+    el.classList.toggle("actualizando", on));
+}
+
+const ESTADO_PROG_LABEL = {
+  pendiente: "Pendiente", aprobado: "Aprobado", rechazado: "Rechazado",
+  cancelado: "Cancelado", enviando: "Enviando", enviado: "Enviado", error: "Error",
+};
+
+function progItemHtml(p) {
+  const motivo = (p.estado === "rechazado" || p.estado === "error") && p.motivo
+    ? `<div class="prog-item__motivo">${escaparHtml(p.motivo)}</div>` : "";
+  const decided = p.decidido_por && (p.estado === "aprobado" || p.estado === "rechazado" || p.estado === "cancelado")
+    ? ` · decidido por ${escaparHtml(p.decidido_por)}` : "";
+  const botones =
+    (p.puede_decidir
+      ? `<button type="button" class="btn btn--sm btn--primary" data-prog-aprobar="${p.id}">Aprobar</button>` +
+        `<button type="button" class="btn btn--sm btn--danger" data-prog-rechazar="${p.id}">Rechazar</button>` : "") +
+    (p.puede_cancelar
+      ? `<button type="button" class="btn btn--sm btn--ghost" data-prog-cancelar="${p.id}">Cancelar</button>` : "");
+  return `<div class="prog-item" data-prog="${p.id}">` +
+    `<div class="prog-item__cab"><span class="prog-estado prog-estado--${p.estado}">${ESTADO_PROG_LABEL[p.estado] || p.estado}</span>` +
+    `<span>${escaparHtml(p.plantilla || "—")}</span></div>` +
+    `<div class="prog-item__meta">${escaparHtml(p.programado_para || "")}` +
+    (p.area ? ` · ${escaparHtml(p.area)}` : "") +
+    (p.limite ? ` · límite ${p.limite}` : "") +
+    (p.creador_nombre ? ` · por ${escaparHtml(p.creador_nombre)}` : "") + decided + `</div>` +
+    motivo +
+    (botones ? `<div class="prog-item__acciones">${botones}</div>` : "") +
+    `</div>`;
+}
+
+// Paginador de 3 por página (la lista no crece más que eso) + scroll.
+function renderProgramados() {
+  const lista = $("#listaProgramados");
+  if (!lista) return;
+  if (!programados.length) {
+    lista.innerHTML =
+      `<div class="prog-vacio"><i class="fa-solid fa-calendar-check"></i>` +
+      `<p>No hay envíos programados.</p></div>`;
+    return;
+  }
+  const total = programados.length;
+  const pageSize = 3;
+  const paginas = Math.max(1, Math.ceil(total / pageSize));
+  let pagina = lista._pagina || 1;
+  if (pagina > paginas) pagina = paginas;
+  if (pagina < 1) pagina = 1;
+  lista._pagina = pagina;
+  const parte = programados.slice((pagina - 1) * pageSize, pagina * pageSize);
+  lista.innerHTML =
+    `<div class="pag-grupo">` +
+      `<span class="pag-info">Página ${pagina} de ${paginas} · ${total} envío${total === 1 ? "" : "s"}</span>` +
+      `<span class="pag-fila">` +
+        `<button type="button" class="btn btn--ghost" data-pag="ant" title="Página anterior" aria-label="Página anterior"${pagina <= 1 ? " disabled" : ""}><i class="fa-solid fa-chevron-left"></i></button>` +
+        `<button type="button" class="btn btn--ghost" data-pag="sig" title="Página siguiente" aria-label="Página siguiente"${pagina >= paginas ? " disabled" : ""}><i class="fa-solid fa-chevron-right"></i></button>` +
+      `</span>` +
+    `</div>` +
+    `<div class="prog-lista-scroll">${parte.map(progItemHtml).join("")}</div>`;
+}
+
+function bloquearFilaProg(id, bloquear) {
+  const item = document.querySelector(`.prog-item[data-prog="${id}"]`);
+  if (!item) return;
+  item.querySelectorAll("button").forEach((b) => { b.disabled = bloquear; });
+}
+
+async function programarEnvio() {
+  if (progCreando) return;
+  const selA = $("#selProgArea");
+  const inpF = $("#inpProgFecha");
+  const inpL = $("#inpProgLimite");
+  const areaId = selA && selA.value ? Number(selA.value) : null;
+  const tpl = (plantillas || []).find((x) => x.id === tplSelId);
+  if (!areaId) { toast("Elige el área.", "error"); return; }
+  if (!tpl) { toast("Elige una plantilla de la lista de la izquierda.", "error"); return; }
+  if (!inpF || !inpF.value) { toast("Elige fecha y hora.", "error"); return; }
+  let limite = null;
+  if (inpL && inpL.value !== "") {
+    limite = Number(inpL.value);
+    if (!Number.isInteger(limite) || limite < 1) { toast("Límite inválido.", "error"); return; }
+  }
+  const btn = $("#btnProgramar");
+  progCreando = true;
+  if (btn) btn.disabled = true;
   try {
-    const res = await fetch(`api/notificaciones/jobs/${job.job_id}`, {
-      headers: authHeaders(), cache: "no-store",
+    const res = await fetch("api/notificaciones/programados", {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ area_id: areaId, plantilla_id: tpl.id, programado_para: inpF.value, limite }),
     });
-    if (!res.ok) {
-      toast("Ese envío ya terminó. Revisa el Historial.", "error");
-      actualizarBannerEnvioEnCurso();
-      return;
-    }
-    $("#confNombre").textContent = job.plantilla || "";
-    $("#listaRechazadosConf").innerHTML = "";
-    $("#listaRechazadosConf").hidden = true;
-    $("#btnLanzarConf").hidden = true;
-    $("#confProgreso").hidden = false;
-    jobIdActualConf = job.job_id;
-    totalActualConf = job.total;
-    hechosActualConf = (job.enviados || 0) + (job.fallidos || 0);
-    modalConf.hidden = false;
-    setBloqueoEnvioConf(true);
-    seguirProgresoConf(job.job_id, job.total);
-  } catch {
-    console.error("[app.js retomarJob()]");
-    toast("No se pudo retomar el envío.", "error");
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) { window.snwSesionExpirada(); return; }
+    if (!res.ok) throw new Error(data.detail || "No se pudo programar.");
+    toast(data.estado === "pendiente"
+      ? "Envío programado: quedó pendiente de aprobación de un superior."
+      : "Envío programado.", "ok");
+    inpF.value = "";
+    if (inpL) inpL.value = "";
+    await cargarProgramados();
+  } catch (err) {
+    console.error("[app.js programarEnvio()]", err);
+    toast(err.message || "No se pudo programar.", "error");
+  } finally {
+    progCreando = false;
+    if (btn) btn.disabled = false;
   }
 }
 
-const btnVerEnvio = $("#btnVerEnvioEnCurso");
-if (btnVerEnvio) btnVerEnvio.addEventListener("click", () => retomarJob(jobBannerActual));
-const listaEnviosEl = $("#listaEnviosEnCurso");
-if (listaEnviosEl) listaEnviosEl.addEventListener("click", (e) => {
-  const b = e.target.closest("[data-ver-job]");
-  if (!b) return;
-  retomarJob(jobsEnCurso.find((j) => j.job_id === b.dataset.verJob) || null);
+const btnProgramarEl = $("#btnProgramar");
+if (btnProgramarEl) btnProgramarEl.addEventListener("click", programarEnvio);
+const btnActualizarProgEl = $("#btnActualizarProg");
+if (btnActualizarProgEl) window.snwConCooldown(btnActualizarProgEl, cargarProgramados);
+
+async function decidirProg(id, accion, motivo) {
+  bloquearFilaProg(id, true);
+  try {
+    const res = await fetch(`api/notificaciones/programados/${id}/${accion}`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(accion === "rechazar" ? { motivo: motivo || "" } : {}),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) { window.snwSesionExpirada(); return; }
+    if (!res.ok) throw new Error(data.detail || "No se pudo registrar la decisión.");
+    toast(accion === "aprobar" ? "Envío aprobado." : accion === "rechazar" ? "Envío rechazado." : "Envío cancelado.", "ok");
+    await cargarProgramados();
+  } catch (err) {
+    console.error("[app.js decidirProg()]", err);
+    toast(err.message || "No se pudo completar.", "error");
+    bloquearFilaProg(id, false);
+  }
+}
+
+const listaProgEl = $("#listaProgramados");
+if (listaProgEl) listaProgEl.addEventListener("click", (e) => {
+  const bPag = e.target.closest("[data-pag]");
+  if (bPag) {
+    const lista = $("#listaProgramados");
+    lista._pagina = (lista._pagina || 1) + (bPag.dataset.pag === "sig" ? 1 : -1);
+    renderProgramados();
+    return;
+  }
+  const bAp = e.target.closest("[data-prog-aprobar]");
+  const bRe = e.target.closest("[data-prog-rechazar]");
+  const bCa = e.target.closest("[data-prog-cancelar]");
+  if (bAp) decidirProg(Number(bAp.dataset.progAprobar), "aprobar");
+  else if (bCa) decidirProg(Number(bCa.dataset.progCancelar), "cancelar");
+  else if (bRe) {
+    progRechazarId = Number(bRe.dataset.progRechazar);
+    const p = programados.find((x) => x.id === progRechazarId);
+    $("#progRechazarTexto").textContent =
+      `Vas a rechazar "${p ? p.plantilla : ""}" programado para ${p ? p.programado_para : ""}.`;
+    $("#progRechazoMotivo").value = "";
+    $("#modalProgRechazar").hidden = false;
+    $("#progRechazoMotivo").focus();
+  }
+});
+
+$("#btnCancelarProgRechazar").addEventListener("click", () => {
+  progRechazarId = null;
+  $("#modalProgRechazar").hidden = true;
+});
+$("#modalProgRechazar").addEventListener("click", (e) => {
+  if (e.target.id === "modalProgRechazar") {
+    progRechazarId = null;
+    $("#modalProgRechazar").hidden = true;
+  }
+});
+$("#btnConfirmarProgRechazar").addEventListener("click", () => {
+  const id = progRechazarId;
+  const motivo = $("#progRechazoMotivo").value.trim();
+  progRechazarId = null;
+  $("#modalProgRechazar").hidden = true;
+  if (id) decidirProg(id, "rechazar", motivo);
 });
 
 setInterval(() => {
-  if (!document.hidden) actualizarBannerEnvioEnCurso();
-}, 5000);
+  if (!document.hidden && tabMsg === "programados") cargarProgramados();
+}, 30000);
+
+pintarTabsMsg();
 
 aplicarModoSoloLecturaPlantillas();
 modoVacia();
 cargarMiUsuario();
 cargarAreas();
 cargar();
-actualizarBannerEnvioEnCurso();
 setInterval(revisarPlantillasEnSegundoPlano, 30000);

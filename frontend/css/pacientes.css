@@ -158,21 +158,6 @@
 .col-check { width: 36px; text-align: center; }
 .col-check input { width: 17px; height: 17px; accent-color: var(--verde); cursor: pointer; }
 
-.modal__card--envio {
-  max-width: 520px;
-  max-height: 90vh;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-
-#modalConfirmar .modal__actions {
-  justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-  margin-top: 22px;
-  flex-wrap: wrap;
-}
-
 .acciones-izq,
 .acciones-derecha {
   display: flex;
@@ -285,6 +270,9 @@
   text-align: left;
   font-weight: 400;
 }
+/* El texto de ayuda va pegado al borde izquierdo de los controles, sin
+   heredar el alineado a la derecha ni la negrita del dd. */
+.conf-limite .field__hint { margin: 0; text-align: left; font-weight: 400; }
 .conf-limite input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
@@ -466,6 +454,17 @@ td.campo-id { color: var(--texto-suave); font-family: Consolas, monospace; }
   font-size: .78rem;
   font-weight: 700;
 }
+/* Origen del envío en Historial (Manual / Programado). */
+.badge--origen {
+  background: var(--neutral-bg);
+  color: var(--neutral-fg);
+  border: 1px solid var(--neutral-bd);
+  padding: 3px 11px;
+  border-radius: 999px;
+  font-size: .78rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
 
 .campo-num {
   text-align: center;
@@ -485,6 +484,7 @@ td.campo-id { color: var(--texto-suave); font-family: Consolas, monospace; }
   letter-spacing: .02em;
 }
 .estado-envio--completado { background: var(--ok-bg); color: var(--ok-fg); border: 1px solid var(--ok-bd); }
+.estado-envio--en_progreso { background: var(--info-bg); color: var(--info-fg); border: 1px solid var(--info-bd); }
 .estado-envio--cancelado { background: var(--neutral-bg); color: var(--neutral-fg); border: 1px solid var(--neutral-bd); }
 .estado-envio--rechazado { background: var(--danger-bg); color: var(--danger-fg); border: 1px solid var(--danger-bd); }
 

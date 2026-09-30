@@ -64,7 +64,7 @@
     ["snw_token", "snw_rol", "snw_nombre", "snw_permisos", "snw_ambiente_admin", "snw_ambiente",
      "snw_esp_pacientes", "snw_esp_mensajeria", "snw_esp_historial", "snw_base_historial",
      "snw_esp_estadisticas", "snw_modo_conf", "snw_page_size_pac", "snw_tab_usuarios",
-     "snw_page_size_hist", "snw_cat_costos",
+     "snw_page_size_hist", "snw_cat_costos", "snw_tab_msg",
      "snw_page_size_usr_envios", "snw_page_size_usr_auditoria", "snw_admin_open"]
       .forEach((k) => localStorage.removeItem(k));
   }
