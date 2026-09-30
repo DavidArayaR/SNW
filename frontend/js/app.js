@@ -494,14 +494,6 @@ function crearItemPlantilla(p) {
   x.innerHTML = '<i class="fa-solid fa-xmark"></i>';
   x.addEventListener("click", (ev) => {
     ev.stopPropagation();
-    // En la tab de edición la X cierra el editor; en las otras quita la
-    // selección de la card de envío o del formulario de programar.
-    if (tabMsg === "plantillas") {
-      if (activaId && hayCambios() && !confirm("Tienes cambios sin guardar. ¿Deseas descartarlos?")) return;
-      modoVacia();
-      resetearCardEnvio(); // la card de envío no puede quedar con la plantilla anterior
-      return;
-    }
     resetearCardEnvio();
   });
   wrap.appendChild(btn);
@@ -2099,14 +2091,9 @@ function cambiarTabMsg(t) {
     cargarProgramados();
     actualizarProgPlantilla();
   } else if (tabMsg === "envios") {
+    // La selección persiste: si hay plantilla elegida y la card está vacía, se prepara.
     const vacia = document.getElementById("envioContenido");
-    if (tplSelId) {
-      // La selección persiste: si hay plantilla elegida y la card está vacía, se prepara.
-      if (vacia && vacia.hidden) abrirModalConf(tplSelId);
-    } else if (vacia && !vacia.hidden) {
-      // Se deseleccionó en otra tab: la card no puede quedar con la plantilla anterior.
-      resetearCardEnvio();
-    }
+    if (tplSelId && vacia && vacia.hidden) abrirModalConf(tplSelId);
   } else if (tabMsg === "plantillas") {
     // El editor sigue a la selección: si se eligió en otra tab, se abre acá
     // (con el resguardo de cambios sin guardar; si se cancela, se vuelve a
