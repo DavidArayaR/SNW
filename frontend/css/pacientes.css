@@ -1,20 +1,23 @@
 /* Solo Base de datos (pacientes.html). Lo compartido vive en componentes.css. */
 
 /* Card «Gestionar base de datos» (cargar CSV, eliminar registros, eliminar
-   tabla). Las acciones se aplican sobre la base elegida en el panel de arriba. */
-.gestion-campo { margin: 14px 18px 0; max-width: 640px; }
+   tabla). Las acciones se aplican sobre la base elegida en el panel de arriba.
+   .panel no trae padding: el aire de los bordes lo da esta regla. */
+#cardGestionBase { padding-bottom: 20px; }
+.gestion-campo { margin: 18px 18px 0; max-width: 640px; }
 .gestion-archivo { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .gestion-archivo .field__hint { margin: 0; }
 .gestion-acciones {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  margin: 16px 18px 0;
-  padding-top: 14px;
+  align-items: center;
+  gap: 12px 14px;
+  margin: 20px 18px 0;
+  padding: 18px 0 0;
   border-top: 1px solid var(--borde);
 }
-.gestion-acciones .btn { display: inline-flex; align-items: center; gap: 8px; }
-.gestion-resultado { margin: 14px 18px 0; }
+.gestion-acciones .btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; }
+.gestion-resultado { margin: 16px 18px 0; }
 .gestion-resultado:empty { display: none; }
 
 #tablaPacientes tr.fila-actualizando > td {
