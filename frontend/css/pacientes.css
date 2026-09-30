@@ -1,16 +1,21 @@
 /* Solo Base de datos (pacientes.html). Lo compartido vive en componentes.css. */
 
-/* Cargar + Gestionar lado a lado (se apilan en pantallas angostas). */
-.pac-dual {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 20px;
-  align-items: start;
-  margin-top: 20px;
+/* Card «Gestionar base de datos» (cargar CSV, eliminar registros, eliminar
+   tabla). Las acciones se aplican sobre la base elegida en el panel de arriba. */
+.gestion-campo { margin: 14px 18px 0; max-width: 640px; }
+.gestion-archivo { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.gestion-archivo .field__hint { margin: 0; }
+.gestion-acciones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 16px 18px 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--borde);
 }
-@media (max-width: 900px) {
-  .pac-dual { grid-template-columns: minmax(0, 1fr); }
-}
+.gestion-acciones .btn { display: inline-flex; align-items: center; gap: 8px; }
+.gestion-resultado { margin: 14px 18px 0; }
+.gestion-resultado:empty { display: none; }
 
 #tablaPacientes tr.fila-actualizando > td {
   animation: fila-pulso 1.1s ease-in-out infinite;

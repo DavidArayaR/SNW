@@ -111,65 +111,51 @@
           </div>
         </section>
 
-        <div class="pac-dual">
-        <section class="panel" id="cardCargarCsv">
+        <section class="panel" id="cardGestionBase">
           <div class="panel__head">
-            <h2>Cargar base de datos (CSV)</h2>
+            <h2>Gestionar base de datos</h2>
           </div>
 
           <p class="field__hint" style="margin:12px 18px 0;">
-            Sube un archivo CSV con columnas <strong>nombre, apellido, telefono</strong>
-            (UTF-8, máx. 5 MB) a una de tus áreas asignadas. Los teléfonos se
+            Acciones sobre la base elegida arriba. Sube pacientes con un CSV de columnas
+            <strong>nombre, apellido, telefono</strong> (UTF-8, máx. 5 MB): los teléfonos se
             normalizan a <strong>+569XXXXXXXX</strong> y los duplicados se omiten.
           </p>
-          <p id="csvSinEsp" class="warn" hidden style="margin:12px 18px 0;">
+          <p class="field__hint" id="csvMsg" style="margin:6px 18px 0; font-weight:600; color:var(--texto);"></p>
+          <p id="gestionSinEsp" class="warn" hidden style="margin:12px 18px 0;">
             No tienes áreas asignadas: pídele a un administrador que te asigne
-            una para poder cargar datos.
+            una para poder cargar y gestionar datos.
+          </p>
+          <p id="gestionLegacy" class="field__hint" hidden style="margin:12px 18px 0;">
+            La base elegida es una tabla general (desarrollo/producción): estas acciones
+            solo están disponibles para bases de área.
           </p>
 
-          <div class="field" style="margin:14px 18px 0; max-width:640px;">
-            <label for="selEspCarga">Área destino</label>
-            <select id="selEspCarga"></select>
-          </div>
-
-          <div class="field" style="margin:14px 18px 0; max-width:640px;">
+          <div class="field gestion-campo">
             <label>Archivo CSV</label>
-            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-              <label for="csvArchivoCarga" class="btn btn--ghost" id="lblArchivoCarga" style="cursor:pointer; margin:0;">Elegir archivo</label>
-              <span id="nombreArchivoCarga" class="field__hint" style="margin:0;">No se ha seleccionado ningún archivo</span>
+            <div class="gestion-archivo">
+              <label for="csvArchivo" class="btn btn--ghost" id="lblArchivoGestion" style="cursor:pointer; margin:0;">
+                <i class="fa-solid fa-folder-open"></i> <span>Elegir archivo</span>
+              </label>
+              <span id="nombreArchivoGestion" class="field__hint">No se ha seleccionado ningún archivo</span>
             </div>
-            <input type="file" id="csvArchivoCarga" accept=".csv" hidden>
-          </div>
-
-          <div style="margin:14px 18px 0;">
-            <button id="btnSubirCsv" class="btn btn--primary" type="button">Cargar base de datos</button>
-          </div>
-
-          <div style="margin:18px 18px 20px; border-top:1px solid var(--borde, #e5e7eb); padding-top:14px;">
-            <button id="btnVaciarBase" class="btn btn--danger-ghost" type="button" disabled>
-              <i class="fa-solid fa-broom"></i> Vaciar base de datos del área
-            </button>
-            <p class="field__hint" style="margin:8px 0 0;">
-              Borra <strong>solo los pacientes</strong> del área elegida arriba (los datos cargados);
-              no elimina el área, su tabla, su rol ni el historial de envíos. Sin confirmar no se hace nada.
-            </p>
-          </div>
-
-          <div id="csvResultado" style="margin:0 18px 20px;"></div>
-        </section>
-
-        <section class="panel" id="cardGestionTabla" hidden>
-          <div class="panel__head">
-            <h2>Gestionar tabla</h2>
-          </div>
-          <div class="toolbar-pacientes" id="csvCarga">
-            <label class="btn btn--ghost" for="csvArchivo" style="cursor:pointer;">Cargar CSV en <span id="csvDestino">…</span></label>
             <input type="file" id="csvArchivo" accept=".csv" hidden>
-            <button type="button" class="btn btn--danger" id="btnEliminarTablaPac">Eliminar tabla completa</button>
-            <span id="csvMsg" class="field__hint">Columnas: nombre, apellido, telefono (UTF-8).</span>
           </div>
+
+          <div class="gestion-acciones">
+            <button id="btnSubirCsv" class="btn btn--primary" type="button" disabled>
+              <i class="fa-solid fa-file-arrow-up"></i> <span>Cargar CSV</span>
+            </button>
+            <button id="btnVaciarBase" class="btn btn--danger-ghost" type="button" disabled>
+              <i class="fa-solid fa-broom"></i> <span>Eliminar registros</span>
+            </button>
+            <button id="btnEliminarTablaPac" class="btn btn--danger" type="button" hidden>
+              <i class="fa-solid fa-trash-can"></i> <span>Eliminar tabla</span>
+            </button>
+          </div>
+
+          <div id="csvResultado" class="gestion-resultado"></div>
         </section>
-        </div>
 
       </main>
     </div>
@@ -195,7 +181,7 @@
 
   <div id="modalVaciarTabla" class="modal" hidden>
     <div class="modal__card" role="dialog" aria-modal="true">
-      <h3>Vaciar base de datos del área</h3>
+      <h3>Eliminar registros</h3>
       <p style="margin: 0 0 12px; font-size: .92rem; line-height: 1.5;">
         Vas a borrar DEFINITIVAMENTE los <strong id="vaciarTablaTotal">…</strong> pacientes
         de <strong id="vaciarTablaNombre">…</strong>.

@@ -158,21 +158,51 @@ async function cargarBasesPac() {
   aplicarModoBase();
 }
 
+// Borrar la tabla completa (DROP) es irreversible: solo administrador y
+// desarrollador. El backend lo exige igual (Depends(solo_admin)).
+const PUEDE_ELIMINAR_TABLA = !!window.snwEsPrivilegiado;
+
+function areaActual() {
+  const esp = espPacId();
+  return esp == null ? null : areas.find((x) => x.id === esp) || null;
+}
+
+// La card «Gestionar base de datos» trabaja sobre la base elegida arriba: con
+// una tabla general (dev/prod) no hay carga ni borrado, y con un área se
+// habilita lo que corresponda según el rol.
 function aplicarModoBase() {
   const esp = espPacId();
   const tabla = tablaPacActual();
-  const cardGestion = $("#cardGestionTabla");
-  // CSV y borrado solo para área y con permiso de gestión.
-  if (cardGestion) cardGestion.hidden = esp == null || !PUEDE_GESTIONAR_PAC;
-  const csvBloque = $("#csvCarga");
-  if (csvBloque && esp != null) {
-    const dest = $("#csvDestino");
-    if (dest) {
-      const e = areas.find((x) => x.id === esp);
-      dest.textContent = e ? `${e.nombre_visible} (${e.nombre_tabla_base})` : "área";
-    }
+  const area = areaActual();
+  const esArea = !!area;
+
+  const avisoSinEsp = $("#gestionSinEsp");
+  if (avisoSinEsp) avisoSinEsp.hidden = areas.length > 0;
+  const avisoLegacy = $("#gestionLegacy");
+  if (avisoLegacy) avisoLegacy.hidden = esArea || areas.length === 0;
+
+  const btnSubir = $("#btnSubirCsv");
+  const btnVaciar = $("#btnVaciarBase");
+  const btnEliminarTabla = $("#btnEliminarTablaPac");
+  const inpCsv = $("#csvArchivo");
+  const lblCsv = $("#lblArchivoGestion");
+  // Sin áreas no hay nada que gestionar; con tabla general tampoco.
+  const puedeOperar = esArea && areas.length > 0;
+  if (btnSubir) btnSubir.disabled = !puedeOperar;
+  if (btnVaciar) btnVaciar.disabled = !puedeOperar;
+  if (inpCsv) inpCsv.disabled = !puedeOperar;
+  if (lblCsv) lblCsv.classList.toggle("is-disabled", !puedeOperar);
+  if (btnEliminarTabla) btnEliminarTabla.hidden = !PUEDE_ELIMINAR_TABLA;
+  if (btnEliminarTabla) btnEliminarTabla.disabled = !puedeOperar;
+
+  const msg = $("#csvMsg");
+  if (msg) {
+    msg.textContent = esArea
+      ? `Destino: ${area.nombre_visible} (${area.nombre_tabla_base}) · columnas: nombre, apellido, telefono (UTF-8).`
+      : "Destino: —";
   }
-  // El borrado de registros solo existe para tablas de área.
+
+  // El borrado de registros seleccionados solo existe para tablas de área.
   const btnDelMasivo = $("#btnEliminarMasivo");
   if (btnDelMasivo) btnDelMasivo.hidden = esp == null;
   const tituloEl = $("#tituloPacientes");
@@ -789,11 +819,11 @@ function cerrarModalDelTabla() {
 
 const btnEliminarTablaPac = $("#btnEliminarTablaPac");
 if (btnEliminarTablaPac) btnEliminarTablaPac.addEventListener("click", () => {
-  const esp = espPacId();
-  if (esp == null || !modalDelTabla) return;
-  const e = areas.find((x) => x.id === esp);
-  $("#delTablaNombre").textContent = e ? `${e.nombre_visible} (${e.nombre_tabla_base})` : "área";
-  $("#delTablaTotal").textContent = String(pacientes.length);
+  const area = areaActual();
+  if (!PUEDE_ELIMINAR_TABLA || !area || !modalDelTabla) return;
+  $("#delTablaNombre").textContent = `${area.nombre_visible} (${area.nombre_tabla_base})`;
+  $("#delTablaTotal").textContent = Number.isFinite(area.total_pacientes)
+    ? String(area.total_pacientes) : String(pacientes.length);
   const btnConf = $("#btnConfirmarDelTabla");
   const btnCanc = $("#btnCancelarDelTabla");
   btnConf.disabled = true;
@@ -848,17 +878,10 @@ if (btnConfirmarDelTabla) btnConfirmarDelTabla.addEventListener("click", async (
   }
 });
 
-// --- Vaciar SOLO los pacientes del área elegida en la card de carga -----
+// --- Eliminar SOLO los pacientes del área elegida en la card de gestión -----
 const btnVaciarBase = $("#btnVaciarBase");
-const selEspCarga = $("#selEspCarga");
 const modalVaciarTabla = $("#modalVaciarTabla");
 let timerVaciarTabla = null;
-
-function habilitarVaciarBase() {
-  if (!btnVaciarBase) return;
-  const hayAreas = !!selEspCarga && selEspCarga.options.length > 0 && !selEspCarga.disabled;
-  btnVaciarBase.disabled = !hayAreas;
-}
 
 function cerrarModalVaciarTabla() {
   if (timerVaciarTabla) { clearInterval(timerVaciarTabla); timerVaciarTabla = null; }
@@ -866,12 +889,11 @@ function cerrarModalVaciarTabla() {
 }
 
 if (btnVaciarBase) btnVaciarBase.addEventListener("click", () => {
-  if (!selEspCarga || !selEspCarga.value || !modalVaciarTabla) return;
-  const espId = Number(selEspCarga.value);
-  const e = areas.find((x) => x.id === espId);
-  $("#vaciarTablaNombre").textContent = e ? `${e.nombre_visible} (${e.nombre_tabla_base})` : "área";
+  const area = areaActual();
+  if (!area || !modalVaciarTabla) return;
+  $("#vaciarTablaNombre").textContent = `${area.nombre_visible} (${area.nombre_tabla_base})`;
   $("#vaciarTablaTotal").textContent =
-    e && Number.isFinite(e.total_pacientes) ? String(e.total_pacientes) : "…";
+    Number.isFinite(area.total_pacientes) ? String(area.total_pacientes) : "…";
   const btnConf = $("#btnConfirmarVaciarTabla");
   const btnCanc = $("#btnCancelarVaciarTabla");
   btnConf.disabled = true;
@@ -901,8 +923,8 @@ if (modalVaciarTabla) modalVaciarTabla.addEventListener("click", (e) => {
 
 const btnConfirmarVaciarTabla = $("#btnConfirmarVaciarTabla");
 if (btnConfirmarVaciarTabla) btnConfirmarVaciarTabla.addEventListener("click", async () => {
-  const espId = selEspCarga ? Number(selEspCarga.value) : null;
-  if (!Number.isFinite(espId)) { cerrarModalVaciarTabla(); return; }
+  const espId = espPacId();
+  if (espId == null) { cerrarModalVaciarTabla(); return; }
   btnConfirmarVaciarTabla.disabled = true;
   try {
     const res = await fetch(`api/areas/${espId}/tabla/datos`, {
@@ -922,116 +944,71 @@ if (btnConfirmarVaciarTabla) btnConfirmarVaciarTabla.addEventListener("click", a
   }
 });
 
-// --- Carga CSV en el área seleccionada ---------------------
+// --- Cargar CSV en el área elegida en la card de gestión --------------------
 const csvInput = $("#csvArchivo");
-if (csvInput) csvInput.addEventListener("change", async () => {
+const btnSubirCsv = $("#btnSubirCsv");
+const nombreArchivo = $("#nombreArchivoGestion");
+const csvResultado = $("#csvResultado");
+let archivoElegido = null;
+
+if (csvInput) {
+  csvInput.addEventListener("change", () => {
+    const f = csvInput.files && csvInput.files[0];
+    archivoElegido = f || null;
+    if (nombreArchivo) {
+      nombreArchivo.textContent = f
+        ? `${f.name} (${(f.size / 1024).toFixed(1)} KB)`
+        : "No se ha seleccionado ningún archivo";
+    }
+  });
+}
+
+if (btnSubirCsv) btnSubirCsv.addEventListener("click", async () => {
   const esp = espPacId();
-  const archivo = csvInput.files && csvInput.files[0];
-  csvInput.value = "";
-  if (!esp || !archivo) return;
-  const msgEl = $("#csvMsg");
-  if (msgEl) msgEl.textContent = "Subiendo…";
+  if (esp == null) return toast("Elige un área como base de datos.", "error");
+  if (!archivoElegido) return toast("Elige un archivo CSV.", "error");
+  btnSubirCsv.disabled = true;
+  if (csvResultado) csvResultado.innerHTML = `<p class="field__hint">Subiendo…</p>`;
   try {
     const datos = new FormData();
-    datos.append("archivo", archivo);
+    datos.append("archivo", archivoElegido);
     const res = await fetch(`api/areas/${esp}/pacientes/csv`, {
       method: "POST", headers: authHeaders(), body: datos,
     });
-    const informe = await res.json().catch(() => ({}));
+    const cuerpo = await res.json().catch(() => ({}));
     if (res.status === 401) { window.snwSesionExpirada(); return; }
-    if (!res.ok) throw new Error((informe.detail && informe.detail.columnas) || informe.detail || `Error ${res.status}`);
-    const inf = informe.informe || {};
-    let texto = `${inf.insertados ?? 0} insertados de ${inf.procesados ?? 0} procesados` +
-      ` (${inf.duplicados ?? 0} duplicados, ${inf.rechazados ?? 0} rechazados).`;
-    const primeros = (inf.errores || []).slice(0, 3).map((e) => `fila ${e.fila}: ${e.motivo}`).join(" · ");
-    if (primeros) texto += " " + primeros;
-    if (msgEl) msgEl.textContent = texto;
-    toast("CSV procesado.", "ok");
-    cargar();
-  } catch (err) {
-    console.error("[pacientes.js:792]", err);
-    if (msgEl) msgEl.textContent = "";
-    toast(err.message || "No se pudo cargar el CSV.", "error");
-  }
-});
-
-// --- Cargar base de datos por área (ex página Carga, ahora panel propio) ---
-async function initCargaCsv() {
-  const selEsp = $("#selEspCarga");
-  const inpArchivo = $("#csvArchivoCarga");
-  const nombreArchivo = $("#nombreArchivoCarga");
-  const btnSubir = $("#btnSubirCsv");
-  const aviso = $("#csvSinEsp");
-  const resultado = $("#csvResultado");
-  if (!selEsp || !inpArchivo || !btnSubir) return;
-  let lista = [];
-  try {
-    const r = await fetch("api/areas/mias", { headers: authHeaders(), cache: "no-store" });
-    if (r.status === 401) { window.snwSesionExpirada(); return; }
-    if (!r.ok) throw new Error();
-    lista = await r.json();
-  } catch {
-    console.error("[pacientes.js initCargaCsv()]");
-    toast("No se pudieron cargar tus áreas.", "error");
-  }
-  selEsp.innerHTML = lista.map((e) =>
-    `<option value="${e.id}">${escaparHtml(e.nombre_visible)} (${escaparHtml(e.nombre_tabla_base)})</option>`).join("");
-  const sinAsignadas = !lista.length;
-  if (aviso) aviso.hidden = !sinAsignadas;
-  selEsp.disabled = sinAsignadas;
-  inpArchivo.disabled = sinAsignadas;
-  btnSubir.disabled = sinAsignadas;
-  habilitarVaciarBase();
-  const lblArchivo = $("#lblArchivoCarga");
-  if (lblArchivo) lblArchivo.classList.toggle("is-disabled", sinAsignadas);
-
-  inpArchivo.addEventListener("change", () => {
-    const f = inpArchivo.files && inpArchivo.files[0];
-    if (nombreArchivo) nombreArchivo.textContent = f
-      ? `${f.name} (${(f.size / 1024).toFixed(1)} KB)`
-      : "No se ha seleccionado ningún archivo";
-  });
-
-  btnSubir.addEventListener("click", async () => {
-    const espId = selEsp.value;
-    const archivo = inpArchivo.files && inpArchivo.files[0];
-    if (!espId) return toast("Elige el área destino.", "error");
-    if (!archivo) return toast("Elige un archivo CSV.", "error");
-    btnSubir.disabled = true;
-    if (resultado) resultado.innerHTML = `<p class="field__hint">Subiendo…</p>`;
-    try {
-      const datos = new FormData();
-      datos.append("archivo", archivo);
-      const res = await fetch(`api/areas/${encodeURIComponent(espId)}/pacientes/csv`, {
-        method: "POST", headers: authHeaders(), body: datos,
-      });
-      const cuerpo = await res.json().catch(() => ({}));
-      if (res.status === 401) { window.snwSesionExpirada(); return; }
-      if (res.status === 403) throw new Error("No tienes acceso a esta área.");
-      if (!res.ok) throw new Error(typeof cuerpo.detail === "string" ? cuerpo.detail : `Error ${res.status}`);
-      const inf = cuerpo.informe || {};
-      const errores = inf.errores || [];
-      const mostrados = errores.slice(0, 20);
-      if (resultado) resultado.innerHTML =
+    if (res.status === 403) throw new Error("No tienes acceso a esta área.");
+    if (!res.ok) {
+      const det = cuerpo.detail;
+      throw new Error(
+        (det && det.columnas) || (typeof det === "string" ? det : `Error ${res.status}`)
+      );
+    }
+    const inf = cuerpo.informe || {};
+    const errores = inf.errores || [];
+    const mostrados = errores.slice(0, 20);
+    if (csvResultado) {
+      csvResultado.innerHTML =
         `<p><strong>${inf.insertados ?? 0}</strong> insertados de ` +
         `${inf.procesados ?? 0} procesados ` +
         `(${inf.duplicados ?? 0} duplicados, ${inf.rechazados ?? 0} rechazados).</p>` +
         (mostrados.length
           ? `<ul>` + mostrados.map((e) => `<li>fila ${e.fila}: ${escaparHtml(e.motivo)}</li>`).join("") + `</ul>` +
-            (errores.length > mostrados.length ? `<p class="field__hint">…y ${errores.length - mostrados.length} más.</p>` : "")
+            (errores.length > mostrados.length
+              ? `<p class="field__hint">…y ${errores.length - mostrados.length} más.</p>` : "")
           : "");
-      toast("Base de datos cargada.", "ok");
-      inpArchivo.value = "";
-      if (nombreArchivo) nombreArchivo.textContent = "No se ha seleccionado ningún archivo";
-      cargar();
-    } catch (err) {
-      console.error("[pacientes.js initCargaCsv()]", err);
-      if (resultado) resultado.innerHTML = "";
-      toast(err.message || "No se pudo cargar el archivo.", "error");
-    } finally {
-      btnSubir.disabled = selEsp.disabled;
     }
-  });
-}
-initCargaCsv();
+    toast("Base de datos cargada.", "ok");
+    csvInput.value = "";
+    archivoElegido = null;
+    if (nombreArchivo) nombreArchivo.textContent = "No se ha seleccionado ningún archivo";
+    cargar();
+  } catch (err) {
+    console.error("[pacientes.js btnSubirCsv]", err);
+    if (csvResultado) csvResultado.innerHTML = "";
+    toast(err.message || "No se pudo cargar el archivo.", "error");
+  } finally {
+    aplicarModoBase();
+  }
+});
 })();
