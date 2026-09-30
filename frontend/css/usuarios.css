@@ -1,5 +1,5 @@
 /* Página de gestión de usuarios (administrador / desarrollador) */
-/* .layout--ancho vive en pacientes.css, que administracion.html ya carga. */
+/* .layout--ancho vive en componentes.css. */
 
 .usr-intro {
   margin: 4px 0 16px;

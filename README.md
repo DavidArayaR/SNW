@@ -57,7 +57,7 @@ snw/
 │   │                          (contador mensual de mensajes, desgloses y costos WhatsApp) y
 │   │                          Configuración (pestaña visible solo para desarrollador).
 │   │                          Exclusivo admin/dev
-│   ├── css/                   tema.css (paleta claro/oscuro), styles.css (compartido), layout.css (sidebar), pacientes.css, estadisticas.css, configuracion.css, usuarios.css
+│   ├── css/                   tema.css (paleta claro/oscuro), styles.css (compartido), layout.css (sidebar), componentes.css (tablas/paginador/badges compartidos), pacientes.css (solo Base de datos), estadisticas.css, configuracion.css, usuarios.css
 │   ├── js/                    tema.js (modo claro/oscuro), layout.js (sidebar/sesión/permisos, común), app.js, pacientes.js, historial.js, estadisticas.js, configuracion.js, usuarios.js, pass-toggle.js (ojito en campos de contraseña)
 │   └── vendor/bootstrap/     Bootstrap 5.3.3 (CSS + bundle JS) servido localmente
 ├── data/
