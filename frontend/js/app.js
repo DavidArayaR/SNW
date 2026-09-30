@@ -523,6 +523,29 @@ function actualizarProgPlantilla() {
   if (!el) return;
   const p = (plantillas || []).find((x) => x.id === tplSelId);
   el.textContent = p ? p.nombre : "—";
+  actualizarPasosProg();
+}
+
+// Pasos 1-plantilla, 2-área, 3-fecha+límite: cada uno se habilita al
+// completar el anterior.
+function actualizarPasosProg() {
+  const p = (plantillas || []).find((x) => x.id === tplSelId);
+  const selA = document.getElementById("selProgArea");
+  const inpF = document.getElementById("inpProgFecha");
+  const inpL = document.getElementById("inpProgLimite");
+  const btn = document.getElementById("btnProgramar");
+  const paso1 = !!p;
+  const paso2 = paso1 && selA && !!selA.value;
+  for (const [id, listo] of [["pasoProg1", paso1], ["pasoProg2", paso2]]) {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle("prog-paso--listo", !!listo);
+  }
+  const paso3 = document.getElementById("pasoProg3");
+  if (paso3) paso3.classList.toggle("prog-paso--listo", !!(paso2 && inpF && inpF.value));
+  if (selA) selA.disabled = !paso1;
+  if (inpF) inpF.disabled = !paso2;
+  if (inpL) inpL.disabled = !paso2;
+  if (btn) btn.disabled = !(paso2 && inpF && inpF.value) || progCreando;
 }
 
 function renderLista(filtro = "") {
@@ -2072,10 +2095,12 @@ function poblarFormProg() {
   const selA = $("#selProgArea");
   if (!selA) return;
   const areas = misAreas || [];
-  selA.innerHTML = areas.map((e) =>
-    `<option value="${e.id}">${escaparHtml(e.nombre_visible)}</option>`).join("");
+  selA.innerHTML = `<option value="">- Seleccione área -</option>` +
+    areas.map((e) =>
+      `<option value="${e.id}">${escaparHtml(e.nombre_visible)}</option>`).join("");
   const guardada = selA.dataset.valor || "";
   if (guardada && areas.some((e) => String(e.id) === guardada)) selA.value = guardada;
+  else selA.value = "";
   actualizarProgPlantilla();
   const inpF = $("#inpProgFecha");
   if (inpF && !inpF.value) {
@@ -2089,7 +2114,10 @@ function poblarFormProg() {
 const selProgAreaEl = $("#selProgArea");
 if (selProgAreaEl) selProgAreaEl.addEventListener("change", () => {
   selProgAreaEl.dataset.valor = selProgAreaEl.value;
+  actualizarPasosProg();
 });
+const inpProgFechaEl = $("#inpProgFecha");
+if (inpProgFechaEl) inpProgFechaEl.addEventListener("input", actualizarPasosProg);
 
 async function cargarProgramados() {
   const lista = $("#listaProgramados");
@@ -2203,8 +2231,9 @@ async function programarEnvio() {
     if (!Number.isInteger(limite) || limite < 1) { toast("Límite inválido.", "error"); return; }
   }
   const btn = $("#btnProgramar");
+  if (btn && btn.disabled && !progCreando) return;
   progCreando = true;
-  if (btn) btn.disabled = true;
+  actualizarPasosProg();
   try {
     const res = await fetch("api/notificaciones/programados", {
       method: "POST",
@@ -2225,7 +2254,7 @@ async function programarEnvio() {
     toast(err.message || "No se pudo programar.", "error");
   } finally {
     progCreando = false;
-    if (btn) btn.disabled = false;
+    actualizarPasosProg();
   }
 }
 

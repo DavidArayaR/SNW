@@ -203,11 +203,10 @@ select.badge--select {
 
 /* Formulario y lista de envíos programados. */
 .prog-form {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
-  gap: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   padding: 14px 18px 18px;
-  align-items: end;
 }
 .prog-form .field { margin: 0; }
 .prog-form input[type="datetime-local"],
@@ -222,7 +221,31 @@ select.badge--select {
   color: var(--texto);
   background: var(--panel);
 }
-/* Plantilla elegida desde la lista (sin select propio). */
+/* Asistente de programar envío por pasos. */
+.prog-paso {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+}
+.prog-paso--listo { border-color: var(--verde-oscuro); }
+.prog-paso__num {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--surface-3);
+  color: var(--texto-suave);
+  font-weight: 700;
+  font-size: .82rem;
+}
+.prog-paso--listo .prog-paso__num { background: var(--verde-oscuro); color: #fff; }
+.prog-paso .field { flex: 1; min-width: 0; margin: 0; }
 .prog-tpl-elegida {
   border: 1.5px solid var(--borde);
   border-radius: 9px;

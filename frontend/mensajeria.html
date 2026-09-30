@@ -240,26 +240,35 @@
           a los supervisores del área); admin y supervisores programan directo.
         </p>
         <div class="prog-form">
-          <div class="field">
-            <label for="selProgArea">Área</label>
-            <select id="selProgArea"></select>
-          </div>
-          <div class="field">
-            <label>Plantilla</label>
-            <div class="prog-tpl-elegida"><strong id="progPlantillaNombre">—</strong>
-              <span class="field__hint">Elígela de la lista de la izquierda.</span>
+          <div class="prog-paso" id="pasoProg1">
+            <span class="prog-paso__num">1</span>
+            <div class="field">
+              <label>Plantilla</label>
+              <div class="prog-tpl-elegida"><strong id="progPlantillaNombre">—</strong>
+                <span class="field__hint">Elígela de la lista de la izquierda.</span>
+              </div>
             </div>
           </div>
-          <div class="field">
-            <label for="inpProgFecha">Fecha y hora (hora del servidor)</label>
-            <input type="datetime-local" id="inpProgFecha">
+          <div class="prog-paso" id="pasoProg2">
+            <span class="prog-paso__num">2</span>
+            <div class="field">
+              <label for="selProgArea">Área</label>
+              <select id="selProgArea" disabled></select>
+            </div>
           </div>
-          <div class="field">
-            <label for="inpProgLimite">Límite de mensajes (vacío = sin límite)</label>
-            <input type="number" id="inpProgLimite" min="1" step="1" placeholder="Sin límite">
+          <div class="prog-paso" id="pasoProg3">
+            <span class="prog-paso__num">3</span>
+            <div class="field">
+              <label for="inpProgFecha">Fecha y hora (hora del servidor)</label>
+              <input type="datetime-local" id="inpProgFecha" disabled>
+            </div>
+            <div class="field">
+              <label for="inpProgLimite">Límite de mensajes (vacío = sin límite)</label>
+              <input type="number" id="inpProgLimite" min="1" step="1" placeholder="Sin límite" disabled>
+            </div>
           </div>
           <div class="form-actions">
-            <button type="button" id="btnProgramar" class="btn btn--primary btn--lg">Programar envío</button>
+            <button type="button" id="btnProgramar" class="btn btn--primary btn--lg" disabled>Programar envío</button>
           </div>
         </div>
       </section>
