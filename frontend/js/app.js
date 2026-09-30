@@ -482,7 +482,23 @@ function crearItemPlantilla(p) {
     `<span class="tpl-item__nombre">${escaparHtml(p.nombre ?? "(sin nombre)")}${estadoTag}</span>` +
     `<span class="tpl-item__vista">${escaparHtml(primeraLinea)}</span>`;
   btn.addEventListener("click", () => clicPlantilla(p.id));
-  return btn;
+  if (p.id !== tplSelId) return btn;
+  // Aleta con X en la plantilla seleccionada para deseleccionarla.
+  const wrap = document.createElement("div");
+  wrap.className = "tpl-item-wrap";
+  const x = document.createElement("button");
+  x.type = "button";
+  x.className = "tpl-quitar";
+  x.title = "Quitar selección";
+  x.setAttribute("aria-label", "Quitar selección de plantilla");
+  x.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+  x.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    resetearCardEnvio();
+  });
+  wrap.appendChild(btn);
+  wrap.appendChild(x);
+  return wrap;
 }
 
 // Click en la lista según la tab: editor, envío o programar. La selección
