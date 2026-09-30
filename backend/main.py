@@ -1965,9 +1965,11 @@ def _registrar_template_meta(p: dict, nombre_anterior: str | None = None,
 def _plantillas_visibles(sesion: dict, plantillas: list) -> list:
     """Subconjunto que la sesión puede ver: admin todo; supervisor su alcance
     (incluye pendientes por revisar); usuario normal solo lo que creó y lo de
-    sus areas asignadas."""
+    sus areas asignadas. La muestra de Meta (hello_world) solo la ven
+    admin/dev."""
     if _es_privilegiado(sesion):
         return list(plantillas)
+    plantillas = [p for p in plantillas if not _es_plantilla_protegida(p)]
     permitidas = set(sesion.get("area_ids") or [])
     plantillas = [p for p in plantillas
                   if p.get("area_id") is None or p.get("area_id") in permitidas]
@@ -3513,6 +3515,12 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
             400,
             detail="Esta plantilla pertenece a otra área: no se puede usar en este envío.",
         )
+    # La muestra de Meta (hello_world) solo se puede probar en desarrollo.
+    if _es_plantilla_protegida(plantilla) and (t_esp is not None or amb != "desarrollo"):
+        raise HTTPException(
+            400,
+            detail="La plantilla Hello World es solo una muestra: únicamente se puede enviar a la base de desarrollo.",
+        )
 
     amb_q = "produccion" if t_esp else amb
     with conectar(amb) as conn, conn.cursor() as cur:
@@ -4188,6 +4196,12 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
     plantilla = _validar_plantilla_programable(
         next((p for p in leer_plantillas() if p["id"] == body.plantilla_id), None),
         esp["id"] if esp else None)
+    # La muestra de Meta (hello_world) solo se puede probar en desarrollo.
+    if _es_plantilla_protegida(plantilla) and (esp is not None or amb != "desarrollo"):
+        raise HTTPException(
+            400,
+            detail="La plantilla Hello World es solo una muestra: únicamente se puede programar para la base de desarrollo.",
+        )
 
     creador = (sesion.get("usuario") or "").strip().lower()
     with conectar() as conn, conn.cursor() as cur:

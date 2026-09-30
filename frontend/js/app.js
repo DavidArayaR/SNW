@@ -1434,6 +1434,17 @@ function abrirModalConf(id = tplSelId) {
   // Si la plantilla es de un área, el select trae solo esa base;
   // si no, trae las disponibles y restaura la última usada.
   construirOpcionesBaseConf(p?.area_id ?? null);
+  if (esPlantillaProtegida(p)) {
+    // Hello World es solo una muestra: únicamente desarrollo.
+    const sel = $("#selBaseConf");
+    if (sel) {
+      sel.innerHTML = `<option value="desarrollo">Desarrollo (pacientes_dev)</option>`;
+      sel.value = "desarrollo";
+    }
+    ambienteConf = "desarrollo";
+    localStorage.setItem("snw_ambiente", ambienteConf);
+    localStorage.setItem("snw_ambiente_admin", ambienteConf);
+  }
   refrescarAvisoDevConf();
   refrescarAvisoAdminConf();
   cargarLimiteAdminConf();
