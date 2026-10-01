@@ -4366,6 +4366,7 @@ def _prog_a_respuesta(f: dict, sesion: dict, preelegidos: int | None = None) -> 
     # Costo aproximado solo para admin/dev/supervisor y mientras el envío
     # todavía no se ejecutó. Se cobra cuando el envío se realice.
     puede_ver_costo = priv or es_sup
+    puede_ver_preelegidos = priv or es_sup
     costo = None
     if puede_ver_costo and f["estado"] in ("pendiente", "aprobado", "enviando"):
         costo = _prog_costo_estimado(f, plantilla_nombre=f.get("plantilla_nombre") or "",
@@ -4382,8 +4383,9 @@ def _prog_a_respuesta(f: dict, sesion: dict, preelegidos: int | None = None) -> 
         "creado": f["creado"].strftime("%d-%m-%Y %H:%M") if f.get("creado") else "",
         "decidido_por": f.get("decidido_por") or "", "motivo": f.get("motivo") or "",
         "job_id": f.get("job_id") or "",
-        "puede_decidir": puede_decidir, "puede_cancelar": puede_cancelar,
-        "puede_ver_costo": puede_ver_costo, "costo": costo,
+         "puede_decidir": puede_decidir, "puede_cancelar": puede_cancelar,
+         "puede_ver_preelegidos": puede_ver_preelegidos,
+         "puede_ver_costo": puede_ver_costo, "costo": costo,
     }
 
 
@@ -4672,7 +4674,10 @@ def _conteo_preelegidos(prog_ids: list[int]) -> dict[int, int]:
 
 def destinatarios_programado(prog_id: int, sesion: dict = Depends(exigir("mensajeria"))):
     """Lista congelada de pacientes de un programado: la que el sistema preeligió
-    al crearlo. Solo quien puede ver el programado puede ver su lista."""
+    al crearlo. Solo administradores, desarrolladores y supervisores pueden ver
+    esta lista sensible."""
+    if not (_es_privilegiado(sesion) or sesion.get("rol") == "supervisor"):
+        raise HTTPException(403, detail="Solo un administrador o superior puede ver los preelegidos.")
     f = _traer_programado(prog_id)
     if not _prog_visible(sesion, f):
         raise HTTPException(404, detail="Envío programado no encontrado.")

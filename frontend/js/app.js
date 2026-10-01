@@ -2443,7 +2443,7 @@ function progItemHtml(p) {
     (p.puede_cancelar
       ? `<button type="button" class="btn btn--sm btn--ghost" data-prog-cancelar="${p.id}">Cancelar</button>` : "");
   // El grupo que el sistema preeligió al crearlo: se puede abrir para revisarlo.
-  const listaDest = (p.preelegidos != null)
+  const listaDest = (p.puede_ver_preelegidos && p.preelegidos != null)
     ? `<div class="prog-item__dest">` +
       `<button type="button" class="prog-item__dest-btn" data-prog-dest="${p.id}">` +
       `Ver ${p.preelegidos} preelegido${p.preelegidos === 1 ? "" : "s"}</button>` +
