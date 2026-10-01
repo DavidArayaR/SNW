@@ -119,7 +119,11 @@
           <p class="field__hint" style="margin:12px 18px 0;">
             Acciones sobre la base elegida arriba. Sube pacientes con un CSV de columnas
             <strong>nombre, apellido, telefono</strong> (UTF-8, máx. 5 MB): los teléfonos se
-            normalizan a <strong>+569XXXXXXXX</strong> y los duplicados se omiten.
+            normalizan a <strong>+569XXXXXXXX</strong>. Opcionalmente
+            <strong>respuesta</strong> (Se dio de baja / Respondió / Sin respuesta) y
+            <strong>estado</strong> (pendiente / enviado): si el paciente ya estaba
+            cargado se actualiza, y se aplica lo mismo al mismo número en
+            <strong>todas las demás bases</strong>.
           </p>
           <p class="field__hint" id="csvMsg" style="margin:6px 18px 0; font-weight:600; color:var(--texto);"></p>
           <p id="gestionSinEsp" class="warn" hidden style="margin:12px 18px 0;">

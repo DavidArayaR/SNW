@@ -1048,7 +1048,9 @@ async def importar_pacientes_csv(area_id: int, archivo: UploadFile = File(...),
         raise _error_area(str(e))
     auditoria_registrar(sesion.get("usuario", ""), "area_csv",
                         esp["nombre_visible"],
-                        f"{informe['insertados']} insertados de {informe['procesados']} procesados")
+                        f"{informe['insertados']} insertados, {informe.get('actualizados', 0)} "
+                        f"actualizados y {informe.get('propagados', 0)} propagados de "
+                        f"{informe['procesados']} procesados")
     return {"ok": True, "area": esp, "informe": informe}
 
 
@@ -1409,8 +1411,28 @@ def actualizar_respuesta_pacientes(body: RespuestaPacientesBulkIn, ambiente: str
                     f" FROM {t} WHERE id = %s",
                     (f"[Ajuste manual · {sesion.get('nombre', 'admin')}]", body.respuesta, pid),
                 )
+        # La baja se propaga al mismo número en las demás bases (por si el
+        # paciente también está cargado en otra especialidad).
+        otras: list[dict] = []
+        if body.respuesta == "baja":
+            cur.execute(f"SELECT telefono FROM {t} WHERE id IN ({placeholders_enc})",
+                        tuple(encontrados))
+            telefonos = {r["telefono"] for r in cur.fetchall() if r.get("telefono")}
+            por_base: dict[str, dict] = {}
+            indice = servicio_areas.indice_pacientes_por_telefono(cur, ambiente)
+            for tel in telefonos:
+                res = servicio_areas.propagar_a_todas_las_bases(
+                    cur, tel, respuesta="baja", excluir=t, ambiente=ambiente,
+                    indice=indice)
+                for b in res.get("bases") or []:
+                    acc = por_base.setdefault(b["tabla"], {"tabla": b["tabla"], "actualizados": 0})
+                    acc["actualizados"] += b["actualizados"]
+            for b in por_base.values():
+                b["nombre"] = servicio_areas.nombre_de_tabla(b["tabla"])
+                otras.append(b)
         conn.commit()
-    return {"ok": True, "actualizados": len(encontrados), "bloqueados": len(bloqueados)}
+    return {"ok": True, "actualizados": len(encontrados), "bloqueados": len(bloqueados),
+            "otras_bases": otras}
 
 
 def actualizar_paciente(paciente_id: int, body: EstadoPacienteIn,
@@ -1504,7 +1526,28 @@ def actualizar_respuesta_paciente(paciente_id: int, body: RespuestaIn,
     fila["actualizado"] = fecha.strftime("%d-%m-%Y %H:%M") if fecha else "—"
     fr = fila.get("ultima_respuesta_fecha")
     fila["ultima_respuesta_fecha"] = fr.strftime("%d-%m-%Y %H:%M") if fr else None
+    # Si se marcó la baja, el mismo paciente queda dado de baja en las demás
+    # bases donde aparece su número (misma persona, otra especialidad): si no,
+    # el sistema le seguiría mandando mensajes desde la base que no se tocó.
+    if body.respuesta == "baja":
+        fila["otras_bases"] = _propagar_baja_otras_bases(t, fila.get("telefono"), ambiente)
     return fila
+
+
+def _propagar_baja_otras_bases(tabla: str, telefono: str | None, ambiente: str) -> list[dict]:
+    """Da de baja al mismo número en el resto de bases y devuelve el detalle."""
+    if not telefono:
+        return []
+    with conectar(ambiente) as conn, conn.cursor() as cur:
+        indice = servicio_areas.indice_pacientes_por_telefono(cur, ambiente)
+        res = servicio_areas.propagar_a_todas_las_bases(
+            cur, telefono, respuesta="baja", excluir=tabla, ambiente=ambiente,
+            indice=indice)
+        conn.commit()
+    detalle = res.get("bases") or []
+    for b in detalle:
+        b["nombre"] = servicio_areas.nombre_de_tabla(b["tabla"])
+    return detalle
 
 
 def mensajes_paciente(paciente_id: int, ambiente: str = Query("produccion"),

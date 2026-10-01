@@ -19,7 +19,7 @@ import io as _io
 import re
 import unicodedata
 
-from db import conectar, log_error
+from db import conectar, log_error, columna_existe, tabla_pacientes
 from telefono import normalizar_telefono
 
 # Nombre físico válido de tabla de especialidad. Los nombres legacy
@@ -479,12 +479,238 @@ def vaciar_tabla_area(area_id: int) -> dict:
             "nombre_tabla_base": tabla, "pacientes_eliminados": vaciados}
 
 
+# --- El mismo paciente en varias bases --------------------------------------
+# El numero es lo que identifica a una persona: el mismo telefono puede estar
+# en `pacientes_dev`, en `pacientes_prod` y en la tabla de cada area (el mismo
+# paciente asiste a dos areas). Por eso una baja, o lo que llega en un CSV,
+# se propaga a TODAS las bases donde aparezca ese numero normalizado: si no, el
+# sistema seguiria mandando mensajes a alguien que ya dijo que no, solo que
+# estuviera cargado en otra base.
+
+# Valores canonicos de `respuesta` (ver expr_respuesta_efectiva en main.py):
+# 'baja' = Se dio de baja, 'respondio' = Respondio, 'pendiente' = Sin respuesta.
+RESPUESTAS = ("baja", "respondio", "pendiente")
+ESTADOS = ("pendiente", "enviado")
+
+# Acepta como viene en un CSV ("Se dio de baja", "respondió", "sin respuesta").
+_ALIAS_RESPUESTA = {
+    "baja": "baja", "se dio de baja": "baja", "dado de baja": "baja",
+    "dio de baja": "baja", "baja explicita": "baja", "opt out": "baja", "optout": "baja",
+    "respondio": "respondio", "con respuesta": "respondio",
+    "pendiente": "pendiente", "sin respuesta": "pendiente", "sin respuestas": "pendiente",
+    "nunca respondio": "pendiente", "no respondio": "pendiente",
+}
+_ALIAS_ESTADO = {
+    "pendiente": "pendiente", "enviado": "enviado",
+}
+
+
+def _sin_acentos(t: str) -> str:
+    n = unicodedata.normalize("NFD", (t or "").strip().lower())
+    n = "".join(c for c in n if unicodedata.category(c) != "Mn")
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]+", " ", n)).strip()
+
+
+def normalizar_respuesta_csv(bruto: str | None) -> str | None:
+    """Texto de la columna `respuesta` de un CSV -> 'baja' | 'respondio' |
+    'pendiente'. None si el texto no corresponde a ninguno (se rechaza la fila)."""
+    if bruto is None:
+        return None
+    return _ALIAS_RESPUESTA.get(_sin_acentos(bruto))
+
+
+def normalizar_estado_csv(bruto: str | None) -> str | None:
+    """Texto de la columna `estado` de un CSV -> 'pendiente' | 'enviado' |
+    None si el texto no corresponde a ninguno."""
+    if bruto is None:
+        return None
+    return _ALIAS_ESTADO.get(_sin_acentos(bruto))
+
+
+def tablas_de_pacientes() -> list[str]:
+    """Todas las bases de pacientes del sistema: desarrollo, produccion y la
+    tabla de cada area, sin repetir."""
+    return list(dict.fromkeys(
+        (tabla_pacientes("desarrollo"), tabla_pacientes("produccion"))
+        + tuple(r["nombre_tabla_base"] for r in listar_tablas_areas())
+    ))
+
+
+def indice_pacientes_por_telefono(cur, ambiente: str | None = None) -> dict[str, dict[str, list[int]]]:
+    """Índice de pacientes de TODAS las tablas por teléfono canónico.
+
+    Normaliza también el valor guardado en la tabla, no solo el del CSV: así
+    se emparejan números con espacios, guiones, paréntesis o prefijo distinto.
+    Se puede reutilizar el índice durante toda una importación CSV.
+    """
+    indice: dict[str, dict[str, list[int]]] = {}
+    for tabla in tablas_de_pacientes():
+        if not tabla_valida(tabla):
+            continue
+        try:
+            cur.execute(f"SELECT id, telefono FROM {tabla}")
+            filas = cur.fetchall()
+        except Exception:
+            continue  # tabla aún no creada o sin el esquema esperado
+        for fila in filas:
+            telefono = normalizar_telefono(fila.get("telefono") or "")
+            if telefono:
+                indice.setdefault(telefono, {}).setdefault(tabla, []).append(fila["id"])
+    return indice
+
+
+def _cond_log_tabla(tabla: str, ambiente: str | None = None) -> tuple[str, tuple]:
+    """Aisla las filas de log_envios por tabla de origen (las legacy no la
+    tienen siempre puesta)."""
+    if not columna_existe("log_envios", "tabla_pacientes", ambiente):
+        return "", ()
+    if tabla in ("pacientes_dev", "pacientes_prod"):
+        return "AND COALESCE(tabla_pacientes, '') IN ('', %s)", (tabla,)
+    return "AND tabla_pacientes = %s", (tabla,)
+
+
+def _baja_activa(cur, tabla: str, ids: list[int], ambiente: str | None = None) -> bool:
+    """True si alguna copia del paciente está actualmente dada de baja."""
+    if not ids or not columna_existe(tabla, "whatsapp_opt_out", ambiente):
+        return False
+    cur.execute(
+        f"SELECT id FROM {tabla} WHERE id IN ({', '.join('%s' for _ in ids)})"
+        " AND whatsapp_opt_out = 1",
+        tuple(ids),
+    )
+    return bool(cur.fetchall())
+
+
+def _baja_con_candado(cur, tabla: str, ids: list[int], ambiente: str | None = None) -> bool:
+    """True si alguna de esas filas pidió la baja con sus propias palabras por
+    WhatsApp: esa respuesta no se toca a mano ni con un CSV."""
+    if not ids or not columna_existe(tabla, "opt_out_explicito", ambiente) \
+            or not columna_existe(tabla, "whatsapp_opt_out", ambiente):
+        return False
+    cur.execute(
+        f"SELECT id FROM {tabla} WHERE id IN ({', '.join('%s' for _ in ids)})"
+        " AND whatsapp_opt_out = 1 AND opt_out_explicito = 1",
+        tuple(ids),
+    )
+    return bool(cur.fetchall())
+
+
+def aplicar_en_tabla(cur, tabla: str, ids: list[int], respuesta: str | None = None,
+                     estado: str | None = None, ambiente: str | None = None,
+                     candado: bool = False) -> int:
+    """Escribe respuesta/estado en las filas dadas de una tabla y devuelve
+    cuantas quedaron cambiadas. No toca el candado: el bloqueo de una baja
+    pedida por el paciente lo decide el webhook, no este ajuste."""
+    if not ids or (not respuesta and not estado):
+        return 0
+    sets: list[str] = []
+    params: list = []
+    if estado:
+        if columna_existe(tabla, "estado", ambiente):
+            sets.append("estado = %s")
+            params.append(estado)
+    if respuesta in RESPUESTAS:
+        if columna_existe(tabla, "whatsapp_opt_out", ambiente):
+            sets.append("whatsapp_opt_out = %s")
+            params.append(1 if respuesta == "baja" else 0)
+        if columna_existe(tabla, "respuesta_manual", ambiente):
+            sets.append("respuesta_manual = %s")
+            params.append(respuesta)
+        if respuesta == "baja":
+            # La baja se lleva tambien el interes que tuviera.
+            for col in ("interesado", "no_interesado"):
+                if columna_existe(tabla, col, ambiente):
+                    sets.append(f"{col} = 0")
+            if candado and columna_existe(tabla, "opt_out_explicito", ambiente):
+                sets.append("opt_out_explicito = 1")
+        if respuesta == "respondio" and columna_existe(tabla, "ultimo_reintegro", ambiente):
+            # Volvio a escribir: cuenta como regreso (anti flip-flop 24 h).
+            sets.append("ultimo_reintegro = NOW()")
+    if not sets:
+        return 0
+    ph = ", ".join("%s" for _ in ids)
+    cur.execute(f"UPDATE {tabla} SET {', '.join(sets)} WHERE id IN ({ph})",
+                (*params, *ids))
+    # Al volver a 'Sin respuesta' se borra la señal 'baja' que el webhook dejó
+    # pegada en el ultimo envio (mismo criterio que el ajuste manual).
+    if respuesta == "pendiente" and columna_existe("log_envios", "respuesta", ambiente):
+        cond, args = _cond_log_tabla(tabla, ambiente)
+        cur.execute(
+            f"UPDATE log_envios SET respuesta = 'pendiente' WHERE paciente_id IN ({ph})"
+            f" AND respuesta = 'baja' {cond}",
+            (*ids, *args),
+        )
+    return len(ids)
+
+
+def propagar_a_todas_las_bases(cur, telefono: str, respuesta: str | None = None,
+                               estado: str | None = None, excluir: str | None = None,
+                               ambiente: str | None = None,
+                               indice: dict[str, dict[str, list[int]]] | None = None,
+                               candado: bool = False) -> dict:
+    """Aplica respuesta/estado al paciente con ese numero en TODAS las bases
+    donde aparezca, menos `excluir` (la que el llamador ya actualizó).
+
+    Devuelve el detalle por base (para poder informarlo) y cuantos quedaron
+    afuera porque su baja tiene candado.
+    """
+    detalle: list[dict] = []
+    omitidos = 0
+    if not respuesta and not estado:
+        return {"bases": detalle, "omitidos": omitidos}
+    indice = indice if indice is not None else indice_pacientes_por_telefono(cur, ambiente)
+    numero = normalizar_telefono(telefono or "")
+    if not numero:
+        return {"bases": detalle, "omitidos": omitidos}
+    coincidencias = indice.get(numero, {})
+
+    # El candado pertenece al paciente, no a una copia de su ficha. Si alguna
+    # base conserva una baja explícita, no se la sobreescribe en ninguna otra;
+    # el estado (pendiente/enviado) sí se puede sincronizar.
+    bloqueo_global = False
+    ids_bloqueados = 0
+    if respuesta in ("pendiente", "respondio"):
+        for t, ids in coincidencias.items():
+            if _baja_con_candado(cur, t, ids, ambiente):
+                bloqueo_global = True
+                ids_bloqueados += len(ids)
+        if bloqueo_global:
+            omitidos = ids_bloqueados
+            respuesta = None
+
+    for t, ids in coincidencias.items():
+        if t == excluir:
+            continue
+        if not ids:
+            continue
+        try:
+            n = aplicar_en_tabla(cur, t, ids, respuesta, estado, ambiente, candado)
+        except Exception as e:
+            log_error(f"propagar_a_todas_las_bases({t})", e)
+            continue
+        if n:
+            detalle.append({"tabla": t, "actualizados": n})
+    return {"bases": detalle, "omitidos": omitidos}
+
+
+def nombre_de_tabla(tabla: str) -> str:
+    """Nombre visible de la base (área) o la tabla si es legacy."""
+    esp = area_por_tabla(tabla)
+    return esp["nombre_visible"] if esp else tabla
+
+
 def importar_pacientes_csv(area_id: int, datos: bytes) -> dict:
-    """Valida un CSV y lo inserta en la tabla de la especialidad.
+    """Valida un CSV y lo carga en la tabla de la especialidad.
 
     Columnas obligatorias: `nombre`, `apellido`, `telefono` (UTF-8).
-    Teléfonos normalizados con `telefono.py` (`+569XXXXXXXX`); los campos del
-    esquema SNW se inicializan (`pendiente`, sin opt-out ni interés).
+    Opcionales: `respuesta` (Se dio de baja / Respondió / Sin respuesta) y
+    `estado` (pendiente / enviado). Teléfonos normalizados con
+    `telefono.py` (`+569XXXXXXXX`).
+
+    Los pacientes que ya estaban en la base se actualizan con la respuesta y el
+    estado del CSV, y lo mismo se aplica en TODAS las demás bases donde exista
+    ese número (misma persona, otra especialidad): así una baja no deja al
+    paciente con respuestas distintas según dónde se mire.
     """
     esp = obtener_area(int(area_id))
     if not esp:
@@ -503,13 +729,24 @@ def importar_pacientes_csv(area_id: int, datos: bytes) -> dict:
     faltan = [c for c in ("nombre", "apellido", "telefono") if c not in cols]
     if faltan:
         raise ValueError("columnas:" + ",".join(faltan))
+    col_respuesta = next((c for c in ("respuesta", "respuesta_paciente", "estado_respuesta")
+                          if c in cols), None)
+    col_estado = next((c for c in ("estado", "estado_paciente", "estado_envio")
+                       if c in cols), None)
 
     with conectar() as conn, conn.cursor() as cur:
-        cur.execute(f"SELECT telefono FROM {tabla}")
-        existentes = {r["telefono"] for r in cur.fetchall()}
+        indice = indice_pacientes_por_telefono(cur)
+        existentes = {
+            tel: por_tabla.get(tabla, [])
+            for tel, por_tabla in indice.items()
+            if por_tabla.get(tabla)
+        }
 
-        procesados = insertados = duplicados = 0
+        procesados = insertados = duplicados = actualizados = 0
+        propagados = 0
+        omitidos = 0
         errores: list[dict] = []
+        bases: dict[str, int] = {}
         vistos_archivo: set[str] = set()
         for nro, fila in enumerate(lector, start=2):
             nombre = normalizar_texto(fila.get(cols["nombre"]))
@@ -526,22 +763,91 @@ def importar_pacientes_csv(area_id: int, datos: bytes) -> dict:
                 errores.append({"fila": nro,
                                 "motivo": f"Formato de teléfono inválido: '{telefono_crudo}'"})
                 continue
-            if telefono in existentes or telefono in vistos_archivo:
+            # Respuesta y estado del CSV (si vienen). Sin esas columnas no se
+            # toca nada: el import es solo una carga de pacientes.
+            respuesta = estado = None
+            if col_respuesta:
+                texto = (fila.get(col_respuesta) or "").strip()
+                if texto:
+                    respuesta = normalizar_respuesta_csv(texto)
+                    if respuesta is None:
+                        errores.append({"fila": nro, "motivo":
+                                        f"Respuesta inválida: '{texto}'. Use: Se dio de baja, "
+                                        f"Respondió o Sin respuesta"})
+                        continue
+            if col_estado:
+                texto = (fila.get(col_estado) or "").strip()
+                if texto:
+                    estado = normalizar_estado_csv(texto)
+                    if estado is None:
+                        errores.append({"fila": nro, "motivo":
+                                        f"Estado inválido: '{texto}'. Use: pendiente, "
+                                        f"enviado"})
+                        continue
+
+            # Un número repetido dentro del archivo se procesa una sola vez.
+            if telefono in vistos_archivo:
                 duplicados += 1
                 continue
+
+            ids_objetivo = existentes.get(telefono, [])
+            # Si otra copia ya está de baja, esa copia es la fuente de verdad:
+            # una baja manual se replica sin candado y una baja explícita se
+            # replica con candado, aunque el CSV no traiga columna respuesta.
+            respuesta_aplicar = respuesta
+            candado_aplicar = False
+            copias_baja = [
+                (t, ids) for t, ids in indice.get(telefono, {}).items()
+                if _baja_activa(cur, t, ids)
+            ]
+            if copias_baja:
+                candado_ids = sum(
+                    len(ids) for t, ids in copias_baja
+                    if _baja_con_candado(cur, t, ids)
+                )
+                candado_aplicar = candado_ids > 0
+                if candado_ids and respuesta != "baja":
+                    omitidos += candado_ids
+                respuesta_aplicar = "baja"
+
+            if ids_objetivo:
+                if aplicar_en_tabla(cur, tabla, ids_objetivo, respuesta_aplicar, estado,
+                                    candado=candado_aplicar):
+                    actualizados += len(ids_objetivo)
+                duplicados += 1
+            else:
+                cur.execute(
+                    f"INSERT INTO {tabla} (nombre, apellido, telefono, estado,"
+                    " whatsapp_opt_out, interesado, opt_out_explicito)"
+                    " VALUES (%s, %s, %s, 'pendiente', 0, 0, 0)",
+                    (nombre[:150], apellido[:150], telefono),
+                )
+                pid = cur.lastrowid
+                ids_objetivo = [pid]
+                existentes[telefono] = ids_objetivo
+                indice.setdefault(telefono, {})[tabla] = ids_objetivo
+                aplicar_en_tabla(cur, tabla, ids_objetivo, respuesta_aplicar, estado,
+                                 candado=candado_aplicar)
+                insertados += 1
             vistos_archivo.add(telefono)
-            cur.execute(
-                f"INSERT INTO {tabla} (nombre, apellido, telefono, estado,"
-                " whatsapp_opt_out, interesado, opt_out_explicito)"
-                " VALUES (%s, %s, %s, 'pendiente', 0, 0, 0)",
-                (nombre[:150], apellido[:150], telefono),
-            )
-            insertados += 1
+            # Y lo mismo en las demás bases donde esté el número.
+            if respuesta_aplicar or estado:
+                res = propagar_a_todas_las_bases(
+                    cur, telefono, respuesta_aplicar, estado, excluir=tabla, indice=indice,
+                    candado=candado_aplicar)
+                for b in res["bases"]:
+                    bases[b["tabla"]] = bases.get(b["tabla"], 0) + b["actualizados"]
+                    propagados += b["actualizados"]
+                omitidos += res["omitidos"]
         conn.commit()
 
+    detalle = [{"tabla": t, "nombre": nombre_de_tabla(t), "actualizados": n}
+               for t, n in sorted(bases.items())]
     return {"procesados": procesados, "insertados": insertados,
-            "duplicados": duplicados, "rechazados": len(errores),
-            "errores": errores}
+            "duplicados": duplicados, "actualizados": actualizados,
+            "propagados": propagados, "omitidos_candado": omitidos,
+            "bases": detalle,
+            "rechazados": len(errores), "errores": errores}
 
 
 def listar_tablas_areas() -> list[dict]:

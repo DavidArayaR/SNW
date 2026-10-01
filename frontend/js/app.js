@@ -512,6 +512,10 @@ function clicPlantilla(id) {
     return;
   }
   if (tabMsg === "programados") {
+    if (esPlantillaProtegida((plantillas || []).find((x) => x.id === id))) {
+      toast("La plantilla Hello World solo se puede usar en la base de desarrollo; no se puede programar.", "error");
+      return;
+    }
     tplSelId = id;
     seleccionarParaProgramar(id);
     guardarSelTpl();
@@ -1852,17 +1856,22 @@ $("#btnConfirmarIniciarConf").addEventListener("click", async () => {
 function pintarRechazadosConf(rechazados) {
   const ul = $("#listaRechazadosConf");
   ul.innerHTML = "";
-  const esDev = ambienteConf === "desarrollo";
+  const base = baseSeleccionadaConf();
+  const esDev = base === "desarrollo" && !modoAreaConf();
   if (esDev) {
     ul.hidden = true;
     return;
   }
-  for (const r of rechazados) {
+  // El filtro de números autorizados solo corresponde a la base desarrollo.
+  // No arrastrar un rechazo de una selección anterior a producción/áreas.
+  const visibles = rechazados.filter((r) =>
+    !/número no autorizado en base desarrollo/i.test(String(r.motivo || "")));
+  for (const r of visibles) {
     const li = document.createElement("li");
     li.textContent = `${r.nombre} (${r.telefono || "sin teléfono"}): ${r.motivo}`;
     ul.appendChild(li);
   }
-  ul.hidden = rechazados.length === 0;
+  ul.hidden = visibles.length === 0;
 }
 
 async function pausarJobConf(jobId) {
@@ -2038,6 +2047,10 @@ function cambiarTabMsg(t) {
   window.scrollTo(0, 0);
   renderLista(buscadorEl.value);
   if (tabMsg === "programados") {
+    if (esPlantillaProtegida((plantillas || []).find((x) => x.id === tplSelId))) {
+      tplSelId = null;
+      guardarSelTpl();
+    }
     cargarProgramados();
     actualizarProgPlantilla();
   } else if (tabMsg === "envios") {
@@ -2074,9 +2087,9 @@ let progSinCupo = false;
 
 
 
-function poblarFormProg() {
+function poblarFormProg(forzarCupo = false) {
   const selA = $("#selProgArea");
-  if (!selA) return;
+  if (!selA) return Promise.resolve();
   const areas = misAreas || [];
   selA.innerHTML = `<option value="">- Seleccione área -</option>` +
     areas.map((e) =>
@@ -2085,9 +2098,9 @@ function poblarFormProg() {
   if (guardada && areas.some((e) => String(e.id) === guardada)) selA.value = guardada;
   else selA.value = "";
   actualizarProgPlantilla();
-  // El tope del límite depende del área elegida: se consulta una vez por área
-  // (los refrescos de la lista reutilizan el dato).
-  cargarCupoProg();
+  // Al refrescar la lista se fuerza la consulta: cancelar o crear un
+  // programado cambia libres/reservados en tiempo real.
+  const cupo = cargarCupoProg(forzarCupo);
   const inpF = $("#inpProgFecha");
   if (inpF && !inpF.value) {
     const min = new Date(Date.now() + 5 * 60000);
@@ -2095,6 +2108,7 @@ function poblarFormProg() {
     const tz = new Date(min.getTime() - min.getTimezoneOffset() * 60000);
     inpF.min = tz.toISOString().slice(0, 16);
   }
+  return cupo;
 }
 
 // Tope real del límite programado: el menor entre los pacientes LIBRES de la
@@ -2260,7 +2274,8 @@ if (inpProgLimiteEl) {
 
 async function cargarProgramados() {
   const lista = $("#listaProgramados");
-  poblarFormProg();
+  // La lista y el texto de cupo deben reflejar la misma fotografía de reservas.
+  await poblarFormProg(true);
   if (!lista) return;
   // Si ya hay datos, se conservan visibles mientras se actualiza (con
   // animación); solo se muestra "Cargando…" la primera vez.
@@ -2542,9 +2557,6 @@ async function programarEnvio() {
       : `Envío programado: ${cuantos} paciente(s) preelegidos.`, "ok");
     inpF.value = "";
     if (inpL) inpL.value = "";
-    // Esos pacientes quedan reservados: hay que volver a pedir el cupo.
-    progCupoKey = "";
-    await cargarCupoProg(true);
     await cargarProgramados();
   } catch (err) {
     console.error("[app.js programarEnvio()]", err);

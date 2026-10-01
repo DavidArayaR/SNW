@@ -506,7 +506,9 @@ tbodyEl.addEventListener("change", async (e) => {
     }
     const actualizado = await res.json();
     if (paciente) Object.assign(paciente, actualizado);
-    toast(nueva === "baja" ? "Paciente marcado como dado de baja." : `Respuesta actualizada a "${nueva}".`, "ok");
+    toast(nueva === "baja"
+      ? mensajeBaja(paciente, "Paciente marcado como dado de baja.")
+      : `Respuesta actualizada a "${nueva}".`, "ok");
     render();
   } catch (err) {
     console.error("[pacientes.js:477]", err);
@@ -651,6 +653,20 @@ function marcarFilasActualizando(ids, on) {
 
 let masivoPendiente = null;
 
+// --- Baja en cascada ---------------------------------------------------------
+// El número identifica a la persona, no la base: al marcar «Se dio de baja» el
+// backend propaga la baja a todas las bases donde esté ese mismo número (por si
+// el paciente también estaba cargado en otra especialidad). Se avisa de cuántas
+// filas se tocaron para que el ajuste no sea una caja negra.
+function mensajeBaja(paciente, base) {
+  const otras = (paciente && paciente.otras_bases) || [];
+  if (!otras.length) return base;
+  const detalle = otras
+    .map((b) => `${b.nombre || b.tabla} (${b.actualizados})`)
+    .join(", ");
+  return `${base} También se aplicó en: ${detalle}.`;
+}
+
 function pedirConfirmacionMasiva(sel, url, campo) {
   const valor = sel.value;
   if (!valor) return;
@@ -697,6 +713,12 @@ async function ejecutarMasivo() {
     let msg = `${data.actualizados} paciente${data.actualizados === 1 ? "" : "s"} actualizado${data.actualizados === 1 ? "" : "s"}.`;
     if (data.bloqueados) {
       msg += ` ${data.bloqueados} no se pudo${data.bloqueados === 1 ? "" : "n"} cambiar (pidieron la baja por WhatsApp).`;
+    }
+    // La baja se propaga al mismo número en las demás bases.
+    if (campo === "respuesta" && valor === "baja" && (data.otras_bases || []).length) {
+      const detalle = data.otras_bases
+        .map((b) => `${b.nombre || b.tabla} (${b.actualizados})`).join(", ");
+      msg += ` También se aplicó en otras bases: ${detalle}.`;
     }
     toast(msg, data.bloqueados ? "error" : "ok");
     await cargar();
@@ -993,7 +1015,18 @@ if (btnSubirCsv) btnSubirCsv.addEventListener("click", async () => {
       csvResultado.innerHTML =
         `<p><strong>${inf.insertados ?? 0}</strong> insertados de ` +
         `${inf.procesados ?? 0} procesados ` +
-        `(${inf.duplicados ?? 0} duplicados, ${inf.rechazados ?? 0} rechazados).</p>` +
+        `(${inf.duplicados ?? 0} ya estaban, ${inf.rechazados ?? 0} rechazados` +
+        `${inf.actualizados ? `, ${inf.actualizados} actualizados` : ""}).</p>` +
+        ((inf.bases || []).length
+          ? `<p>También se aplicó la respuesta/estado del CSV al mismo número en otras bases: ` +
+            `${inf.bases.map((b) => `${escaparHtml(b.nombre || b.tabla)} (${b.actualizados})`).join(", ")}.` +
+            (inf.omitidos_candado
+              ? ` <span class="field__hint">${inf.omitidos_candado} bajas con candado ` +
+                `se respetaron y no se reactivaron.</span>` : "") +
+            `</p>`
+          : (inf.omitidos_candado
+            ? `<p class="field__hint">${inf.omitidos_candado} bajas con candado se respetaron ` +
+              `y no se reactivaron.</p>` : "")) +
         (mostrados.length
           ? `<ul>` + mostrados.map((e) => `<li>fila ${e.fila}: ${escaparHtml(e.motivo)}</li>`).join("") + `</ul>` +
             (errores.length > mostrados.length

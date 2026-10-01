@@ -209,7 +209,14 @@ def _normalizar_telefono(crudo: str) -> str | None:
 
 # Compara teléfonos ignorando el '+' inicial y los espacios (Meta manda el
 # wa_id como "56993921740"; la BD los guarda como "+56993921740").
-_TEL_MATCH = "REPLACE(REPLACE({col}, '+', ''), ' ', '') = REPLACE(REPLACE(%s, '+', ''), ' ', '')"
+# Compara el teléfono ignorando el formato con que haya quedado guardado en
+# una base antigua. El valor recibido por Meta ya se normaliza antes de usarlo.
+_TEL_MATCH = (
+    "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE({col}, '+', ''), ' ', ''),"
+    " '-', ''), '(', ''), ')', ''), '.', '') = "
+    "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(%s, '+', ''), ' ', ''),"
+    " '-', ''), '(', ''), ')', ''), '.', '')"
+)
 
 
 def _hash_evento(payload: dict) -> str:
