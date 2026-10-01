@@ -303,6 +303,25 @@ select.badge--select {
   font-weight: 700;
 }
 .prog-item__meta { font-size: .82rem; color: var(--texto-suave); margin-top: 4px; }
+/* Fecha programada, junto al nombre de la plantilla: es el dato clave de la
+   fila, por eso va como etiqueta destacada y no como texto suelto. */
+.prog-item__fecha {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: .78rem;
+  font-weight: 700;
+  color: var(--brand-tint-fg);
+  background: var(--brand-tint);
+  border: 1px solid var(--brand-tint-bd);
+  white-space: nowrap;
+}
+.prog-item__fecha i { font-size: .72rem; }
+@media (max-width: 520px) {
+  .prog-item__fecha { white-space: normal; }
+}
 .prog-item__motivo {
   margin-top: 6px;
   font-size: .82rem;

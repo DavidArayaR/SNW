@@ -4399,14 +4399,34 @@ def _prog_visible(sesion: dict, f: dict) -> bool:
 
 
 def listar_programados(sesion: dict = Depends(exigir("mensajeria"))):
+    # Lo más reciente primero (por creación, no por fecha programada: si no, un
+    # envío lejano en el futuro tapa los nuevos).
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT * FROM envios_programados ORDER BY programado_para DESC, id DESC LIMIT 200"
+            "SELECT * FROM envios_programados ORDER BY creado DESC, id DESC LIMIT 200"
         )
         filas = cur.fetchall()
     # Admin/dev lo ven todo; el supervisor también (decide en sus areas,
     # pero ve el panorama completo como en el resto del sistema).
     return [_prog_a_respuesta(f, sesion) for f in filas if _prog_visible(sesion, f)]
+
+
+def resumen_programados(sesion: dict = Depends(exigir("mensajeria"))):
+    """Foto ligera de la lista de programados (solo id y estado de lo visible)
+    para que la pantalla detecte en segundos un alta o una decisión - propia, de
+    otro supervisor o hecha desde el correo - sin recargar la lista entera.
+    Mismo orden que `listar_programados` para que las firmas coincidan."""
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, estado, creador, area_id FROM envios_programados"
+            " ORDER BY creado DESC, id DESC LIMIT 200"
+        )
+        filas = cur.fetchall()
+    visibles = [f for f in filas if _prog_visible(sesion, f)]
+    return {
+        "items": [[f["id"], f["estado"]] for f in visibles],
+        "pendientes": sum(1 for f in visibles if f["estado"] == "pendiente"),
+    }
 
 
 def _traer_programado(prog_id: int) -> dict:

@@ -2162,6 +2162,7 @@ async function cargarProgramados() {
     if (res.status === 401) { window.snwSesionExpirada(); return; }
     if (!res.ok) throw new Error();
     programados = await res.json();
+    progsPrev = new Map(programados.map((p) => [p.id, p.estado]));
     const listaProg = $("#listaProgramados");
     if (listaProg) listaProg._pagina = 1;
     renderProgramados();
@@ -2169,6 +2170,108 @@ async function cargarProgramados() {
     console.error("[app.js cargarProgramados()]");
     marcarProgsActualizando(false);
     if (primera) lista.innerHTML = `<p class="field__hint">No se pudieron cargar.</p>`;
+  }
+}
+
+/* ---------- Actualización automática de la lista de programados ----------
+   Un envío por aprobar, aprobado o rechazado se refleja solo en pantalla:
+   el navegador compara una foto liviana (id + estado) y, si algo cambió,
+   recarga la lista y avisa. Así también se detectan las decisiones tomadas
+   por otro supervisor o desde el enlace del correo, no solo las del propio
+   usuario. La cadencia es rápida mientras hay algo por aprobar y se relaja
+   cuando no hay nada pendiente. */
+const INTERVALO_PROG_VIVO = 3000;
+const INTERVALO_PROG_LATIDO = 10000;
+let timerProgs = null;
+let hayProgsPendientes = false;
+let cargandoResumenProgs = false;
+let progsPrev = null; // Map id -> estado de la última foto conocida
+let progsDecididoPropio = new Map(); // id -> cuándo decidió este usuario
+
+function programarProgs() {
+  if (timerProgs) clearInterval(timerProgs);
+  timerProgs = setInterval(() => {
+    if (!document.hidden) revisarProgs();
+  }, hayProgsPendientes ? INTERVALO_PROG_VIVO : INTERVALO_PROG_LATIDO);
+}
+
+// Qué cambió respecto de la foto anterior: altas nuevas y cambios de estado.
+function diffProgs(items) {
+  const nuevos = [], cambiados = [];
+  for (const [id, estado] of items) {
+    if (!progsPrev.has(id)) nuevos.push([id, estado]);
+    else if (progsPrev.get(id) !== estado) cambiados.push([id, estado]);
+  }
+  return { nuevos, cambiados };
+}
+
+// Aviso de lo que cambió por fuera. Los estados técnicos del envío
+// (enviando/enviado/error) actualizan la lista sin molestar con un aviso, y
+// las decisiones que acaba de tomar este usuario ya tienen su propio aviso
+// (no se duplica).
+function avisarCambioProgs(nuevos, cambiados) {
+  const porId = new Map(programados.map((p) => [p.id, p]));
+  const nombre = (id) => (porId.get(id) || {}).plantilla || "Envío programado";
+  const quien = (id) => (porId.get(id) || {}).decidido_por || "";
+  const conQuien = (id) => (quien(id) ? ` por ${quien(id)}` : "");
+  const propia = (id) => (Date.now() - (progsDecididoPropio.get(id) || 0)) < 15000;
+  const msgs = [];
+  const porAprobar = nuevos.filter(([, e]) => e === "pendiente");
+  if (porAprobar.length) {
+    msgs.push(`Hay ${porAprobar.length} envío${porAprobar.length === 1 ? "" : "s"} ` +
+      `programado${porAprobar.length === 1 ? "" : "s"} por aprobar`);
+  }
+  for (const [id, estado] of cambiados) {
+    if (propia(id)) continue;
+    if (estado === "aprobado") msgs.push(`"${nombre(id)}" aprobado${conQuien(id)}`);
+    else if (estado === "rechazado") msgs.push(`"${nombre(id)}" rechazado${conQuien(id)}`);
+    else if (estado === "cancelado") msgs.push(`"${nombre(id)}" cancelado${conQuien(id)}`);
+  }
+  if (msgs.length) toast(msgs.join(" · "), "ok");
+}
+
+async function revisarProgs() {
+  if (cargandoResumenProgs) return; // no apilar sondeos si uno quedó colgado
+  cargandoResumenProgs = true;
+  let data;
+  try {
+    const res = await fetch("api/notificaciones/programados/resumen", {
+      headers: authHeaders(), cache: "no-store",
+    });
+    if (res.status === 401) { window.snwSesionExpirada(); return; }
+    if (!res.ok) throw new Error();
+    data = await res.json();
+  } catch {
+    console.error("[app.js revisarProgs()]");
+    return;
+  } finally {
+    cargandoResumenProgs = false;
+  }
+  const items = data.items || [];
+  // La primera foto solo deja registrada la base de comparación: todavía no
+  // hay nada que avisar.
+  if (progsPrev !== null) {
+    const { nuevos, cambiados } = diffProgs(items);
+    if (nuevos.length || cambiados.length) {
+      await cargarProgramados();
+      avisarCambioProgs(nuevos, cambiados);
+    } else {
+      progsPrev = new Map(items);
+    }
+  } else {
+    progsPrev = new Map(items);
+  }
+  // La cadencia sigue a la lista: rápida con algo por aprobar, lenta si no.
+  const pendientes = Number(data.pendientes) || 0;
+  if (hayProgsPendientes !== pendientes > 0) {
+    hayProgsPendientes = pendientes > 0;
+    programarProgs();
+  }
+  // El registro de decisiones propias solo sirve unos segundos: se poda.
+  if (progsDecididoPropio.size) {
+    const ahora = Date.now();
+    progsDecididoPropio = new Map(
+      [...progsDecididoPropio].filter(([, t]) => ahora - t < 60000));
   }
 }
 
@@ -2193,6 +2296,11 @@ function progItemHtml(p) {
         `<span class="prog-item__costo-aviso">(se cobra al realizarse el envío)</span></div>` : "";
   const decided = p.decidido_por && (p.estado === "aprobado" || p.estado === "rechazado" || p.estado === "cancelado")
     ? ` · decidido por ${escaparHtml(p.decidido_por)}` : "";
+  // Junto al nombre va la fecha para la que quedó programado; en la línea de
+  // detalle, cuándo se creó.
+  const fechaProg = p.programado_para
+    ? `<span class="prog-item__fecha"><i class="fa-regular fa-clock"></i>` +
+      `para el día ${escaparHtml(p.programado_para)}</span>` : "";
   const botones =
     (p.puede_decidir
       ? `<button type="button" class="btn btn--sm btn--primary" data-prog-aprobar="${p.id}">Aprobar</button>` +
@@ -2201,8 +2309,9 @@ function progItemHtml(p) {
       ? `<button type="button" class="btn btn--sm btn--ghost" data-prog-cancelar="${p.id}">Cancelar</button>` : "");
   return `<div class="prog-item" data-prog="${p.id}">` +
     `<div class="prog-item__cab"><span class="prog-estado prog-estado--${p.estado}">${ESTADO_PROG_LABEL[p.estado] || p.estado}</span>` +
-    `<span>${escaparHtml(p.plantilla || "—")}</span></div>` +
-    `<div class="prog-item__meta">${escaparHtml(p.programado_para || "")}` +
+    `<span>${escaparHtml(p.plantilla || "—")}</span>${fechaProg}</div>` +
+    `<div class="prog-item__meta">` +
+    (p.creado ? `Creado ${escaparHtml(p.creado)}` : "") +
     (p.area ? ` · ${escaparHtml(p.area)}` : "") +
     (p.limite ? ` · límite ${p.limite}` : "") +
     (p.creador_nombre ? ` · por ${escaparHtml(p.creador_nombre)}` : "") + decided + `</div>` +
@@ -2305,6 +2414,7 @@ async function decidirProg(id, accion, motivo) {
     const data = await res.json().catch(() => ({}));
     if (res.status === 401) { window.snwSesionExpirada(); return; }
     if (!res.ok) throw new Error(data.detail || "No se pudo registrar la decisión.");
+    progsDecididoPropio.set(id, Date.now());
     toast(accion === "aprobar" ? "Envío aprobado." : accion === "rechazar" ? "Envío rechazado." : "Envío cancelado.", "ok");
     await cargarProgramados();
   } catch (err) {
@@ -2357,9 +2467,12 @@ $("#btnConfirmarProgRechazar").addEventListener("click", () => {
   if (id) decidirProg(id, "rechazar", motivo);
 });
 
-setInterval(() => {
-  if (!document.hidden && tabMsg === "programados") cargarProgramados();
-}, 30000);
+// Al volver a la pestaña se revisa de inmediato: si en otra pantalla se
+// aprobó, rechazó o creó un envío, la lista ya está al día al mirarla.
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) revisarProgs();
+});
+programarProgs();
 
 pintarTabsMsg();
 
