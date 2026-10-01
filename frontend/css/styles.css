@@ -99,14 +99,39 @@ select.badge--select {
   box-shadow: var(--sombra);
 }
 
+/* Cada superficie de Mensajería tiene un acento propio en su borde. */
+.panel--list,
+.panel--editor,
+#panelEnvio,
+.prog-columna > .panel {
+  background: var(--panel);
+  border: 1px solid var(--card-accent);
+  border-top: 3px solid var(--card-accent);
+}
+.panel--list {
+  --card-accent: #4ea896;
+}
+.panel--editor {
+  --card-accent: #4ea896;
+}
+#panelEnvio {
+  --card-accent: #5691c7;
+}
+.prog-columna > .panel {
+  --card-accent: #c59142;
+}
+
+:root[data-tema="oscuro"] .panel--list { --card-accent: #66c3ac; }
+:root[data-tema="oscuro"] .panel--editor { --card-accent: #66c3ac; }
+:root[data-tema="oscuro"] #panelEnvio { --card-accent: #83b9e8; }
+:root[data-tema="oscuro"] .prog-columna > .panel { --card-accent: #e0b76b; }
+
 .panel--list {
   position: sticky;
   top: 20px;
   max-height: calc(100vh - 44px);
   display: flex;
   flex-direction: column;
-  background: var(--panel-2);
-  border-top: 3px solid var(--verde);
 }
 
 .panel__head {
@@ -134,7 +159,7 @@ select.badge--select {
   flex-wrap: wrap;
   align-items: center;
   row-gap: 10px;
-  background: var(--brand-tint);
+  background: var(--panel);
   border-radius: calc(var(--radio) - 3px) calc(var(--radio) - 3px) 0 0;
 }
 .panel--list .panel__actions {
@@ -550,7 +575,7 @@ button:hover {
 .btn[disabled]:hover,
 button:disabled:hover { outline: none; }
 
-.panel--editor { min-height: 60vh; border-top: 3px solid var(--borde); }
+.panel--editor { min-height: 60vh; }
 .panel--editor form { padding: 20px 24px 26px; }
 
 .field { margin-bottom: 18px; }
