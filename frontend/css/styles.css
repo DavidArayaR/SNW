@@ -518,6 +518,7 @@ select.badge--select {
 .tpl-list__grupo--ok { background: var(--ok-bg); color: var(--ok-fg); }
 .tpl-list__grupo--warn { background: var(--warn-bg); color: var(--warn-fg); }
 .tpl-list__grupo--danger { background: var(--danger-bg); color: var(--danger-fg); }
+.tpl-list__grupo--info { background: var(--info-bg); color: var(--info-fg); }
 
 .btn {
   display: inline-flex;
