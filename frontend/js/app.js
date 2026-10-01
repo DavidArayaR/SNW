@@ -494,7 +494,8 @@ function crearItemPlantilla(p) {
   x.innerHTML = '<i class="fa-solid fa-xmark"></i>';
   x.addEventListener("click", (ev) => {
     ev.stopPropagation();
-    resetearCardEnvio();
+    if (tabMsg === "plantillas") cancelarEdicion();
+    else resetearCardEnvio();
   });
   wrap.appendChild(btn);
   wrap.appendChild(x);
