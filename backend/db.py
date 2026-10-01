@@ -278,6 +278,21 @@ def asegurar_tabla_config() -> None:
                 "  INDEX idx_prog_token (token)"
                 ") CHARACTER SET utf8mb4"
             )
+            # Pacientes preelegidos por cada programado: la lista se congela al
+            # crearlo, para que el envío salga a ese grupo y no a quien aparezca
+            # pendiente después. Un paciente no puede quedar en dos programados
+            # activos de la misma base (ver _preelegir_pacientes_prog).
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS programado_destinatarios (
+                  prog_id INT NOT NULL,
+                  paciente_id INT NOT NULL,
+                  nombre VARCHAR(150) NOT NULL DEFAULT '',
+                  telefono VARCHAR(32) NOT NULL DEFAULT '',
+                  creado DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  INDEX idx_pd_prog (prog_id),
+                  INDEX idx_pd_paciente (paciente_id)
+                ) CHARACTER SET utf8mb4
+            """)
             _sembrar_usuarios(cur)
             # Si el login ya es un correo y no hay correo de recuperación, se copia.
             cur.execute(

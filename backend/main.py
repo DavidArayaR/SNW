@@ -4000,6 +4000,14 @@ def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensaj
     t = (esp["nombre_tabla_base"] if esp else tabla_pacientes(amb))
     amb_q = "produccion" if esp else amb
     total, elegibles = _contar_elegibles_tabla(t, amb_q, amb)
+    # Los que ya están tomados por un programado activo no se pueden preelegir
+    # de nuevo: son los que quedan libres para este envío/horario.
+    try:
+        reservados = _contar_reservados_prog(t, amb, amb_q)
+    except Exception as e:
+        log_error("contar_reservados_prog", e)
+        reservados = 0
+    libres = max(0, elegibles - reservados)
 
     costo = None
     if body.plantilla_id is not None and tiene_permiso(sesion, "tarifas_editar"):
@@ -4010,6 +4018,8 @@ def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensaj
     return {
         "total": total,
         "pendientes": elegibles,
+        "reservados": reservados,
+        "libres": libres,
         "base_datos": t if esp else nombre_base(amb),
         "area_id": (esp["id"] if esp else None),
         "costo": costo,
@@ -4153,6 +4163,127 @@ class ProgCrearIn(BaseModel):
     limite: int | None = None
 
 
+# --- Destinatarios preelegidos de cada programado ---------------------------
+# Al crear un programado se congela QUIÉN lo va a recibir. Sirve para poder
+# programar varios envíos el mismo día (p. ej. medir qué hora rinde más una
+# promoción): el sistema reparte la base y cada horario recibe un grupo
+# distinto, así que el resultado de cada uno es comparable y nadie recibe la
+# promoción dos veces. Los pacientes que se den de baja después se excluyen al
+# enviar y se avisa (nunca se escribe a quien pidió la baja).
+
+_ESTADOS_PROG_RESERVAN = ("pendiente", "aprobado", "enviando")
+
+
+def _contar_reservados_prog(t: str, amb: str, amb_q: str) -> int:
+    """Pacientes de la base que ya están tomados por otro programado activo."""
+    with conectar(amb) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT COUNT(DISTINCT pd.paciente_id) AS n FROM programado_destinatarios pd"
+            " JOIN envios_programados ep ON ep.id = pd.prog_id"
+            " WHERE ep.tabla = %s AND ep.ambiente = %s AND ep.estado IN"
+            " ('pendiente', 'aprobado', 'enviando')",
+            (t, amb_q),
+        )
+        return int((cur.fetchone() or {}).get("n") or 0)
+
+
+def _preelegir_pacientes_prog(t: str, amb: str, amb_q: str, n: int, cur=None) -> list[dict]:
+    """Primeros N pacientes libres de la base: pendientes, sin opt-out ni baja y
+    que no estén ya preelegidos por otro programado activo. Orden estable por id
+    (así los grupos de cada horario son siempre los mismos).
+
+    Si se pasa `cur` (la misma transacción que va a guardar la lista) la lectura
+    se hace con FOR UPDATE: dos programados creados a la vez se serializan y no
+    pueden quedarse con los mismos pacientes."""
+    if n <= 0:
+        return []
+    cond = []
+    if columna_existe(t, "estado", amb_q):
+        cond.append("p.estado = 'pendiente'")
+    if columna_existe(t, "whatsapp_opt_out", amb_q):
+        cond.append("p.whatsapp_opt_out = 0")
+    if columna_existe(t, "respuesta", amb_q):
+        cond.append("(p.respuesta IS NULL OR p.respuesta <> 'baja')")
+    # Fuera los que ya tienen otro programado vivo en esta misma base.
+    cond.append(
+        "p.id NOT IN (SELECT pd.paciente_id FROM programado_destinatarios pd"
+        " JOIN envios_programados ep ON ep.id = pd.prog_id"
+        " WHERE ep.tabla = %(t)s AND ep.ambiente = %(amb)s AND ep.estado IN"
+        " ('pendiente', 'aprobado', 'enviando'))"
+    )
+    where = (" WHERE " + " AND ".join(cond)) if cond else ""
+    sql = (f"SELECT p.id, p.nombre, p.apellido, p.telefono FROM {t} p{where}"
+           " ORDER BY p.id LIMIT %(n)s" + (" FOR UPDATE" if cur else ""))
+    params = {"t": t, "amb": amb_q, "n": n}
+    if cur:
+        cur.execute(sql, params)
+        filas = cur.fetchall()
+    else:
+        with conectar(amb) as conn, conn.cursor() as c2:
+            c2.execute(sql, params)
+            filas = c2.fetchall()
+    return [
+        {"id": r["id"],
+         "nombre": " ".join(x for x in [r.get("nombre"), r.get("apellido")] if x),
+         "telefono": (r.get("telefono") or "").strip()}
+        for r in filas
+    ]
+
+
+def _prog_destinatarios(prog_id: int) -> list[dict]:
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT paciente_id, nombre, telefono FROM programado_destinatarios"
+            " WHERE prog_id = %s ORDER BY paciente_id",
+            (int(prog_id),),
+        )
+        return [{"id": r["paciente_id"], "nombre": r.get("nombre") or "",
+                 "telefono": r.get("telefono") or ""} for r in cur.fetchall()]
+
+
+def _liberar_destinatarios_prog(prog_id: int) -> None:
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM programado_destinatarios WHERE prog_id = %s", (int(prog_id),))
+        conn.commit()
+
+
+def _revivir_destinatarios_prog(tabla: str, amb: str, amb_q: str,
+                                 ids: list[int]) -> tuple[list[dict], list[dict]]:
+    """Al ejecutar, la lista congelada se vuelve a validar: siguen pendientes,
+    sin opt-out y sin baja. Devuelve (vivos, excluidos con su motivo)."""
+    if not ids:
+        return [], []
+    cols = ["p.id", "p.nombre", "p.apellido", "p.telefono"]
+    if columna_existe(tabla, "whatsapp_opt_out", amb_q):
+        cols.append("p.whatsapp_opt_out")
+    if columna_existe(tabla, "respuesta", amb_q):
+        cols.append("p.respuesta")
+    cond = [f"p.id IN ({', '.join('%s' for _ in ids)})"]
+    if columna_existe(tabla, "estado", amb_q):
+        cond.append("p.estado = 'pendiente'")
+    with conectar(amb) as conn, conn.cursor() as cur:
+        cur.execute(
+            f"SELECT {', '.join(cols)} FROM {tabla} p WHERE " + " AND ".join(cond),
+            tuple(ids),
+        )
+        filas = cur.fetchall()
+    por_id = {r["id"]: r for r in filas}
+    vivos, excluidos = [], []
+    for pid in ids:
+        r = por_id.get(pid)
+        if r is None:
+            excluidos.append({"id": pid, "nombre": "", "motivo": "Ya no está en la base"})
+        elif r.get("whatsapp_opt_out") or (r.get("respuesta") or "") == "baja":
+            excluidos.append({"id": pid, "nombre": " ".join(
+                x for x in [r.get("nombre"), r.get("apellido")] if x),
+                "motivo": "Se dio de baja antes del envío"})
+        else:
+            vivos.append({"id": pid, "nombre": " ".join(
+                x for x in [r.get("nombre"), r.get("apellido")] if x),
+                "telefono": (r.get("telefono") or "").strip()})
+    return vivos, excluidos
+
+
 def _validar_plantilla_programable(plantilla: dict | None, area_id: int | None) -> dict:
     """La plantilla debe existir, no ser especial, estar aprobada por Meta y
     con revisión interna aprobada; si es de un area, solo sirve en esa area."""
@@ -4172,7 +4303,7 @@ def _validar_plantilla_programable(plantilla: dict | None, area_id: int | None) 
     return plantilla
 
 
-def _prog_a_respuesta(f: dict, sesion: dict) -> dict:
+def _prog_a_respuesta(f: dict, sesion: dict, preelegidos: int | None = None) -> dict:
     esp = servicio_areas.obtener_area(f["area_id"]) if f.get("area_id") is not None else None
     priv = _es_privilegiado(sesion)
     es_sup = sesion.get("rol") == "supervisor"
@@ -4194,13 +4325,14 @@ def _prog_a_respuesta(f: dict, sesion: dict) -> dict:
     puede_ver_costo = priv or es_sup
     costo = None
     if puede_ver_costo and f["estado"] in ("pendiente", "aprobado", "enviando"):
-        costo = _prog_costo_estimado(f, plantilla_nombre=f.get("plantilla_nombre") or "")
+        costo = _prog_costo_estimado(f, plantilla_nombre=f.get("plantilla_nombre") or "",
+                                     elegibles=preelegidos)
     return {
         "id": f["id"], "area_id": f.get("area_id"),
         "area": (esp.get("nombre_visible") if esp else ""),
         "tabla": f.get("tabla") or "", "ambiente": f.get("ambiente") or "produccion",
         "plantilla_id": f.get("plantilla_id"), "plantilla": f.get("plantilla_nombre") or "",
-        "limite": f.get("limite"),
+        "limite": f.get("limite"), "preelegidos": preelegidos,
         "programado_para": f["programado_para"].strftime("%d-%m-%Y %H:%M") if f.get("programado_para") else "",
         "estado": f.get("estado"), "creador": f.get("creador") or "",
         "creador_nombre": f.get("creador_nombre") or "",
@@ -4212,18 +4344,20 @@ def _prog_a_respuesta(f: dict, sesion: dict) -> dict:
     }
 
 
-def _prog_costo_estimado(f: dict, plantilla_nombre: str = "") -> dict | None:
-    """Costo aproximado de ejecutar este envío programado hoy: se cuentan los
-    elegibles (pendientes, sin opt-out ni baja) de la tabla que se va a usar y
-    se estima contra la tarifa vigente de la plantilla. None si no hay tarifa
-    o plantilla. El cobro real ocurre cuando el envío se ejecuta."""
+def _prog_costo_estimado(f: dict, plantilla_nombre: str = "",
+                         elegibles: int | None = None) -> dict | None:
+    """Costo aproximado de ejecutar este envío programado: se estima sobre los
+    destinatarios preelegidos (la lista congelada al crearlo) y, si no se
+    conoce, sobre los elegibles (pendientes, sin opt-out ni baja) de la tabla.
+    None si no hay tarifa o plantilla. El cobro real ocurre cuando se ejecuta."""
     try:
         amb = f.get("ambiente") or "produccion"
         tabla = f.get("tabla") or nombre_base(amb)
         if not tabla:
             return None
-        amb_q = "produccion" if f.get("area_id") is not None else amb
-        _, elegibles = _contar_elegibles_tabla(tabla, amb_q, amb)
+        if elegibles is None:
+            amb_q = "produccion" if f.get("area_id") is not None else amb
+            _, elegibles = _contar_elegibles_tabla(tabla, amb_q, amb)
         plantilla = next((p for p in leer_plantillas() if p.get("id") == f.get("plantilla_id")), None)
         if plantilla is None:
             return None
@@ -4278,31 +4412,42 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
             raise HTTPException(403, detail="Solo puedes programar para tu área o la base de desarrollo.")
         tabla = nombre_base(amb)
 
-    # El límite de un programado no puede pasar los pendientes de la base ni el
-    # cupo diario de Meta (usuarios únicos en 24 h).
+    # Tope real del programado: ni más de lo que el usuario propone, ni más de
+    # los pendientes LIBRES de la base (los que ya tiene otro programado activo
+    # no se pueden volver a tomar), ni más de lo que deja el cupo de Meta.
     amb_q = "produccion" if esp is not None else amb
     _, pendientes = _contar_elegibles_tabla(tabla, amb_q, amb)
+    try:
+        reservados = _contar_reservados_prog(tabla, amb, amb_q)
+    except Exception as e:
+        log_error("contar_reservados_prog", e)
+        reservados = 0
+    libres = max(0, pendientes - reservados)
     info_limite = _limite_mensajeria_info(amb)
     if info_limite and info_limite["disponibles"] <= 0:
         raise HTTPException(429, detail=(
             f"Límite diario de WhatsApp alcanzado: en las últimas 24 h ya se contactó a "
             f"{info_limite['usados_24h']} usuarios únicos (límite {info_limite['tier']}). "
             f"Espera a que avance la ventana de 24 h o sube el límite en Configuración."))
-    tope = min(pendientes, info_limite["disponibles"]) if info_limite else pendientes
+    tope = min(libres, info_limite["disponibles"]) if info_limite else libres
     if limite is not None and limite > tope:
-        if pendientes <= 0:
+        if libres <= 0:
+            if pendientes <= 0:
+                raise HTTPException(422, detail="No hay pacientes pendientes en esta base para programar.")
             raise HTTPException(422, detail=(
-                "No hay pacientes pendientes en esta base para programar."))
+                f"No quedan pacientes libres: los {pendientes} pendientes de esta base ya están "
+                f"preelegidos por otros envíos programados activos. Cancela alguno o espera a que "
+                f"se complete."))
         if info_limite:
             raise HTTPException(422, detail=(
-                f"El límite no puede superar los {pendientes} pendientes de la base de datos "
+                f"El límite no puede superar los {libres} pendientes libres de la base de datos "
                 f"ni los {info_limite['disponibles']} que deja el límite diario de Meta hoy "
                 f"({info_limite['tier']} usuarios únicos en 24 h; ya se contactó a "
                 f"{info_limite['usados_24h']}). Usa {tope} o menos, o déjalo vacío para enviar a "
                 f"todos los disponibles."))
         raise HTTPException(422, detail=(
-            f"El límite no puede superar los {pendientes} pacientes pendientes de la base de "
-            f"datos. Usa {pendientes} o menos, o déjalo vacío para enviar a todos."))
+            f"El límite no puede superar los {libres} pacientes pendientes libres de la base de "
+            f"datos. Usa {tope} o menos, o déjalo vacío para enviar a todos."))
 
     plantilla = _validar_plantilla_programable(
         next((p for p in leer_plantillas() if p["id"] == body.plantilla_id), None),
@@ -4330,7 +4475,27 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
     directo = _es_privilegiado(sesion) or rol == "supervisor"
     estado = "aprobado" if directo else "pendiente"
     token = None if directo else uuid.uuid4().hex
+
+    # El sistema preelige QUIÉN recibe este envío y lo congela: así varios
+    # envíos del mismo día reparten la base sin repetir pacientes y el resultado
+    # de cada horario es comparable. La lectura y el guardado van en la misma
+    # transacción (con FOR UPDATE) para que dos creations simultáneas no se
+    # repartan los mismos pacientes.
+    n_preelegir = limite if limite is not None else tope
+    if n_preelegir <= 0:
+        raise HTTPException(422, detail=(
+            f"No quedan pacientes libres en esta base: los {pendientes} pendientes ya están "
+            f"preelegidos por otros envíos programados activos. Cancela alguno o espera a que "
+            f"se complete."))
+
     with conectar() as conn, conn.cursor() as cur:
+        preelegidos = _preelegir_pacientes_prog(tabla, amb, amb_q, n_preelegir, cur=cur)
+        if not preelegidos:
+            conn.rollback()
+            raise HTTPException(422, detail=(
+                f"No quedan pacientes libres en esta base: los {pendientes} pendientes ya están "
+                f"preelegidos por otros envíos programados activos. Cancela alguno o espera a que "
+                f"se complete."))
         cur.execute(
             "INSERT INTO envios_programados (area_id, tabla, ambiente, plantilla_id, plantilla_nombre,"
             " limite, programado_para, estado, creador, creador_nombre, decidido_por, token)"
@@ -4340,27 +4505,36 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
              (sesion.get("nombre") or "Usuario"), (creador if directo else ""), token),
         )
         prog_id = cur.lastrowid
+        cur.executemany(
+            "INSERT INTO programado_destinatarios (prog_id, paciente_id, nombre, telefono)"
+            " VALUES (%s, %s, %s, %s)",
+            [(prog_id, p["id"], p["nombre"][:150], p["telefono"][:32]) for p in preelegidos],
+        )
         conn.commit()
 
     if not directo:
         if not esp:
+            _liberar_destinatarios_prog(prog_id)
+            with conectar() as conn, conn.cursor() as cur:
+                cur.execute("DELETE FROM envios_programados WHERE id = %s", (prog_id,))
+                conn.commit()
             raise HTTPException(409, detail="Sin área no hay supervisores a quienes pedir confirmación.")
         sups = [s["correo"] for s in servicio_areas.correos_supervisores_area(esp["id"]) if s.get("correo")]
         if not sups:
+            _liberar_destinatarios_prog(prog_id)
             with conectar() as conn, conn.cursor() as cur:
                 cur.execute("DELETE FROM envios_programados WHERE id = %s", (prog_id,))
                 conn.commit()
             raise HTTPException(409, detail="El área no tiene supervisores con correo: no se puede pedir confirmación.")
-        # Mismo correo que el envío manual, con los destinatarios que habrá.
-        _total_tabla, _eleg = _contar_elegibles_tabla(esp["nombre_tabla_base"], amb, amb)
+        # Mismo correo que el envío manual, con los destinatarios preelegidos.
         _enviar_correo_prog(sups, prog_id, plantilla.get("nombre") or "", esp["nombre_visible"],
                             cuando.strftime("%d-%m-%Y %H:%M"), limite,
                             (sesion.get("nombre") or creador), token,
                             plantilla_texto=plantilla.get("texto") or "",
                             tabla_nombre=amb,
                             plantilla_clave=plantilla.get("clave") or "",
-                            total=min(_eleg, limite) if limite else _eleg)
-    return {"ok": True, "id": prog_id, "estado": estado}
+                            total=len(preelegidos))
+    return {"ok": True, "id": prog_id, "estado": estado, "preelegidos": len(preelegidos)}
 
 
 def _enviar_correo_prog(destinatarios: list, prog_id: int, plantilla_nombre: str,
@@ -4434,7 +4608,33 @@ def listar_programados(sesion: dict = Depends(exigir("mensajeria"))):
         filas = cur.fetchall()
     # Admin/dev lo ven todo; el supervisor también (decide en sus areas,
     # pero ve el panorama completo como en el resto del sistema).
-    return [_prog_a_respuesta(f, sesion) for f in filas if _prog_visible(sesion, f)]
+    visibles = [f for f in filas if _prog_visible(sesion, f)]
+    # Cuántos pacientes quedaron preelegidos en cada uno (una sola consulta).
+    conteo = _conteo_preelegidos([f["id"] for f in visibles])
+    return [_prog_a_respuesta(f, sesion, preelegidos=conteo.get(f["id"], 0)) for f in visibles]
+
+
+def _conteo_preelegidos(prog_ids: list[int]) -> dict[int, int]:
+    if not prog_ids:
+        return {}
+    ph = ", ".join("%s" for _ in prog_ids)
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"SELECT prog_id, COUNT(*) AS n FROM programado_destinatarios"
+            f" WHERE prog_id IN ({ph}) GROUP BY prog_id",
+            tuple(prog_ids),
+        )
+        return {r["prog_id"]: int(r["n"] or 0) for r in cur.fetchall()}
+
+
+def destinatarios_programado(prog_id: int, sesion: dict = Depends(exigir("mensajeria"))):
+    """Lista congelada de pacientes de un programado: la que el sistema preeligió
+    al crearlo. Solo quien puede ver el programado puede ver su lista."""
+    f = _traer_programado(prog_id)
+    if not _prog_visible(sesion, f):
+        raise HTTPException(404, detail="Envío programado no encontrado.")
+    return {"id": f["id"], "total": len(_prog_destinatarios(prog_id)),
+            "destinatarios": _prog_destinatarios(prog_id)}
 
 
 def resumen_programados(sesion: dict = Depends(exigir("mensajeria"))):
@@ -4640,14 +4840,18 @@ def _motivo_cupo_meta(f: dict, info: dict) -> str:
             f"límite en Configuración.")
 
 
-def _avisar_creador_prog(f: dict, motivo: str) -> None:
-    """Avisa a quien creó el programado (admin o usuario) que no se ejecutó por
-    falta de cupo. Si no tiene correo configurado, el motivo queda igual a la
-    vista en la lista de programados."""
+def _avisar_creador_prog(f: dict, motivo: str, titulo: str = "", asunto: str = "") -> None:
+    """Avisa a quien creó el programado (admin o usuario) que su envío no salió
+    como estaba previsto: falta de cupo de Meta, lista vacía o pacientes dados de
+    baja. Si no tiene correo configurado, el motivo queda igual a la vista en la
+    lista de programados."""
     creador = (f.get("creador") or "").strip().lower()
     prog_id = f.get("id")
     if not creador:
         return
+    titulo = titulo or "Tu envío programado no se realizó"
+    if not asunto:
+        asunto = f"[SNW] Envío programado de {creador} no se realizó (cupo de WhatsApp)"
     try:
         cuenta = usuario_buscar(creador) or {}
     except Exception as e:
@@ -4669,21 +4873,18 @@ def _avisar_creador_prog(f: dict, motivo: str) -> None:
         return
     html = f"""
     <html><body style="font-family: Arial, sans-serif; color: #24303c;">
-      <h2>Tu envío programado no se realizó</h2>
+      <h2>{_html.escape(titulo)}</h2>
       <p>Hola <strong>{_html.escape(cuenta.get('nombre') or creador)}</strong>,</p>
-      <p>El envío programado de la plantilla
+      <p>Sobre el envío programado de la plantilla
       <strong>{_html.escape(f.get('plantilla_nombre') or '')}</strong> para el
-      <strong>{f['programado_para'].strftime('%d-%m-%Y %H:%M') if f.get('programado_para') else ''}</strong>
-      no salió porque no quedaba cupo de WhatsApp.</p>
+      <strong>{f['programado_para'].strftime('%d-%m-%Y %H:%M') if f.get('programado_para') else ''}</strong>:</p>
       <p style="background:#f5f7f8; border-left:4px solid #b23b37; padding:12px 14px; border-radius:6px;">
         {_html.escape(motivo)}</p>
       <p><a href="{base}" style="display:inline-block; background:#128c7e; color:#fff; padding:12px 22px; border-radius:8px; text-decoration:none; font-weight:bold;">Ver envíos programados</a></p>
     </body></html>
     """
-    ok = _enviar_correo_html([correo],
-                             f"[SNW] Envío programado de {creador} no se realizó (cupo de WhatsApp)",
-                             html)
-    print(f"[PROG] Programado {prog_id}: aviso de cupo enviado a {correo} "
+    ok = _enviar_correo_html([correo], asunto, html)
+    print(f"[PROG] Programado {prog_id}: aviso al creador enviado a {correo} "
           f"({'creador' if propio else 'destino global'}; ok={ok})")
 
 
@@ -4709,11 +4910,33 @@ def _ejecutar_programado(f: dict) -> None:
     except HTTPException as e:
         _marcar_prog(f["id"], "error", e.detail)
         return
+
+    # La lista se congeló al crear el programado. Se vuelve a validar aquí: si
+    # alguno se dio de baja, queda fuera y se le avisa al creador (nunca se
+    # escribe a quien pidió la baja).
+    amb_q = "produccion" if f.get("area_id") is not None else amb_prog
+    cohorte = _prog_destinatarios(f["id"])
+    if not cohorte:
+        motivo = ("No quedaron destinatarios preelegidos: la lista se vació antes de la hora "
+                  "de envío. Reprograma el envío.")
+        _marcar_prog(f["id"], "error", motivo)
+        _avisar_creador_prog(f, motivo)
+        return
+    vivos, excluidos = _revivir_destinatarios_prog(
+        f.get("tabla") or nombre_base(amb_prog), amb_prog, amb_q, [p["id"] for p in cohorte])
+    if not vivos:
+        motivo = (f"Los {len(cohorte)} destinatarios preelegidos ya no se pueden contactar "
+                  f"({len(excluidos)} dados de baja). No se envió nada. Reprograma el envío.")
+        _marcar_prog(f["id"], "error", motivo)
+        _avisar_creador_prog(f, motivo)
+        return
+
     body = EnvioIn(
         ambiente=amb_prog,
         plantilla_id=f["plantilla_id"],
         area_id=f.get("area_id"),
-        limite=f.get("limite"),
+        limite=len(vivos),
+        pacientes=[p["id"] for p in vivos],
     )
     sesion_sistema = {
         "usuario": f.get("creador") or "sistema",
@@ -4750,6 +4973,15 @@ def _ejecutar_programado(f: dict) -> None:
         _marcar_prog(f["id"], "enviado", "sin destinatarios")
         return
     threading.Thread(target=lambda: asyncio.run(bg()), daemon=True).start()
+    if excluidos:
+        motivo = (f"Enviado a {len(vivos)} de los {len(cohorte)} pacientes preelegidos: "
+                  f"{len(excluidos)} quedaron fuera (se dieron de baja o ya no estaban en la base).")
+        _marcar_prog(f["id"], "enviado", motivo, job_id)
+        _avisar_creador_prog(
+            f, motivo,
+            titulo="Tu envío programado salió a menos pacientes de lo previsto",
+            asunto=f"[SNW] Envío programado de {f.get('creador') or ''}: {len(excluidos)} pacientes excluidos")
+        return
     _marcar_prog(f["id"], "enviado", "", job_id)
 
 

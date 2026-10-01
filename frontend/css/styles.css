@@ -342,6 +342,30 @@ select.badge--select {
   padding: 6px 10px;
 }
 .prog-item__costo-aviso { display: block; color: var(--texto-suave); margin-top: 2px; }
+/* Grupo de pacientes que el sistema preeligió al crear el programado. */
+.prog-item__dest { margin-top: 8px; }
+.prog-item__dest-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: .82rem;
+  color: var(--verde, #128c7e);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.prog-item__dest-btn:hover { color: var(--verde-osc, #0c6d62); }
+.prog-item__dest-lista { margin-top: 6px; }
+.prog-item__dest-ul {
+  margin: 0;
+  padding: 8px 10px 8px 26px;
+  max-height: 190px;
+  overflow-y: auto;
+  font-size: .8rem;
+  background: var(--surface-3, rgba(0, 0, 0, .04));
+  border: 1px solid var(--borde, rgba(0, 0, 0, .12));
+  border-radius: 8px;
+}
 /* Feedback mientras se actualiza la lista (igual que en Base de datos). */
 .prog-item.actualizando { animation: fila-pulso 1.1s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {

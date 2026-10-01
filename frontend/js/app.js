@@ -2097,25 +2097,27 @@ function poblarFormProg() {
   }
 }
 
-// Tope real del límite programado: el menor entre los pendientes de la base y
-// los usuarios que aún permite contactar el límite diario de Meta. Sin límite
-// de Meta configurado, el tope son los pendientes.
+// Tope real del límite programado: el menor entre los pacientes LIBRES de la
+// base (los que ya tienen otro programado activo no cuentan) y los usuarios que
+// aún permite contactar el límite diario de Meta. Sin límite de Meta
+// configurado, el tope son los libres.
 function techoProgLimite() {
   const c = progCupo;
   if (!c) return 0;
-  const disponibles = (c.disponibles != null) ? c.disponibles : c.pendientes;
-  return Math.max(0, Math.min(c.pendientes || 0, disponibles));
+  const enBase = (c.libres != null) ? c.libres : (c.pendientes || 0);
+  const disponibles = (c.disponibles != null) ? c.disponibles : enBase;
+  return Math.max(0, Math.min(enBase, disponibles));
 }
 
-// Explica cuál es el tope real, nombrando los dos límites (pendientes de la
-// base y cupo diario de Meta).
+// Explica cuál es el tope real, nombrando los dos límites (pacientes libres de
+// la base y cupo diario de Meta).
 function textoTopeProg(techo) {
   const c = progCupo || {};
-  const enBase = c.pendientes || 0;
+  const enBase = (c.libres != null) ? c.libres : (c.pendientes || 0);
   if (c.disponibles == null) {
-    return `El límite no puede superar los ${enBase} pacientes pendientes de la base de datos. Usa ${techo} o menos.`;
+    return `El límite no puede superar los ${enBase} pacientes libres de la base de datos. Usa ${techo} o menos.`;
   }
-  return `El límite no puede superar los ${enBase} pendientes de la base de datos ni los ` +
+  return `El límite no puede superar los ${enBase} pacientes libres de la base de datos ni los ` +
     `${c.disponibles} del límite diario de Meta (${c.tier} usuarios únicos en 24 h; ya se ` +
     `contactó a ${c.usados}). Usa ${techo} o menos.`;
 }
@@ -2168,22 +2170,32 @@ function aplicarCupoProg() {
   // quien programa vea el conflicto y lo corrija (el backend lo rechaza igual).
   revisarLimiteProg();
   if (nota) {
+    const libres = (c.libres != null) ? c.libres : (c.pendientes || 0);
     if (progSinCupo) {
       nota.hidden = false;
-      nota.textContent = c.disponibles != null && c.disponibles <= 0
-        ? `Sin cupo hoy: el límite diario de Meta (${c.tier} usuarios únicos en 24 h) ya se ` +
-          `alcanzó. Espera a que avance la ventana de 24 h para programar.`
-        : "No hay pacientes pendientes en esta base para programar.";
+      if (c.disponibles != null && c.disponibles <= 0) {
+        nota.textContent = `Sin cupo hoy: el límite diario de Meta (${c.tier} usuarios únicos en 24 h) ` +
+          `ya se alcanzó. Espera a que avance la ventana de 24 h para programar.`;
+      } else if (libres <= 0 && c.reservados > 0) {
+        nota.textContent =
+          `No quedan pacientes libres: los ${c.pendientes} pendientes de esta base ya están ` +
+          `preelegidos por otros envíos programados activos. Cancela alguno o espera a que se complete.`;
+      } else {
+        nota.textContent = "No hay pacientes pendientes en esta base para programar.";
+      }
       return;
     }
     nota.hidden = false;
+    const cola = (c.pendientes || 0) > techo ? ` · ${c.pendientes - techo} quedan para otro horario` : "";
+    const tomados = c.reservados > 0 ? ` · ${c.reservados} ya tomados por otros programados` : "";
     if (c.tier) {
-      const extra = (c.pendientes || 0) > techo ? ` · ${c.pendientes - techo} quedan para más adelante` : "";
       nota.textContent =
         `Máximo ${techo} hoy: ${c.disponibles} de ${c.tier} disponibles por el límite diario ` +
-        `de Meta y ${c.pendientes} pendientes en la base${extra}.`;
+        `de Meta y ${libres} pacientes libres en la base${tomados}${cola}. El sistema preelige ` +
+        `y reserva ese grupo al programar.`;
     } else {
-      nota.textContent = `Pendientes en la base: ${c.pendientes}.`;
+      nota.textContent = `Máximo ${techo}: ${libres} pacientes libres en la base${tomados}${cola}. ` +
+        `El sistema preelige y reserva ese grupo al programar.`;
     }
   }
 }
@@ -2212,6 +2224,9 @@ async function cargarCupoProg(forzar = false) {
     const lim = d.limite_mensajeria || null;
     progCupo = {
       pendientes: Number(d.pendientes) || 0,
+      // Los que ya tienen otro programado activo no se pueden preelegir otra vez.
+      reservados: Number(d.reservados) || 0,
+      libres: Number(d.libres ?? d.pendientes) || 0,
       disponibles: lim ? Number(lim.disponibles) : null,
       tier: lim ? lim.tier : 0,
       usados: lim ? lim.usados_24h : 0,
@@ -2412,17 +2427,48 @@ function progItemHtml(p) {
         `<button type="button" class="btn btn--sm btn--danger" data-prog-rechazar="${p.id}">Rechazar</button>` : "") +
     (p.puede_cancelar
       ? `<button type="button" class="btn btn--sm btn--ghost" data-prog-cancelar="${p.id}">Cancelar</button>` : "");
+  // El grupo que el sistema preeligió al crearlo: se puede abrir para revisarlo.
+  const listaDest = (p.preelegidos != null)
+    ? `<div class="prog-item__dest">` +
+      `<button type="button" class="prog-item__dest-btn" data-prog-dest="${p.id}">` +
+      `Ver ${p.preelegidos} preelegido${p.preelegidos === 1 ? "" : "s"}</button>` +
+      `<div class="prog-item__dest-lista" data-prog-dest-lista="${p.id}" hidden></div></div>` : "";
   return `<div class="prog-item" data-prog="${p.id}">` +
     `<div class="prog-item__cab"><span class="prog-estado prog-estado--${p.estado}">${ESTADO_PROG_LABEL[p.estado] || p.estado}</span>` +
-    `<span>${escaparHtml(p.plantilla || "—")}</span>${fechaProg}</div>` +
+    `<span>${escaparHtml(p.plantilla || "-")}</span>${fechaProg}</div>` +
     `<div class="prog-item__meta">` +
     (p.creado ? `Creado ${escaparHtml(p.creado)}` : "") +
     (p.area ? ` · ${escaparHtml(p.area)}` : "") +
     (p.limite ? ` · límite ${p.limite}` : "") +
     (p.creador_nombre ? ` · por ${escaparHtml(p.creador_nombre)}` : "") + decided + `</div>` +
-    motivo + costo +
+    motivo + costo + listaDest +
     (botones ? `<div class="prog-item__acciones">${botones}</div>` : "") +
     `</div>`;
+}
+
+// Carga y muestra (u oculta) la lista de pacientes que quedaron preelegidos.
+async function toggleDestinatariosProg(id, btn) {
+  const caja = document.querySelector(`[data-prog-dest-lista="${id}"]`);
+  if (!caja) return;
+  if (!caja.hidden) { caja.hidden = true; return; }
+  caja.hidden = false;
+  caja.innerHTML = `<p class="field__hint">Cargando…</p>`;
+  try {
+    const res = await fetch(`api/notificaciones/programados/${id}/destinatarios`, {
+      headers: authHeaders(), cache: "no-store",
+    });
+    if (res.status === 401) { window.snwSesionExpirada(); return; }
+    if (!res.ok) throw new Error();
+    const d = await res.json();
+    const items = (d.destinatarios || []).map((x) =>
+      `<li>${escaparHtml(x.nombre || "Sin nombre")} · ${escaparHtml(x.telefono || "sin teléfono")}</li>`).join("");
+    caja.innerHTML = d.total
+      ? `<ul class="prog-item__dest-ul">${items}</ul>`
+      : `<p class="field__hint">Este envío no tiene lista preelegida (se creó antes de existirla).</p>`;
+  } catch {
+    console.error("[app.js toggleDestinatariosProg()]");
+    caja.innerHTML = `<p class="field__hint">No se pudo cargar la lista.</p>`;
+  }
 }
 
 // Paginador de 3 por página (la lista no crece más que eso) + scroll.
@@ -2488,11 +2534,17 @@ async function programarEnvio() {
     const data = await res.json().catch(() => ({}));
     if (res.status === 401) { window.snwSesionExpirada(); return; }
     if (!res.ok) throw new Error(data.detail || "No se pudo programar.");
+    // El sistema ya dejó reservado el grupo: se informa para que quede claro
+    // que el envío va a esos pacientes y no a quien aparezca pendiente después.
+    const cuantos = Number(data.preelegidos) || 0;
     toast(data.estado === "pendiente"
-      ? "Envío programado: quedó pendiente de aprobación de un superior."
-      : "Envío programado.", "ok");
+      ? `Envío programado: ${cuantos} paciente(s) preelegidos, pendiente de aprobación de un superior.`
+      : `Envío programado: ${cuantos} paciente(s) preelegidos.`, "ok");
     inpF.value = "";
     if (inpL) inpL.value = "";
+    // Esos pacientes quedan reservados: hay que volver a pedir el cupo.
+    progCupoKey = "";
+    await cargarCupoProg(true);
     await cargarProgramados();
   } catch (err) {
     console.error("[app.js programarEnvio()]", err);
@@ -2541,7 +2593,9 @@ if (listaProgEl) listaProgEl.addEventListener("click", (e) => {
   const bAp = e.target.closest("[data-prog-aprobar]");
   const bRe = e.target.closest("[data-prog-rechazar]");
   const bCa = e.target.closest("[data-prog-cancelar]");
-  if (bAp) decidirProg(Number(bAp.dataset.progAprobar), "aprobar");
+  const bDe = e.target.closest("[data-prog-dest]");
+  if (bDe) toggleDestinatariosProg(Number(bDe.dataset.progDest), bDe);
+  else if (bAp) decidirProg(Number(bAp.dataset.progAprobar), "aprobar");
   else if (bCa) decidirProg(Number(bCa.dataset.progCancelar), "cancelar");
   else if (bRe) {
     progRechazarId = Number(bRe.dataset.progRechazar);

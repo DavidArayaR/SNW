@@ -18,6 +18,7 @@ RUTAS = (
     ("/api/notificaciones/programados", "POST", "crear_programado", None),
     ("/api/notificaciones/programados", "GET", "listar_programados", None),
     ("/api/notificaciones/programados/resumen", "GET", "resumen_programados", None),
+    ("/api/notificaciones/programados/{prog_id}/destinatarios", "GET", "destinatarios_programado", None),
     ("/api/notificaciones/programados/{prog_id}/aprobar", "POST", "aprobar_programado", None),
     ("/api/notificaciones/programados/{prog_id}/rechazar", "POST", "rechazar_programado", None),
     ("/api/notificaciones/programados/{prog_id}/cancelar", "POST", "cancelar_programado", None),
