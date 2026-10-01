@@ -595,11 +595,17 @@ function renderLista(filtro = "") {
 
   // Solo una plantilla APROBADA por Meta se puede usar para enviar. Las
   // rechazadas se pueden editar/eliminar (para corregirlas o descartarlas),
-  // por eso van en su propio grupo; las realmente pendientes de revisión
-  // (recién creadas o PENDING) quedan de solo lectura (ver abrir()).
-  const aprobadas = visibles.filter((p) => esPlantillaAprobada(p));
-  const rechazadas = visibles.filter((p) => esPlantillaRechazada(p));
-  const pendientes = visibles.filter((p) => !esPlantillaAprobada(p) && !esPlantillaRechazada(p));
+  // por eso van en su propio grupo. La aprobación interna ocurre antes de
+  // enviar la plantilla a Meta, por lo que ambas esperas deben distinguirse.
+  const estaRechazada = (p) => esPlantillaRechazada(p) || aprobacionPlantilla(p) === "rechazada";
+  const aprobadas = visibles.filter((p) => esPlantillaAprobada(p) && !estaRechazada(p));
+  const rechazadas = visibles.filter(estaRechazada);
+  const pendientesInternas = visibles.filter(
+    (p) => aprobacionPlantilla(p) === "pendiente" && !estaRechazada(p)
+  );
+  const pendientesMeta = visibles.filter(
+    (p) => aprobacionPlantilla(p) !== "pendiente" && !estaRechazada(p) && !esPlantillaAprobada(p)
+  );
 
   const agregarGrupo = (titulo, lista, tono, icono) => {
     if (!lista.length) return;
@@ -611,8 +617,9 @@ function renderLista(filtro = "") {
   };
 
   agregarGrupo("Plantillas aprobadas por Meta", aprobadas, "ok", "fa-circle-check");
-  agregarGrupo("Plantillas rechazadas por Meta", rechazadas, "danger", "fa-circle-xmark");
-  agregarGrupo("Plantillas pendientes de aprobación por Meta", pendientes, "warn", "fa-clock");
+  agregarGrupo("Plantillas rechazadas", rechazadas, "danger", "fa-circle-xmark");
+  agregarGrupo("Plantillas pendientes de aprobación", pendientesInternas, "warn", "fa-clock");
+  agregarGrupo("Plantillas pendientes de aprobación por Meta", pendientesMeta, "info", "fa-clock");
 }
 
 function actualizarPreview() {
@@ -809,9 +816,10 @@ function actualizarBotonesSegunEstado(p) {
       avisoPendiente.hidden = false;
     } else if (p && !editable) {
       pararCuentaRegresiva();
-      avisoPendiente.textContent =
-        `Esta plantilla está ${etiquetaEstadoMeta(p.whatsapp_template_status).toLowerCase()} en Meta: ` +
-        "no se puede editar, guardar, eliminar ni usar para enviar mensajes hasta que se resuelva.";
+      avisoPendiente.textContent = p.whatsapp_template_status === "PENDING"
+        ? "Esta plantilla está pendiente de aprobación por Meta: no se puede editar, guardar, eliminar ni usar para enviar mensajes hasta que se apruebe."
+        : `Esta plantilla está ${etiquetaEstadoMeta(p.whatsapp_template_status).toLowerCase()} en Meta: ` +
+          "no se puede editar, guardar, eliminar ni usar para enviar mensajes hasta que se resuelva.";
       avisoPendiente.hidden = false;
     } else if (p && enEnfriamiento) {
       avisoPendiente.textContent = textoEnfriamiento(p);
