@@ -3137,6 +3137,68 @@ def _costo_estimado_por_clave(clave: str, total: int) -> dict | None:
     }
 
 
+def _html_correo_envio(*, solicitante: str, tipo: str, tipo_detalle: str, base_nombre: str,
+                       total: int, plantilla_nombre: str, plantilla_texto: str,
+                       costo: dict | None, url_confirmar: str, url_rechazar: str,
+                       token: str) -> str:
+    """Cuerpo del correo de confirmación/autorización de un envío masivo. Es el
+    mismo para el envío manual y el programado: lo único que cambia es la línea
+    «Tipo de envío» (manual o programado, con su fecha)."""
+    costo_txt = _fmt_moneda(costo["costo"], costo["moneda"]) if costo else "no disponible"
+    bloque_costo = f"""
+      <div style="text-align:center; margin:26px 0;">
+        <p style="margin:0 0 4px; font-size:13px; color:#66757f;">Costo aproximado de este envío</p>
+        <p style="margin:0; font-size:40px; line-height:1.1; font-weight:bold; color:#d11a1a;">{costo_txt}</p>
+        <p style="margin:8px 0 0; font-size:12px; color:#66757f;">{total} mensajes &times; {_fmt_moneda(costo['rate'], costo['moneda'])} c/u &middot; categoría {costo['categoria'].capitalize()}</p>
+      </div>""" if costo else """
+      <p style="text-align:center; margin:24px 0; font-size:13px; color:#b23b37; font-weight:bold;">
+        Costo aproximado no disponible (revisa las tarifas de Meta en Estadísticas).
+      </p>"""
+    return f"""
+    <html><body style="font-family: Arial, sans-serif; color: #24303c;">
+      <h2>Solicitud de envío masivo</h2>
+      <p><strong>{_html.escape(solicitante)}</strong> solicitó enviar la plantilla
+      <strong>{_html.escape(plantilla_nombre)}</strong> a
+      <strong>{total} personas</strong> desde la base de datos
+      <strong>{_html.escape(base_nombre)}</strong>.</p>
+      <p>Tipo de envío: <strong>{_html.escape(tipo)}</strong>{tipo_detalle}</p>
+      {bloque_costo}
+      <div style="background:#f5f7f8; border-left:4px solid #128c7e; padding:14px 16px; margin:18px 0; border-radius:6px;">
+        <p style="margin:0 0 6px; font-size:12px; color:#66757f; font-weight:bold;">Mensaje a enviar:</p>
+        <p style="margin:0; white-space:pre-wrap; font-family:Consolas,monospace; font-size:13px; color:#24303c;">{_html.escape(plantilla_texto or '')}</p>
+      </div>
+      <p style="margin:24px 0;">
+        <a href="{url_confirmar}" style="display:inline-block; background:#128c7e; color:#fff; padding:12px 22px; border-radius:8px; text-decoration:none; font-weight:bold;">Confirmar envío</a>
+        &nbsp;&nbsp;
+        <a href="{url_rechazar}" style="display:inline-block; background:#b23b37; color:#fff; padding:12px 22px; border-radius:8px; text-decoration:none; font-weight:bold;">Rechazar envío</a>
+      </p>
+      <p>Si no reconoces esta solicitud, ignora este correo.</p>
+      <p style="font-size:12px; color:#66757f;">Token: {token}</p>
+    </body></html>
+    """
+
+
+def _enviar_correo_html(destinos: list, subject: str, html: str) -> bool:
+    """SMTP común a los correos de confirmación (manual y programado)."""
+    c = _config_correo()
+    emisor = c["emisor"]
+    host, port, user, pwd, tls = c["host"], c["port"], c["user"], c["pwd"], c["tls"]
+    try:
+        msg = _armar_mensaje(subject, emisor, ", ".join(destinos), html)
+        context = ssl.create_default_context()
+        with smtplib.SMTP(host, port) as server:
+            if tls:
+                server.starttls(context=context)
+            if user and pwd:
+                server.login(user, pwd)
+            server.sendmail(emisor, destinos, msg.as_string())
+        print(f"[CORREO] Enviado a {', '.join(destinos)}: {subject}")
+        return True
+    except Exception as e:
+        log_error(f"correo a {', '.join(destinos)}", e)
+        return False
+
+
 def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, plantilla_texto: str,
                                  ambiente: str, plantilla_clave: str = "", solicitante: str = "",
                                  destinos_extra: list | None = None,
@@ -3166,14 +3228,11 @@ def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, p
         # Los enlaces por token no requieren sesión, así que el destinatario
         # puede confirmar o rechazar.
         destinos = [destino_global]
-    host, port, user, pwd, tls = c["host"], c["port"], c["user"], c["pwd"], c["tls"]
+    host, pwd = c["host"], c["pwd"]
 
     costo = _costo_estimado_por_clave(plantilla_clave, total)
     costo_txt = _fmt_moneda(costo["costo"], costo["moneda"]) if costo else "no disponible"
     quien = solicitante.strip() or "usuario desconocido"
-    quien_html = _html.escape(quien)
-    plantilla_nombre_html = _html.escape(plantilla_nombre)
-    plantilla_texto_html = _html.escape(plantilla_texto)
 
     if not host or not pwd:
         # Modo simulado: logear URL para pruebas sin SMTP real
@@ -3183,57 +3242,22 @@ def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, p
     confirm_url = f"{base}/api/notificaciones/confirmar/{token}"
     reject_url = f"{base}/api/notificaciones/rechazar/{token}"
     subject = f"[SNW] {quien} pide confirmar un envío masivo - {total} destinatarios (~{costo_txt})"
-    linea_esp = ""
-    if (area_nombre or "").strip():
-        esp_html = _html.escape(area_nombre.strip())
-        linea_esp = f"<p>Area: <strong>{esp_html}</strong>.</p>"
+    detalle_base = f" ({area_nombre.strip()})" if (area_nombre or "").strip() else ""
 
-    if costo:
-        bloque_costo = f"""
-      <div style="text-align:center; margin:26px 0;">
-        <p style="margin:0 0 4px; font-size:13px; color:#66757f;">Costo aproximado de este envío</p>
-        <p style="margin:0; font-size:40px; line-height:1.1; font-weight:bold; color:#d11a1a;">{costo_txt}</p>
-        <p style="margin:8px 0 0; font-size:12px; color:#66757f;">{total} mensajes &times; {_fmt_moneda(costo['rate'], costo['moneda'])} c/u &middot; categoría {costo['categoria'].capitalize()}</p>
-      </div>"""
-    else:
-        bloque_costo = """
-      <p style="text-align:center; margin:24px 0; font-size:13px; color:#b23b37; font-weight:bold;">
-        Costo aproximado no disponible (revisa las tarifas de Meta en Estadísticas).
-      </p>"""
-
-    html = f"""
-    <html><body style="font-family: Arial, sans-serif; color: #24303c;">
-      <h2>Solicitud de envío masivo</h2>
-      <p><strong>{quien_html}</strong> solicitó enviar la plantilla <strong>{plantilla_nombre_html}</strong> a <strong>{total} personas</strong> desde la base de datos <strong>{ambiente}</strong>.</p>
-      {linea_esp}
-      {bloque_costo}
-      <div style="background:#f5f7f8; border-left:4px solid #128c7e; padding:14px 16px; margin:18px 0; border-radius:6px;">
-        <p style="margin:0 0 6px; font-size:12px; color:#66757f; font-weight:bold;">Mensaje a enviar:</p>
-        <p style="margin:0; white-space:pre-wrap; font-family:Consolas,monospace; font-size:13px; color:#24303c;">{plantilla_texto_html}</p>
-      </div>
-      <p style="margin:24px 0;">
-        <a href="{confirm_url}" style="display:inline-block; background:#128c7e; color:#fff; padding:12px 22px; border-radius:8px; text-decoration:none; font-weight:bold;">Confirmar envío</a>
-        &nbsp;&nbsp;
-        <a href="{reject_url}" style="display:inline-block; background:#b23b37; color:#fff; padding:12px 22px; border-radius:8px; text-decoration:none; font-weight:bold;">Rechazar envío</a>
-      </p>
-      <p>Si no reconoces esta solicitud, ignora este correo.</p>
-      <p style="font-size:12px; color:#66757f;">Token: {token}</p>
-    </body></html>
-    """
-    try:
-        msg = _armar_mensaje(subject, emisor, ", ".join(destinos), html)
-        context = ssl.create_default_context()
-        with smtplib.SMTP(host, port) as server:
-            if tls:
-                server.starttls(context=context)
-            if user and pwd:
-                server.login(user, pwd)
-            server.sendmail(emisor, destinos, msg.as_string())
-        print(f"[CORREO] Confirmación enviada a {', '.join(destinos)} token {token}")
-        return True
-    except Exception as e:
-        log_error(f"_enviar_correo_confirmacion a {', '.join(destinos)}", e)
-        return False
+    html = _html_correo_envio(
+        solicitante=quien,
+        tipo="Manual",
+        tipo_detalle="",
+        base_nombre=f"{ambiente}{detalle_base}",
+        total=total,
+        plantilla_nombre=plantilla_nombre,
+        plantilla_texto=plantilla_texto,
+        costo=costo,
+        url_confirmar=confirm_url,
+        url_rechazar=reject_url,
+        token=token,
+    )
+    return _enviar_correo_html(destinos, subject, html)
 
 
 def renderizar_mensaje(texto: str, paciente: dict) -> str:
@@ -4301,61 +4325,66 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
                 cur.execute("DELETE FROM envios_programados WHERE id = %s", (prog_id,))
                 conn.commit()
             raise HTTPException(409, detail="El área no tiene supervisores con correo: no se puede pedir confirmación.")
+        # Mismo correo que el envío manual, con los destinatarios que habrá.
+        _total_tabla, _eleg = _contar_elegibles_tabla(esp["nombre_tabla_base"], amb, amb)
         _enviar_correo_prog(sups, prog_id, plantilla.get("nombre") or "", esp["nombre_visible"],
                             cuando.strftime("%d-%m-%Y %H:%M"), limite,
-                            (sesion.get("nombre") or creador), token)
+                            (sesion.get("nombre") or creador), token,
+                            plantilla_texto=plantilla.get("texto") or "",
+                            tabla_nombre=amb,
+                            plantilla_clave=plantilla.get("clave") or "",
+                            total=min(_eleg, limite) if limite else _eleg)
     return {"ok": True, "id": prog_id, "estado": estado}
 
 
 def _enviar_correo_prog(destinatarios: list, prog_id: int, plantilla_nombre: str,
                         area_nombre: str, cuando_txt: str, limite: int | None,
-                        solicitante: str, token: str) -> bool:
-    """Aviso a supervisores del area: aprueban/rechazan con enlaces por token."""
+                        solicitante: str, token: str, plantilla_texto: str = "",
+                        tabla_nombre: str = "", plantilla_clave: str = "",
+                        total: int | None = None) -> bool:
+    """Aviso a supervisores del area: confirman/rechazan con enlaces por token.
+    Mismo cuerpo que el correo del envío manual; lo único que cambia es la línea
+    «Tipo de envío», que dice Programado y la fecha programada."""
     c = _config_correo()
     emisor = c["emisor"]
     base = url_base()
     if not emisor:
         print(f"[CORREO-PROG] Emisor no configurado. Programado {prog_id}")
         return False
-    host, port, user, pwd, tls = c["host"], c["port"], c["user"], c["pwd"], c["tls"]
+    host, pwd = c["host"], c["pwd"]
+    total = int(total or limite or 0)
+    costo = _costo_estimado_por_clave(plantilla_clave, total) if total else None
+    costo_txt = _fmt_moneda(costo["costo"], costo["moneda"]) if costo else "no disponible"
     if not host or not pwd:
         print(f"[CORREO-PROG SIMULADO] Para {', '.join(destinatarios)}: {solicitante} programó"
               f" '{plantilla_nombre}' ({area_nombre}) para {cuando_txt} -"
-              f" aprobar {base}/api/notificaciones/programados/aprobar/{token} |"
-              f" rechazar {base}/api/notificaciones/programados/rechazar/{token}")
+              f" confirmar {base}/api/notificaciones/programados/aprobar/{token} |"
+              f" rechazar {base}/api/notificaciones/programados/rechazar/{token}"
+              f" - {total} personas, costo aprox. {costo_txt}")
         return True
     limite_txt = f" (límite {limite} mensajes)" if limite else ""
-    subject = f"[SNW] {solicitante} programó un envío ({area_nombre}, {cuando_txt})"
-    html = f"""
-    <html><body style="font-family: Arial, sans-serif; color: #24303c;">
-      <h2>Envío masivo programado</h2>
-      <p><strong>{_html.escape(solicitante)}</strong> programó la plantilla
-      <strong>{_html.escape(plantilla_nombre)}</strong> en el área
-      <strong>{_html.escape(area_nombre)}</strong> para el
-      <strong>{_html.escape(cuando_txt)}</strong>{limite_txt}.</p>
-      <p>Si no se decide nada antes de la fecha, el envío <strong>no</strong> se ejecuta.</p>
-      <p style="margin:24px 0;">
-        <a href="{base}/api/notificaciones/programados/aprobar/{token}" style="display:inline-block; background:#128c7e; color:#fff; padding:12px 22px; border-radius:8px; text-decoration:none; font-weight:bold;">Aprobar envío</a>
-        &nbsp;&nbsp;
-        <a href="{base}/api/notificaciones/programados/rechazar/{token}" style="display:inline-block; background:#b23b37; color:#fff; padding:12px 22px; border-radius:8px; text-decoration:none; font-weight:bold;">Rechazar</a>
-      </p>
-      <p>Si no reconoces esta solicitud, ignora este correo.</p>
-    </body></html>
-    """
-    try:
-        msg = _armar_mensaje(subject, emisor, ", ".join(destinatarios), html)
-        context = ssl.create_default_context()
-        with smtplib.SMTP(host, port) as server:
-            if tls:
-                server.starttls(context=context)
-            if user and pwd:
-                server.login(user, pwd)
-            server.sendmail(emisor, destinatarios, msg.as_string())
-        print(f"[CORREO-PROG] Aviso de programado {prog_id} a {', '.join(destinatarios)}")
-        return True
-    except Exception as e:
-        log_error(f"_enviar_correo_prog {prog_id}", e)
-        return False
+    subject = (f"[SNW] {solicitante} pide confirmar un envío programado - "
+               f"{total} destinatarios (~{costo_txt})")
+    base_nombre = f"{tabla_nombre} ({area_nombre})" if (tabla_nombre and area_nombre) \
+        else (tabla_nombre or area_nombre)
+    html = _html_correo_envio(
+        solicitante=solicitante,
+        tipo="Programado",
+        tipo_detalle=(f" para el <strong>{_html.escape(cuando_txt)}</strong>{limite_txt}."
+                      " Si no se confirma antes de la fecha, el envío no se ejecuta."),
+        base_nombre=base_nombre,
+        total=total,
+        plantilla_nombre=plantilla_nombre,
+        plantilla_texto=plantilla_texto,
+        costo=costo,
+        url_confirmar=f"{base}/api/notificaciones/programados/aprobar/{token}",
+        url_rechazar=f"{base}/api/notificaciones/programados/rechazar/{token}",
+        token=token,
+    )
+    ok = _enviar_correo_html(destinatarios, subject, html)
+    if not ok:
+        log_error(f"_enviar_correo_prog {prog_id}", RuntimeError("fallo el envio por SMTP"))
+    return ok
 
 
 def _prog_visible(sesion: dict, f: dict) -> bool:
