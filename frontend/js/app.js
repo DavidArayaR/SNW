@@ -560,8 +560,8 @@ function actualizarPasosProg() {
   if (paso3) paso3.classList.toggle("prog-paso--listo", !!(paso2 && inpF && inpF.value));
   if (selA) selA.disabled = !paso1;
   if (inpF) inpF.disabled = !paso2;
-  if (inpL) inpL.disabled = !paso2;
-  if (btn) btn.disabled = !(paso2 && inpF && inpF.value) || progCreando;
+  if (inpL) inpL.disabled = !paso2 || progSinCupo;
+  if (btn) btn.disabled = !(paso2 && inpF && inpF.value) || progCreando || progSinCupo;
 }
 
 function renderLista(filtro = "") {
@@ -1447,7 +1447,6 @@ function abrirModalConf(id = tplSelId) {
   }
   refrescarAvisoDevConf();
   refrescarAvisoAdminConf();
-  cargarLimiteAdminConf();
   actualizarResumenConf();
 
   $("#confProgreso").hidden = true;
@@ -1614,55 +1613,6 @@ function fmtMoneda(monto, moneda) {
     maximumFractionDigits: entero ? 0 : 2,
   });
   return `${s} ${moneda}`;
-}
-
-// Editor del límite diario (wa_messaging_limit_24h) para admin/dev. Se muestra
-// dentro de la card de envío para ajustarlo a lo que indique el dashboard de Meta.
-function cargarLimiteAdminConf() {
-  const fila = $("#filaLimiteAdminConf");
-  if (!fila) return;
-  if (!window.snwEsPrivilegiado) {
-    fila.hidden = true;
-    return;
-  }
-  fila.hidden = false;
-  fetch("api/whatsapp/messaging-limit", { headers: authHeaders(), cache: "no-store" })
-    .then((r) => (r.ok ? r.json() : null))
-    .then((data) => {
-      if (!data || data.tier == null) return;
-      $("#limiteAdminNumConf").value = String(data.tier);
-    })
-    .catch(() => {});
-}
-
-const btnGuardarLimiteConf = $("#btnGuardarLimiteConf");
-if (btnGuardarLimiteConf) {
-  btnGuardarLimiteConf.addEventListener("click", async () => {
-    const input = $("#limiteAdminNumConf");
-    const valor = parseInt(input.value, 10);
-    if (!Number.isFinite(valor) || valor < 0) {
-      return toast("Escribe un número válido (0 = ilimitado).", "error");
-    }
-    btnGuardarLimiteConf.disabled = true;
-    try {
-      const res = await fetch("api/whatsapp/messaging-limit", {
-        method: "PUT",
-        headers: authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ limite: valor }),
-      });
-      if (res.status === 401) { window.snwSesionExpirada(); return; }
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail ?? `Error ${res.status}`);
-      input.value = String(data.tier);
-      toast("Límite diario actualizado.");
-      actualizarResumenConf();
-    } catch (e) {
-      console.error("[app.js cargarLimiteAdminConf()]", e);
-      toast(e.message || "No se pudo guardar el límite.", "error");
-    } finally {
-      btnGuardarLimiteConf.disabled = false;
-    }
-  });
 }
 
 // Aviso del límite diario de WhatsApp alcanzado. En producción bloquea el
@@ -2116,6 +2066,12 @@ document.querySelectorAll("[data-msgtab]").forEach((b) =>
 let programados = [];
 let progCreando = false; // candado anti doble-click/abuso
 let progRechazarId = null;
+// Cupo de hoy para el envío programado: pendientes de la base y lo que deja el
+// límite diario de Meta. El límite del formulario nunca puede pasar ese techo.
+let progCupo = null; // {pendientes, disponibles, tier, usados}
+let progCupoKey = ""; // área para la que ya se consultó (evita repetir el sondeo)
+let progSinCupo = false;
+
 
 
 function poblarFormProg() {
@@ -2129,6 +2085,9 @@ function poblarFormProg() {
   if (guardada && areas.some((e) => String(e.id) === guardada)) selA.value = guardada;
   else selA.value = "";
   actualizarProgPlantilla();
+  // El tope del límite depende del área elegida: se consulta una vez por área
+  // (los refrescos de la lista reutilizan el dato).
+  cargarCupoProg();
   const inpF = $("#inpProgFecha");
   if (inpF && !inpF.value) {
     const min = new Date(Date.now() + 5 * 60000);
@@ -2138,13 +2097,151 @@ function poblarFormProg() {
   }
 }
 
+// Tope real del límite programado: el menor entre los pendientes de la base y
+// los usuarios que aún permite contactar el límite diario de Meta. Sin límite
+// de Meta configurado, el tope son los pendientes.
+function techoProgLimite() {
+  const c = progCupo;
+  if (!c) return 0;
+  const disponibles = (c.disponibles != null) ? c.disponibles : c.pendientes;
+  return Math.max(0, Math.min(c.pendientes || 0, disponibles));
+}
+
+// Explica cuál es el tope real, nombrando los dos límites (pendientes de la
+// base y cupo diario de Meta).
+function textoTopeProg(techo) {
+  const c = progCupo || {};
+  const enBase = c.pendientes || 0;
+  if (c.disponibles == null) {
+    return `El límite no puede superar los ${enBase} pacientes pendientes de la base de datos. Usa ${techo} o menos.`;
+  }
+  return `El límite no puede superar los ${enBase} pendientes de la base de datos ni los ` +
+    `${c.disponibles} del límite diario de Meta (${c.tier} usuarios únicos en 24 h; ya se ` +
+    `contactó a ${c.usados}). Usa ${techo} o menos.`;
+}
+
+// Revisa el campo: lo pinta en rojo mientras no se pueda enviar (pasa el tope
+// real, no es entero o es menor a 1) y devuelve si el valor es válido. Sin cupo
+// (techo 0) no se compara nada: el campo queda deshabilitado y la nota explica.
+function revisarLimiteProg(avisar = false) {
+  const inpL = $("#inpProgLimite");
+  if (!inpL) return true;
+  const bruto = inpL.value.trim();
+  const techo = techoProgLimite();
+  let motivo = "";
+  if (bruto !== "" && techo > 0) {
+    const v = Number(bruto);
+    if (!Number.isInteger(v) || v < 1) {
+      motivo = "El límite debe ser un número entero de 1 o más (vacío = sin límite).";
+    } else if (v > techo) {
+      motivo = textoTopeProg(techo);
+    }
+  }
+  // "invalido" es la clase del tema para pintar el borde en rojo.
+  inpL.classList.toggle("invalido", !!motivo);
+  inpL.setAttribute("aria-invalid", motivo ? "true" : "false");
+  if (motivo && avisar) {
+    toast(motivo, "error");
+    inpL.focus();
+  }
+  return !motivo;
+}
+
+function aplicarCupoProg() {
+  const inpL = $("#inpProgLimite");
+  const nota = $("#progLimiteNota");
+  if (!inpL) return;
+  const c = progCupo;
+  if (!c) {
+    inpL.removeAttribute("max");
+    progSinCupo = false;
+    inpL.classList.remove("invalido");
+    inpL.removeAttribute("aria-invalid");
+    if (nota) nota.hidden = true;
+    return;
+  }
+  const techo = techoProgLimite();
+  progSinCupo = techo <= 0;
+  if (techo > 0) inpL.max = String(techo);
+  else inpL.removeAttribute("max");
+  // No se recorta el valor: si quedó mayor al tope se marca en rojo para que
+  // quien programa vea el conflicto y lo corrija (el backend lo rechaza igual).
+  revisarLimiteProg();
+  if (nota) {
+    if (progSinCupo) {
+      nota.hidden = false;
+      nota.textContent = c.disponibles != null && c.disponibles <= 0
+        ? `Sin cupo hoy: el límite diario de Meta (${c.tier} usuarios únicos en 24 h) ya se ` +
+          `alcanzó. Espera a que avance la ventana de 24 h para programar.`
+        : "No hay pacientes pendientes en esta base para programar.";
+      return;
+    }
+    nota.hidden = false;
+    if (c.tier) {
+      const extra = (c.pendientes || 0) > techo ? ` · ${c.pendientes - techo} quedan para más adelante` : "";
+      nota.textContent =
+        `Máximo ${techo} hoy: ${c.disponibles} de ${c.tier} disponibles por el límite diario ` +
+        `de Meta y ${c.pendientes} pendientes en la base${extra}.`;
+    } else {
+      nota.textContent = `Pendientes en la base: ${c.pendientes}.`;
+    }
+  }
+}
+
+// Se consulta al elegir área (o al abrir la pestaña con una ya elegida). Una
+// sola vez por área: los refrescos de la lista no vuelven a preguntar.
+async function cargarCupoProg(forzar = false) {
+  const selA = $("#selProgArea");
+  if (!selA) return;
+  const areaId = selA.value ? Number(selA.value) : "";
+  const key = String(areaId);
+  if (!forzar && key === progCupoKey) { aplicarCupoProg(); return; }
+  progCupoKey = key;
+  progCupo = null;
+  aplicarCupoProg();
+  if (!areaId) return;
+  try {
+    const res = await fetch("api/notificaciones/destinatarios", {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ ambiente: "produccion", area_id: areaId }),
+    });
+    if (res.status === 401) { window.snwSesionExpirada(); return; }
+    if (!res.ok) throw new Error();
+    const d = await res.json();
+    const lim = d.limite_mensajeria || null;
+    progCupo = {
+      pendientes: Number(d.pendientes) || 0,
+      disponibles: lim ? Number(lim.disponibles) : null,
+      tier: lim ? lim.tier : 0,
+      usados: lim ? lim.usados_24h : 0,
+    };
+  } catch {
+    console.error("[app.js cargarCupoProg()]");
+    progCupo = null;
+  }
+  aplicarCupoProg();
+  actualizarPasosProg();
+}
+
 const selProgAreaEl = $("#selProgArea");
 if (selProgAreaEl) selProgAreaEl.addEventListener("change", () => {
   selProgAreaEl.dataset.valor = selProgAreaEl.value;
+  cargarCupoProg();
   actualizarPasosProg();
 });
 const inpProgFechaEl = $("#inpProgFecha");
 if (inpProgFechaEl) inpProgFechaEl.addEventListener("input", actualizarPasosProg);
+const inpProgLimiteEl = $("#inpProgLimite");
+if (inpProgLimiteEl) {
+  // Mientras se escribe se va marcando en rojo; al salir del campo, el aviso.
+  inpProgLimiteEl.addEventListener("input", () => {
+    revisarLimiteProg();
+    actualizarPasosProg();
+  });
+  inpProgLimiteEl.addEventListener("change", () => revisarLimiteProg(true));
+  inpProgLimiteEl.addEventListener("blur", () => revisarLimiteProg(false));
+}
 
 async function cargarProgramados() {
   const lista = $("#listaProgramados");
@@ -2216,6 +2313,7 @@ function avisarCambioProgs(nuevos, cambiados) {
   const conQuien = (id) => (quien(id) ? ` por ${quien(id)}` : "");
   const propia = (id) => (Date.now() - (progsDecididoPropio.get(id) || 0)) < 15000;
   const msgs = [];
+  const errores = [];
   const porAprobar = nuevos.filter(([, e]) => e === "pendiente");
   if (porAprobar.length) {
     msgs.push(`Hay ${porAprobar.length} envío${porAprobar.length === 1 ? "" : "s"} ` +
@@ -2223,11 +2321,18 @@ function avisarCambioProgs(nuevos, cambiados) {
   }
   for (const [id, estado] of cambiados) {
     if (propia(id)) continue;
+    const fila = porId.get(id) || {};
     if (estado === "aprobado") msgs.push(`"${nombre(id)}" aprobado${conQuien(id)}`);
     else if (estado === "rechazado") msgs.push(`"${nombre(id)}" rechazado${conQuien(id)}`);
     else if (estado === "cancelado") msgs.push(`"${nombre(id)}" cancelado${conQuien(id)}`);
+    else if (estado === "error") {
+      // Caso habitual: se agotó el cupo de Meta ese día. Se avisa en pantalla
+      // con el motivo (indica los disponibles de ese día).
+      errores.push(`"${nombre(id)}" no se envió${fila.motivo ? `: ${fila.motivo}` : ""}`);
+    }
   }
   if (msgs.length) toast(msgs.join(" · "), "ok");
+  if (errores.length) toast(errores.join(" · "), "error");
 }
 
 async function revisarProgs() {
@@ -2365,11 +2470,11 @@ async function programarEnvio() {
   if (!areaId) { toast("Elige el área.", "error"); return; }
   if (!tpl) { toast("Elige una plantilla de la lista de la izquierda.", "error"); return; }
   if (!inpF || !inpF.value) { toast("Elige fecha y hora.", "error"); return; }
-  let limite = null;
-  if (inpL && inpL.value !== "") {
-    limite = Number(inpL.value);
-    if (!Number.isInteger(limite) || limite < 1) { toast("Límite inválido.", "error"); return; }
-  }
+  if (progSinCupo) { toast("Hoy no hay cupo disponible para programar este envío.", "error"); return; }
+  // Campo en rojo + aviso si el límite pasa los pendientes de la base o el cupo
+  // de Meta (o no es un entero válido).
+  if (!revisarLimiteProg(true)) return;
+  const limite = (inpL && inpL.value.trim() !== "") ? Number(inpL.value) : null;
   const btn = $("#btnProgramar");
   if (btn && btn.disabled && !progCreando) return;
   progCreando = true;

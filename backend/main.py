@@ -4278,6 +4278,32 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
             raise HTTPException(403, detail="Solo puedes programar para tu área o la base de desarrollo.")
         tabla = nombre_base(amb)
 
+    # El límite de un programado no puede pasar los pendientes de la base ni el
+    # cupo diario de Meta (usuarios únicos en 24 h).
+    amb_q = "produccion" if esp is not None else amb
+    _, pendientes = _contar_elegibles_tabla(tabla, amb_q, amb)
+    info_limite = _limite_mensajeria_info(amb)
+    if info_limite and info_limite["disponibles"] <= 0:
+        raise HTTPException(429, detail=(
+            f"Límite diario de WhatsApp alcanzado: en las últimas 24 h ya se contactó a "
+            f"{info_limite['usados_24h']} usuarios únicos (límite {info_limite['tier']}). "
+            f"Espera a que avance la ventana de 24 h o sube el límite en Configuración."))
+    tope = min(pendientes, info_limite["disponibles"]) if info_limite else pendientes
+    if limite is not None and limite > tope:
+        if pendientes <= 0:
+            raise HTTPException(422, detail=(
+                "No hay pacientes pendientes en esta base para programar."))
+        if info_limite:
+            raise HTTPException(422, detail=(
+                f"El límite no puede superar los {pendientes} pendientes de la base de datos "
+                f"ni los {info_limite['disponibles']} que deja el límite diario de Meta hoy "
+                f"({info_limite['tier']} usuarios únicos en 24 h; ya se contactó a "
+                f"{info_limite['usados_24h']}). Usa {tope} o menos, o déjalo vacío para enviar a "
+                f"todos los disponibles."))
+        raise HTTPException(422, detail=(
+            f"El límite no puede superar los {pendientes} pacientes pendientes de la base de "
+            f"datos. Usa {pendientes} o menos, o déjalo vacío para enviar a todos."))
+
     plantilla = _validar_plantilla_programable(
         next((p for p in leer_plantillas() if p["id"] == body.plantilla_id), None),
         esp["id"] if esp else None)
@@ -4606,11 +4632,76 @@ def _marcar_prog(fila_id: int, estado: str, motivo: str = "", job_id: str | None
         conn.commit()
 
 
+def _motivo_cupo_meta(f: dict, info: dict) -> str:
+    """Motivo para cuando no queda cupo de Meta el día del envío."""
+    return (f"No se envió: el límite diario de Meta está agotado para ese día. "
+            f"Disponibles {info['disponibles']} de {info['tier']} usuarios únicos en 24 h "
+            f"(ya se contactó a {info['usados_24h']}). Reprograma para otro día o sube el "
+            f"límite en Configuración.")
+
+
+def _avisar_creador_prog(f: dict, motivo: str) -> None:
+    """Avisa a quien creó el programado (admin o usuario) que no se ejecutó por
+    falta de cupo. Si no tiene correo configurado, el motivo queda igual a la
+    vista en la lista de programados."""
+    creador = (f.get("creador") or "").strip().lower()
+    prog_id = f.get("id")
+    if not creador:
+        return
+    try:
+        cuenta = usuario_buscar(creador) or {}
+    except Exception as e:
+        log_error(f"usuario_buscar (aviso programado {prog_id})", e)
+        cuenta = {}
+    correo = (cuenta.get("correo_recuperacion") or "").strip()
+    base = url_base()
+    c = _config_correo()
+    emisor = c["emisor"]
+    # Sin correo propio (cuentas antiguas sin correo de recuperación) el aviso
+    # va al destino global de la aplicación, para que alguien lo reciba.
+    correo = correo or (c.get("destino") or "").strip()
+    if not correo:
+        print(f"[PROG] Programado {prog_id}: sin correo configurado para {creador} -> {motivo}")
+        return
+    propio = correo == (cuenta.get("correo_recuperacion") or "").strip()
+    if not emisor or not c["host"] or not c["pwd"]:
+        print(f"[CORREO SIMULADO] Aviso de cupo para {correo}: {motivo}")
+        return
+    html = f"""
+    <html><body style="font-family: Arial, sans-serif; color: #24303c;">
+      <h2>Tu envío programado no se realizó</h2>
+      <p>Hola <strong>{_html.escape(cuenta.get('nombre') or creador)}</strong>,</p>
+      <p>El envío programado de la plantilla
+      <strong>{_html.escape(f.get('plantilla_nombre') or '')}</strong> para el
+      <strong>{f['programado_para'].strftime('%d-%m-%Y %H:%M') if f.get('programado_para') else ''}</strong>
+      no salió porque no quedaba cupo de WhatsApp.</p>
+      <p style="background:#f5f7f8; border-left:4px solid #b23b37; padding:12px 14px; border-radius:6px;">
+        {_html.escape(motivo)}</p>
+      <p><a href="{base}" style="display:inline-block; background:#128c7e; color:#fff; padding:12px 22px; border-radius:8px; text-decoration:none; font-weight:bold;">Ver envíos programados</a></p>
+    </body></html>
+    """
+    ok = _enviar_correo_html([correo],
+                             f"[SNW] Envío programado de {creador} no se realizó (cupo de WhatsApp)",
+                             html)
+    print(f"[PROG] Programado {prog_id}: aviso de cupo enviado a {correo} "
+          f"({'creador' if propio else 'destino global'}; ok={ok})")
+
+
 def _ejecutar_programado(f: dict) -> None:
     """Lanza un programado vencido reutilizando el pipeline normal (misma
     elegibilidad, límites y registro). La sesión es del sistema con rol
     administrador, pero el envío queda atribuido a quien lo programó."""
     from schemas import EnvioIn
+
+    amb_prog = f.get("ambiente") or "produccion"
+    # Si ese día no queda cupo de Meta, no se manda nada: se avisa al creador
+    # con cuántos hay disponibles y queda con el motivo a la vista.
+    info_limite = _limite_mensajeria_info(amb_prog)
+    if info_limite and info_limite["disponibles"] <= 0:
+        motivo = _motivo_cupo_meta(f, info_limite)
+        _marcar_prog(f["id"], "error", motivo)
+        _avisar_creador_prog(f, motivo)
+        return
 
     plantilla = next((p for p in leer_plantillas() if p["id"] == f.get("plantilla_id")), None)
     try:
@@ -4619,7 +4710,7 @@ def _ejecutar_programado(f: dict) -> None:
         _marcar_prog(f["id"], "error", e.detail)
         return
     body = EnvioIn(
-        ambiente=f.get("ambiente") or "produccion",
+        ambiente=amb_prog,
         plantilla_id=f["plantilla_id"],
         area_id=f.get("area_id"),
         limite=f.get("limite"),
@@ -4634,15 +4725,23 @@ def _ejecutar_programado(f: dict) -> None:
     try:
         resp = iniciar_envio(body, bg, sesion_sistema)
     except HTTPException as e:
-        if e.status_code in (409, 429):
-            # Base ocupada o límite diario lleno: se reintenta en el próximo ciclo.
-            log_error(f"scheduler programado {f['id']}: reintento ({e.status_code})", e)
+        if e.status_code == 409:
+            # Base ocupada: se reintenta en el próximo ciclo.
+            log_error(f"scheduler programado {f['id']}: reintento (409)", e)
             with conectar() as conn, conn.cursor() as cur:
                 cur.execute(
                     "UPDATE envios_programados SET estado = 'aprobado' WHERE id = %s AND estado = 'enviando'",
                     (int(f["id"]),),
                 )
                 conn.commit()
+            return
+        if e.status_code == 429:
+            # El cupo se agotó justo al lanzar: tampoco se reintenta en bucle,
+            # se avisa al creador y queda con el motivo a la vista.
+            info = _limite_mensajeria_actual() or {"tier": 0, "usados_24h": 0, "disponibles": 0}
+            motivo = _motivo_cupo_meta(f, info)
+            _marcar_prog(f["id"], "error", motivo)
+            _avisar_creador_prog(f, motivo)
             return
         _marcar_prog(f["id"], "error", e.detail)
         return
