@@ -210,13 +210,24 @@
       d.textContent = t;
       return d.innerHTML;
     };
+    const tituloCuenta = nombreUsuario
+      ? `Mi cuenta (${nombreUsuario}): contraseña y correo de recuperación`
+      : "Mi cuenta: contraseña y correo de recuperación";
     sidebar.innerHTML =
       `<a class="sidebar__brand" href="index.html" title="Notificaciones WhatsApp">` +
       `<i class="fa-brands fa-whatsapp"></i>` +
       `<span><strong>Notificaciones</strong><small>Sistema Notificaciones WhatsApp</small></span></a>` +
       `<button type="button" class="sidebar__plegar" id="btnPlegar" aria-label="Plegar o expandir el menú">` +
       `<i class="fa-solid fa-angles-left"></i></button>` +
-      `<ul class="nav flex-column sidebar__nav">${items}</ul>`;
+      `<ul class="nav flex-column sidebar__nav">${items}</ul>` +
+      `<div class="sidebar__cuenta" aria-label="Acciones de cuenta">` +
+      `<button type="button" class="sidebar__accion" id="btnTema" title="Cambiar entre modo claro y oscuro" aria-label="Cambiar entre modo claro y oscuro">` +
+      `<i class="fa-solid fa-moon"></i><span>Modo oscuro</span></button>` +
+      `<button type="button" class="sidebar__accion" id="btnClavePropia" title="${escaparHtml(tituloCuenta)}" aria-label="Mi cuenta">` +
+      `<i class="fa-solid fa-circle-user"></i><span>Mi cuenta</span></button>` +
+      `<button type="button" class="sidebar__accion" id="btnSalir" title="Cerrar sesión" aria-label="Cerrar sesión">` +
+      `<i class="fa-solid fa-right-from-bracket"></i><span>Cerrar sesión</span></button>` +
+      `</div>`;
 
     // Feedback instantáneo al hacer clic: marca el ítem como activo de
     // una vez (sin esperar a que la página nueva termine de cargar)
@@ -239,26 +250,15 @@
         try { localStorage.setItem("snw_admin_open", abierto ? "1" : "0"); } catch (e) { /* sin almacenamiento */ }
       };
       pintarAdmin(ES_PAG_ADMIN || localStorage.getItem("snw_admin_open") === "1");
-      btnAdminToggle.addEventListener("click", () => pintarAdmin(subnavAdmin.hidden));
-    }
-
-    // Acciones de cuenta en la barra superior, solo iconos (fijas a la
-    // derecha; así no se comprimen en pantallas angostas).
-    const topbar = document.querySelector(".app-topbar");
-    if (topbar && !document.getElementById("btnTema")) {
-      const tituloCuenta = nombreUsuario
-        ? `Mi cuenta (${nombreUsuario}): contraseña y correo de recuperación`
-        : "Mi cuenta: contraseña y correo de recuperación";
-      const acc = document.createElement("div");
-      acc.className = "app-topbar__acciones";
-      acc.innerHTML =
-        `<button type="button" class="app-topbar__icon-btn" id="btnTema" title="Cambiar entre modo claro y oscuro" aria-label="Cambiar entre modo claro y oscuro">` +
-        `<i class="fa-solid fa-moon"></i><span class="visually-hidden">Modo oscuro</span></button>` +
-        `<button type="button" class="app-topbar__icon-btn" id="btnClavePropia" title="${escaparHtml(tituloCuenta)}" aria-label="Mi cuenta">` +
-        `<i class="fa-solid fa-circle-user"></i><span class="visually-hidden">Mi cuenta</span></button>` +
-        `<button type="button" class="app-topbar__icon-btn" id="btnSalir" title="Cerrar sesión" aria-label="Cerrar sesión">` +
-        `<i class="fa-solid fa-right-from-bracket"></i><span class="visually-hidden">Cerrar sesión</span></button>`;
-      topbar.appendChild(acc);
+      btnAdminToggle.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const abierto = subnavAdmin.hidden;
+        pintarAdmin(abierto);
+        if (abierto && window.matchMedia("(max-width: 991.98px)").matches) {
+          window.requestAnimationFrame(() => subnavAdmin.scrollIntoView({ block: "nearest" }));
+        }
+      });
     }
 
     const btnTema = document.getElementById("btnTema");

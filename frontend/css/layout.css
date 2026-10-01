@@ -80,7 +80,60 @@
 .sidebar__brand strong { font-size: .98rem; font-weight: 700; }
 .sidebar__brand small { font-size: .72rem; opacity: .8; }
 
-.sidebar__nav { gap: 0; list-style: none; }
+.sidebar__nav {
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 0;
+  list-style: none;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Acciones de cuenta ancladas al pie de la sidebar. */
+.sidebar__cuenta {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: auto;
+  padding: 12px 12px 0 2px;
+  border-top: 1px solid var(--borde);
+}
+.sidebar__accion {
+  flex: 1 1 0;
+  width: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 40px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--texto);
+  font: inherit;
+  font-size: .86rem;
+  font-weight: 600;
+  text-align: left;
+  transition: background-color .2s ease, color .2s ease, border-color .2s ease;
+}
+.sidebar__accion span { display: none; }
+.sidebar__accion i {
+  flex-shrink: 0;
+  width: 1.9rem;
+  height: 1.9rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  font-size: .95rem;
+}
+.sidebar__accion:hover {
+  background: var(--hover);
+  color: var(--texto);
+  border-color: var(--borde);
+}
+.sidebar__accion:active { transform: scale(.98); }
 
 /* Submenú desplegable de Administración. */
 .sidebar__subnav {
@@ -179,30 +232,6 @@
 }
 .app-topbar__sep { flex: 1 1 0%; min-width: 0; }
 
-/* Acciones de cuenta en la barra superior (tema / mi cuenta / salir):
-   solo iconos, tamaño fijo, siempre a la derecha. */
-.app-topbar__acciones {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: auto;
-  flex-shrink: 0;
-}
-.app-topbar__icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 38px;
-  height: 38px;
-  flex-shrink: 0;
-  border: 1px solid var(--borde);
-  border-radius: 10px;
-  background: var(--panel);
-  color: var(--texto);
-  font-size: 1rem;
-}
-.app-topbar__icon-btn:hover { background: var(--hover); color: var(--texto); }
-
 /* Indicadores de contexto (ambiente / base de datos) en la barra superior.
    min-width: 0 + ellipsis: en pantallas angostas se acortan con «…» en vez
    de desbordar la barra (o, si tampoco entran así, pasan a la línea
@@ -257,7 +286,8 @@
     padding: 8px 0 12px;
   }
   .sidebar-colapsada .sidebar__brand span,
-  .sidebar-colapsada .nav-link span { display: none; }
+  .sidebar-colapsada .nav-link span,
+  .sidebar-colapsada .sidebar__accion span { display: none; }
 
   .sidebar-colapsada .sidebar__plegar { align-self: center; margin: -4px 0 8px; }
   .sidebar-colapsada .sidebar__plegar i { transform: rotate(180deg); }
@@ -268,6 +298,16 @@
     padding-left: 0;
     padding-right: 0;
     border-radius: 999px;
+  }
+
+  .sidebar-colapsada .sidebar__cuenta {
+    padding: 12px 0 0;
+  }
+  .sidebar-colapsada .sidebar__accion {
+    justify-content: center;
+    gap: 0;
+    padding-left: 0;
+    padding-right: 0;
   }
 }
 
