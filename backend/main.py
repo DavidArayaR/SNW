@@ -5147,7 +5147,7 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
 
     with conectar(ambiente) as conn, conn.cursor() as cur:
         cur.execute(sql, tuple(args) or None)
-        filas = cur.fetchall()
+        filas = list(cur.fetchall() or [])
 
     for f in filas:
         f["_orden"] = f.pop("fecha_hora")
@@ -5158,7 +5158,7 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
         cur.execute(
             "SELECT * FROM envios_programados ORDER BY programado_para DESC, id DESC LIMIT 300"
         )
-        for g in cur.fetchall():
+        for g in list(cur.fetchall() or []):
             if not _prog_visible(sesion, g):
                 continue
             if tabla and (g.get("tabla") or "") != tabla:

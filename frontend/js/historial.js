@@ -288,12 +288,11 @@ async function cargar(mantenerPagina = false) {
   try {
     const base = (selBaseHist && selBaseHist.value) || "todos";
     const qs = base !== "todos" ? `tabla=${encodeURIComponent(base)}` : "ambiente=todos";
-    const [rh, rc] = await Promise.all([
-      fetch(`${API_HISTORIAL}?${qs}`, { headers: authHeaders(), cache: "no-store" }),
-      fetch(`api/configuracion?ambiente=produccion`, { headers: authHeaders(), cache: "no-store" }),
-    ]);
-    if (rh.status === 401 || rc.status === 401) { window.snwSesionExpirada(); return; }
-    if (!rh.ok || !rc.ok) throw new Error();
+    const rh = await fetch(`${API_HISTORIAL}?${qs}`, {
+      headers: authHeaders(), cache: "no-store",
+    });
+    if (rh.status === 401) { window.snwSesionExpirada(); return; }
+    if (!rh.ok) throw new Error();
     registros = await rh.json();
     if (!mantenerPagina) paginaHist = 1;
     render();

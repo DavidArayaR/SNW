@@ -2054,9 +2054,12 @@ function cambiarTabMsg(t) {
     cargarProgramados();
     actualizarProgPlantilla();
   } else if (tabMsg === "envios") {
-    // La selección persiste: si hay plantilla elegida y la card está vacía, se prepara.
+    // Si se eligió otra plantilla desde otra tab, actualiza la card manual
+    // aunque ya estuviera abierta; si no cambió, conserva su estado actual.
     const vacia = document.getElementById("envioContenido");
-    if (tplSelId && vacia && vacia.hidden) abrirModalConf(tplSelId);
+    if (tplSelId && vacia && (vacia.hidden || confPlantillaId !== tplSelId)) {
+      abrirModalConf(tplSelId);
+    }
   } else if (tabMsg === "plantillas") {
     // El editor sigue a la selección: si se eligió en otra tab, se abre acá
     // (con el resguardo de cambios sin guardar; si se cancela, se vuelve a
