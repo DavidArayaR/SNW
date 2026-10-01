@@ -3180,14 +3180,65 @@ def _costo_estimado_por_clave(clave: str, total: int) -> dict | None:
     }
 
 
+def _formatear_entero(valor: int) -> str:
+    return f"{int(valor):,}".replace(",", ".")
+
+
+def _resumen_cupo_meta_html(info: dict | None, total: int) -> tuple[str, str]:
+    """Resumen del messaging limit que se muestra al supervisor."""
+    if not info:
+        return (
+            """
+      <div style="background:#fff8e6; border-left:4px solid #d99a00; padding:14px 16px; margin:18px 0; border-radius:6px;">
+        <p style="margin:0 0 6px; font-weight:bold; color:#7a5700;">Cupo diario de Meta</p>
+        <p style="margin:0;">No fue posible determinar el límite configurado para esta cuenta. Revisa la configuración antes de aprobar.</p>
+      </div>""",
+            "cupo no disponible",
+        )
+
+    tier = max(0, int(info.get("tier") or 0))
+    usados = max(0, int(info.get("usados_24h") or 0))
+    disponibles = max(0, int(info.get("disponibles") or 0))
+    total = max(0, int(total or 0))
+    restantes = max(0, disponibles - total)
+    tier_txt = _formatear_entero(tier)
+    usados_txt = _formatear_entero(usados)
+    disponibles_txt = _formatear_entero(disponibles)
+    total_txt = _formatear_entero(total)
+    restantes_txt = _formatear_entero(restantes)
+    alerta = (
+        "<p style=\"margin:10px 0 0; color:#b23b37; font-weight:bold;\">"
+        "El cupo puede agotarse antes de la aprobación o ejecución si se realizan otros envíos."
+        "</p>"
+        if total > disponibles else ""
+    )
+    return (
+        f"""
+      <div style="background:#eef8f5; border-left:4px solid #128c7e; padding:14px 16px; margin:18px 0; border-radius:6px;">
+        <p style="margin:0 0 8px; font-weight:bold; color:#0b665c;">Cupo diario de Meta</p>
+        <table style="width:100%; border-collapse:collapse; font-size:13px;">
+          <tr><td style="padding:4px 0; color:#66757f;">Límite de la cuenta</td><td style="padding:4px 0; text-align:right; font-weight:bold;">{tier_txt} usuarios únicos / 24 h</td></tr>
+          <tr><td style="padding:4px 0; color:#66757f;">Contactados en las últimas 24 h</td><td style="padding:4px 0; text-align:right; font-weight:bold;">{usados_txt}</td></tr>
+          <tr><td style="padding:4px 0; color:#66757f;">Disponibles ahora</td><td style="padding:4px 0; text-align:right; font-weight:bold; color:#0b665c;">{disponibles_txt}</td></tr>
+          <tr><td style="padding:4px 0; color:#66757f;">Este envío</td><td style="padding:4px 0; text-align:right; font-weight:bold;">{total_txt}</td></tr>
+          <tr style="border-top:1px solid #c9e3dd;"><td style="padding:7px 0 0; color:#66757f;">Saldo estimado después</td><td style="padding:7px 0 0; text-align:right; font-weight:bold; color:#0b665c;">{restantes_txt}</td></tr>
+        </table>
+        <p style="margin:10px 0 0; font-size:12px; color:#66757f;">El cálculo usa una ventana móvil de 24 horas, no un reinicio a medianoche.</p>
+        {alerta}
+      </div>""",
+        f"{disponibles_txt} disponibles de {tier_txt}",
+    )
+
+
 def _html_correo_envio(*, solicitante: str, tipo: str, tipo_detalle: str, base_nombre: str,
                        total: int, plantilla_nombre: str, plantilla_texto: str,
                        costo: dict | None, url_confirmar: str, url_rechazar: str,
-                       token: str) -> str:
+                       token: str, cupo_meta: dict | None = None) -> str:
     """Cuerpo del correo de confirmación/autorización de un envío masivo. Es el
     mismo para el envío manual y el programado: lo único que cambia es la línea
     «Tipo de envío» (manual o programado, con su fecha)."""
     costo_txt = _fmt_moneda(costo["costo"], costo["moneda"]) if costo else "no disponible"
+    bloque_cupo, _ = _resumen_cupo_meta_html(cupo_meta, total)
     bloque_costo = f"""
       <div style="text-align:center; margin:26px 0;">
         <p style="margin:0 0 4px; font-size:13px; color:#66757f;">Costo aproximado de este envío</p>
@@ -3205,6 +3256,7 @@ def _html_correo_envio(*, solicitante: str, tipo: str, tipo_detalle: str, base_n
       <strong>{total} personas</strong> desde la base de datos
       <strong>{_html.escape(base_nombre)}</strong>.</p>
       <p>Tipo de envío: <strong>{_html.escape(tipo)}</strong>{tipo_detalle}</p>
+      {bloque_cupo}
       {bloque_costo}
       <div style="background:#f5f7f8; border-left:4px solid #128c7e; padding:14px 16px; margin:18px 0; border-radius:6px;">
         <p style="margin:0 0 6px; font-size:12px; color:#66757f; font-weight:bold;">Mensaje a enviar:</p>
@@ -3245,7 +3297,7 @@ def _enviar_correo_html(destinos: list, subject: str, html: str) -> bool:
 def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, plantilla_texto: str,
                                  ambiente: str, plantilla_clave: str = "", solicitante: str = "",
                                  destinos_extra: list | None = None,
-                                 area_nombre: str = "") -> bool:
+                                 area_nombre: str = "", cupo_meta: dict | None = None) -> bool:
     c = _config_correo()
     emisor, destino_global = c["emisor"], c["destino"]
     base = url_base()
@@ -3275,16 +3327,18 @@ def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, p
 
     costo = _costo_estimado_por_clave(plantilla_clave, total)
     costo_txt = _fmt_moneda(costo["costo"], costo["moneda"]) if costo else "no disponible"
+    _, cupo_asunto = _resumen_cupo_meta_html(cupo_meta, total)
     quien = solicitante.strip() or "usuario desconocido"
 
     if not host or not pwd:
         # Modo simulado: logear URL para pruebas sin SMTP real
-        print(f"[CORREO SIMULADO] Para {', '.join(destinos)} desde {emisor}: solicitado por {quien} - confirmar {base}/api/notificaciones/confirmar/{token} | rechazar {base}/api/notificaciones/rechazar/{token} - {total} personas, plantilla '{plantilla_nombre}', base {ambiente}, costo aprox. {costo_txt}")
+        print(f"[CORREO SIMULADO] Para {', '.join(destinos)} desde {emisor}: solicitado por {quien} - confirmar {base}/api/notificaciones/confirmar/{token} | rechazar {base}/api/notificaciones/rechazar/{token} - {total} personas, plantilla '{plantilla_nombre}', base {ambiente}, costo aprox. {costo_txt}, Meta: {cupo_asunto}")
         return True
 
     confirm_url = f"{base}/api/notificaciones/confirmar/{token}"
     reject_url = f"{base}/api/notificaciones/rechazar/{token}"
-    subject = f"[SNW] {quien} pide confirmar un envío masivo - {total} destinatarios (~{costo_txt})"
+    subject = (f"[SNW] {quien} pide confirmar un envío masivo - {total} destinatarios "
+               f"(~{costo_txt}) | Meta: {cupo_asunto}")
     detalle_base = f" ({area_nombre.strip()})" if (area_nombre or "").strip() else ""
 
     html = _html_correo_envio(
@@ -3299,6 +3353,7 @@ def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, p
         url_confirmar=confirm_url,
         url_rechazar=reject_url,
         token=token,
+        cupo_meta=cupo_meta,
     )
     return _enviar_correo_html(destinos, subject, html)
 
@@ -3808,7 +3863,8 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         _enviar_correo_confirmacion(token, len(destinatarios), plantilla["nombre"], plantilla["texto"],
                                     amb, plantilla["clave"], solicitante,
                                     destinos_extra=correos_sup,
-                                    area_nombre=(esp["nombre_visible"] if esp else ""))
+                                    area_nombre=(esp["nombre_visible"] if esp else ""),
+                                    cupo_meta=info_limite)
         return {"requiere_confirmacion": True, "solicitud_id": token, "total": len(destinatarios),
                 "ambiente": amb, "rechazados": rechazados, "aviso_limite_mensajeria": aviso_limite,
                 "confirm_url": f"{url_base()}/api/notificaciones/confirmar/{token}"}
@@ -4578,7 +4634,8 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
                             plantilla_texto=plantilla.get("texto") or "",
                             tabla_nombre=amb,
                             plantilla_clave=plantilla.get("clave") or "",
-                            total=len(preelegidos))
+                            total=len(preelegidos),
+                            cupo_meta=info_limite)
     return {"ok": True, "id": prog_id, "estado": estado, "preelegidos": len(preelegidos)}
 
 
@@ -4586,7 +4643,7 @@ def _enviar_correo_prog(destinatarios: list, prog_id: int, plantilla_nombre: str
                         area_nombre: str, cuando_txt: str, limite: int | None,
                         solicitante: str, token: str, plantilla_texto: str = "",
                         tabla_nombre: str = "", plantilla_clave: str = "",
-                        total: int | None = None) -> bool:
+                        total: int | None = None, cupo_meta: dict | None = None) -> bool:
     """Aviso a supervisores del area: confirman/rechazan con enlaces por token.
     Mismo cuerpo que el correo del envío manual; lo único que cambia es la línea
     «Tipo de envío», que dice Programado y la fecha programada."""
@@ -4600,16 +4657,17 @@ def _enviar_correo_prog(destinatarios: list, prog_id: int, plantilla_nombre: str
     total = int(total or limite or 0)
     costo = _costo_estimado_por_clave(plantilla_clave, total) if total else None
     costo_txt = _fmt_moneda(costo["costo"], costo["moneda"]) if costo else "no disponible"
+    _, cupo_asunto = _resumen_cupo_meta_html(cupo_meta, total)
     if not host or not pwd:
         print(f"[CORREO-PROG SIMULADO] Para {', '.join(destinatarios)}: {solicitante} programó"
               f" '{plantilla_nombre}' ({area_nombre}) para {cuando_txt} -"
               f" confirmar {base}/api/notificaciones/programados/aprobar/{token} |"
               f" rechazar {base}/api/notificaciones/programados/rechazar/{token}"
-              f" - {total} personas, costo aprox. {costo_txt}")
+              f" - {total} personas, costo aprox. {costo_txt}, Meta: {cupo_asunto}")
         return True
     limite_txt = f" (límite {limite} mensajes)" if limite else ""
     subject = (f"[SNW] {solicitante} pide confirmar un envío programado - "
-               f"{total} destinatarios (~{costo_txt})")
+               f"{total} destinatarios (~{costo_txt}) | Meta: {cupo_asunto}")
     base_nombre = f"{tabla_nombre} ({area_nombre})" if (tabla_nombre and area_nombre) \
         else (tabla_nombre or area_nombre)
     html = _html_correo_envio(
@@ -4625,6 +4683,7 @@ def _enviar_correo_prog(destinatarios: list, prog_id: int, plantilla_nombre: str
         url_confirmar=f"{base}/api/notificaciones/programados/aprobar/{token}",
         url_rechazar=f"{base}/api/notificaciones/programados/rechazar/{token}",
         token=token,
+        cupo_meta=cupo_meta,
     )
     ok = _enviar_correo_html(destinatarios, subject, html)
     if not ok:
