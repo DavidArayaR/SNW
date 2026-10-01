@@ -231,7 +231,12 @@ function refrescarAvisoSinArea() {
   if (!hint) return;
   const sinAsignadas = (window.snwRol || "") === "usuario" && !misAreas.length;
   hint.hidden = !sinAsignadas;
-  if (inpArea) inpArea.disabled = sinAsignadas;
+  const p = activaId ? plantillas.find((x) => x.id === activaId) : null;
+  const fueraDeMisAreas = !!p && p.area_id != null &&
+    !misAreas.some((area) => Number(area.id) === Number(p.area_id));
+  const bloquearPorAlcance = !!p && !window.snwEsPrivilegiado &&
+    (!puedeEditarEsta(p) || fueraDeMisAreas);
+  if (inpArea) inpArea.disabled = sinAsignadas || bloquearPorAlcance;
 }
 
 // Selector único de base de datos de la card de envío: lista solo
@@ -780,6 +785,7 @@ function actualizarBotonesSegunEstado(p) {
   const puedeGuardar = PUEDE_EDITAR_PLANTILLAS && puedeEditarEsta(p) && editable && !enEnfriamiento && !esPlantillaProtegida(p);
   const puedeEliminar = PUEDE_EDITAR_PLANTILLAS && puedeEditarEsta(p) && editable && !esPlantillaProtegida(p);
   const puedeRevisar = p && ap === "pendiente" && puedeAprobarPlantillas();
+  document.querySelectorAll(".wildcards").forEach((el) => { el.hidden = !puedeGuardar; });
   btnGuardar.hidden = !puedeGuardar;
   const btnAprobar = $("#btnAprobar");
   const btnRechazar = $("#btnRechazar");
