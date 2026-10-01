@@ -779,7 +779,7 @@ function actualizarBotonesSegunEstado(p) {
   // Además solo el creador edita/elimina las suyas (admin/dev, cualquiera).
   const puedeGuardar = PUEDE_EDITAR_PLANTILLAS && puedeEditarEsta(p) && editable && !enEnfriamiento && !esPlantillaProtegida(p);
   const puedeEliminar = PUEDE_EDITAR_PLANTILLAS && puedeEditarEsta(p) && editable && !esPlantillaProtegida(p);
-  const puedeRevisar = p && ap !== "aprobada" && puedeAprobarPlantillas();
+  const puedeRevisar = p && ap === "pendiente" && puedeAprobarPlantillas();
   btnGuardar.hidden = !puedeGuardar;
   const btnAprobar = $("#btnAprobar");
   const btnRechazar = $("#btnRechazar");

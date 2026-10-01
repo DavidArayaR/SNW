@@ -2458,9 +2458,22 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
                         400,
                         detail="El nombre de la plantilla no se puede cambiar. Elimínala y crea una nueva.",
                     )
+                area_id_nueva = _validar_plantilla_area(sesion, body.area_id)
+                lang_nuevo = (body.whatsapp_template_lang or "").strip() or None
+                hubo_cambio = (
+                    body.texto != (p.get("texto") or "")
+                    or area_id_nueva != p.get("area_id")
+                    or lang_nuevo != p.get("whatsapp_template_lang")
+                    or categoria != p.get("whatsapp_template_categoria")
+                )
+                if _aprobacion_plantilla(p) == "rechazada" and not hubo_cambio:
+                    raise HTTPException(
+                        400,
+                        detail="Debes modificar y guardar la plantilla antes de volver a aprobarla.",
+                    )
                 p["texto"] = body.texto
-                p["area_id"] = _validar_plantilla_area(sesion, body.area_id)
-                p["whatsapp_template_lang"] = (body.whatsapp_template_lang or "").strip() or None
+                p["area_id"] = area_id_nueva
+                p["whatsapp_template_lang"] = lang_nuevo
                 p["whatsapp_template_categoria"] = categoria
                 p["actualizada"] = int(time.time() * 1000)
                 if _aprobacion_plantilla(p) == "rechazada":
@@ -2607,6 +2620,11 @@ def aprobar_plantilla(plantilla_id: int, sesion: dict = Depends(_exigir_aprobado
         raise HTTPException(404, detail="Plantilla no encontrada")
     if p.get("especial"):
         raise HTTPException(400, detail="El mensaje de call center no necesita aprobación.")
+    if _aprobacion_plantilla(p) == "rechazada":
+        raise HTTPException(
+            400,
+            detail="Debes modificar y guardar la plantilla antes de volver a aprobarla.",
+        )
     if _aprobacion_plantilla(p) == "aprobada":
         return p
     p["aprobacion_estado"] = "aprobada"
