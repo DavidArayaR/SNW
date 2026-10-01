@@ -314,9 +314,11 @@ function render() {
       ? `<span class="respuesta-fecha">${escaparHtml(p.ultima_respuesta_fecha)}</span>`
       : "";
     tr.innerHTML =
+      // Sin permiso de gestión la casilla no existe: tampoco su celda, o las
+      // filas quedarían con una columna más que la cabecera.
       (PUEDE_GESTIONAR_PAC
         ? `<td class="col-check"><input type="checkbox" data-id="${p.id}" ${seleccionados.has(p.id) ? "checked" : ""}></td>`
-        : `<td class="col-check"></td>`) +
+        : "") +
       `<td class="campo-id">${p.id}</td>` +
       `<td class="campo-nombre">${escaparHtml(nombreCompleto)}</td>` +
       `<td class="campo-tel">${escaparHtml(p.telefono)}</td>` +
