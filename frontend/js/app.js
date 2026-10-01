@@ -2479,7 +2479,7 @@ async function toggleDestinatariosProg(id, btn) {
       `<li>${escaparHtml(x.nombre || "Sin nombre")} · ${escaparHtml(x.telefono || "sin teléfono")}</li>`).join("");
     caja.innerHTML = d.total
       ? `<ul class="prog-item__dest-ul">${items}</ul>`
-      : `<p class="field__hint">Este envío no tiene lista preelegida (se creó antes de existirla).</p>`;
+      : `<p class="field__hint">Este envío no tiene una lista preseleccionada porque se creó antes de que existiera.</p>`;
   } catch {
     console.error("[app.js toggleDestinatariosProg()]");
     caja.innerHTML = `<p class="field__hint">No se pudo cargar la lista.</p>`;
