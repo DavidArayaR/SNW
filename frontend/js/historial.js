@@ -91,9 +91,28 @@ function mostrarVacioProgreso(lista) {
   }
 }
 
+// Cadencia del sondeo de «Envíos en progreso»: cada 3 s mientras hay algo vivo
+// (para ver el avance al instante) y un latido lento cuando la lista está
+// vacía, que es lo único que detecta un envío iniciado en otro equipo.
+const INTERVALO_PROGRESO_VIVO = 3000;
+const INTERVALO_PROGRESO_LATIDO = 60000;
+let timerProgreso = null;
+let hayProgresoVivo = false;
+let cargandoEnProgreso = false;
+
+function programarProgreso() {
+  if (timerProgreso) clearInterval(timerProgreso);
+  const ms = hayProgresoVivo ? INTERVALO_PROGRESO_VIVO : INTERVALO_PROGRESO_LATIDO;
+  timerProgreso = setInterval(() => {
+    if (!document.hidden) cargarEnProgreso();
+  }, ms);
+}
+
 async function cargarEnProgreso() {
   const lista = $("#listaEnProgreso");
   if (!lista) return;
+  if (cargandoEnProgreso) return; // no apilar sondeos si uno quedó colgado
+  cargandoEnProgreso = true;
   let items;
   try {
     const r = await fetch("api/notificaciones/envios-en-progreso", {
@@ -105,11 +124,18 @@ async function cargarEnProgreso() {
   } catch {
     console.error("[historial.js cargarEnProgreso()]");
     return; // se conserva lo último mostrado, sin mensajes ni saltos
+  } finally {
+    cargandoEnProgreso = false;
   }
   // Si algo terminó o cambió, la tabla se recarga sola (sin mover página ni avisar).
   const firma = items.map((it) => `${it.origen}:${it.id ?? it.job_id}:${it.estado}`).join("|");
   if (firmaProgreso !== null && firmaProgreso !== firma) cargar(true);
   firmaProgreso = firma;
+  // La cadencia sigue a la lista: rápida con envíos vivos, lenta si no hay nada.
+  if (hayProgresoVivo !== !!items.length) {
+    hayProgresoVivo = !!items.length;
+    programarProgreso();
+  }
   if (!items.length) {
     mostrarVacioProgreso(lista);
     return;
@@ -147,9 +173,12 @@ async function cargarEnProgreso() {
 }
 
 window.snwConCooldown($("#btnActualizarProgreso"), cargarEnProgreso);
-setInterval(() => {
+programarProgreso();
+// Al volver a la pestaña no se espera al siguiente sondeo: si el envío empezó
+// en otro equipo mientras tanto, aparece de inmediato.
+document.addEventListener("visibilitychange", () => {
   if (!document.hidden) cargarEnProgreso();
-}, 3000);
+});
 
 document.addEventListener("click", (e) => {
   const bj = e.target.closest("#listaEnProgreso [data-cancel-job]");
