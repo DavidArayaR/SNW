@@ -1769,6 +1769,16 @@ $("#btnConfirmarIniciarConf").addEventListener("click", async () => {
   // sigue en el servidor y se ve en Historial); la base ocupada la rechaza el backend.
   $("#btnLanzarConf").hidden = true;
   setBloqueoEnvioConf(true);
+  const espera = document.getElementById("modalEspera");
+  const mensajeEspera = document.getElementById("mensajeEsperaConf");
+  const requiereSupervisorPrevisto = ambienteEnvioConf() === "produccion" &&
+    !(window.snwPuede && window.snwPuede("envio_produccion"));
+  if (requiereSupervisorPrevisto && espera) {
+    if (mensajeEspera) mensajeEspera.textContent = "Enviando la solicitud al supervisor...";
+    const linkEl = document.getElementById("linkConfirmacionEsperaMsg");
+    if (linkEl) linkEl.textContent = "";
+    espera.hidden = false;
+  }
 
   try {
     if (!confPlantillaId) throw new Error("Elige una plantilla primero.");
@@ -1782,7 +1792,12 @@ $("#btnConfirmarIniciarConf").addEventListener("click", async () => {
       headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(cuerpo),
     });
-    if (res.status === 401) { window.snwSesionExpirada(); setBloqueoEnvioConf(false); return; }
+    if (res.status === 401) {
+      if (espera) espera.hidden = true;
+      window.snwSesionExpirada();
+      setBloqueoEnvioConf(false);
+      return;
+    }
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail ?? `Error ${res.status}`);
 
@@ -1793,7 +1808,7 @@ $("#btnConfirmarIniciarConf").addEventListener("click", async () => {
     }
 
     if (data.requiere_confirmacion) {
-      const espera = document.getElementById("modalEspera");
+      if (mensajeEspera) mensajeEspera.innerHTML = "Se ha enviado un correo a <strong>supervisor</strong> solicitando confirmación.";
       espera.hidden = false;
       const linkEl = document.getElementById("linkConfirmacionEsperaMsg");
       if (linkEl && data.confirm_url && window.snwEsPrivilegiado) {
@@ -1835,6 +1850,7 @@ $("#btnConfirmarIniciarConf").addEventListener("click", async () => {
       return;
     }
 
+    if (espera) espera.hidden = true;
     if (!data.iniciado) {
       setBloqueoEnvioConf(false);
       finalizarConf(`Ningún destinatario válido en la base ${data.ambiente}.`, true);
@@ -1847,6 +1863,7 @@ $("#btnConfirmarIniciarConf").addEventListener("click", async () => {
     seguirProgresoConf(data.job_id, data.total);
   } catch (err) {
     console.error("[app.js:1708]", err);
+    if (espera) espera.hidden = true;
     toast(`Error al iniciar el envío: ${err.message}`, "error");
     setBloqueoEnvioConf(false);
     $("#btnLanzarConf").hidden = false;
