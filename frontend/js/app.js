@@ -796,6 +796,10 @@ function actualizarBotonesSegunEstado(p) {
   btnEliminar.hidden = !(p && puedeEliminar);
   if (btnEnviarActual) btnEnviarActual.hidden = !(p && enviable);
   if (avisoPendiente) {
+    avisoPendiente.classList.toggle(
+      "aviso-rechazo",
+      !!(p && (ap === "rechazada" || esPlantillaRechazada(p)))
+    );
     if (p && esPlantillaProtegida(p)) {
       pararCuentaRegresiva();
       avisoPendiente.textContent =

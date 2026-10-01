@@ -635,6 +635,16 @@ button:disabled:hover { outline: none; }
    que no se solapen entre ellos. */
 .field__hint + .warn { margin-top: 8px; }
 #avisoPendiente { margin: 14px 18px 0; }
+#avisoPendiente.aviso-rechazo {
+  background: var(--danger-bg);
+  border: 2px solid var(--danger-bd);
+  border-left: 6px solid var(--danger-fg);
+  color: var(--danger-fg);
+  font-size: .92rem;
+  font-weight: 700;
+  line-height: 1.5;
+  padding: 14px 16px;
+}
 
 .preview-wrap {
   margin-bottom: 22px;
