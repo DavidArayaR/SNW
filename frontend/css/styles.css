@@ -99,32 +99,23 @@ select.badge--select {
   box-shadow: var(--sombra);
 }
 
-/* Cada superficie de Mensajería tiene un acento propio en su borde. */
+/* Cards de Mensajería: líneas neutras; la lista conserva su acento verde. */
 .panel--list,
 .panel--editor,
 #panelEnvio,
 .prog-columna > .panel {
   background: var(--panel);
-  border: 1px solid var(--card-accent);
-  border-top: 3px solid var(--card-accent);
+  border: none;
+  border-top: 3px solid var(--borde);
+  border-bottom: 3px solid var(--borde);
 }
 .panel--list {
-  --card-accent: #4ea896;
+  --card-accent: #8abfb3;
+  border: 1px solid var(--card-accent);
+  border-top: 3px solid var(--card-accent);
+  border-bottom: 3px solid var(--card-accent);
 }
-.panel--editor {
-  --card-accent: #4ea896;
-}
-#panelEnvio {
-  --card-accent: #5691c7;
-}
-.prog-columna > .panel {
-  --card-accent: #c59142;
-}
-
-:root[data-tema="oscuro"] .panel--list { --card-accent: #66c3ac; }
-:root[data-tema="oscuro"] .panel--editor { --card-accent: #66c3ac; }
-:root[data-tema="oscuro"] #panelEnvio { --card-accent: #83b9e8; }
-:root[data-tema="oscuro"] .prog-columna > .panel { --card-accent: #e0b76b; }
+:root[data-tema="oscuro"] .panel--list { --card-accent: #4f8c80; }
 
 .panel--list {
   position: sticky;

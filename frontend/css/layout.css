@@ -47,6 +47,17 @@
   overflow-x: hidden;
   transition: width .2s ease, transform .25s ease;
 }
+.sidebar::after {
+  content: "";
+  position: absolute;
+  top: calc(var(--topbar-alto) - 2px);
+  right: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--verde-oscuro);
+  pointer-events: none;
+  z-index: 0;
+}
 
 /* Botón para plegar/expandir (dentro de la sidebar, escritorio) */
 .sidebar__plegar {
@@ -97,7 +108,6 @@
   gap: 6px;
   margin-top: auto;
   padding: 12px 12px 0 2px;
-  border-top: 1px solid var(--borde);
 }
 .sidebar__accion {
   flex: 1 1 0;
@@ -107,7 +117,7 @@
   justify-content: center;
   height: 40px;
   padding: 0;
-  border: 1px solid transparent;
+  border: none;
   border-radius: 12px;
   background: transparent;
   color: var(--texto);
@@ -115,7 +125,7 @@
   font-size: .86rem;
   font-weight: 600;
   text-align: left;
-  transition: background-color .2s ease, color .2s ease, border-color .2s ease;
+  transition: background-color .2s ease, color .2s ease;
 }
 .sidebar__accion span { display: none; }
 .sidebar__accion i {
@@ -131,9 +141,8 @@
 .sidebar__accion:hover {
   background: var(--hover);
   color: var(--texto);
-  border-color: var(--borde);
+  outline: none;
 }
-.sidebar__accion:active { transform: scale(.98); }
 
 /* Submenú desplegable de Administración. */
 .sidebar__subnav {
@@ -193,8 +202,11 @@
   background: var(--hover);
   color: var(--texto);
 }
-.sidebar .nav-link:active { transform: scale(.97); }
 .sidebar .nav-link.active {
+  z-index: 1;
+  margin-right: -2px;
+  border: 2px solid var(--verde-oscuro);
+  border-right: none;
   background: var(--fondo);
   color: var(--verde-oscuro);
 }
@@ -221,6 +233,7 @@
   min-height: var(--topbar-alto);
   padding: 8px 20px;
   background: var(--nav-bg);
+  border-bottom: 2px solid var(--verde-oscuro);
 }
 .app-topbar__titulo {
   font-size: 1rem;
@@ -279,6 +292,10 @@
 @media (min-width: 992px) {
   .app-shell.sidebar-colapsada { --sidebar-ancho: 72px; }
 
+  /* El botón activo sobresale hasta el contenido; el menú de escritorio no
+     debe recortarlo horizontalmente. */
+  .sidebar__nav { overflow: visible; }
+
   .sidebar-colapsada .sidebar { padding: 16px 10px; }
   .sidebar-colapsada .sidebar__brand {
     justify-content: center;
@@ -297,6 +314,8 @@
     gap: 0;
     padding-left: 0;
     padding-right: 0;
+    margin-right: 0;
+    border: 1px solid transparent;
     border-radius: 999px;
   }
 
@@ -348,6 +367,7 @@ code { color: inherit; }
     transform: translateX(-100%);
     box-shadow: 0 0 40px rgba(0, 0, 0, .35);
   }
+  .sidebar::after { top: 0; }
   .app-shell.sidebar-abierta .sidebar { transform: translateX(0); }
   .app-shell.sidebar-abierta .sidebar-backdrop { display: block; }
 
