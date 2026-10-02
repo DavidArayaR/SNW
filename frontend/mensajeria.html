@@ -165,35 +165,46 @@
             <p class="envio-vacio__pista">Elige una de la lista de la izquierda.</p>
           </div>
           <div id="envioContenido" hidden>
-          <dl class="detalles">
-            <div class="detalle-fila">
-              <dt>Plantilla</dt>
-              <dd id="confNombre">&mdash;</dd>
+          <div class="prog-form manual-form">
+            <div class="prog-paso" id="pasoManual1">
+              <span class="prog-paso__num">1</span>
+              <div class="field">
+                <label>Plantilla</label>
+                <div class="prog-tpl-elegida"><strong id="confNombre">&mdash;</strong></div>
+              </div>
             </div>
-            <div class="detalle-fila">
-              <dt>Destinatarios</dt>
-              <dd id="confDestinatarios">Contando...</dd>
+            <div class="prog-paso" id="pasoManual2">
+              <span class="prog-paso__num">2</span>
+              <div class="field">
+                <label for="selBaseConf">Base de datos</label>
+                <select id="selBaseConf"></select>
+                <p class="prog-disponibles-base" id="confDestinatarios">Contando pacientes...</p>
+              </div>
             </div>
-            <div class="detalle-fila" id="filaCostoConf" hidden>
-              <dt>Costo aproximado</dt>
-              <dd id="confCosto">&mdash;</dd>
-            </div>
-            <div class="detalle-fila">
-              <dt>Base de datos</dt>
-              <dd><select id="selBaseConf" class="badge badge--select" aria-label="Base de datos"></select></dd>
-            </div>
-            <div class="detalle-fila conf-limite-fila" id="filaLimiteConf" hidden>
-              <dt>Cu&aacute;ntos enviar</dt>
-              <dd class="conf-limite">
-                <input type="range" id="limiteRangeConf" min="1" value="1" step="1">
-                <div class="conf-limite__abajo">
-                  <input type="number" id="limiteNumConf" min="1" value="1" step="1">
-                  <span>de <strong id="limiteMaxConf">0</strong> a enviar</span>
+            <div class="prog-paso" id="filaLimiteConf">
+              <span class="prog-paso__num">3</span>
+              <div class="field">
+                <p class="field__hint prog-limite-nota" id="limiteNotaConf" hidden></p>
+                <label for="selLimiteModoConf">Cómo quieres definir la cantidad</label>
+                <select id="selLimiteModoConf" disabled>
+                  <option value="">Selecciona una opción</option>
+                  <option value="porcentaje">Porcentaje del máximo disponible</option>
+                  <option value="cantidad">Cantidad exacta</option>
+                </select>
+                <div class="field" id="porcentajeConfWrap" hidden>
+                  <label for="limiteRangeConf">Porcentaje</label>
+                  <div class="prog-porcentaje-control">
+                    <input type="range" id="limiteRangeConf" min="1" max="100" value="50" step="1" disabled>
+                    <output id="limitePorcentajeConf" for="limiteRangeConf">50 %</output>
+                  </div>
                 </div>
-                <p class="conf-limite__nota" id="limiteNotaConf" hidden></p>
-              </dd>
+                <label for="limiteNumConf" id="labelLimiteConf">Cantidad de pacientes</label>
+                <input type="number" id="limiteNumConf" min="1" step="1" placeholder="Elige porcentaje o cantidad" aria-describedby="limiteErrorConf" disabled>
+                <p class="limite-error" id="limiteErrorConf" role="alert" hidden></p>
+                <p class="field__hint">Máximo disponible: <strong id="limiteMaxConf">0</strong> pacientes.</p>
+              </div>
             </div>
-          </dl>
+            <p class="field__hint" id="filaCostoConf" hidden>Costo aproximado: <strong id="confCosto">&mdash;</strong></p>
 
           <div class="aviso-dev" id="confAvisoDev" hidden></div>
           <div class="aviso-limite" id="confAvisoLimite" hidden></div>
@@ -217,6 +228,7 @@
             <div class="acciones-derecha">
               <button type="button" class="btn btn--primary" id="btnLanzarConf" disabled>Iniciar Env&iacute;o</button>
             </div>
+          </div>
           </div>
           </div>
         </div>
@@ -274,7 +286,8 @@
                 </div>
               </div>
               <label for="inpProgLimite" id="labelProgLimite">Cantidad de pacientes</label>
-              <input type="number" id="inpProgLimite" min="1" step="1" placeholder="Elige porcentaje o cantidad" disabled>
+              <input type="number" id="inpProgLimite" min="1" step="1" placeholder="Elige porcentaje o cantidad" aria-describedby="progLimiteError" disabled>
+              <p class="limite-error" id="progLimiteError" role="alert" hidden></p>
             </div>
           </div>
           <div class="form-actions">

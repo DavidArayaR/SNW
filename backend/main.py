@@ -3843,10 +3843,9 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
             },
         })
 
-    # En producción (y en areas) se puede limitar cuántos se envían
-    # de esta tanda; el resto queda pendiente para un envío posterior.
-    # En desarrollo no aplica.
-    if (amb == "produccion" or t_esp) and body.limite is not None and destinatarios:
+    # La cantidad elegida para el envío manual se respeta en cualquier base;
+    # el resto queda pendiente para un envío posterior.
+    if body.limite is not None and destinatarios:
         n = max(1, min(int(body.limite), len(destinatarios)))
         destinatarios = destinatarios[:n]
 

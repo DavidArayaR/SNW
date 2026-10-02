@@ -241,11 +241,11 @@ function refrescarAvisoSinArea() {
 
 // Selector único de base de datos de la card de envío: lista solo
 // las bases disponibles —desarrollo/producción (según restricción) y una
-// opción por área—. Si hay una sola disponible, queda seleccionada.
+// opción por área—. La elección de base siempre es explícita.
 // Valores: "desarrollo" | "produccion" | "esp:<id>".
 function baseSeleccionadaConf() {
   const sel = $("#selBaseConf");
-  return sel && sel.value ? sel.value : ambienteConf;
+  return sel?.value || "";
 }
 
 function modoAreaConf() {
@@ -266,7 +266,7 @@ function ambienteEnvioConf() {
 }
 
 // Reconstruye las opciones del select. Con `forzarEspId` (plantilla de una
-// área) deja solo esa opción, ya seleccionada.
+// área) deja solo esa base como opción, pero exige seleccionarla.
 function construirOpcionesBaseConf(forzarEspId) {
   const sel = $("#selBaseConf");
   if (!sel) return;
@@ -290,38 +290,8 @@ function construirOpcionesBaseConf(forzarEspId) {
         `</optgroup>`;
     }
   }
-  sel.innerHTML = html;
-
-  // Restaura la última elección si sigue disponible; si no, la primera
-  // opción (cuando hay una sola disponible, queda esa seleccionada).
-  const valores = [...sel.options].map((o) => o.value);
-  let elegido = null;
-  if (forzarEspId != null) {
-    elegido = `esp:${forzarEspId}`;
-  } else {
-    const guardadoEsp = localStorage.getItem("snw_esp_mensajeria");
-    if (localStorage.getItem("snw_modo_conf") === "area" && guardadoEsp &&
-        valores.includes(`esp:${guardadoEsp}`)) {
-      elegido = `esp:${guardadoEsp}`;
-    } else if (valores.includes(ambienteConf)) {
-      elegido = ambienteConf;
-    } else if (valores.length) {
-      elegido = valores[0];
-    }
-  }
-  if (elegido != null) {
-    sel.value = elegido;
-    if (elegido.startsWith("esp:")) {
-      localStorage.setItem("snw_modo_conf", "area");
-      localStorage.setItem("snw_esp_mensajeria", elegido.slice(4));
-    } else {
-      ambienteConf = elegido;
-      localStorage.setItem("snw_ambiente", ambienteConf);
-      localStorage.setItem("snw_ambiente_admin", ambienteConf);
-      localStorage.setItem("snw_modo_conf", "base");
-      actualizarBadgeMensajeria();
-    }
-  }
+  sel.innerHTML = `<option value="" selected disabled>— Seleccione base de datos —</option>` + html;
+  sel.value = "";
 }
 
 async function cargar() {
@@ -519,7 +489,7 @@ function clicPlantilla(id) {
   }
   if (tabMsg === "programados") {
     tplSelId = id;
-    seleccionarParaProgramar(id);
+    seleccionarParaProgramar();
     guardarSelTpl();
     return;
   }
@@ -528,17 +498,9 @@ function clicPlantilla(id) {
   renderLista(buscadorEl.value);
 }
 
-function seleccionarParaProgramar(id) {
-  const p = (plantillas || []).find((x) => x.id === id);
+function seleccionarParaProgramar() {
   actualizarProgPlantilla();
-  const selBase = document.getElementById("selProgBase");
-  if (p && selBase && p.area_id != null &&
-      [...selBase.options].some((o) => o.value === `esp:${p.area_id}`)) {
-    selBase.value = `esp:${p.area_id}`;
-    selBase.dataset.valor = selBase.value;
-    localStorage.setItem("snw_prog_base", selBase.value);
-    cargarCupoProg();
-  }
+  cargarCupoProg();
   actualizarPasosProg();
   renderLista(buscadorEl.value);
 }
@@ -553,18 +515,19 @@ function actualizarProgPlantilla() {
     const restringido = usuarioRestringidoADesarrollo() || (window.snwRol || "") === "usuario";
     const areas = misAreas || [];
     const esHelloWorld = !!p && esPlantillaProtegida(p);
-
+    const plantillaId = String(p?.id ?? "");
+    const seleccionAnterior = selBase.dataset.plantillaId === plantillaId ? selBase.value : "";
+    const opcionInicial = `<option value="" selected disabled>— Seleccione base de datos —</option>`;
     if (esHelloWorld) {
-      // Guarda la última base elegida para restaurarla al volver a otra plantilla.
-      if (selBase.value && !selBase.disabled) {
-        selBase.dataset.valor = selBase.value;
-        localStorage.setItem("snw_prog_base", selBase.value);
-      }
-      selBase.innerHTML = `<option value="desarrollo">Desarrollo (pacientes_dev)</option>`;
-      selBase.value = "desarrollo";
-      selBase.disabled = true;
+      selBase.innerHTML = opcionInicial + `<option value="desarrollo">Desarrollo (pacientes_dev)</option>`;
+    } else if (p?.area_id != null) {
+      const area = areas.find((item) => Number(item.id) === Number(p.area_id));
+      selBase.innerHTML = opcionInicial + (area
+        ? `<option value="esp:${area.id}">${escaparHtml(area.nombre_visible)} (${escaparHtml(area.nombre_tabla_base)})</option>`
+        : "");
     } else {
       selBase.innerHTML =
+        opcionInicial +
         `<optgroup label="Bases de datos">` +
           `<option value="desarrollo">Desarrollo (pacientes_dev)</option>` +
           (restringido ? "" : `<option value="produccion">Producción (pacientes_prod)</option>`) +
@@ -574,11 +537,10 @@ function actualizarProgPlantilla() {
               areas.map((area) => `<option value="esp:${area.id}">${escaparHtml(area.nombre_visible)} (${escaparHtml(area.nombre_tabla_base)})</option>`).join("") +
             `</optgroup>`
           : "");
-      const disponibles = [...selBase.options].map((opcion) => opcion.value);
-      const preferida = selBase.dataset.valor || localStorage.getItem("snw_prog_base") || "";
-      selBase.value = disponibles.includes(preferida) ? preferida : (disponibles[0] || "");
-      selBase.dataset.valor = selBase.value;
     }
+    selBase.value = [...selBase.options].some((opcion) => opcion.value === seleccionAnterior)
+      ? seleccionAnterior : "";
+    selBase.dataset.plantillaId = plantillaId;
   }
   actualizarPasosProg();
 }
@@ -601,7 +563,7 @@ function actualizarPasosProg() {
     const el = document.getElementById(id);
     if (el) el.classList.toggle("prog-paso--listo", !!listo);
   }
-  if (selA) selA.disabled = !paso1 || (!!p && esPlantillaProtegida(p));
+  if (selA) selA.disabled = !paso1;
   if (inpF) inpF.disabled = !paso2;
   if (selModo) selModo.disabled = !paso3Listo || progSinCupo;
   const modo = selModo?.value || "";
@@ -613,13 +575,9 @@ function actualizarPasosProg() {
 function limiteProgElegido() {
   const modo = $("#selProgLimiteModo")?.value || "";
   const inpL = $("#inpProgLimite");
-  if (!inpL) return false;
-  if (modo === "porcentaje") return Number.isInteger(Number(inpL.value)) && Number(inpL.value) >= 1;
-  if (modo === "cantidad") {
-    const cantidad = Number(inpL.value);
-    return inpL.value.trim() !== "" && Number.isInteger(cantidad) && cantidad >= 1;
-  }
-  return false;
+  if (!inpL || !["porcentaje", "cantidad"].includes(modo) || inpL.value.trim() === "") return false;
+  const cantidad = Number(inpL.value);
+  return Number.isInteger(cantidad) && cantidad >= 1 && cantidad <= techoProgLimite();
 }
 
 function actualizarLimiteDesdeModo() {
@@ -1430,10 +1388,14 @@ let totalActualConf = 0;
 let hechosActualConf = 0;
 
 let confPlantillaId = null; // plantilla de la card de envío (puede diferir del editor)
+let maxManualConf = 0;
+let disponiblesBaseManualConf = 0;
+let disponiblesMetaManualConf = null;
+let consultaManualConf = 0;
 
 // Solo se bloquean los controles de envío de la card: el resto (tabs, lista,
 // programar, otras bases) sigue usable para lanzar otro envío en paralelo.
-const CONTROLES_ENVIO_CONF = ["btnLanzarConf", "selBaseConf", "limiteRangeConf", "limiteNumConf"];
+const CONTROLES_ENVIO_CONF = ["btnLanzarConf", "selBaseConf", "selLimiteModoConf", "limiteRangeConf", "limiteNumConf"];
 function setBloqueoEnvioConf(bloquear) {
   envioEnCursoConf = bloquear;
   CONTROLES_ENVIO_CONF.forEach((id) => {
@@ -1446,6 +1408,7 @@ function setBloqueoEnvioConf(bloquear) {
     if (b) b.disabled = false;
   });
   if (!bloquear) actualizarBloqueoCampos();
+  actualizarPasosManual();
 }
 
 // Sincronizar con el entorno global de la configuración: si cambió a produccion/desarrollo, actualizar la selección
@@ -1522,22 +1485,25 @@ function abrirModalConf(id = tplSelId) {
   if (!p) return;
   tplSelId = id;
   confPlantillaId = id;
+  maxManualConf = 0;
+  disponiblesBaseManualConf = 0;
+  disponiblesMetaManualConf = null;
+  $("#selLimiteModoConf").value = "";
+  $("#limiteNumConf").value = "";
   $("#confNombre").textContent = p?.nombre ?? "";
 
   aplicarRestriccionAmbiente();
-  // Si la plantilla es de un área, el select trae solo esa base;
-  // si no, trae las disponibles y restaura la última usada.
+  // Si la plantilla es de un área, el select ofrece solo esa base;
+  // en todos los casos el usuario debe elegirla explícitamente.
   construirOpcionesBaseConf(p?.area_id ?? null);
   if (esPlantillaProtegida(p)) {
     // Hello World es solo una muestra: únicamente desarrollo.
     const sel = $("#selBaseConf");
     if (sel) {
-      sel.innerHTML = `<option value="desarrollo">Desarrollo (pacientes_dev)</option>`;
-      sel.value = "desarrollo";
+      sel.innerHTML = `<option value="" selected disabled>— Seleccione base de datos —</option>` +
+        `<option value="desarrollo">Desarrollo (pacientes_dev)</option>`;
+      sel.value = "";
     }
-    ambienteConf = "desarrollo";
-    localStorage.setItem("snw_ambiente", ambienteConf);
-    localStorage.setItem("snw_ambiente_admin", ambienteConf);
   }
   refrescarAvisoDevConf();
   refrescarAvisoAdminConf();
@@ -1551,6 +1517,7 @@ function abrirModalConf(id = tplSelId) {
   $("#btnLanzarConf").hidden = false;
   $("#envioSinPlantilla").hidden = true;
   $("#envioContenido").hidden = false;
+  actualizarPasosManual();
 
   cambiarTabMsg("envios");
   renderLista(buscadorEl.value);
@@ -1560,7 +1527,14 @@ function abrirModalConf(id = tplSelId) {
 // estado inicial sin selección.
 function resetearCardEnvio() {
   clearInterval(timerPollingConf);
+  consultaManualConf += 1;
   tplSelId = null;
+  confPlantillaId = null;
+  maxManualConf = 0;
+  disponiblesBaseManualConf = 0;
+  disponiblesMetaManualConf = null;
+  $("#selLimiteModoConf").value = "";
+  $("#limiteNumConf").value = "";
   guardarSelTpl();
   actualizarProgPlantilla();
   $("#confProgreso").hidden = true;
@@ -1573,6 +1547,7 @@ function resetearCardEnvio() {
   const conP = $("#envioContenido");
   if (sinP) sinP.hidden = false;
   if (conP) conP.hidden = true;
+  actualizarPasosManual();
   renderLista(buscadorEl.value);
 }
 
@@ -1637,68 +1612,108 @@ function refrescarAvisoAdminConf() {
   }
 }
 
-// Selector de cuántos mensajes enviar (solo producción). Mantiene el slider
-// y el número sincronizados y devuelve el valor elegido.
-function limiteEnvioConf() {
-  const fila = $("#filaLimiteConf");
-  if (!fila || fila.hidden) return null;
-  const numEl = $("#limiteNumConf");
-  if (numEl.disabled) return null;
-  const n = parseInt(numEl.value, 10);
-  return Number.isFinite(n) ? n : null;
+// El paso 3 permite elegir un porcentaje del máximo disponible o una cantidad
+// exacta. En ambos casos se envía al servidor la cantidad final de pacientes.
+function erroresExcesoCupo(cantidad, disponiblesBase, disponiblesMeta) {
+  const errores = [];
+  if (cantidad > disponiblesBase) errores.push("No puede excederse la cantidad de pacientes disponibles");
+  if (disponiblesMeta != null && cantidad > disponiblesMeta) {
+    errores.push("No debe excederse el límite diario de Meta");
+  }
+  return errores;
 }
 
-// Configura el slider de cuántos enviar. `max` es el menor entre los pendientes
-// y los usuarios que aún permite contactar el límite diario de WhatsApp (si
-// aplica). Muestra cuántos quedan disponibles hoy y nunca deja superar el cupo.
-function configurarLimiteConf(pendientes, lim) {
-  const fila = $("#filaLimiteConf");
-  const range = $("#limiteRangeConf");
-  const num = $("#limiteNumConf");
-  const nota = $("#limiteNotaConf");
-  const esProd = baseSeleccionadaConf() === "produccion" || modoAreaConf();
+function limiteEnvioConf() {
+  const modo = $("#selLimiteModoConf")?.value || "";
+  const numEl = $("#limiteNumConf");
+  if (!modo || !numEl || numEl.value.trim() === "") return null;
+  const n = Number(numEl.value);
+  return Number.isInteger(n) && n >= 1 && n <= maxManualConf ? n : null;
+}
 
-  if (!esProd || pendientes <= 0) {
-    fila.hidden = true;
-    return;
+function actualizarPasosManual() {
+  const plantilla = plantillas.find((p) => p.id === confPlantillaId);
+  const base = $("#selBaseConf")?.value || "";
+  const modo = $("#selLimiteModoConf")?.value || "";
+  const listo1 = !!plantilla;
+  const listo2 = listo1 && !!base;
+  const puedeElegirLimite = listo2 && maxManualConf > 0;
+  const listo3 = puedeElegirLimite && limiteEnvioConf() != null;
+  for (const [id, listo] of [["pasoManual1", listo1], ["pasoManual2", listo2], ["filaLimiteConf", listo3]]) {
+    const paso = document.getElementById(id);
+    if (paso) paso.classList.toggle("prog-paso--listo", listo);
   }
-  const disponibles = (lim && lim.disponibles != null) ? lim.disponibles : pendientes;
-  const max = Math.max(0, Math.min(pendientes, disponibles));
+  const selBase = $("#selBaseConf");
+  if (selBase) selBase.disabled = !listo1 || envioEnCursoConf;
+  $("#selLimiteModoConf").disabled = !puedeElegirLimite || envioEnCursoConf;
+  $("#limiteRangeConf").disabled = !puedeElegirLimite || modo !== "porcentaje" || envioEnCursoConf;
+  $("#limiteNumConf").disabled = !puedeElegirLimite || modo !== "cantidad" || envioEnCursoConf;
+  $("#btnLanzarConf").disabled = !listo3 || envioEnCursoConf;
+}
 
-  fila.hidden = false;
-  const techo = Math.max(1, max);
-  range.max = num.max = String(techo);
-  range.min = num.min = "1";
-  range.disabled = num.disabled = max <= 0;
-  // Por defecto se envían todos los que permite el cupo de hoy.
-  range.value = num.value = String(techo);
-  $("#limiteMaxConf").textContent = max;
+function actualizarCantidadManual() {
+  const modo = $("#selLimiteModoConf").value;
+  const num = $("#limiteNumConf");
+  const range = $("#limiteRangeConf");
+  $("#porcentajeConfWrap").hidden = modo !== "porcentaje";
+  $("#labelLimiteConf").textContent = modo === "porcentaje" ? "Cantidad que se enviará" : "Cantidad de pacientes";
+  num.readOnly = modo === "porcentaje";
+  if (modo === "porcentaje") {
+    const porcentaje = Number(range.value);
+    num.value = maxManualConf > 0 ? String(Math.max(1, Math.floor(maxManualConf * porcentaje / 100))) : "";
+    $("#limitePorcentajeConf").textContent = `${porcentaje} % (${num.value || 0} pacientes)`;
+  } else if (modo !== "cantidad") {
+    num.value = "";
+  }
+  const bruto = num.value.trim();
+  const cantidad = Number(bruto);
+  const errores = modo === "cantidad" && bruto !== ""
+    ? (!Number.isInteger(cantidad) || cantidad < 1
+      ? ["Ingresa una cantidad válida de pacientes"]
+      : erroresExcesoCupo(cantidad, disponiblesBaseManualConf, disponiblesMetaManualConf))
+    : [];
+  const error = $("#limiteErrorConf");
+  error.hidden = errores.length === 0;
+  error.textContent = errores.join("\n");
+  num.classList.toggle("invalido", errores.length > 0);
+  num.setAttribute("aria-invalid", errores.length > 0 ? "true" : "false");
+  actualizarPasosManual();
+}
+
+// El máximo es el menor entre los pacientes pendientes de la base y el cupo
+// restante de Meta, únicamente cuando este último aplica al envío.
+function configurarLimiteConf(pendientes, lim) {
+  const nota = $("#limiteNotaConf");
+  const disponibles = (lim && lim.disponibles != null) ? lim.disponibles : pendientes;
+  disponiblesBaseManualConf = pendientes;
+  disponiblesMetaManualConf = lim && lim.disponibles != null ? Number(lim.disponibles) : null;
+  maxManualConf = Math.max(0, Math.min(pendientes, disponibles));
+  $("#limiteMaxConf").textContent = new Intl.NumberFormat("es-CL").format(maxManualConf);
+  $("#limiteNumConf").max = String(Math.max(1, maxManualConf));
+  $("#selLimiteModoConf").value = "";
+  $("#limiteNumConf").value = "";
+  $("#limiteRangeConf").value = "50";
+  $("#limitePorcentajeConf").textContent = "50 %";
 
   if (nota) {
     if (lim && lim.tier) {
       nota.hidden = false;
-      const extra = pendientes > max
-        ? ` · ${pendientes - max} quedan para más adelante`
-        : "";
-      nota.textContent =
-        `${lim.disponibles} de ${lim.tier} disponibles hoy y disponibles en base de datos: ` +
-        `${pendientes}${extra}.`;
+      const numero = new Intl.NumberFormat("es-CL");
+      nota.innerHTML = `<strong>Límite diario de Meta:</strong> ${numero.format(lim.tier)} ` +
+        `(${numero.format(Math.max(0, lim.disponibles))} disponibles)`;
+      const porcentaje = Math.max(0, Number(lim.disponibles) || 0) / Number(lim.tier) * 100;
+      nota.classList.remove("prog-limite-nota--ok", "prog-limite-nota--warn", "prog-limite-nota--danger");
+      nota.classList.add(porcentaje > 50 ? "prog-limite-nota--ok" : porcentaje >= 20 ? "prog-limite-nota--warn" : "prog-limite-nota--danger");
     } else {
-      nota.hidden = false;
-      nota.textContent = `Disponibles en base de datos: ${pendientes}.`;
+      nota.hidden = true;
     }
   }
+  actualizarCantidadManual();
 }
 
-(function sincronizarLimiteConf() {
-  const range = $("#limiteRangeConf");
-  const num = $("#limiteNumConf");
-  if (!range || !num) return;
-  const clamp = (v) => Math.min(Math.max(1, parseInt(v, 10) || 1), parseInt(num.max, 10) || 1);
-  range.addEventListener("input", () => { num.value = range.value; });
-  num.addEventListener("input", () => { range.value = clamp(num.value); });
-  num.addEventListener("change", () => { num.value = range.value = clamp(num.value); });
-})();
+$("#selLimiteModoConf").addEventListener("change", actualizarCantidadManual);
+$("#limiteRangeConf").addEventListener("input", actualizarCantidadManual);
+$("#limiteNumConf").addEventListener("input", actualizarCantidadManual);
 
 function fmtMoneda(monto, moneda) {
   const entero = Number.isInteger(monto);
@@ -1709,9 +1724,8 @@ function fmtMoneda(monto, moneda) {
   return `${s} ${moneda}`;
 }
 
-// Aviso del límite diario de WhatsApp alcanzado. En producción bloquea el
-// envío; en desarrollo solo se indica (el envío no se bloquea).
-function mostrarAvisoLimiteConf(lim, esProd) {
+// Aviso del límite diario de WhatsApp cuando aplica al envío manual.
+function mostrarAvisoLimiteConf(lim) {
   const box = $("#confAvisoLimite");
   if (!box) return;
   if (!lim || lim.disponibles > 0) {
@@ -1721,17 +1735,30 @@ function mostrarAvisoLimiteConf(lim, esProd) {
   box.hidden = false;
   box.textContent =
     `Límite diario de WhatsApp alcanzado: en las últimas 24 h ya se contactó a ` +
-    `${lim.usados_24h} usuarios únicos (límite ${lim.tier}).` +
-    (esProd ? "" : " En desarrollo el envío no se bloquea, pero en producción se rechazaría.");
+    `${lim.usados_24h} usuarios únicos (límite ${lim.tier}).`;
 }
 
 async function actualizarResumenConf() {
   const dd = $("#confDestinatarios");
   const filaCosto = $("#filaCostoConf");
   const ddCosto = $("#confCosto");
-  dd.textContent = "Contando...";
+  const consulta = ++consultaManualConf;
+  dd.textContent = "Contando pacientes...";
   filaCosto.hidden = true;
-  $("#btnLanzarConf").disabled = true;
+  maxManualConf = 0;
+  disponiblesBaseManualConf = 0;
+  disponiblesMetaManualConf = null;
+  $("#limiteNotaConf").hidden = true;
+  $("#selLimiteModoConf").value = "";
+  $("#limiteNumConf").value = "";
+  actualizarCantidadManual();
+  if (!baseSeleccionadaConf()) {
+    dd.hidden = true;
+    configurarLimiteConf(0);
+    mostrarAvisoLimiteConf(null);
+    return;
+  }
+  dd.hidden = false;
 
   try {
     const espId = areaEnvioId();
@@ -1743,20 +1770,16 @@ async function actualizarResumenConf() {
       body: JSON.stringify(cuerpoEnvio),
     });
     if (res.status === 401) { window.snwSesionExpirada(); return; }
+    if (!res.ok) throw new Error("No se pudieron contar los pacientes.");
     const data = await res.json();
+    if (consulta !== consultaManualConf) return;
     const lim = data.limite_mensajeria || null;
     const esProd = baseSeleccionadaConf() === "produccion" || espId != null;
-    const sinCupo = !!(lim && lim.disponibles <= 0);
-    dd.textContent = `${data.pendientes} pendiente(s) · base: ${data.base_datos}`;
-    configurarLimiteConf(data.pendientes || 0, lim);
-    // En producción el cupo diario bloquea el envío; en desarrollo solo se avisa.
-    $("#btnLanzarConf").disabled = data.pendientes === 0 || (sinCupo && esProd);
-    mostrarAvisoLimiteConf(lim, esProd);
-    if (sinCupo && esProd) {
-      dd.textContent =
-        `Sin cupo hoy: ${data.pendientes} pendiente(s) · límite de WhatsApp alcanzado ` +
-        `(${lim.usados_24h}/${lim.tier} usuarios en 24 h).`;
-    }
+    const limAplicable = esProd ? lim : null;
+    const pendientes = Number(data.pendientes) || 0;
+    dd.textContent = `Disponibles en esta base: ${new Intl.NumberFormat("es-CL").format(pendientes)} pacientes.`;
+    configurarLimiteConf(pendientes, limAplicable);
+    mostrarAvisoLimiteConf(limAplicable);
 
     if (data.costo) {
       ddCosto.textContent =
@@ -1767,10 +1790,11 @@ async function actualizarResumenConf() {
       filaCosto.hidden = true;
     }
   } catch {
+    if (consulta !== consultaManualConf) return;
     console.error("[app.js actualizarResumenConf()]");
     dd.textContent = "No se pudieron contar.";
     configurarLimiteConf(0);
-    mostrarAvisoLimiteConf(null, false);
+    mostrarAvisoLimiteConf(null);
   }
 }
 
@@ -1839,12 +1863,13 @@ modalRechazadoConfEl.addEventListener("click", (e) => {
 
 $("#btnLanzarConf").addEventListener("click", () => {
   const nombre = $("#confNombre").textContent || "plantilla";
-  const dest = $("#confDestinatarios").textContent || "";
+  const dest = limiteEnvioConf();
+  if (dest == null) return;
   const baseEl = $("#selBaseConf");
   const base = baseEl && baseEl.selectedOptions.length
     ? baseEl.selectedOptions[0].textContent : "";
   $("#mensajeIniciarConf").textContent =
-    `¿Iniciar el envío de "${nombre}" a ${dest}${base ? ` (${base})` : ""}?`;
+    `¿Iniciar el envío de "${nombre}" para hasta ${dest} paciente(s)${base ? ` de ${base}` : ""}?`;
   $("#modalIniciarConf").hidden = false;
 });
 $("#btnNoIniciarConf").addEventListener("click", () => {
@@ -1854,6 +1879,12 @@ $("#modalIniciarConf").addEventListener("click", (e) => {
   if (e.target.id === "modalIniciarConf") $("#modalIniciarConf").hidden = true;
 });
 $("#btnConfirmarIniciarConf").addEventListener("click", async () => {
+  const limiteSeleccionado = limiteEnvioConf();
+  if (limiteSeleccionado == null) {
+    $("#modalIniciarConf").hidden = true;
+    toast("Elige cuántos pacientes quieres incluir en el envío.", "error");
+    return;
+  }
   $("#modalIniciarConf").hidden = true;
   // Se puede lanzar otro envío aunque se siga uno en la card (el anterior
   // sigue en el servidor y se ve en Historial); la base ocupada la rechaza el backend.
@@ -1875,8 +1906,7 @@ $("#btnConfirmarIniciarConf").addEventListener("click", async () => {
     const cuerpo = { plantilla_id: confPlantillaId, ambiente: ambienteEnvioConf() };
     const espIdLanzar = areaEnvioId();
     if (espIdLanzar != null) cuerpo.area_id = espIdLanzar;
-    const lim = limiteEnvioConf();
-    if (lim != null) cuerpo.limite = lim;
+    cuerpo.limite = limiteSeleccionado;
     const res = await fetch("api/notificaciones/enviar", {
       method: "POST",
       headers: authHeaders({ "Content-Type": "application/json" }),
@@ -2222,28 +2252,6 @@ function techoProgLimite() {
   return Math.max(0, Math.min(enBase, disponibles));
 }
 
-function fechaProgEtiqueta(fecha) {
-  if (!fecha) return "hoy";
-  const [anio, mes, dia] = fecha.split("-");
-  return dia && mes && anio ? `${dia}/${mes}/${anio}` : fecha;
-}
-
-// Explica cuál es el tope real, nombrando los dos límites (pacientes libres de
-// la base y cupo diario de Meta).
-function textoTopeProg(techo) {
-  const c = progCupo || {};
-  const enBase = (c.libres != null) ? c.libres : (c.pendientes || 0);
-  if (c.disponibles == null) {
-    return `En esta base hay ${enBase} pacientes disponibles. Ingresa ${techo} o menos.`;
-  }
-  const fecha = fechaProgEtiqueta(c.fecha);
-  const usados = c.enviados != null || c.programados != null
-    ? `Ya se enviaron ${c.enviados || 0} y hay ${c.programados || 0} incluidos en otros envíos.`
-    : `Ya se enviaron ${c.usados || 0}.`;
-  return `Para el ${fecha} quedan ${c.disponibles} destinatarios del máximo diario de ${c.tier} de Meta. ` +
-    `${usados} En esta base hay ${enBase} pacientes disponibles. Ingresa ${techo} o menos.`;
-}
-
 // Revisa el campo: lo pinta en rojo mientras no se pueda enviar (pasa el tope
 // real, no es entero o es menor a 1) y devuelve si el valor es válido. Sin cupo
 // (techo 0) no se compara nada: el campo queda deshabilitado y la nota explica.
@@ -2253,28 +2261,35 @@ function revisarLimiteProg(avisar = false) {
   const bruto = inpL.value.trim();
   const modo = $("#selProgLimiteModo")?.value || "";
   const techo = techoProgLimite();
-  let motivo = "";
+  const errores = [];
   if (!modo) {
-    motivo = "Elige un porcentaje o una cantidad exacta para continuar.";
+    errores.push("Elige un porcentaje o una cantidad exacta para continuar.");
   } else if (modo === "cantidad" && bruto === "") {
-    motivo = "Indica cuántos pacientes quieres programar.";
+    errores.push("Indica cuántos pacientes quieres programar.");
   } else if (bruto !== "" && techo > 0) {
     const v = Number(bruto);
     if (!Number.isInteger(v) || v < 1) {
-      motivo = "El límite debe ser un número entero de 1 o más (vacío = sin límite).";
-    } else if (v > techo) {
-      motivo = textoTopeProg(techo);
+      errores.push("Ingresa una cantidad válida de pacientes.");
+    } else {
+      const c = progCupo || {};
+      const disponiblesBase = c.libres != null ? c.libres : (c.pendientes || 0);
+      errores.push(...erroresExcesoCupo(v, disponiblesBase, c.disponibles));
     }
   }
   // "invalido" es la clase del tema para pintar el borde en rojo.
-  const mostrarError = !!motivo && (avisar || !!modo);
+  const mostrarError = errores.length > 0 && (avisar || (!!modo && bruto !== ""));
+  const error = $("#progLimiteError");
+  if (error) {
+    error.hidden = !mostrarError;
+    error.textContent = mostrarError ? errores.join("\n") : "";
+  }
   inpL.classList.toggle("invalido", mostrarError);
   inpL.setAttribute("aria-invalid", mostrarError ? "true" : "false");
-  if (motivo && avisar) {
-    toast(motivo, "error");
+  if (errores.length && avisar) {
+    toast(errores.join(" "), "error");
     inpL.focus();
   }
-  return !motivo;
+  return errores.length === 0;
 }
 
 function aplicarCupoProg() {
@@ -2302,6 +2317,8 @@ function aplicarCupoProg() {
     progSinCupo = false;
     inpL.classList.remove("invalido");
     inpL.removeAttribute("aria-invalid");
+    const error = $("#progLimiteError");
+    if (error) { error.hidden = true; error.textContent = ""; }
     if (nota) nota.hidden = true;
     return;
   }
@@ -2381,8 +2398,6 @@ async function cargarCupoProg(forzar = false) {
 
 const selProgBaseEl = $("#selProgBase");
 if (selProgBaseEl) selProgBaseEl.addEventListener("change", () => {
-  selProgBaseEl.dataset.valor = selProgBaseEl.value;
-  localStorage.setItem("snw_prog_base", selProgBaseEl.value);
   cargarCupoProg();
   actualizarPasosProg();
 });
