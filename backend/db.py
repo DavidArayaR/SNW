@@ -315,6 +315,16 @@ def asegurar_tabla_config() -> None:
             except Exception as e:
                 log_error("migrar_whatsapp_avisos_unicos", e)
             _sembrar_usuarios(cur)
+            # Solo la cuenta que incorporó un paciente vía CSV puede ver sus datos completos.
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS paciente_csv_accesos ("
+                "  tabla_pacientes VARCHAR(64) NOT NULL,"
+                "  paciente_id INT NOT NULL,"
+                "  usuario_id INT NOT NULL,"
+                "  PRIMARY KEY (tabla_pacientes, paciente_id, usuario_id),"
+                "  INDEX idx_csv_acceso_usuario (usuario_id)"
+                ") CHARACTER SET utf8mb4"
+            )
             # Si el login ya es un correo y no hay correo de recuperación, se copia.
             cur.execute(
                 "UPDATE usuarios SET correo_recuperacion = LOWER(usuario)"

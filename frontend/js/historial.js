@@ -7,6 +7,8 @@ function authHeaders(extra = {}) {
 if (!localStorage.getItem("snw_token")) location.replace("login.html");
 
 let registros = [];
+let cargaHistSecuencia = 0;
+let cargandoCambioBase = false;
 let filtro = "";
 let paginaHist = 1;
 let pageSizeHist = Math.min(100, Math.max(10, Number(localStorage.getItem("snw_page_size_hist")) || 10));
@@ -263,7 +265,7 @@ if (selBaseHist) selBaseHist.addEventListener("change", () => {
     localStorage.removeItem("snw_base_historial");
   }
   paginaHist = 1;
-  cargar();
+  cargar(false, false, true);
 });
 
 const pagAntHist = $("#pagAntHist");
@@ -299,7 +301,25 @@ function escaparHtml(texto) {
   return div.innerHTML;
 }
 
-async function cargar(mantenerPagina = false, mostrarFeedback = false) {
+async function cargar(mantenerPagina = false, mostrarFeedback = false, mostrarCarga = false) {
+  if (cargandoCambioBase && !mostrarCarga) return;
+  const secuencia = ++cargaHistSecuencia;
+  const inicioCarga = mostrarCarga ? performance.now() : 0;
+  if (mostrarCarga) {
+    cargandoCambioBase = true;
+    registros = [];
+    tbodyEl.closest("table").setAttribute("aria-busy", "true");
+    tbodyEl.innerHTML = `<tr class="historial-fila-cargando"><td colspan="10">` +
+      `<span class="historial-cargando" role="status">` +
+      `<span class="historial-cargando__spinner" aria-hidden="true"></span>` +
+      `Actualizando historial…</span></td></tr>`;
+    vacioEl.hidden = true;
+    contadorEl.textContent = "Actualizando…";
+    statsEl.innerHTML = "";
+    $("#pagInfoHist").textContent = "Actualizando…";
+    $("#pagAntHist").disabled = true;
+    $("#pagSigHist").disabled = true;
+  }
   try {
     const base = (selBaseHist && selBaseHist.value) || "todos";
     const qs = base !== "todos" ? `tabla=${encodeURIComponent(base)}` : "ambiente=todos";
@@ -308,13 +328,31 @@ async function cargar(mantenerPagina = false, mostrarFeedback = false) {
     });
     if (rh.status === 401) { window.snwSesionExpirada(); return; }
     if (!rh.ok) throw new Error();
-    registros = await rh.json();
+    const nuevosRegistros = await rh.json();
+    if (mostrarCarga) {
+      const restante = 250 - (performance.now() - inicioCarga);
+      if (restante > 0) await new Promise((resolver) => setTimeout(resolver, restante));
+    }
+    if (secuencia !== cargaHistSecuencia) return;
+    registros = nuevosRegistros;
     if (!mantenerPagina) paginaHist = 1;
     render();
     if (mostrarFeedback) toast("Historial actualizado correctamente.");
   } catch {
+    if (secuencia !== cargaHistSecuencia) return;
     console.error("[historial.js cargar()]");
+    if (mostrarCarga) {
+      tbodyEl.innerHTML = `<tr class="historial-fila-cargando"><td colspan="10">` +
+        `No se pudo actualizar el historial. Inténtalo de nuevo.</td></tr>`;
+      contadorEl.textContent = "—";
+      $("#pagInfoHist").textContent = "No disponible";
+    }
     if (!mantenerPagina) toast("Error al conectar con el servidor.", "error");
+  } finally {
+    if (secuencia === cargaHistSecuencia && mostrarCarga) {
+      cargandoCambioBase = false;
+      tbodyEl.closest("table").removeAttribute("aria-busy");
+    }
   }
 }
 
@@ -458,7 +496,7 @@ function abrirDetalle(envio, detalle) {
       const marcaInteres = d.interesado
         ? `<span class="hist-tag-interes" title="Marcado como interesado">interesado</span>`
         : "";
-      const celdaMsgs = d.paciente_id
+      const celdaMsgs = d.paciente_id && d.datos_completos
         ? `<td class="hist-col-msgs"><button type="button" class="btn btn--sm btn--ghost" data-mensajes="${d.paciente_id}">Ver mensajes</button></td>`
         : `<td class="hist-col-msgs">—</td>`;
       const tr = document.createElement("tr");

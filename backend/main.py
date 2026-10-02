@@ -331,6 +331,65 @@ def _resolver_tabla_pacientes(sesion: dict, ambiente: str,
     return tabla, esp
 
 
+def _ids_csv_propios(tabla: str, ids: list[int], sesion: dict) -> set[int]:
+    """Acceso completo solo a las filas incorporadas por esta cuenta vía CSV.
+    Un error o una carga anterior sin autor registrado nunca concede acceso."""
+    uid = servicio_areas.usuario_id_por_correo(sesion.get("usuario", ""))
+    ids = list({int(pid) for pid in ids if pid is not None})
+    if not uid or not ids:
+        return set()
+    propios: set[int] = set()
+    try:
+        with conectar() as conn, conn.cursor() as cur:
+            for inicio in range(0, len(ids), 500):
+                lote = ids[inicio:inicio + 500]
+                ph = ", ".join("%s" for _ in lote)
+                cur.execute(
+                    "SELECT paciente_id FROM paciente_csv_accesos"
+                    f" WHERE tabla_pacientes = %s AND usuario_id = %s AND paciente_id IN ({ph})",
+                    (tabla, uid, *lote),
+                )
+                propios.update(int(r["paciente_id"]) for r in cur.fetchall())
+    except Exception as e:
+        log_error("_ids_csv_propios", e)
+        return set()
+    return propios
+
+
+def _iniciales_paciente(nombre: str | None) -> str:
+    letras = [next((c for c in parte if c.isalpha()), "")
+              for parte in (nombre or "").split()]
+    return " ".join(f"{c.upper()}." for c in letras if c) or "—"
+
+
+def _telefono_paciente_oculto(numero: str | None) -> str:
+    digitos = re.sub(r"\D", "", numero or "")
+    if re.fullmatch(r"(?:569\d{8}|56\d{8}|9\d{7,8})", digitos):
+        return f"+569 **** *{digitos[-3:]}"
+    return "—"
+
+
+def _ocultar_datos_paciente(fila: dict) -> None:
+    fila["nombre"] = _iniciales_paciente(" ".join(
+        x for x in (fila.get("nombre"), fila.get("apellido")) if x))
+    fila["apellido"] = ""
+    fila["telefono"] = _telefono_paciente_oculto(fila.get("telefono"))
+    fila["ultimo_mensaje_recibido"] = None
+    fila["ultimo_error"] = None
+
+
+def _rechazados_visibles(rechazados: list[dict], tabla: str, sesion: dict) -> list[dict]:
+    propios = _ids_csv_propios(tabla, [r.get("id") for r in rechazados], sesion)
+    salida = []
+    for r in rechazados:
+        visible = dict(r)
+        if r.get("id") not in propios:
+            visible["nombre"] = _iniciales_paciente(r.get("nombre"))
+            visible["telefono"] = _telefono_paciente_oculto(r.get("telefono"))
+        salida.append(visible)
+    return salida
+
+
 def _cond_tabla_log(tabla: str | None) -> tuple[str, tuple]:
     """Fragmento SQL para aislar filas de log_envios por tabla de origen.
 
@@ -1039,11 +1098,13 @@ async def importar_pacientes_csv(area_id: int, archivo: UploadFile = File(...),
     uid = servicio_areas.usuario_id_por_correo(sesion.get("usuario", ""))
     if not servicio_areas.puede_acceder_area(privilegiado, uid, area_id):
         raise HTTPException(403, detail="No tienes acceso a esta área.")
+    if uid is None:
+        raise HTTPException(403, detail="No se pudo identificar la cuenta que sube el CSV.")
     datos = await archivo.read()
     if len(datos) > CSV_MAX_BYTES:
         raise HTTPException(413, detail="El archivo supera los 5 MB.")
     try:
-        informe = servicio_areas.importar_pacientes_csv(area_id, datos)
+        informe = servicio_areas.importar_pacientes_csv(area_id, datos, uid)
     except ValueError as e:
         raise _error_area(str(e))
     auditoria_registrar(sesion.get("usuario", ""), "area_csv",
@@ -1162,13 +1223,24 @@ def from_pacientes(ambiente: str, tabla: str | None = None) -> str:
     """Cláusula FROM + LEFT JOIN sobre la tabla de pacientes del entorno
     (o la tabla explícita de una area)."""
     t = tabla or tabla_pacientes(ambiente)
+    filtro_log = _filtro_log_paciente(t, ambiente, "l2")
     return (
         f" FROM {t} p"
         " LEFT JOIN log_envios l ON l.id = ("
         "   SELECT l2.id FROM log_envios l2"
-        "   WHERE l2.paciente_id = p.id ORDER BY l2.id DESC LIMIT 1"
+        f"   WHERE l2.paciente_id = p.id{filtro_log} ORDER BY l2.id DESC LIMIT 1"
         ")"
     )
+
+
+def _filtro_log_paciente(tabla: str, ambiente: str, alias: str) -> str:
+    if "tabla_pacientes" not in columnas_tabla("log_envios", ambiente):
+        return ""
+    if tabla in ("pacientes_dev", "pacientes_prod"):
+        return f" AND COALESCE({alias}.tabla_pacientes, '') IN ('', '{tabla}')"
+    if not servicio_areas.tabla_valida(tabla):
+        raise ValueError("Tabla de pacientes inválida")
+    return f" AND {alias}.tabla_pacientes = '{tabla}'"
 
 
 def expr_respuesta_efectiva(alias: str = "p", tiene_opt_out: bool = True,
@@ -1264,11 +1336,15 @@ def expr_select_pacientes(ambiente: str, tabla: str | None = None) -> str:
     # con plantilla_clave = 'respuesta', que inserta el webhook).
     exprs.append(
         "(SELECT le.fecha_hora FROM log_envios le WHERE le.paciente_id = p.id"
-        "  AND le.plantilla_clave = 'respuesta' ORDER BY le.id DESC LIMIT 1) AS ultima_respuesta_fecha"
+        "  AND le.plantilla_clave = 'respuesta'"
+        + _filtro_log_paciente(t, ambiente, "le")
+        + " ORDER BY le.id DESC LIMIT 1) AS ultima_respuesta_fecha"
     )
     exprs.append(
         "(SELECT le.mensaje FROM log_envios le WHERE le.paciente_id = p.id"
-        "  AND le.plantilla_clave = 'respuesta' ORDER BY le.id DESC LIMIT 1) AS ultimo_mensaje_recibido"
+        "  AND le.plantilla_clave = 'respuesta'"
+        + _filtro_log_paciente(t, ambiente, "le")
+        + " ORDER BY le.id DESC LIMIT 1) AS ultimo_mensaje_recibido"
     )
     return ", ".join(exprs)
 
@@ -1285,22 +1361,25 @@ def listar_pacientes(q: str | None = Query(None), ambiente: str = Query("producc
             raise HTTPException(403, detail="No tienes permiso para acceder a esta sección.")
         t, _esp = _resolver_tabla_pacientes(sesion, ambiente, None)
     sql = "SELECT " + expr_select_pacientes(ambiente, tabla=t) + from_pacientes(ambiente, tabla=t)
-    args: list = []
-    if q and q.strip():
-        like = f"%{q.strip()}%"
-        sql += " WHERE p.nombre LIKE %s OR p.telefono LIKE %s"
-        args = [like, like]
     sql += " ORDER BY p.id"
 
     with conectar(ambiente) as conn, conn.cursor() as cur:
-        cur.execute(sql, tuple(args) or None)
+        cur.execute(sql)
         filas = cur.fetchall()
 
+    propios = _ids_csv_propios(t, [f["id"] for f in filas], sesion)
     for f in filas:
+        f["datos_completos"] = f["id"] in propios
+        if not f["datos_completos"]:
+            _ocultar_datos_paciente(f)
         fecha = f.pop("fecha_actualizacion", None)
         f["actualizado"] = fecha.strftime("%d-%m-%Y %H:%M") if fecha else "—"
         fr = f.get("ultima_respuesta_fecha")
         f["ultima_respuesta_fecha"] = fr.strftime("%d-%m-%Y %H:%M") if fr else None
+    if q and q.strip():
+        texto = q.strip().casefold()
+        filas = [f for f in filas if texto in f["nombre"].casefold()
+                 or texto in f["telefono"].casefold()]
     return filas
 
 
@@ -1454,6 +1533,9 @@ def actualizar_paciente(paciente_id: int, body: EstadoPacienteIn,
             (paciente_id,),
         )
         fila = cur.fetchone()
+        fila["datos_completos"] = paciente_id in _ids_csv_propios(t, [paciente_id], sesion)
+        if not fila["datos_completos"]:
+            _ocultar_datos_paciente(fila)
         fecha = fila.pop("fecha_actualizacion", None)
         fila["actualizado"] = fecha.strftime("%d-%m-%Y %H:%M") if fecha else "—"
         return fila
@@ -1531,6 +1613,9 @@ def actualizar_respuesta_paciente(paciente_id: int, body: RespuestaIn,
     # el sistema le seguiría mandando mensajes desde la base que no se tocó.
     if body.respuesta == "baja":
         fila["otras_bases"] = _propagar_baja_otras_bases(t, fila.get("telefono"), ambiente)
+    fila["datos_completos"] = paciente_id in _ids_csv_propios(t, [paciente_id], sesion)
+    if not fila["datos_completos"]:
+        _ocultar_datos_paciente(fila)
     return fila
 
 
@@ -1553,9 +1638,7 @@ def _propagar_baja_otras_bases(tabla: str, telefono: str | None, ambiente: str) 
 def mensajes_paciente(paciente_id: int, ambiente: str = Query("produccion"),
                       area_id: int | None = Query(None),
                       sesion: dict = Depends(sesion_actual)):
-    """Todos los mensajes (entrantes y salientes) de un paciente, para revisar
-    a mano si su interés es real. Los entrantes se guardan tal cual los escribió.
-    Accesible a cualquier usuario (solo lectura)."""
+    """Los mensajes completos solo están disponibles para quien subió el CSV."""
     if area_id is not None:
         t, _esp = _resolver_tabla_pacientes(sesion, ambiente, area_id)
     else:
@@ -1579,6 +1662,8 @@ def mensajes_paciente(paciente_id: int, ambiente: str = Query("produccion"),
         pac = cur.fetchone()
         if not pac:
             raise HTTPException(404, detail="Paciente no encontrado")
+        if paciente_id not in _ids_csv_propios(t, [paciente_id], sesion):
+            raise HTTPException(403, detail="Solo quien subió este paciente por CSV puede ver sus mensajes.")
         cond_log, args_log = _cond_tabla_log_segura(t if _esp else None, ambiente)
         cur.execute(
             "SELECT id, fecha_hora, mensaje, plantilla_clave, estado_envio, descripcion_error"
@@ -1592,9 +1677,6 @@ def mensajes_paciente(paciente_id: int, ambiente: str = Query("produccion"),
         filas = cur.fetchall()
     pac["interesado"] = bool(pac.get("interesado"))
     pac["whatsapp_opt_out"] = bool(pac.get("whatsapp_opt_out"))
-    if sesion.get("rol") not in ROLES_PRIVILEGIADOS:
-        # El número de teléfono del paciente es solo para admin/dev.
-        pac["telefono"] = None
     mensajes = []
     for f in filas:
         entrante = (f.get("plantilla_clave") or "") == "respuesta"
@@ -2702,18 +2784,24 @@ def obtener_call_center_log(sesion: dict = Depends(exigir("call_center_registro"
             where, args = f" WHERE base_datos IN ({placeholders})", tuple(permitidas)
         with conectar() as conn, conn.cursor() as cur:
             cur.execute(
-                "SELECT id, nombre_paciente, numero_paciente, numero_call_center,"
+                "SELECT id, paciente_id, nombre_paciente, numero_paciente, numero_call_center,"
                 " plantilla_clave, automatico, estado, descripcion_error, base_datos, fecha_hora"
                 f" FROM call_center_log{where} ORDER BY id DESC LIMIT 200",
                 args or None,
             )
-            privilegiado = _es_privilegiado(sesion)
-            for r in cur.fetchall():
+            filas = cur.fetchall()
+            propios_por_tabla = {
+                tabla: _ids_csv_propios(tabla, [r.get("paciente_id") for r in filas
+                                                 if r.get("base_datos") == tabla], sesion)
+                for tabla in {r.get("base_datos") for r in filas if r.get("base_datos")}
+            }
+            for r in filas:
                 r["fecha"] = r.pop("fecha_hora").strftime("%d-%m-%Y %H:%M")
                 r["automatico"] = bool(r["automatico"])
-                if not privilegiado:
-                    # El número de teléfono del paciente es solo para admin/dev.
-                    r["numero_paciente"] = None
+                if r.get("paciente_id") not in propios_por_tabla.get(r.get("base_datos"), set()):
+                    r["nombre_paciente"] = _iniciales_paciente(r.get("nombre_paciente"))
+                    r["numero_paciente"] = _telefono_paciente_oculto(r.get("numero_paciente"))
+                    r["descripcion_error"] = None
                 entradas.append(r)
     except Exception as e:
         log_error("obtener_call_center_log", e)
@@ -3890,7 +3978,8 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
                                         r.get("motivo"), ambiente=amb, envio_id=envio_id,
                                         area_id=(esp["id"] if esp else None),
                                         tabla_pacientes=t_esp)
-        return {"iniciado": False, "total": 0, "rechazados": rechazados,
+        return {"iniciado": False, "total": 0,
+                "rechazados": _rechazados_visibles(rechazados, t_esp or nombre_base(amb), sesion),
                 "requiere_confirmacion": False, "envio_id": envio_id}
 
     # En producción se requiere confirmación por correo del supervisor, salvo
@@ -3949,7 +4038,9 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
                                     area_nombre=(esp["nombre_visible"] if esp else ""),
                                     cupo_meta=info_limite)
         return {"requiere_confirmacion": True, "solicitud_id": token, "total": len(destinatarios),
-                "ambiente": amb, "rechazados": rechazados, "aviso_limite_mensajeria": aviso_limite,
+                "ambiente": amb,
+                "rechazados": _rechazados_visibles(rechazados, t_esp or nombre_base(amb), sesion),
+                "aviso_limite_mensajeria": aviso_limite,
                 "confirm_url": f"{url_base()}/api/notificaciones/confirmar/{token}"}
 
     envio_id = crear_envio_batch(t_esp or nombre_base(amb), plantilla["clave"], plantilla["nombre"],
@@ -3996,7 +4087,9 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
 
     background_tasks.add_task(procesar_job, job_id)
     return {"requiere_confirmacion": False, "iniciado": True, "job_id": job_id, "total": len(destinatarios),
-            "ambiente": amb, "rechazados": rechazados, "aviso_limite_mensajeria": aviso_limite}
+            "ambiente": amb,
+            "rechazados": _rechazados_visibles(rechazados, t_esp or nombre_base(amb), sesion),
+            "aviso_limite_mensajeria": aviso_limite}
 
 
 def estado_solicitud(token: str, sesion: dict = Depends(sesion_actual)):
@@ -4232,7 +4325,11 @@ def estado_job(job_id: str, sesion: dict = Depends(exigir("mensajeria"))):
     if job is None:
         raise HTTPException(404, detail="Envío no encontrado")
 
-    return {k: v for k, v in job.items() if k != "destinatarios"}
+    respuesta = {k: v for k, v in job.items()
+                 if k not in ("destinatarios", "actual", "errores")}
+    if respuesta.get("estado") == "error":
+        respuesta["detalle"] = "Error interno del envío. Revisa el registro del servidor."
+    return respuesta
 
 
 def envios_en_progreso(sesion: dict = Depends(exigir("mensajeria"))):
@@ -4848,6 +4945,12 @@ def destinatarios_programado(prog_id: int, sesion: dict = Depends(exigir("mensaj
     if not _prog_es_base_desarrollo(f):
         raise HTTPException(403, detail="Los preelegidos solo se pueden ver en la base de desarrollo.")
     destinatarios = _prog_destinatarios(prog_id)
+    propios = _ids_csv_propios(f.get("tabla") or "pacientes_dev",
+                              [d["id"] for d in destinatarios], sesion)
+    for d in destinatarios:
+        if d["id"] not in propios:
+            d["nombre"] = _iniciales_paciente(d.get("nombre"))
+            d["telefono"] = _telefono_paciente_oculto(d.get("telefono"))
     return {"id": f["id"], "total": len(destinatarios), "destinatarios": destinatarios}
 
 
@@ -5464,16 +5567,20 @@ def detalle_historial(envio_id: str, ambiente: str = Query("produccion"),
     with conectar(ambiente) as conn, conn.cursor() as cur:
         cur.execute(sql, (*args_r, envio_id))
         filas = cur.fetchall()
-    privilegiado = sesion.get("rol") in ROLES_PRIVILEGIADOS
+    propios = _ids_csv_propios(t, [f.get("paciente_id") for f in filas], sesion)
     for f in filas:
         f["fecha"] = f.pop("fecha_hora").strftime("%d-%m-%Y %H:%M")
         f["interesado"] = bool(f.get("interesado"))
         msg = (f.get("mensaje_respuesta") or "").strip()
         f["mensaje_respuesta"] = msg
         f["respuesta_interes"] = bool(msg) and es_mensaje_interes(msg)
-        if not privilegiado:
-            # El número de teléfono del paciente es solo para admin/dev.
-            f["numero_telefono"] = None
+        f["datos_completos"] = f.get("paciente_id") in propios
+        if not f["datos_completos"]:
+            f["nombre_paciente"] = _iniciales_paciente(f.get("nombre_paciente"))
+            f["numero_telefono"] = _telefono_paciente_oculto(f.get("numero_telefono"))
+            f["mensaje_respuesta"] = None
+            f["descripcion_error"] = None
+            f["respuesta_interes"] = False
     return filas
 
 

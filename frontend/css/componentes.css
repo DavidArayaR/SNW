@@ -390,6 +390,31 @@ tbody tr:last-child td { border-bottom: none; }
   padding: 30px 0;
 }
 
+#tablaHistorial .historial-fila-cargando td {
+  height: 112px;
+  text-align: center;
+  color: var(--texto-suave);
+  cursor: default;
+}
+#tablaHistorial .historial-fila-cargando:hover { background: transparent; }
+.historial-cargando {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+}
+.historial-cargando__spinner {
+  width: 22px;
+  height: 22px;
+  border: 3px solid var(--borde);
+  border-top-color: var(--verde-oscuro);
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .historial-cargando__spinner { animation: none; }
+}
+
 .badge--db {
   background: var(--brand-tint);
   color: var(--verde-oscuro);

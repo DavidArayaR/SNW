@@ -423,6 +423,10 @@ def eliminar_paciente_area(area_id: int, paciente_id: int) -> bool:
         borrado = (cur.rowcount or 0) > 0
         if borrado:
             cur.execute(
+                "DELETE FROM paciente_csv_accesos WHERE tabla_pacientes = %s AND paciente_id = %s",
+                (tabla, int(paciente_id)),
+            )
+            cur.execute(
                 "DELETE FROM log_envios WHERE paciente_id = %s AND tabla_pacientes = %s",
                 (int(paciente_id), tabla),
             )
@@ -448,6 +452,7 @@ def eliminar_tabla_area(area_id: int) -> dict:
             cur.execute("DELETE FROM usuario_area_roles WHERE rol_id = %s",
                         (int(rol["id"]),))
             cur.execute("DELETE FROM roles_area WHERE id = %s", (int(rol["id"]),))
+        cur.execute("DELETE FROM paciente_csv_accesos WHERE tabla_pacientes = %s", (tabla,))
         if _tabla_fisica_existe(cur, tabla):
             cur.execute(f"DROP TABLE {tabla}")
         cur.execute("DELETE FROM areas WHERE id = %s", (int(area_id),))
@@ -473,6 +478,7 @@ def vaciar_tabla_area(area_id: int) -> dict:
             raise ValueError("no_existe")
         cur.execute(f"DELETE FROM {tabla}")
         vaciados = (cur.rowcount or 0)
+        cur.execute("DELETE FROM paciente_csv_accesos WHERE tabla_pacientes = %s", (tabla,))
         cur.execute("DELETE FROM log_envios WHERE tabla_pacientes = %s", (tabla,))
         conn.commit()
     return {"id": int(area_id), "nombre_visible": esp["nombre_visible"],
@@ -699,7 +705,7 @@ def nombre_de_tabla(tabla: str) -> str:
     return esp["nombre_visible"] if esp else tabla
 
 
-def importar_pacientes_csv(area_id: int, datos: bytes) -> dict:
+def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int) -> dict:
     """Valida un CSV y lo carga en la tabla de la especialidad.
 
     Columnas obligatorias: `nombre`, `apellido`, `telefono` (UTF-8).
@@ -718,6 +724,8 @@ def importar_pacientes_csv(area_id: int, datos: bytes) -> dict:
     tabla = esp["nombre_tabla_base"]
     if not tabla_valida(tabla):
         raise ValueError("tabla_invalida")
+    if not usuario_id:
+        raise ValueError("usuario_invalido")
     try:
         texto = (datos or b"").decode("utf-8-sig")
     except (UnicodeDecodeError, ValueError):
@@ -829,6 +837,11 @@ def importar_pacientes_csv(area_id: int, datos: bytes) -> dict:
                 aplicar_en_tabla(cur, tabla, ids_objetivo, respuesta_aplicar, estado,
                                  candado=candado_aplicar)
                 insertados += 1
+            cur.executemany(
+                "INSERT IGNORE INTO paciente_csv_accesos"
+                " (tabla_pacientes, paciente_id, usuario_id) VALUES (%s, %s, %s)",
+                [(tabla, pid, int(usuario_id)) for pid in ids_objetivo],
+            )
             vistos_archivo.add(telefono)
             # Y lo mismo en las demás bases donde esté el número.
             if respuesta_aplicar or estado:
