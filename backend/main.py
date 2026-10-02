@@ -4194,7 +4194,10 @@ def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensaj
     libres = max(0, elegibles - reservados)
 
     costo = None
-    if body.plantilla_id is not None and tiene_permiso(sesion, "tarifas_editar"):
+    # La estimación se muestra a administradores, desarrolladores y supervisores;
+    # un usuario normal no la recibe aunque pueda consultar destinatarios.
+    puede_ver_costo = _es_privilegiado(sesion) or sesion.get("rol") == "supervisor"
+    if body.plantilla_id is not None and puede_ver_costo:
         plantilla = next((p for p in leer_plantillas() if p["id"] == body.plantilla_id), None)
         if plantilla is not None:
             costo = _costo_estimado_por_clave(plantilla.get("clave", ""), elegibles)
@@ -4557,6 +4560,10 @@ def _prog_costo_estimado(f: dict, plantilla_nombre: str = "",
         if elegibles is None:
             amb_q = "produccion" if f.get("area_id") is not None else amb
             _, elegibles = _contar_elegibles_tabla(tabla, amb_q, amb)
+            # Programados antiguos sin lista preelegida: no estimar el costo
+            # sobre toda la base cuando se configuró una cantidad menor.
+            if f.get("limite") is not None:
+                elegibles = min(elegibles, max(0, int(f["limite"])))
         plantilla = next((p for p in leer_plantillas() if p.get("id") == f.get("plantilla_id")), None)
         if plantilla is None:
             return None

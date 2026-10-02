@@ -469,8 +469,7 @@ function crearItemPlantilla(p) {
   x.innerHTML = '<i class="fa-solid fa-xmark"></i>';
   x.addEventListener("click", (ev) => {
     ev.stopPropagation();
-    if (tabMsg === "plantillas") cancelarEdicion();
-    else resetearCardEnvio();
+    cancelarEdicion();
   });
   wrap.appendChild(btn);
   wrap.appendChild(x);
@@ -570,6 +569,19 @@ function actualizarPasosProg() {
   if (inpPorcentaje) inpPorcentaje.disabled = !paso3Listo || modo !== "porcentaje" || progSinCupo;
   if (inpL) inpL.disabled = !paso3Listo || progSinCupo || !modo || modo === "porcentaje";
   if (btn) btn.disabled = !paso4Listo || progCreando || progSinCupo;
+  actualizarCostoProg();
+}
+
+function actualizarCostoProg() {
+  const modo = $("#selProgLimiteModo")?.value || "";
+  const cantidad = limiteProgElegido() ? Number($("#inpProgLimite").value) : null;
+  const base = $("#selProgBase")?.value || "";
+  const fecha = $("#inpProgFecha")?.value.slice(0, 10) || "";
+  const costo = base && fecha && progCupoKey === `${base}|${fecha}|${tplSelId || ""}`
+    ? progCupo?.costo : null;
+  pintarCostoEstimado(
+    "filaCostoProg", "progCosto", "progCostoDetalle", costo, modo, cantidad
+  );
 }
 
 function limiteProgElegido() {
@@ -1049,11 +1061,15 @@ function intentarNueva() {
   modoNueva();
 }
 
+function confirmarDescarteEditor() {
+  return !hayCambios() || confirm("¿Descartar los cambios?");
+}
+
 function cancelarEdicion() {
-  if (hayCambios() && !confirm("¿Descartar los cambios?")) return;
-  // Cancelar siempre deselecciona la plantilla (no la vuelve a abrir).
-  modoVacia();
-  guardarSelTpl();
+  if (!confirmarDescarteEditor()) return false;
+  // La selección es compartida por las tres pestañas: limpiar todas las vistas.
+  resetearCardEnvio();
+  return true;
 }
 
 formEl.addEventListener("submit", async (e) => {
@@ -1391,6 +1407,7 @@ let confPlantillaId = null; // plantilla de la card de envío (puede diferir del
 let maxManualConf = 0;
 let disponiblesBaseManualConf = 0;
 let disponiblesMetaManualConf = null;
+let tarifaCostoManualConf = null;
 let consultaManualConf = 0;
 
 // Solo se bloquean los controles de envío de la card: el resto (tabs, lista,
@@ -1488,6 +1505,7 @@ function abrirModalConf(id = tplSelId) {
   maxManualConf = 0;
   disponiblesBaseManualConf = 0;
   disponiblesMetaManualConf = null;
+  tarifaCostoManualConf = null;
   $("#selLimiteModoConf").value = "";
   $("#limiteNumConf").value = "";
   $("#confNombre").textContent = p?.nombre ?? "";
@@ -1528,13 +1546,14 @@ function abrirModalConf(id = tplSelId) {
 function resetearCardEnvio() {
   clearInterval(timerPollingConf);
   consultaManualConf += 1;
-  tplSelId = null;
   confPlantillaId = null;
   maxManualConf = 0;
   disponiblesBaseManualConf = 0;
   disponiblesMetaManualConf = null;
+  tarifaCostoManualConf = null;
   $("#selLimiteModoConf").value = "";
   $("#limiteNumConf").value = "";
+  modoVacia();
   guardarSelTpl();
   actualizarProgPlantilla();
   $("#confProgreso").hidden = true;
@@ -1548,7 +1567,6 @@ function resetearCardEnvio() {
   if (sinP) sinP.hidden = false;
   if (conP) conP.hidden = true;
   actualizarPasosManual();
-  renderLista(buscadorEl.value);
 }
 
 $("#btnEnviarActual").addEventListener("click", () => {
@@ -1607,7 +1625,7 @@ function refrescarAvisoAdminConf() {
       "Logeado como admin: se envía directamente sin confirmación de supervisor.";
   } else if (requiereConf) {
     box.textContent = modoEsp
-      ? "Este envío pedirá confirmación por correo al supervisor (llega también a los supervisores del área)."
+      ? "Este envío pedirá confirmación por correo al supervisor."
       : "Este envío pedirá confirmación por correo al supervisor.";
   }
 }
@@ -1651,6 +1669,34 @@ function actualizarPasosManual() {
   $("#btnLanzarConf").disabled = !listo3 || envioEnCursoConf;
 }
 
+function actualizarCostoManual() {
+  pintarCostoEstimado(
+    "filaCostoConf", "confCosto", "confCostoDetalle", tarifaCostoManualConf,
+    $("#selLimiteModoConf").value, limiteEnvioConf()
+  );
+}
+
+function pintarCostoEstimado(filaId, montoId, detalleId, tarifa, modo, cantidad) {
+  const fila = document.getElementById(filaId);
+  const rate = Number(tarifa?.rate);
+  if (!tarifa || !["porcentaje", "cantidad"].includes(modo) ||
+      tarifa.rate == null || !Number.isFinite(rate) || rate < 0) {
+    fila.hidden = true;
+    return;
+  }
+  fila.hidden = false;
+  if (cantidad == null) {
+    document.getElementById(montoId).textContent = "—";
+    document.getElementById(detalleId).textContent = "Indica una cantidad válida para estimar el costo.";
+    return;
+  }
+  // Igual que el servidor: redondear hacia arriba el costo total.
+  document.getElementById(montoId).textContent = fmtMoneda(Math.ceil(rate * cantidad), tarifa.moneda);
+  document.getElementById(detalleId).textContent =
+    `${new Intl.NumberFormat("es-CL").format(cantidad)} mensajes × ` +
+    `${fmtMoneda(rate, tarifa.moneda)} por mensaje · categoría ${tarifa.categoria}`;
+}
+
 function actualizarCantidadManual() {
   const modo = $("#selLimiteModoConf").value;
   const num = $("#limiteNumConf");
@@ -1677,6 +1723,7 @@ function actualizarCantidadManual() {
   error.textContent = errores.join("\n");
   num.classList.toggle("invalido", errores.length > 0);
   num.setAttribute("aria-invalid", errores.length > 0 ? "true" : "false");
+  actualizarCostoManual();
   actualizarPasosManual();
 }
 
@@ -1741,13 +1788,13 @@ function mostrarAvisoLimiteConf(lim) {
 async function actualizarResumenConf() {
   const dd = $("#confDestinatarios");
   const filaCosto = $("#filaCostoConf");
-  const ddCosto = $("#confCosto");
   const consulta = ++consultaManualConf;
   dd.textContent = "Contando pacientes...";
   filaCosto.hidden = true;
   maxManualConf = 0;
   disponiblesBaseManualConf = 0;
   disponiblesMetaManualConf = null;
+  tarifaCostoManualConf = null;
   $("#limiteNotaConf").hidden = true;
   $("#selLimiteModoConf").value = "";
   $("#limiteNumConf").value = "";
@@ -1781,14 +1828,8 @@ async function actualizarResumenConf() {
     configurarLimiteConf(pendientes, limAplicable);
     mostrarAvisoLimiteConf(limAplicable);
 
-    if (data.costo) {
-      ddCosto.textContent =
-        `${fmtMoneda(data.costo.costo, data.costo.moneda)} ` +
-        `(${data.costo.total} × ${fmtMoneda(data.costo.rate, data.costo.moneda)}, categoría ${data.costo.categoria})`;
-      filaCosto.hidden = false;
-    } else {
-      filaCosto.hidden = true;
-    }
+    tarifaCostoManualConf = data.costo || null;
+    actualizarCostoManual();
   } catch {
     if (consulta !== consultaManualConf) return;
     console.error("[app.js actualizarResumenConf()]");
@@ -1812,8 +1853,7 @@ $("#btnCancelarConf").addEventListener("click", () => {
     return;
   }
   // Sin envío en curso: se comporta como limpiar la card.
-  clearInterval(timerPollingConf);
-  resetearCardEnvio();
+  cancelarEdicion();
 });
 $("#btnNoCancelarConf").addEventListener("click", () => {
   $("#modalCancelarConf").hidden = true;
@@ -1823,6 +1863,7 @@ $("#btnNoCancelarConf").addEventListener("click", () => {
   }
 });
 $("#btnConfirmarCancelarConf").addEventListener("click", async () => {
+  if (!confirmarDescarteEditor()) return;
   const accion = await (async () => {
     try {
       const res = await fetch(`api/notificaciones/jobs/${jobIdActualConf}/cancelar`, {
@@ -1850,6 +1891,7 @@ $("#btnConfirmarCancelarConf").addEventListener("click", async () => {
   }
 });
 $("#btnCerrarConf").addEventListener("click", () => {
+  if (!confirmarDescarteEditor()) return;
   clearInterval(timerPollingConf);
   // Si había un envío en curso, el trabajo sigue en el servidor (se ve en Historial).
   if (envioEnCursoConf) setBloqueoEnvioConf(false);
@@ -2217,8 +2259,9 @@ let progCreando = false; // candado anti doble-click/abuso
 let progRechazarId = null;
 // Cupo de hoy para el envío programado: pendientes de la base y lo que deja el
 // límite diario de Meta. El límite del formulario nunca puede pasar ese techo.
-let progCupo = null; // {pendientes, disponibles, tier, usados}
-let progCupoKey = ""; // base para la que ya se consultó (evita repetir el sondeo)
+let progCupo = null; // {pendientes, disponibles, tier, usados, costo}
+let progCupoKey = ""; // base, fecha y plantilla ya consultadas
+let progCupoConsulta = 0;
 let progSinCupo = false;
 
 
@@ -2357,16 +2400,19 @@ async function cargarCupoProg(forzar = false) {
   const areaId = base.startsWith("esp:") ? Number(base.slice(4)) : "";
   const ambiente = areaId ? "produccion" : base;
   const fecha = $("#inpProgFecha")?.value.slice(0, 10) || "";
-  const key = `${base}|${fecha}`;
+  const key = `${base}|${fecha}|${tplSelId || ""}`;
   if (!forzar && key === progCupoKey) { aplicarCupoProg(); return; }
+  const consulta = ++progCupoConsulta;
   progCupoKey = key;
   progCupo = null;
   aplicarCupoProg();
+  actualizarPasosProg();
   if (!base) return;
   try {
     const cuerpo = { ambiente, prevision_programado: true };
     if (areaId) cuerpo.area_id = areaId;
     if (fecha) cuerpo.fecha = fecha;
+    if (tplSelId) cuerpo.plantilla_id = tplSelId;
     const res = await fetch("api/notificaciones/destinatarios", {
       method: "POST",
       headers: authHeaders({ "Content-Type": "application/json" }),
@@ -2375,6 +2421,7 @@ async function cargarCupoProg(forzar = false) {
     if (res.status === 401) { window.snwSesionExpirada(); return; }
     if (!res.ok) throw new Error();
     const d = await res.json();
+    if (consulta !== progCupoConsulta) return;
     const lim = d.limite_mensajeria || null;
     progCupo = {
       pendientes: Number(d.pendientes) || 0,
@@ -2387,8 +2434,10 @@ async function cargarCupoProg(forzar = false) {
       enviados: lim && lim.enviados_dia != null ? Number(lim.enviados_dia) : null,
       programados: lim && lim.reservados_dia != null ? Number(lim.reservados_dia) : null,
       fecha: lim && lim.fecha ? lim.fecha : "",
+      costo: d.costo || null,
     };
   } catch {
+    if (consulta !== progCupoConsulta) return;
     console.error("[app.js cargarCupoProg()]");
     progCupo = null;
   }
@@ -2576,9 +2625,13 @@ function progItemHtml(p) {
   const motivo = (p.estado === "rechazado" || p.estado === "error") && p.motivo
     ? `<div class="prog-item__motivo">${escaparHtml(p.motivo)}</div>` : "";
   const costo = p.costo && p.puede_ver_costo
-    ? `<div class="prog-item__costo" title="Cuando se realice el envío se cobrará la tarifa vigente por ${p.costo.elegibles} mensajes.">` +
-        `Costo aprox.: <b>${fmtMoneda(p.costo.costo, p.costo.moneda)}</b>` +
-        `<span class="prog-item__costo-aviso">(se cobra al realizarse el envío)</span></div>` : "";
+    ? `<div class="costo-resumen prog-item__costo" title="Cuando se realice el envío se cobrará la tarifa vigente por ${escaparHtml(String(p.costo.elegibles))} mensajes.">` +
+        `<span class="costo-resumen__icono" aria-hidden="true"><i class="fa-solid fa-coins"></i></span>` +
+        `<div class="costo-resumen__contenido">` +
+          `<span class="costo-resumen__etiqueta">Costo aproximado</span>` +
+          `<strong class="costo-resumen__monto">${escaparHtml(fmtMoneda(p.costo.costo, p.costo.moneda))}</strong>` +
+          `<span class="costo-resumen__detalle">Se cobra al realizarse el envío.</span>` +
+        `</div></div>` : "";
   const decided = p.decidido_por && (p.estado === "aprobado" || p.estado === "rechazado" || p.estado === "cancelado")
     ? ` · decidido por ${escaparHtml(p.decidido_por)}` : "";
   const baseDatos = p.tabla || (p.ambiente === "desarrollo" ? "pacientes_dev" : "pacientes_prod");

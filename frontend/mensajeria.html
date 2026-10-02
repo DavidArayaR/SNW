@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
   <link rel="stylesheet" href="css/tema.css">
-  <link rel="stylesheet" href="css/styles.css?v=tabs3">
+  <link rel="stylesheet" href="css/styles.css?v=costo2">
   <link rel="stylesheet" href="css/componentes.css">
   <link rel="stylesheet" href="css/layout.css?v=tabs5">
   <script src="js/tema.js"></script>
@@ -204,7 +204,14 @@
                 <p class="field__hint">Máximo disponible: <strong id="limiteMaxConf">0</strong> pacientes.</p>
               </div>
             </div>
-            <p class="field__hint" id="filaCostoConf" hidden>Costo aproximado: <strong id="confCosto">&mdash;</strong></p>
+            <div class="costo-resumen" id="filaCostoConf" hidden aria-live="polite">
+              <span class="costo-resumen__icono" aria-hidden="true"><i class="fa-solid fa-coins"></i></span>
+              <div class="costo-resumen__contenido">
+                <span class="costo-resumen__etiqueta">Costo aproximado</span>
+                <strong class="costo-resumen__monto" id="confCosto">&mdash;</strong>
+                <span class="costo-resumen__detalle" id="confCostoDetalle"></span>
+              </div>
+            </div>
 
           <div class="aviso-dev" id="confAvisoDev" hidden></div>
           <div class="aviso-limite" id="confAvisoLimite" hidden></div>
@@ -288,6 +295,14 @@
               <label for="inpProgLimite" id="labelProgLimite">Cantidad de pacientes</label>
               <input type="number" id="inpProgLimite" min="1" step="1" placeholder="Elige porcentaje o cantidad" aria-describedby="progLimiteError" disabled>
               <p class="limite-error" id="progLimiteError" role="alert" hidden></p>
+            </div>
+          </div>
+          <div class="costo-resumen" id="filaCostoProg" hidden aria-live="polite">
+            <span class="costo-resumen__icono" aria-hidden="true"><i class="fa-solid fa-coins"></i></span>
+            <div class="costo-resumen__contenido">
+              <span class="costo-resumen__etiqueta">Costo aproximado</span>
+              <strong class="costo-resumen__monto" id="progCosto">&mdash;</strong>
+              <span class="costo-resumen__detalle" id="progCostoDetalle"></span>
             </div>
           </div>
           <div class="form-actions">
@@ -417,7 +432,7 @@
 
   <script src="js/layout.js?v=tabs3"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/app.js?v=tabs3"></script>
+  <script src="js/app.js?v=costo4"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>

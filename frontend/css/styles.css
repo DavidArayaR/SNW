@@ -92,6 +92,10 @@ select.badge--select {
   align-items: start;
 }
 
+/* En Mensajería, .layout es un hijo flex con márgenes laterales automáticos:
+   sin ancho explícito puede encogerse al cambiar el contenido de la base. */
+body[data-pagina="mensajeria"] .layout { width: 100%; }
+
 .panel {
   background: var(--panel);
   border: 1px solid var(--borde);
@@ -217,6 +221,39 @@ select.badge--select {
 .card-envio { padding: 4px 18px 18px; }
 .card-envio .modal__actions { padding: 12px 0 0; }
 .card-envio .manual-form { padding: 14px 0 0; }
+/* Resumen de costo en envío manual y programados. */
+.costo-resumen {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 6px 0 0;
+  padding: 14px 16px;
+  border: 1px solid var(--brand-tint-bd);
+  border-left: 4px solid var(--verde);
+  border-radius: 10px;
+  background: var(--brand-tint);
+  color: var(--texto);
+}
+.costo-resumen[hidden] { display: none; }
+.costo-resumen__icono {
+  display: grid;
+  place-items: center;
+  flex: 0 0 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--panel);
+  color: var(--verde-oscuro);
+}
+.costo-resumen__contenido { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.costo-resumen__etiqueta {
+  color: var(--brand-tint-fg);
+  font-size: .78rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.costo-resumen__monto { font-size: 1.4rem; line-height: 1.2; overflow-wrap: anywhere; }
+.costo-resumen__detalle { color: var(--texto-suave); font-size: .82rem; line-height: 1.4; }
 
 /* Sin plantilla seleccionada, la card conserva el alto del editor y del
    formulario de programar (60vh) en vez de quedar en una línea de texto. */
@@ -383,16 +420,7 @@ select.badge--select {
   padding: 6px 10px;
 }
 .prog-item__acciones { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
-.prog-item__costo {
-  margin-top: 8px;
-  font-size: .82rem;
-  background: var(--brand-tint, rgba(9, 180, 124, .08));
-  border: 1px solid var(--brand-bd, rgba(9, 180, 124, .25));
-  color: var(--texto, #1f2937);
-  border-radius: 8px;
-  padding: 6px 10px;
-}
-.prog-item__costo-aviso { display: block; color: var(--texto-suave); margin-top: 2px; }
+.prog-item__costo { margin-top: 8px; }
 /* Grupo de pacientes que el sistema preeligió al crear el programado. */
 .prog-item__dest { margin-top: 8px; }
 .prog-item__dest-btn {
