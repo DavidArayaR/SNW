@@ -2496,6 +2496,10 @@ function progItemHtml(p) {
         `<span class="prog-item__costo-aviso">(se cobra al realizarse el envío)</span></div>` : "";
   const decided = p.decidido_por && (p.estado === "aprobado" || p.estado === "rechazado" || p.estado === "cancelado")
     ? ` · decidido por ${escaparHtml(p.decidido_por)}` : "";
+  const baseDatos = p.tabla || (p.ambiente === "desarrollo" ? "pacientes_dev" : "pacientes_prod");
+  const etiquetaBase = p.area
+    ? `${escaparHtml(p.area)} (${escaparHtml(baseDatos)})`
+    : escaparHtml(baseDatos);
   // Junto al nombre va la fecha para la que quedó programado; en la línea de
   // detalle, cuándo se creó.
   const fechaProg = p.programado_para
@@ -2515,10 +2519,9 @@ function progItemHtml(p) {
       `<div class="prog-item__dest-lista" data-prog-dest-lista="${p.id}" hidden></div></div>` : "";
   return `<div class="prog-item" data-prog="${p.id}">` +
     `<div class="prog-item__cab"><span class="prog-estado prog-estado--${p.estado}">${ESTADO_PROG_LABEL[p.estado] || p.estado}</span>` +
-    `<span>${escaparHtml(p.plantilla || "-")}</span>${fechaProg}</div>` +
+    `<span>${escaparHtml(p.plantilla || "-")} · Base: ${etiquetaBase}</span>${fechaProg}</div>` +
     `<div class="prog-item__meta">` +
     (p.creado ? `Creado ${escaparHtml(p.creado)}` : "") +
-    (p.area ? ` · ${escaparHtml(p.area)}` : "") +
     (p.limite ? ` · límite ${p.limite}` : "") +
     (p.creador_nombre ? ` · por ${escaparHtml(p.creador_nombre)}` : "") + decided + `</div>` +
     motivo + costo + listaDest +
