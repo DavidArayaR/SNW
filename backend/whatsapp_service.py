@@ -1065,31 +1065,6 @@ class WhatsAppService:
             log_error(f"_registrar_respuesta({telefono})", e)
             return "error"
 
-    def _reintegro_reciente(self, cur, p: dict) -> bool:
-        """True si el paciente se reintegró (una retractación o interés volvió
-        a activar sus notificaciones) hace menos de 24 h. Se usa para impedir
-        la alternancia baja -> reintegración repetida: el paciente que se dio
-        de baja y volvió no puede darse de baja otra vez hasta que pasen 24 h."""
-        try:
-            cur.execute(f"SELECT ultimo_reintegro FROM {p['tabla']} WHERE id = %s", (p["id"],))
-            ultimo = (cur.fetchone() or {}).get("ultimo_reintegro")
-        except Exception:
-            return False  # esquema sin la columna: nunca bloquea
-        if not ultimo:
-            return False
-        cur.execute("SELECT %s >= (NOW() - INTERVAL 24 HOUR) AS reciente", (ultimo,))
-        return bool((cur.fetchone() or {}).get("reciente"))
-
-    def _bloquea_flip_flop(self, cur, p: dict) -> bool:
-        """Anti flip-flop: en producción y en areas SIEMPRE; en la
-        base de desarrollo legacy solo si la opción `anti_flip_flop_dev` está
-        activa (desactivarla permite probar el flujo sin límite en desarrollo)."""
-        if p["tabla"] == tabla_pacientes("desarrollo"):
-            valor = str(config_get("anti_flip_flop_dev", "true")).strip().lower()
-            if valor not in ("true", "1", "on", "si", "sí"):
-                return False
-        return self._reintegro_reciente(cur, p)
-
     def _registrar_baja(self, telefono: str, aviso: bool | None = None) -> None:
         match = _TEL_MATCH.format(col="telefono")
         try:
@@ -1103,15 +1078,6 @@ class WhatsAppService:
                 # no se reenvía el aviso de despedida.
                 ya_de_baja = all(p.get("whatsapp_opt_out") for p in pacientes)
                 for p in pacientes:
-                    # Anti flip-flop: si el paciente apenas se reintegró (últimas
-                    # 24 h), no puede darse de baja otra vez. Solo una baja por
-                    # cada 24 h desde su último regreso.
-                    if self._bloquea_flip_flop(cur, p):
-                        log_error(
-                            f"_registrar_baja({telefono}): baja ignorada, se reintegró"
-                            f" hace menos de 24 h (tabla {p['tabla']})"
-                        )
-                        continue
                     cur.execute(f"UPDATE {p['tabla']} SET whatsapp_opt_out = 1 WHERE {match}", (telefono,))
                     # Baja pedida con sus propias palabras por WhatsApp: queda
                     # bloqueada para edición manual hasta que el paciente se
@@ -1167,9 +1133,8 @@ class WhatsAppService:
                         cur.execute(f"UPDATE {p['tabla']} SET opt_out_explicito = 0 WHERE {match}", (telefono,))
                     except Exception:
                         pass  # esquema sin la columna
-                    # Marca la fecha del regreso: da pie al anti flip-flop de
-                    # 24 h (producción siempre; desarrollo según la opción). Solo
-                    # en la fila que realmente estaba de baja.
+                    # Conserva la fecha del regreso para trazabilidad. Solo en
+                    # la fila que realmente estaba de baja.
                     if p.get("whatsapp_opt_out"):
                         try:
                             cur.execute(f"UPDATE {p['tabla']} SET ultimo_reintegro = NOW() WHERE {match}", (telefono,))
@@ -1222,9 +1187,9 @@ class WhatsAppService:
                             cur.execute(sql, params)
                         except Exception:
                             pass  # esquema sin esa columna
-                    # Anti flip-flop: solo cuenta como "regreso" si el paciente
-                    # realmente venía de baja; un interés de alguien que nunca se
-                    # dio de baja no le impide luego darse de baja.
+                    # Solo registra la fecha si el paciente realmente venía de
+                    # baja; un interés de alguien que nunca se dio de baja no
+                    # necesita ese dato de trazabilidad.
                     if venia_de_baja:
                         try:
                             cur.execute(f"UPDATE {p['tabla']} SET ultimo_reintegro = NOW() WHERE {match}", (telefono,))

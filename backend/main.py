@@ -1896,10 +1896,29 @@ whatsapp_service.al_detectar_interes = _programar_call_center_auto
 
 
 _MENSAJE_BAJA_DESPEDIDA = (
-    "Lamentamos que te vayas. Si quieres, puedes reactivar las notificaciones"
-    " en cualquier momento escribiendo cualquier mensaje."
+    "Lamentamos que te vayas. Puedes darte de baja y reincorporarte cuando quieras."
+    " Para volver a recibir notificaciones, escribe cualquier mensaje."
 )
-_MENSAJE_BIENVENIDA_DEVUELTA = "¡Bienvenido/a de vuelta! Ya reactivamos tus notificaciones."
+_MENSAJE_BIENVENIDA_DEVUELTA = (
+    "¡Bienvenido/a de vuelta! Ya reactivamos tus notificaciones."
+    " Recuerda que puedes darte de baja y reincorporarte cuando quieras."
+)
+
+
+def _reservar_aviso_unico(telefono: str, tipo: str) -> bool:
+    """Reserva un aviso automático para que solo se envíe una vez por teléfono."""
+    tel = normalizar_telefono(telefono) or telefono
+    try:
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT IGNORE INTO whatsapp_avisos_unicos (telefono, tipo) VALUES (%s, %s)",
+                (tel, tipo),
+            )
+            conn.commit()
+            return cur.rowcount == 1
+    except Exception as e:
+        log_error(f"_reservar_aviso_unico({tel}, {tipo})", e)
+        return True
 
 
 def _enviar_mensaje_directo(telefono_evento: str, texto: str, clave_log: str) -> None:
@@ -1946,11 +1965,13 @@ def _enviar_mensaje_directo(telefono_evento: str, texto: str, clave_log: str) ->
 
 
 def _avisar_baja(telefono: str) -> None:
-    _enviar_mensaje_directo(telefono, _MENSAJE_BAJA_DESPEDIDA, "baja_aviso")
+    if _reservar_aviso_unico(telefono, "baja"):
+        _enviar_mensaje_directo(telefono, _MENSAJE_BAJA_DESPEDIDA, "baja_aviso")
 
 
 def _avisar_retractacion(telefono: str) -> None:
-    _enviar_mensaje_directo(telefono, _MENSAJE_BIENVENIDA_DEVUELTA, "retractacion_aviso")
+    if _reservar_aviso_unico(telefono, "reintegro"):
+        _enviar_mensaje_directo(telefono, _MENSAJE_BIENVENIDA_DEVUELTA, "retractacion_aviso")
 
 
 def _programar_aviso(fn, telefono: str) -> None:
@@ -2890,16 +2911,6 @@ _CONFIG_SECCIONES = [
              "ayuda": "Límite de Meta: usuarios únicos a los que el negocio puede escribir en una "
                       "ventana móvil de 24 h (250, 1000, 2000, 10000, 100000). Al alcanzarlo se bloquean "
                       "los envíos masivos en producción. 0 = ilimitado (sin control)."},
-        ],
-    },
-    {
-        "id": "bajas", "titulo": "Bajas y reactivaciones", "icono": "fa-user-slash",
-        "campos": [
-            {"clave": "anti_flip_flop_dev", "etiqueta": "Aplicar el límite también en desarrollo", "tipo": "bool",
-             "ayuda": "En producción, el paciente que se da de baja y se reintegra no puede volver a "
-                      "darse de baja hasta que pasen 24 h (siempre activo). Con esto activado, la "
-                      "restricción también aplica en la base de desarrollo; desactívalo para probar "
-                      "el flujo de baja/reintegración sin límite en desarrollo."},
         ],
     },
     {

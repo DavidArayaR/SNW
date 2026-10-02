@@ -97,6 +97,13 @@ CREATE TABLE IF NOT EXISTS whatsapp_eventos (
   UNIQUE KEY uq_clave (clave)
 );
 
+CREATE TABLE IF NOT EXISTS whatsapp_avisos_unicos (
+  telefono VARCHAR(32) NOT NULL,
+  tipo VARCHAR(32) NOT NULL,
+  enviado DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (telefono, tipo)
+);
+
 -- TODA la configuración de la app. En .env solo quedan las credenciales 
 -- de la base de datos (DB_*), que se necesitan para llegar aquí.
 CREATE TABLE IF NOT EXISTS configuracion (

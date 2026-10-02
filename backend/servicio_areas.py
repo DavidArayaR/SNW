@@ -624,7 +624,7 @@ def aplicar_en_tabla(cur, tabla: str, ids: list[int], respuesta: str | None = No
             if candado and columna_existe(tabla, "opt_out_explicito", ambiente):
                 sets.append("opt_out_explicito = 1")
         if respuesta == "respondio" and columna_existe(tabla, "ultimo_reintegro", ambiente):
-            # Volvio a escribir: cuenta como regreso (anti flip-flop 24 h).
+            # Volvio a escribir: queda registrada la fecha del regreso.
             sets.append("ultimo_reintegro = NOW()")
     if not sets:
         return 0

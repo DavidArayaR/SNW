@@ -42,11 +42,8 @@ CONFIG_DEFAULTS = {
     # Sesiones: horas de INACTIVIDAD tras las que una sesión expira sola
     # (se renueva con cada acción; 0 = no expiran).
     "sesion_expira_horas": "5",
-    # Anti flip-flop: si el paciente se da de baja y luego se reintegra (por
-    # retractación o interés), no puede volver a darse de baja hasta que pasen
-    # 24 h. Evita que juegue con los botones de baja/reintegrarse. En producción
-    # está SIEMPRE activo; `anti_flip_flop_dev` decide si también aplica en la
-    # base de desarrollo (desactivarlo permite probar el flujo sin límite).
+    # Clave histórica conservada para no romper configuraciones existentes.
+    # La baja y la reincorporación ahora pueden repetirse sin límite.
     "anti_flip_flop_dev": "true",
     "intervalo_ms": "1000",
     "url_base": "",
@@ -293,6 +290,30 @@ def asegurar_tabla_config() -> None:
                   INDEX idx_pd_paciente (paciente_id)
                 ) CHARACTER SET utf8mb4
             """)
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS whatsapp_avisos_unicos ("
+                "  telefono VARCHAR(32) NOT NULL,"
+                "  tipo VARCHAR(32) NOT NULL,"
+                "  enviado DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                "  PRIMARY KEY (telefono, tipo)"
+                ") CHARACTER SET utf8mb4"
+            )
+            # Los avisos ya enviados antes de esta migración también cuentan:
+            # no deben repetirse solo por agregar el control de una vez.
+            try:
+                cur.execute(
+                    "INSERT IGNORE INTO whatsapp_avisos_unicos (telefono, tipo, enviado) "
+                    "SELECT REPLACE(REPLACE(numero_telefono, '+', ''), ' ', ''), "
+                    "CASE plantilla_clave WHEN 'baja_aviso' THEN 'baja' "
+                    "WHEN 'retractacion_aviso' THEN 'reintegro' END, MIN(fecha_hora) "
+                    "FROM log_envios "
+                    "WHERE estado_envio = 'enviado' "
+                    "AND plantilla_clave IN ('baja_aviso', 'retractacion_aviso') "
+                    "AND COALESCE(numero_telefono, '') <> '' "
+                    "GROUP BY REPLACE(REPLACE(numero_telefono, '+', ''), ' ', ''), plantilla_clave"
+                )
+            except Exception as e:
+                log_error("migrar_whatsapp_avisos_unicos", e)
             _sembrar_usuarios(cur)
             # Si el login ya es un correo y no hay correo de recuperación, se copia.
             cur.execute(
