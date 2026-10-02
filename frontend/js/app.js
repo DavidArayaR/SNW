@@ -518,10 +518,6 @@ function clicPlantilla(id) {
     return;
   }
   if (tabMsg === "programados") {
-    if (esPlantillaProtegida((plantillas || []).find((x) => x.id === id))) {
-      toast("La plantilla Hello World solo se puede usar en la base de desarrollo; no se puede programar.", "error");
-      return;
-    }
     tplSelId = id;
     seleccionarParaProgramar(id);
     guardarSelTpl();
@@ -534,13 +530,16 @@ function clicPlantilla(id) {
 
 function seleccionarParaProgramar(id) {
   const p = (plantillas || []).find((x) => x.id === id);
-  const selA = document.getElementById("selProgArea");
-  if (p && selA && p.area_id != null &&
-      [...selA.options].some((o) => o.value === String(p.area_id))) {
-    selA.value = String(p.area_id);
-    selA.dataset.valor = selA.value;
-  }
   actualizarProgPlantilla();
+  const selBase = document.getElementById("selProgBase");
+  if (p && selBase && p.area_id != null &&
+      [...selBase.options].some((o) => o.value === `esp:${p.area_id}`)) {
+    selBase.value = `esp:${p.area_id}`;
+    selBase.dataset.valor = selBase.value;
+    localStorage.setItem("snw_prog_base", selBase.value);
+    cargarCupoProg();
+  }
+  actualizarPasosProg();
   renderLista(buscadorEl.value);
 }
 
@@ -549,6 +548,38 @@ function actualizarProgPlantilla() {
   if (!el) return;
   const p = (plantillas || []).find((x) => x.id === tplSelId);
   el.textContent = p ? p.nombre : "—";
+  const selBase = document.getElementById("selProgBase");
+  if (selBase) {
+    const restringido = usuarioRestringidoADesarrollo() || (window.snwRol || "") === "usuario";
+    const areas = misAreas || [];
+    const esHelloWorld = !!p && esPlantillaProtegida(p);
+
+    if (esHelloWorld) {
+      // Guarda la última base elegida para restaurarla al volver a otra plantilla.
+      if (selBase.value && !selBase.disabled) {
+        selBase.dataset.valor = selBase.value;
+        localStorage.setItem("snw_prog_base", selBase.value);
+      }
+      selBase.innerHTML = `<option value="desarrollo">Desarrollo (pacientes_dev)</option>`;
+      selBase.value = "desarrollo";
+      selBase.disabled = true;
+    } else {
+      selBase.innerHTML =
+        `<optgroup label="Bases de datos">` +
+          `<option value="desarrollo">Desarrollo (pacientes_dev)</option>` +
+          (restringido ? "" : `<option value="produccion">Producción (pacientes_prod)</option>`) +
+        `</optgroup>` +
+        (areas.length
+          ? `<optgroup label="Bases por área">` +
+              areas.map((area) => `<option value="esp:${area.id}">${escaparHtml(area.nombre_visible)} (${escaparHtml(area.nombre_tabla_base)})</option>`).join("") +
+            `</optgroup>`
+          : "");
+      const disponibles = [...selBase.options].map((opcion) => opcion.value);
+      const preferida = selBase.dataset.valor || localStorage.getItem("snw_prog_base") || "";
+      selBase.value = disponibles.includes(preferida) ? preferida : (disponibles[0] || "");
+      selBase.dataset.valor = selBase.value;
+    }
+  }
   actualizarPasosProg();
 }
 
@@ -556,7 +587,7 @@ function actualizarProgPlantilla() {
 // completar el anterior.
 function actualizarPasosProg() {
   const p = (plantillas || []).find((x) => x.id === tplSelId);
-  const selA = document.getElementById("selProgArea");
+  const selA = document.getElementById("selProgBase");
   const inpF = document.getElementById("inpProgFecha");
   const inpL = document.getElementById("inpProgLimite");
   const btn = document.getElementById("btnProgramar");
@@ -568,7 +599,7 @@ function actualizarPasosProg() {
   }
   const paso3 = document.getElementById("pasoProg3");
   if (paso3) paso3.classList.toggle("prog-paso--listo", !!(paso2 && inpF && inpF.value));
-  if (selA) selA.disabled = !paso1;
+  if (selA) selA.disabled = !paso1 || (!!p && esPlantillaProtegida(p));
   if (inpF) inpF.disabled = !paso2;
   if (inpL) inpL.disabled = !paso2 || progSinCupo;
   if (btn) btn.disabled = !(paso2 && inpF && inpF.value) || progCreando || progSinCupo;
@@ -2083,10 +2114,6 @@ function cambiarTabMsg(t) {
   window.scrollTo(0, 0);
   renderLista(buscadorEl.value);
   if (tabMsg === "programados") {
-    if (esPlantillaProtegida((plantillas || []).find((x) => x.id === tplSelId))) {
-      tplSelId = null;
-      guardarSelTpl();
-    }
     cargarProgramados();
     actualizarProgPlantilla();
   } else if (tabMsg === "envios") {
@@ -2121,21 +2148,14 @@ let progRechazarId = null;
 // Cupo de hoy para el envío programado: pendientes de la base y lo que deja el
 // límite diario de Meta. El límite del formulario nunca puede pasar ese techo.
 let progCupo = null; // {pendientes, disponibles, tier, usados}
-let progCupoKey = ""; // área para la que ya se consultó (evita repetir el sondeo)
+let progCupoKey = ""; // base para la que ya se consultó (evita repetir el sondeo)
 let progSinCupo = false;
 
 
 
 function poblarFormProg(forzarCupo = false) {
-  const selA = $("#selProgArea");
-  if (!selA) return Promise.resolve();
-  const areas = misAreas || [];
-  selA.innerHTML = `<option value="">- Seleccione área -</option>` +
-    areas.map((e) =>
-      `<option value="${e.id}">${escaparHtml(e.nombre_visible)}</option>`).join("");
-  const guardada = selA.dataset.valor || "";
-  if (guardada && areas.some((e) => String(e.id) === guardada)) selA.value = guardada;
-  else selA.value = "";
+  const selBase = $("#selProgBase");
+  if (!selBase) return Promise.resolve();
   actualizarProgPlantilla();
   // Al refrescar la lista se fuerza la consulta: cancelar o crear un
   // programado cambia libres/reservados en tiempo real.
@@ -2256,20 +2276,24 @@ function aplicarCupoProg() {
 // Se consulta al elegir área (o al abrir la pestaña con una ya elegida). Una
 // sola vez por área: los refrescos de la lista no vuelven a preguntar.
 async function cargarCupoProg(forzar = false) {
-  const selA = $("#selProgArea");
-  if (!selA) return;
-  const areaId = selA.value ? Number(selA.value) : "";
-  const key = String(areaId);
+  const selBase = $("#selProgBase");
+  if (!selBase) return;
+  const base = selBase.value || "";
+  const areaId = base.startsWith("esp:") ? Number(base.slice(4)) : "";
+  const ambiente = areaId ? "produccion" : base;
+  const key = base;
   if (!forzar && key === progCupoKey) { aplicarCupoProg(); return; }
   progCupoKey = key;
   progCupo = null;
   aplicarCupoProg();
-  if (!areaId) return;
+  if (!base) return;
   try {
+    const cuerpo = { ambiente };
+    if (areaId) cuerpo.area_id = areaId;
     const res = await fetch("api/notificaciones/destinatarios", {
       method: "POST",
       headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ ambiente: "produccion", area_id: areaId }),
+      body: JSON.stringify(cuerpo),
     });
     if (res.status === 401) { window.snwSesionExpirada(); return; }
     if (!res.ok) throw new Error();
@@ -2292,9 +2316,10 @@ async function cargarCupoProg(forzar = false) {
   actualizarPasosProg();
 }
 
-const selProgAreaEl = $("#selProgArea");
-if (selProgAreaEl) selProgAreaEl.addEventListener("change", () => {
-  selProgAreaEl.dataset.valor = selProgAreaEl.value;
+const selProgBaseEl = $("#selProgBase");
+if (selProgBaseEl) selProgBaseEl.addEventListener("change", () => {
+  selProgBaseEl.dataset.valor = selProgBaseEl.value;
+  localStorage.setItem("snw_prog_base", selProgBaseEl.value);
   cargarCupoProg();
   actualizarPasosProg();
 });
@@ -2563,12 +2588,14 @@ function bloquearFilaProg(id, bloquear) {
 
 async function programarEnvio() {
   if (progCreando) return;
-  const selA = $("#selProgArea");
+  const selBase = $("#selProgBase");
   const inpF = $("#inpProgFecha");
   const inpL = $("#inpProgLimite");
-  const areaId = selA && selA.value ? Number(selA.value) : null;
+  const base = selBase && selBase.value ? selBase.value : "";
+  const areaId = base.startsWith("esp:") ? Number(base.slice(4)) : null;
+  const ambiente = areaId != null ? "produccion" : base;
   const tpl = (plantillas || []).find((x) => x.id === tplSelId);
-  if (!areaId) { toast("Elige el área.", "error"); return; }
+  if (!base) { toast("Elige la base de datos.", "error"); return; }
   if (!tpl) { toast("Elige una plantilla de la lista de la izquierda.", "error"); return; }
   if (!inpF || !inpF.value) { toast("Elige fecha y hora.", "error"); return; }
   if (progSinCupo) { toast("Hoy no hay cupo disponible para programar este envío.", "error"); return; }
@@ -2584,7 +2611,7 @@ async function programarEnvio() {
     const res = await fetch("api/notificaciones/programados", {
       method: "POST",
       headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ area_id: areaId, plantilla_id: tpl.id, programado_para: inpF.value, limite }),
+      body: JSON.stringify({ ambiente, ...(areaId != null ? { area_id: areaId } : {}), plantilla_id: tpl.id, programado_para: inpF.value, limite }),
     });
     const data = await res.json().catch(() => ({}));
     if (res.status === 401) { window.snwSesionExpirada(); return; }
