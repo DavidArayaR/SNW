@@ -68,6 +68,8 @@ body[data-seccion="administracion"] .stats {
   align-items: center;
   gap: 12px;
   padding: 14px 16px;
+  border-top: 3px solid var(--borde);
+  border-bottom: 3px solid var(--borde);
   border-radius: 16px;
   transition: background-color .15s ease, border-color .15s ease,
     transform .1s ease, box-shadow .15s ease;

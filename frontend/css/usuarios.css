@@ -48,6 +48,8 @@
 
 .usr-card {
   border: 1px solid var(--borde);
+  border-top: 3px solid var(--borde);
+  border-bottom: 3px solid var(--borde);
   border-radius: var(--radio);
   background: var(--surface-2);
   padding: 16px 16px 14px;
