@@ -163,6 +163,7 @@ body[data-pagina="mensajeria"] .layout { width: 100%; }
   flex-basis: 100%;
   justify-content: flex-start;
 }
+#accionesPlantillas[hidden] { display: none; }
 .panel--list .panel__actions .btn { flex: 1 1 auto; justify-content: center; }
 
 /* Selector combinado (mayor especificidad que .field__hint solo) para que

@@ -2206,12 +2206,15 @@ function guardarSelTpl() {
 function pintarTabsMsg() {
   document.querySelectorAll("[data-msgtab]").forEach((b) =>
     b.classList.toggle("activo", b.dataset.msgtab === tabMsg));
+  const enPlantillas = tabMsg === "plantillas";
+  $("#accionesPlantillas").hidden = !enPlantillas;
+  $("#avisoSincronizarMeta").hidden = !enPlantillas;
   // La lista queda fija siempre en el mismo lugar; solo se alterna el panel
   // derecho (editor / envío / columna de programados).
   const pE = $("#panelEditor");
   const pV = $("#panelEnvio");
   const pG = $("#progColumna");
-  if (pE) pE.hidden = tabMsg !== "plantillas";
+  if (pE) pE.hidden = !enPlantillas;
   if (pV) pV.hidden = tabMsg !== "envios";
   if (pG) pG.hidden = tabMsg !== "programados";
 }
@@ -2649,8 +2652,9 @@ function progItemHtml(p) {
         `<button type="button" class="btn btn--sm btn--danger" data-prog-rechazar="${p.id}">Rechazar</button>` : "") +
     (p.puede_cancelar
       ? `<button type="button" class="btn btn--sm btn--ghost" data-prog-cancelar="${p.id}">Cancelar</button>` : "");
-  // El grupo que el sistema preeligió al crearlo: se puede abrir para revisarlo.
-  const listaDest = (p.puede_ver_preelegidos && p.preelegidos != null)
+  // Solo se puede revisar la lista preelegida de la base de desarrollo.
+  const listaDest = (p.puede_ver_preelegidos && p.ambiente === "desarrollo" &&
+    p.area_id == null && p.preelegidos != null)
     ? `<div class="prog-item__dest">` +
       `<button type="button" class="prog-item__dest-btn" data-prog-dest="${p.id}">` +
       `Ver ${p.preelegidos} preelegido${p.preelegidos === 1 ? "" : "s"}</button>` +

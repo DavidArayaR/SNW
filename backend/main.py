@@ -4503,6 +4503,10 @@ def _validar_plantilla_programable(plantilla: dict | None, area_id: int | None) 
     return plantilla
 
 
+def _prog_es_base_desarrollo(f: dict) -> bool:
+    return f.get("ambiente") == "desarrollo" and f.get("area_id") is None
+
+
 def _prog_a_respuesta(f: dict, sesion: dict, preelegidos: int | None = None) -> dict:
     esp = servicio_areas.obtener_area(f["area_id"]) if f.get("area_id") is not None else None
     priv = _es_privilegiado(sesion)
@@ -4523,7 +4527,7 @@ def _prog_a_respuesta(f: dict, sesion: dict, preelegidos: int | None = None) -> 
     # Costo aproximado solo para admin/dev/supervisor y mientras el envío
     # todavía no se ejecutó. Se cobra cuando el envío se realice.
     puede_ver_costo = priv or es_sup
-    puede_ver_preelegidos = priv or es_sup
+    puede_ver_preelegidos = _prog_es_base_desarrollo(f)
     costo = None
     if puede_ver_costo and f["estado"] in ("pendiente", "aprobado", "enviando"):
         costo = _prog_costo_estimado(f, plantilla_nombre=f.get("plantilla_nombre") or "",
@@ -4837,15 +4841,14 @@ def _conteo_preelegidos(prog_ids: list[int]) -> dict[int, int]:
 
 def destinatarios_programado(prog_id: int, sesion: dict = Depends(exigir("mensajeria"))):
     """Lista congelada de pacientes de un programado: la que el sistema preeligió
-    al crearlo. Solo administradores, desarrolladores y supervisores pueden ver
-    esta lista sensible."""
-    if not (_es_privilegiado(sesion) or sesion.get("rol") == "supervisor"):
-        raise HTTPException(403, detail="Solo un administrador o superior puede ver los preelegidos.")
+    al crearlo. Solo se muestra para envíos a la base de desarrollo."""
     f = _traer_programado(prog_id)
     if not _prog_visible(sesion, f):
         raise HTTPException(404, detail="Envío programado no encontrado.")
-    return {"id": f["id"], "total": len(_prog_destinatarios(prog_id)),
-            "destinatarios": _prog_destinatarios(prog_id)}
+    if not _prog_es_base_desarrollo(f):
+        raise HTTPException(403, detail="Los preelegidos solo se pueden ver en la base de desarrollo.")
+    destinatarios = _prog_destinatarios(prog_id)
+    return {"id": f["id"], "total": len(destinatarios), "destinatarios": destinatarios}
 
 
 def resumen_programados(sesion: dict = Depends(exigir("mensajeria"))):
