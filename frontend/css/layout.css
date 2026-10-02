@@ -202,6 +202,11 @@
   background: var(--hover);
   color: var(--texto);
 }
+:root[data-tema="oscuro"] .sidebar .nav-link:hover,
+:root[data-tema="oscuro"] .sidebar__accion:hover {
+  background: #3a8f7b;
+  color: #ffffff;
+}
 .sidebar .nav-link.active {
   z-index: 1;
   margin-right: -2px;
