@@ -13,6 +13,19 @@ let pageSizeHist = Math.min(100, Math.max(10, Number(localStorage.getItem("snw_p
 
 const $ = (sel) => document.querySelector(sel);
 
+function inicialesPaciente(nombre) {
+  const letras = String(nombre ?? "").trim().split(/\s+/)
+    .map((parte) => Array.from(parte).find((caracter) => /\p{L}/u.test(caracter)))
+    .filter(Boolean);
+  return letras.length ? letras.map((letra) => `${letra.toLocaleUpperCase("es")}.`).join(" ") : "—";
+}
+
+function telefonoEnmascarado(numero) {
+  const digitos = String(numero ?? "").replace(/\D/g, "");
+  if (!/^(?:569\d{8}|56\d{8}|9\d{7,8})$/.test(digitos)) return "—";
+  return `+569 **** *${digitos.slice(-3)}`;
+}
+
 /* ---------- Envíos en progreso (manual + programados activos) ---------- */
 let firmaProgreso = null; // firma de la última foto (origen:id:estado) para detectar términos
 const ESTADO_PROG_LABEL = {
@@ -450,7 +463,7 @@ function abrirDetalle(envio, detalle) {
         : `<td class="hist-col-msgs">—</td>`;
       const tr = document.createElement("tr");
       tr.innerHTML =
-        `<td class="campo-nombre">${escaparHtml(d.nombre_paciente ?? "—")}${marcaInteres}</td>` +
+        `<td class="campo-nombre">${escaparHtml(inicialesPaciente(d.nombre_paciente))}${marcaInteres}</td>` +
         `<td><span class="respuesta-badge respuesta-${escaparHtml(r)}">${escaparHtml(respuestaLabel(r))}</span>${msgHtml}</td>` +
         `<td class="campo-fecha">${escaparHtml(d.fecha ?? "—")}</td>` +
         celdaMsgs;
@@ -495,13 +508,13 @@ function renderMensajes(data) {
   const pac = data.paciente || {};
   pacienteMsgActual = { id: pac.id, ambiente: ambienteDetalle, interesado: !!pac.interesado };
 
-  const nombre = [pac.nombre, pac.apellido].filter(Boolean).join(" ") || "Paciente";
-  $("#mensajesTitulo").textContent = `Mensajes · ${nombre}`;
+  const iniciales = inicialesPaciente([pac.nombre, pac.apellido].filter(Boolean).join(" "));
+  $("#mensajesTitulo").textContent = iniciales === "—" ? "Mensajes del paciente" : `Mensajes · ${iniciales}`;
 
   const estado = pac.respuesta === "baja" ? "Se dio de baja"
     : pac.respuesta === "respondio" ? "Respondió" : "Sin respuesta";
   $("#msgPacienteCab").innerHTML =
-    `<span>${escaparHtml(pac.telefono ?? "")}</span>` +
+    `<span>${escaparHtml(telefonoEnmascarado(pac.telefono))}</span>` +
     `<span class="msg-cab__estado">${escaparHtml(estado)}</span>` +
     (pac.interesado ? `<span class="hist-tag-interes">interesado</span>` : "");
 
