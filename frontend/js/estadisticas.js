@@ -102,7 +102,7 @@ function chip(label, valor, clase, resp) {
   return `<div class="stat ${clase}"${attr}>${label} <strong>${num(valor)}</strong></div>`;
 }
 
-async function cargar() {
+async function cargar(mostrarFeedback = false) {
   // El botón lo deshabilita/rehabilita el cooldown de snwConCooldown, no
   // esta función (ver el addEventListener más abajo).
   try {
@@ -111,6 +111,7 @@ async function cargar() {
     if (res.status === 401) { window.snwSesionExpirada(); return; }
     if (!res.ok) throw new Error();
     render(await res.json());
+    if (mostrarFeedback) toast("Estadísticas actualizadas correctamente.");
   } catch {
     console.error("[estadisticas.js cargar()]");
     toast("No se pudieron cargar las estadísticas.", "error");
@@ -593,7 +594,7 @@ if (ES_ADMIN && $("#panelCostos")) {
   }
 }
 
-window.snwConCooldown($("#btnActualizarEstadisticas"), cargar);
+window.snwConCooldown($("#btnActualizarEstadisticas"), () => cargar(true));
 document.querySelectorAll("#enviosTabs button").forEach((b) =>
   b.addEventListener("click", () => cargarEnvios(b.dataset.gran))
 );

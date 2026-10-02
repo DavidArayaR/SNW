@@ -231,7 +231,7 @@ function escaparHtml(texto) {
   return div.innerHTML;
 }
 
-async function cargar() {
+async function cargar(mostrarFeedback = false) {
   try {
     // Si no hay preferencia guardada, usar el entorno global de la configuración como default
     if (!_ambienteInicializado && !localStorage.getItem("snw_ambiente_admin")) {
@@ -272,6 +272,7 @@ async function cargar() {
     aplicarModoBase();
 
     render();
+    if (mostrarFeedback) toast("Pacientes actualizados correctamente.");
   } catch (err) {
     console.error("[pacientes] cargar:", err);
     toast("Error al conectar con el servidor" + (err && err.message ? `: ${err.message}` : "."), "error");
@@ -616,7 +617,7 @@ statsEl.addEventListener("click", (e) => {
   render();
 });
 
-window.snwConCooldown($("#btnActualizar"), cargar);
+window.snwConCooldown($("#btnActualizar"), () => cargar(true));
 
 // --- Paginación: Anterior/Siguiente y tamaño de página (10–100) ------------
 const pagAntPac = $("#pagAntPac");

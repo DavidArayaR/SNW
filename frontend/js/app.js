@@ -2311,7 +2311,7 @@ if (inpProgLimiteEl) {
   inpProgLimiteEl.addEventListener("blur", () => revisarLimiteProg(false));
 }
 
-async function cargarProgramados() {
+async function cargarProgramados(mostrarFeedback = false) {
   const lista = $("#listaProgramados");
   // La lista y el texto de cupo deben reflejar la misma fotografía de reservas.
   await poblarFormProg(true);
@@ -2332,6 +2332,7 @@ async function cargarProgramados() {
     const listaProg = $("#listaProgramados");
     if (listaProg) listaProg._pagina = 1;
     renderProgramados();
+    if (mostrarFeedback) toast("Envíos programados actualizados correctamente.");
   } catch {
     console.error("[app.js cargarProgramados()]");
     marcarProgsActualizando(false);
@@ -2609,7 +2610,7 @@ async function programarEnvio() {
 const btnProgramarEl = $("#btnProgramar");
 if (btnProgramarEl) btnProgramarEl.addEventListener("click", programarEnvio);
 const btnActualizarProgEl = $("#btnActualizarProg");
-if (btnActualizarProgEl) window.snwConCooldown(btnActualizarProgEl, cargarProgramados);
+if (btnActualizarProgEl) window.snwConCooldown(btnActualizarProgEl, () => cargarProgramados(true));
 
 async function decidirProg(id, accion, motivo) {
   bloquearFilaProg(id, true);

@@ -44,7 +44,7 @@ function msg(texto, tipo = "") {
   msgEl.style.color = tipo === "error" ? "var(--danger-fg)" : "";
 }
 
-async function cargar() {
+async function cargar(mostrarFeedback = false) {
   yaCargada = true;
   try {
     const [re, ru] = await Promise.all([
@@ -58,6 +58,7 @@ async function cargar() {
     estado.usuarios = du.usuarios || [];
     msg("");
     render();
+    if (mostrarFeedback) toast("Áreas actualizadas correctamente.");
   } catch (e) {
     console.error("[areas.js cargar()]", e);
     toast("No se pudieron cargar las áreas.", "error");
@@ -70,7 +71,7 @@ window.snwCargarAreas = function () {
 };
 
 const btnActualizar = $("#btnActualizarAreas");
-if (btnActualizar) btnActualizar.addEventListener("click", () => { yaCargada = false; cargar(); });
+  if (btnActualizar) window.snwConCooldown(btnActualizar, () => cargar(true));
 
 function fmtFecha(f) {
   if (!f) return "—";

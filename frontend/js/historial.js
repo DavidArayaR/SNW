@@ -108,7 +108,7 @@ function programarProgreso() {
   }, ms);
 }
 
-async function cargarEnProgreso() {
+async function cargarEnProgreso(mostrarFeedback = false) {
   const lista = $("#listaEnProgreso");
   if (!lista) return;
   if (cargandoEnProgreso) return; // no apilar sondeos si uno quedó colgado
@@ -138,6 +138,7 @@ async function cargarEnProgreso() {
   }
   if (!items.length) {
     mostrarVacioProgreso(lista);
+    if (mostrarFeedback) toast("Progreso actualizado correctamente.");
     return;
   }
   // Actualización quirúrgica: solo se toca la fila que cambió; el resto del
@@ -170,9 +171,10 @@ async function cargarEnProgreso() {
   cont.querySelectorAll(".prog-item").forEach((el) => {
     if (!vistos.has(el.dataset.k)) el.remove();
   });
+  if (mostrarFeedback) toast("Progreso actualizado correctamente.");
 }
 
-window.snwConCooldown($("#btnActualizarProgreso"), cargarEnProgreso);
+window.snwConCooldown($("#btnActualizarProgreso"), () => cargarEnProgreso(true));
 programarProgreso();
 // Al volver a la pestaña no se espera al siguiente sondeo: si el envío empezó
 // en otro equipo mientras tanto, aparece de inmediato.
@@ -284,7 +286,7 @@ function escaparHtml(texto) {
   return div.innerHTML;
 }
 
-async function cargar(mantenerPagina = false) {
+async function cargar(mantenerPagina = false, mostrarFeedback = false) {
   try {
     const base = (selBaseHist && selBaseHist.value) || "todos";
     const qs = base !== "todos" ? `tabla=${encodeURIComponent(base)}` : "ambiente=todos";
@@ -296,6 +298,7 @@ async function cargar(mantenerPagina = false) {
     registros = await rh.json();
     if (!mantenerPagina) paginaHist = 1;
     render();
+    if (mostrarFeedback) toast("Historial actualizado correctamente.");
   } catch {
     console.error("[historial.js cargar()]");
     if (!mantenerPagina) toast("Error al conectar con el servidor.", "error");
@@ -539,7 +542,7 @@ buscadorEl.addEventListener("input", () => {
   render();
 });
 
-window.snwConCooldown($("#btnActualizar"), cargar);
+window.snwConCooldown($("#btnActualizar"), () => cargar(false, true));
 
 let toastTimer;
 function toast(msg, tipo = "ok") {
@@ -559,7 +562,7 @@ toastEl.addEventListener("click", () => toastEl.classList.remove("visible"));
 /* null si no se tiene el permiso `call_center_registro` (data-perm en el HTML) */
 const panelCCLogEl = $("#panelCCRegistro");
 
-async function cargarLogCC() {
+async function cargarLogCC(mostrarFeedback = false) {
   if (!panelCCLogEl) return;
   const body = $("#ccLogBody");
   const cont = $("#ccLogContadores");
@@ -587,6 +590,7 @@ async function cargarLogCC() {
             `</tr>`;
         }).join("")
       : `<tr><td colspan="4" style="text-align:center;color:var(--texto-suave);">Todavía no se ha enviado ninguna respuesta de call center.</td></tr>`;
+    if (mostrarFeedback) toast("Registro de call center actualizado correctamente.");
   } catch {
     console.error("[historial.js cargarLogCC()]");
     body.innerHTML = `<tr><td colspan="4" style="text-align:center;color:var(--danger-fg);">No se pudo cargar el registro.</td></tr>`;
@@ -594,7 +598,7 @@ async function cargarLogCC() {
 }
 
 if (panelCCLogEl) {
-  window.snwConCooldown($("#btnActualizarCCLog"), cargarLogCC);
+  window.snwConCooldown($("#btnActualizarCCLog"), () => cargarLogCC(true));
 }
 
 cargarBasesHist();

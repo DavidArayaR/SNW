@@ -189,7 +189,7 @@ async function cargarAuditoriaUsuario(correo, contenedor) {
   }
 }
 
-async function cargar() {
+async function cargar(mostrarFeedback = false) {
   try {
     const r = await fetch("api/usuarios", { headers: authHeaders(), cache: "no-store" });
     if (r.status === 401) { window.snwSesionExpirada(); return; }
@@ -202,6 +202,7 @@ async function cargar() {
       info.textContent = `Desarrolladores: ${estado.desarrolladores} de ${estado.max_desarrolladores}.`;
     }
     render();
+    if (mostrarFeedback) toast("Usuarios actualizados correctamente.");
   } catch (e) {
     console.error("[usuarios.js cargar()]", e);
     toast("No se pudieron cargar las cuentas.", "error");
@@ -555,7 +556,7 @@ formInvitar.addEventListener("submit", async (e) => {
   }
 });
 
-window.snwConCooldown($("#btnRecargar"), cargar);
+window.snwConCooldown($("#btnRecargar"), () => cargar(true));
 $("#btnCancelarBorrar").addEventListener("click", cerrarModal);
 $("#btnConfirmarBorrar").addEventListener("click", eliminar);
 $("#modalBorrar").addEventListener("click", (e) => { if (e.target.id === "modalBorrar") cerrarModal(); });
