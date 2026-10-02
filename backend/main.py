@@ -3079,10 +3079,65 @@ def _limite_mensajeria_info(amb: str) -> dict | None:
     return _limite_mensajeria_actual()
 
 
+def _limite_mensajeria_fecha(fecha: datetime.date) -> dict | None:
+    """Cupo de Meta previsto para una fecha: envíos realizados ese día más
+    destinatarios únicos reservados en otros programados activos."""
+    tier = _limite_mensajeria_tier()
+    if not tier:
+        return None
+
+    normalizar_sql = "REPLACE(REPLACE(REPLACE(REPLACE(COALESCE({campo}, ''), '+', ''), ' ', ''), '-', ''), '(', '')"
+    sent_tel = normalizar_sql.format(campo="numero_telefono")
+    reserved_tel = normalizar_sql.format(campo="pd.telefono")
+    estados = ("pendiente", "aprobado", "enviando")
+    marcadores = ", ".join(["%s"] * len(_CLAVES_NO_CUENTAN_LIMITE))
+    try:
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"SELECT COUNT(DISTINCT {sent_tel}) AS n FROM log_envios "
+                "WHERE estado_envio = 'enviado' AND DATE(fecha_hora) = %s "
+                "AND COALESCE(plantilla_clave, '') NOT IN (" + marcadores + ") "
+                f"AND {sent_tel} <> ''",
+                (fecha, *_CLAVES_NO_CUENTAN_LIMITE),
+            )
+            enviados = int((cur.fetchone() or {}).get("n") or 0)
+            cur.execute(
+                f"SELECT COUNT(DISTINCT {reserved_tel}) AS n "
+                "FROM programado_destinatarios pd "
+                "JOIN envios_programados ep ON ep.id = pd.prog_id "
+                "WHERE DATE(ep.programado_para) = %s "
+                "AND ep.estado IN (%s, %s, %s) "
+                f"AND {reserved_tel} <> '' "
+                f"AND NOT EXISTS (SELECT 1 FROM log_envios le WHERE le.estado_envio = 'enviado' "
+                "AND DATE(le.fecha_hora) = %s "
+                "AND COALESCE(le.plantilla_clave, '') NOT IN (" + marcadores + ") "
+                f"AND BINARY {normalizar_sql.format(campo='le.numero_telefono')} = "
+                f"BINARY {reserved_tel})",
+                (fecha, *estados, fecha, *_CLAVES_NO_CUENTAN_LIMITE),
+            )
+            reservados = int((cur.fetchone() or {}).get("n") or 0)
+    except Exception as e:
+        log_error(f"_limite_mensajeria_fecha {fecha}", e)
+        raise HTTPException(503, detail="No se pudo calcular el cupo de Meta para la fecha elegida.")
+
+    usados = enviados + reservados
+    return {
+        "tier": tier,
+        "usados_24h": usados,
+        "usados_dia": usados,
+        "enviados_dia": enviados,
+        "reservados_dia": reservados,
+        "disponibles": max(0, tier - usados),
+        "fecha": fecha.isoformat(),
+    }
+
+
 def _limite_mensajeria_aviso(amb: str) -> dict | None:
     """Info del cupo para MOSTRARLO. En producción se muestra siempre que aplique
     (API oficial); en desarrollo solo si el límite diario ya se alcanzó, para
     poder indicarlo sin bloquear el envío."""
+    if config_get("metodo_envio", "").strip() != "api_oficial":
+        return None
     info = _limite_mensajeria_actual()
     if not info:
         return None
@@ -4093,6 +4148,8 @@ class DestinosIn(BaseModel):
     ambiente: str = "produccion"
     plantilla_id: int | None = None
     area_id: int | None = None
+    fecha: str | None = None
+    prevision_programado: bool = False
 
 
 def _contar_elegibles_tabla(t: str, amb_q: str, amb: str) -> tuple[int, int]:
@@ -4143,6 +4200,19 @@ def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensaj
         if plantilla is not None:
             costo = _costo_estimado_por_clave(plantilla.get("clave", ""), elegibles)
 
+    aplica_limite_meta = (
+        amb == "produccion" and config_get("metodo_envio", "").strip() == "api_oficial"
+    )
+    info_limite = None if body.prevision_programado else _limite_mensajeria_aviso(amb)
+    if body.fecha:
+        try:
+            fecha_cupo = datetime.date.fromisoformat(body.fecha)
+        except ValueError:
+            raise HTTPException(422, detail="Fecha inválida para calcular el límite diario.")
+        info_fecha = _limite_mensajeria_fecha(fecha_cupo) if aplica_limite_meta else None
+        if info_fecha is not None:
+            info_limite = info_fecha
+
     return {
         "total": total,
         "pendientes": elegibles,
@@ -4151,7 +4221,7 @@ def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensaj
         "base_datos": t if esp else nombre_base(amb),
         "area_id": (esp["id"] if esp else None),
         "costo": costo,
-        "limite_mensajeria": _limite_mensajeria_aviso(amb),
+        "limite_mensajeria": info_limite,
     }
 
 
@@ -4288,7 +4358,7 @@ class ProgCrearIn(BaseModel):
     ambiente: str | None = None  # legacy cuando no hay area
     plantilla_id: int
     programado_para: str  # "YYYY-MM-DDTHH:MM" (hora del servidor)
-    limite: int | None = None
+    limite: int
 
 
 # --- Destinatarios preelegidos de cada programado ---------------------------
@@ -4520,14 +4590,9 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
         raise HTTPException(422, detail="Fecha/hora inválida (usa el selector).")
     if cuando <= datetime.datetime.now() + datetime.timedelta(seconds=60):
         raise HTTPException(422, detail="Programa con al menos 1 minuto de anticipación.")
-    limite = None
-    if body.limite is not None:
-        try:
-            limite = int(body.limite)
-        except (TypeError, ValueError):
-            raise HTTPException(422, detail="Límite inválido.")
-        if limite < 1:
-            raise HTTPException(422, detail="El límite debe ser 1 o más (vacío = sin límite).")
+    limite = body.limite
+    if limite < 1:
+        raise HTTPException(422, detail="La cantidad debe ser de 1 paciente o más.")
 
     esp = None
     if body.area_id is not None:
@@ -4553,12 +4618,15 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
         log_error("contar_reservados_prog", e)
         reservados = 0
     libres = max(0, pendientes - reservados)
-    info_limite = _limite_mensajeria_info(amb)
+    info_limite = None
+    if amb == "produccion" and config_get("metodo_envio", "").strip() == "api_oficial":
+        info_limite = _limite_mensajeria_fecha(cuando.date())
     if info_limite and info_limite["disponibles"] <= 0:
         raise HTTPException(429, detail=(
-            f"Límite diario de WhatsApp alcanzado: en las últimas 24 h ya se contactó a "
-            f"{info_limite['usados_24h']} usuarios únicos (límite {info_limite['tier']}). "
-            f"Espera a que avance la ventana de 24 h o sube el límite en Configuración."))
+            f"Límite diario de WhatsApp alcanzado para {cuando:%d/%m/%Y}: "
+            f"{info_limite['enviados_dia']} usuarios ya contactados y "
+            f"{info_limite['reservados_dia']} reservados por otros programados "
+            f"(límite {info_limite['tier']}). Elige otra fecha o sube el límite en Configuración."))
     tope = min(libres, info_limite["disponibles"]) if info_limite else libres
     if limite is not None and limite > tope:
         if libres <= 0:
@@ -4571,9 +4639,10 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
         if info_limite:
             raise HTTPException(422, detail=(
                 f"El límite no puede superar los {libres} pendientes libres de la base de datos "
-                f"ni los {info_limite['disponibles']} que deja el límite diario de Meta hoy "
-                f"({info_limite['tier']} usuarios únicos en 24 h; ya se contactó a "
-                f"{info_limite['usados_24h']}). Usa {tope} o menos, o déjalo vacío para enviar a "
+                f"ni los {info_limite['disponibles']} que quedan del límite diario de Meta para "
+                f"{cuando:%d/%m/%Y} ({info_limite['tier']} usuarios; "
+                f"{info_limite['enviados_dia']} enviados y {info_limite['reservados_dia']} "
+                f"reservados por otros programados). Usa {tope} o menos, o déjalo vacío para enviar a "
                 f"todos los disponibles."))
         raise HTTPException(422, detail=(
             f"El límite no puede superar los {libres} pacientes pendientes libres de la base de "

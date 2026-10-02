@@ -265,6 +265,21 @@ select.badge--select {
   color: var(--texto);
   background: var(--panel);
 }
+.prog-porcentaje-control { display: flex; align-items: center; gap: 12px; }
+.prog-porcentaje-control input[type="range"] { flex: 1; min-width: 0; accent-color: var(--verde-oscuro); }
+.prog-porcentaje-control output { min-width: 130px; color: var(--texto-suave); font-size: .85rem; text-align: right; }
+.prog-form input[readonly] { background: var(--surface-3); }
+.prog-disponibles-base {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  background: var(--surface-3);
+  color: var(--texto);
+  font-size: .85rem;
+  font-weight: 600;
+}
+.prog-disponibles-base[hidden] { display: none; }
 /* Asistente de programar envío por pasos. */
 .prog-paso {
   display: flex;
@@ -275,6 +290,22 @@ select.badge--select {
   padding: 10px 12px;
   background: var(--surface-2);
 }
+.prog-paso > .field { flex: 1; min-width: 0; }
+.prog-limite-nota {
+  display: block;
+  padding: 9px 11px;
+  border: 1px solid var(--ok-bd);
+  border-left-width: 4px;
+  border-radius: 8px;
+  background: var(--ok-bg);
+  color: var(--ok-fg);
+  font-size: .8rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.prog-limite-nota--warn { border-color: var(--warn-bd); background: var(--warn-bg); color: var(--warn-fg); }
+.prog-limite-nota--danger { border-color: var(--danger-bd); background: var(--danger-bg); color: var(--danger-fg); }
+.prog-limite-nota[hidden] { display: none; }
 .prog-paso--listo { border-color: var(--verde-oscuro); }
 .prog-paso__num {
   flex-shrink: 0;

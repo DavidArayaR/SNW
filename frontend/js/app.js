@@ -583,26 +583,66 @@ function actualizarProgPlantilla() {
   actualizarPasosProg();
 }
 
-// Pasos 1-plantilla, 2-área, 3-fecha+límite: cada uno se habilita al
+// Pasos 1-plantilla, 2-área, 3-fecha y 4-límite: cada uno se habilita al
 // completar el anterior.
 function actualizarPasosProg() {
   const p = (plantillas || []).find((x) => x.id === tplSelId);
   const selA = document.getElementById("selProgBase");
   const inpF = document.getElementById("inpProgFecha");
   const inpL = document.getElementById("inpProgLimite");
+  const selModo = document.getElementById("selProgLimiteModo");
+  const inpPorcentaje = document.getElementById("inpProgPorcentaje");
   const btn = document.getElementById("btnProgramar");
   const paso1 = !!p;
   const paso2 = paso1 && selA && !!selA.value;
-  for (const [id, listo] of [["pasoProg1", paso1], ["pasoProg2", paso2]]) {
+  const paso3Listo = !!(paso2 && inpF && inpF.value);
+  const paso4Listo = !!(paso3Listo && limiteProgElegido());
+  for (const [id, listo] of [["pasoProg1", paso1], ["pasoProg2", paso2], ["pasoProg3", paso3Listo], ["pasoProg4", paso4Listo]]) {
     const el = document.getElementById(id);
     if (el) el.classList.toggle("prog-paso--listo", !!listo);
   }
-  const paso3 = document.getElementById("pasoProg3");
-  if (paso3) paso3.classList.toggle("prog-paso--listo", !!(paso2 && inpF && inpF.value));
   if (selA) selA.disabled = !paso1 || (!!p && esPlantillaProtegida(p));
   if (inpF) inpF.disabled = !paso2;
-  if (inpL) inpL.disabled = !paso2 || progSinCupo;
-  if (btn) btn.disabled = !(paso2 && inpF && inpF.value) || progCreando || progSinCupo;
+  if (selModo) selModo.disabled = !paso3Listo || progSinCupo;
+  const modo = selModo?.value || "";
+  if (inpPorcentaje) inpPorcentaje.disabled = !paso3Listo || modo !== "porcentaje" || progSinCupo;
+  if (inpL) inpL.disabled = !paso3Listo || progSinCupo || !modo || modo === "porcentaje";
+  if (btn) btn.disabled = !paso4Listo || progCreando || progSinCupo;
+}
+
+function limiteProgElegido() {
+  const modo = $("#selProgLimiteModo")?.value || "";
+  const inpL = $("#inpProgLimite");
+  if (!inpL) return false;
+  if (modo === "porcentaje") return Number.isInteger(Number(inpL.value)) && Number(inpL.value) >= 1;
+  if (modo === "cantidad") {
+    const cantidad = Number(inpL.value);
+    return inpL.value.trim() !== "" && Number.isInteger(cantidad) && cantidad >= 1;
+  }
+  return false;
+}
+
+function actualizarLimiteDesdeModo() {
+  const modo = $("#selProgLimiteModo")?.value || "";
+  const inpL = $("#inpProgLimite");
+  const wrap = $("#progPorcentajeWrap");
+  const inpPorcentaje = $("#inpProgPorcentaje");
+  const salida = $("#progPorcentajeValor");
+  const label = $("#labelProgLimite");
+  if (!inpL) return;
+  if (wrap) wrap.hidden = modo !== "porcentaje";
+  if (label) label.textContent = modo === "porcentaje" ? "Cantidad que se programará" : "Cantidad de pacientes";
+  inpL.readOnly = modo === "porcentaje";
+  if (modo === "porcentaje") {
+    const porcentaje = Number(inpPorcentaje?.value) || 1;
+    const cantidad = Math.max(1, Math.floor(techoProgLimite() * porcentaje / 100));
+    inpL.value = techoProgLimite() > 0 ? String(cantidad) : "";
+    if (salida) salida.textContent = `${porcentaje} % (${inpL.value || 0} pacientes)`;
+  } else if (modo !== "cantidad") {
+    inpL.value = "";
+  }
+  revisarLimiteProg();
+  actualizarPasosProg();
 }
 
 function renderLista(filtro = "") {
@@ -2182,17 +2222,26 @@ function techoProgLimite() {
   return Math.max(0, Math.min(enBase, disponibles));
 }
 
+function fechaProgEtiqueta(fecha) {
+  if (!fecha) return "hoy";
+  const [anio, mes, dia] = fecha.split("-");
+  return dia && mes && anio ? `${dia}/${mes}/${anio}` : fecha;
+}
+
 // Explica cuál es el tope real, nombrando los dos límites (pacientes libres de
 // la base y cupo diario de Meta).
 function textoTopeProg(techo) {
   const c = progCupo || {};
   const enBase = (c.libres != null) ? c.libres : (c.pendientes || 0);
   if (c.disponibles == null) {
-    return `El límite no puede superar los ${enBase} pacientes libres de la base de datos. Usa ${techo} o menos.`;
+    return `En esta base hay ${enBase} pacientes disponibles. Ingresa ${techo} o menos.`;
   }
-  return `El límite no puede superar los ${enBase} pacientes libres de la base de datos ni los ` +
-    `${c.disponibles} del límite diario de Meta (${c.tier} usuarios únicos en 24 h; ya se ` +
-    `contactó a ${c.usados}). Usa ${techo} o menos.`;
+  const fecha = fechaProgEtiqueta(c.fecha);
+  const usados = c.enviados != null || c.programados != null
+    ? `Ya se enviaron ${c.enviados || 0} y hay ${c.programados || 0} incluidos en otros envíos.`
+    : `Ya se enviaron ${c.usados || 0}.`;
+  return `Para el ${fecha} quedan ${c.disponibles} destinatarios del máximo diario de ${c.tier} de Meta. ` +
+    `${usados} En esta base hay ${enBase} pacientes disponibles. Ingresa ${techo} o menos.`;
 }
 
 // Revisa el campo: lo pinta en rojo mientras no se pueda enviar (pasa el tope
@@ -2202,9 +2251,14 @@ function revisarLimiteProg(avisar = false) {
   const inpL = $("#inpProgLimite");
   if (!inpL) return true;
   const bruto = inpL.value.trim();
+  const modo = $("#selProgLimiteModo")?.value || "";
   const techo = techoProgLimite();
   let motivo = "";
-  if (bruto !== "" && techo > 0) {
+  if (!modo) {
+    motivo = "Elige un porcentaje o una cantidad exacta para continuar.";
+  } else if (modo === "cantidad" && bruto === "") {
+    motivo = "Indica cuántos pacientes quieres programar.";
+  } else if (bruto !== "" && techo > 0) {
     const v = Number(bruto);
     if (!Number.isInteger(v) || v < 1) {
       motivo = "El límite debe ser un número entero de 1 o más (vacío = sin límite).";
@@ -2213,8 +2267,9 @@ function revisarLimiteProg(avisar = false) {
     }
   }
   // "invalido" es la clase del tema para pintar el borde en rojo.
-  inpL.classList.toggle("invalido", !!motivo);
-  inpL.setAttribute("aria-invalid", motivo ? "true" : "false");
+  const mostrarError = !!motivo && (avisar || !!modo);
+  inpL.classList.toggle("invalido", mostrarError);
+  inpL.setAttribute("aria-invalid", mostrarError ? "true" : "false");
   if (motivo && avisar) {
     toast(motivo, "error");
     inpL.focus();
@@ -2225,8 +2280,23 @@ function revisarLimiteProg(avisar = false) {
 function aplicarCupoProg() {
   const inpL = $("#inpProgLimite");
   const nota = $("#progLimiteNota");
+  const disponiblesBase = $("#progDisponiblesBase");
   if (!inpL) return;
   const c = progCupo;
+  if (disponiblesBase) {
+    disponiblesBase.hidden = !c;
+    if (c) {
+      const libres = Number(c.libres ?? c.pendientes) || 0;
+      disponiblesBase.textContent = `Disponibles en esta base: ${new Intl.NumberFormat("es-CL").format(libres)} pacientes.`;
+    }
+  }
+  if (nota) {
+    nota.classList.remove("prog-limite-nota--ok", "prog-limite-nota--warn", "prog-limite-nota--danger");
+    if (c?.tier && c.disponibles != null) {
+      const porcentaje = (Math.max(0, Number(c.disponibles) || 0) / Number(c.tier)) * 100;
+      nota.classList.add(porcentaje > 50 ? "prog-limite-nota--ok" : porcentaje >= 20 ? "prog-limite-nota--warn" : "prog-limite-nota--danger");
+    }
+  }
   if (!c) {
     inpL.removeAttribute("max");
     progSinCupo = false;
@@ -2237,38 +2307,26 @@ function aplicarCupoProg() {
   }
   const techo = techoProgLimite();
   progSinCupo = techo <= 0;
+  if ($("#selProgLimiteModo")?.value === "porcentaje") {
+    const porcentaje = Number($("#inpProgPorcentaje")?.value) || 1;
+    inpL.value = techo > 0 ? String(Math.max(1, Math.floor(techo * porcentaje / 100))) : "";
+    const salida = $("#progPorcentajeValor");
+    if (salida) salida.textContent = `${porcentaje} % (${inpL.value || 0} pacientes)`;
+  }
   if (techo > 0) inpL.max = String(techo);
   else inpL.removeAttribute("max");
   // No se recorta el valor: si quedó mayor al tope se marca en rojo para que
   // quien programa vea el conflicto y lo corrija (el backend lo rechaza igual).
   revisarLimiteProg();
   if (nota) {
-    const libres = (c.libres != null) ? c.libres : (c.pendientes || 0);
-    if (progSinCupo) {
-      nota.hidden = false;
-      if (c.disponibles != null && c.disponibles <= 0) {
-        nota.textContent = `Sin cupo hoy: el límite diario de Meta (${c.tier} usuarios únicos en 24 h) ` +
-          `ya se alcanzó. Espera a que avance la ventana de 24 h para programar.`;
-      } else if (libres <= 0 && c.reservados > 0) {
-        nota.textContent =
-          `No quedan pacientes libres: los ${c.pendientes} pendientes de esta base ya están ` +
-          `preelegidos por otros envíos programados activos. Cancela alguno o espera a que se complete.`;
-      } else {
-        nota.textContent = "No hay pacientes pendientes en esta base para programar.";
-      }
-      return;
-    }
-    nota.hidden = false;
-    const cola = (c.pendientes || 0) > techo ? ` · ${c.pendientes - techo} quedan para otro horario` : "";
-    const tomados = c.reservados > 0 ? ` · ${c.reservados} ya tomados por otros programados` : "";
-    if (c.tier) {
-      nota.textContent =
-        `Máximo ${techo} hoy: ${c.disponibles} de ${c.tier} disponibles por el límite diario ` +
-        `de Meta y ${libres} pacientes libres en la base${tomados}${cola}. El sistema preelige ` +
-        `y reserva ese grupo al programar.`;
+    if (!c.tier || c.disponibles == null) {
+      nota.hidden = true;
     } else {
-      nota.textContent = `Máximo ${techo}: ${libres} pacientes libres en la base${tomados}${cola}. ` +
-        `El sistema preelige y reserva ese grupo al programar.`;
+      nota.hidden = false;
+      const numero = new Intl.NumberFormat("es-CL");
+      const limiteMeta = numero.format(c.tier);
+      const quedanMeta = numero.format(Math.max(0, c.disponibles));
+      nota.innerHTML = `<strong>Límite diario de Meta:</strong> ${limiteMeta} (${quedanMeta} disponibles)`;
     }
   }
 }
@@ -2281,15 +2339,17 @@ async function cargarCupoProg(forzar = false) {
   const base = selBase.value || "";
   const areaId = base.startsWith("esp:") ? Number(base.slice(4)) : "";
   const ambiente = areaId ? "produccion" : base;
-  const key = base;
+  const fecha = $("#inpProgFecha")?.value.slice(0, 10) || "";
+  const key = `${base}|${fecha}`;
   if (!forzar && key === progCupoKey) { aplicarCupoProg(); return; }
   progCupoKey = key;
   progCupo = null;
   aplicarCupoProg();
   if (!base) return;
   try {
-    const cuerpo = { ambiente };
+    const cuerpo = { ambiente, prevision_programado: true };
     if (areaId) cuerpo.area_id = areaId;
+    if (fecha) cuerpo.fecha = fecha;
     const res = await fetch("api/notificaciones/destinatarios", {
       method: "POST",
       headers: authHeaders({ "Content-Type": "application/json" }),
@@ -2307,6 +2367,9 @@ async function cargarCupoProg(forzar = false) {
       disponibles: lim ? Number(lim.disponibles) : null,
       tier: lim ? lim.tier : 0,
       usados: lim ? lim.usados_24h : 0,
+      enviados: lim && lim.enviados_dia != null ? Number(lim.enviados_dia) : null,
+      programados: lim && lim.reservados_dia != null ? Number(lim.reservados_dia) : null,
+      fecha: lim && lim.fecha ? lim.fecha : "",
     };
   } catch {
     console.error("[app.js cargarCupoProg()]");
@@ -2324,7 +2387,10 @@ if (selProgBaseEl) selProgBaseEl.addEventListener("change", () => {
   actualizarPasosProg();
 });
 const inpProgFechaEl = $("#inpProgFecha");
-if (inpProgFechaEl) inpProgFechaEl.addEventListener("input", actualizarPasosProg);
+if (inpProgFechaEl) inpProgFechaEl.addEventListener("input", () => {
+  cargarCupoProg(true);
+  actualizarPasosProg();
+});
 const inpProgLimiteEl = $("#inpProgLimite");
 if (inpProgLimiteEl) {
   // Mientras se escribe se va marcando en rojo; al salir del campo, el aviso.
@@ -2335,6 +2401,10 @@ if (inpProgLimiteEl) {
   inpProgLimiteEl.addEventListener("change", () => revisarLimiteProg(true));
   inpProgLimiteEl.addEventListener("blur", () => revisarLimiteProg(false));
 }
+const selProgLimiteModoEl = $("#selProgLimiteModo");
+if (selProgLimiteModoEl) selProgLimiteModoEl.addEventListener("change", actualizarLimiteDesdeModo);
+const inpProgPorcentajeEl = $("#inpProgPorcentaje");
+if (inpProgPorcentajeEl) inpProgPorcentajeEl.addEventListener("input", actualizarLimiteDesdeModo);
 
 async function cargarProgramados(mostrarFeedback = false) {
   const lista = $("#listaProgramados");
@@ -2604,8 +2674,8 @@ async function programarEnvio() {
   if (progSinCupo) { toast("Hoy no hay cupo disponible para programar este envío.", "error"); return; }
   // Campo en rojo + aviso si el límite pasa los pendientes de la base o el cupo
   // de Meta (o no es un entero válido).
-  if (!revisarLimiteProg(true)) return;
-  const limite = (inpL && inpL.value.trim() !== "") ? Number(inpL.value) : null;
+  if (!revisarLimiteProg(true) || !limiteProgElegido()) return;
+  const limite = Number(inpL.value);
   const btn = $("#btnProgramar");
   if (btn && btn.disabled && !progCreando) return;
   progCreando = true;
@@ -2627,6 +2697,9 @@ async function programarEnvio() {
       : `Envío programado: ${cuantos} paciente(s) preelegidos.`, "ok");
     inpF.value = "";
     if (inpL) inpL.value = "";
+    const selModo = $("#selProgLimiteModo");
+    if (selModo) selModo.value = "";
+    actualizarLimiteDesdeModo();
     await cargarProgramados();
   } catch (err) {
     console.error("[app.js programarEnvio()]", err);

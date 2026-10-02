@@ -246,6 +246,7 @@
             <div class="field">
               <label for="selProgBase">Base de datos</label>
               <select id="selProgBase" disabled></select>
+              <p class="prog-disponibles-base" id="progDisponiblesBase" hidden></p>
             </div>
           </div>
           <div class="prog-paso" id="pasoProg3">
@@ -254,10 +255,26 @@
               <label for="inpProgFecha">Fecha y hora (hora del servidor)</label>
               <input type="datetime-local" id="inpProgFecha" disabled>
             </div>
+          </div>
+          <div class="prog-paso" id="pasoProg4">
+            <span class="prog-paso__num">4</span>
             <div class="field">
-              <label for="inpProgLimite">Límite de mensajes (vacío = sin límite)</label>
-              <input type="number" id="inpProgLimite" min="1" step="1" placeholder="Sin límite" disabled>
-              <p class="field__hint" id="progLimiteNota" hidden></p>
+              <p class="field__hint prog-limite-nota" id="progLimiteNota" hidden></p>
+              <label for="selProgLimiteModo">Cómo quieres definir la cantidad</label>
+              <select id="selProgLimiteModo" disabled>
+                <option value="">Selecciona una opción</option>
+                <option value="porcentaje">Porcentaje del máximo disponible</option>
+                <option value="cantidad">Cantidad exacta</option>
+              </select>
+              <div class="field" id="progPorcentajeWrap" hidden>
+                <label for="inpProgPorcentaje">Porcentaje</label>
+                <div class="prog-porcentaje-control">
+                  <input type="range" id="inpProgPorcentaje" min="1" max="100" step="1" value="50" disabled>
+                  <output id="progPorcentajeValor" for="inpProgPorcentaje">50 %</output>
+                </div>
+              </div>
+              <label for="inpProgLimite" id="labelProgLimite">Cantidad de pacientes</label>
+              <input type="number" id="inpProgLimite" min="1" step="1" placeholder="Elige porcentaje o cantidad" disabled>
             </div>
           </div>
           <div class="form-actions">
