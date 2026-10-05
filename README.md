@@ -426,7 +426,7 @@ tiene template de Meta (va como texto libre, ventana de 24 h). No hay gestión d
 | Método | Endpoint | Descripción |
 |---|---|---|
 | POST | `/api/notificaciones/enviar` | Inicia el envío `{pacientes: [ids] \| null, plantilla_id, ambiente, limite?, area_id?}`. `pacientes: null` = todos los elegibles (usado desde Mensajería). `limite` (solo producción y especialidades) recorta cuántos pendientes entran en esta tanda; el resto quedan pendientes. Con `area_id` envía a la tabla `pacientes_<slug>` (403 si no está asignada; una plantilla de otra especialidad da 400). El rol `usuario` solo puede enviar a sus especialidades o a desarrollo (403 a producción legacy). Rechaza (400) si la plantilla no está `APPROVED` en Meta; 409 si en ese momento hay **otro envío en curso en esa misma base** |
-| POST | `/api/notificaciones/destinatarios` | Cuenta pacientes totales, pendientes y libres de una base (los libres descuentan los reservados por programados). Con `plantilla_id`, incluye el costo aproximado solo para supervisor/admin/dev si hay tarifa disponible. Con fecha, informa el cupo diario de Meta para esa fecha cuando corresponde a `api_oficial` en producción |
+| POST | `/api/notificaciones/destinatarios` | Cuenta pacientes totales, elegibles (el campo de compatibilidad se llama `pendientes`) y libres de una base; los libres descuentan los reservados por programados. En desarrollo cuenta números de prueba autorizados sin importar su estado; en producción solo los pendientes. Con `plantilla_id`, incluye el costo aproximado solo para supervisor/admin/dev si hay tarifa disponible. Con fecha, informa el cupo diario de Meta para esa fecha cuando corresponde a `api_oficial` en producción |
 | GET | `/api/notificaciones/jobs/{job_id}` | Progreso en vivo del envío en curso |
 | GET | `/api/notificaciones/envio-en-curso` | Envíos masivos activos (en proceso o pausados, sin destinatarios): Mensajería muestra un banner para retomarlos aunque se haya cerrado el modal |
 | POST | `/api/notificaciones/jobs/{job_id}/pausa` \| `/reanudar` \| `/cancelar` | Control del job en curso |
@@ -807,7 +807,9 @@ propagar como error 500.
 - **Desarrollo**: sin importar el rol, el envío masivo queda restringido a
   `pacientes_dev` y a los números configurados en `numeros_prueba_dev`. Producción y
   áreas se bloquean al crear envíos manuales o programados; el worker vuelve a comprobar
-  el entorno y los números autorizados justo antes de llamar al motor.
+  el entorno y los números autorizados justo antes de llamar al motor. Puede reenviar
+  registros con estado `enviado`; la elegibilidad no depende de su estado, pero sí excluye
+  bajas y números fuera de la lista de prueba.
 - **Motor intercambiable** (`metodo_envio`): `simulado` (no envía nada real, solo
   registra en consola) o `api_oficial` (WhatsApp Business Cloud API).
 - **Cola en background**: cada envío corre como `BackgroundTask` de FastAPI con

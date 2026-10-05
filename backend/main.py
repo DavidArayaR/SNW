@@ -4458,13 +4458,14 @@ class DestinosIn(BaseModel):
 
 
 def _contar_elegibles_tabla(t: str, amb_q: str, amb: str) -> tuple[int, int]:
-    """(total, elegibles) de una tabla: elegibles = pendientes, sin opt-out
-    y sin baja. En desarrollo solo cuenta números de prueba autorizados."""
+    """(total, elegibles) de una tabla. Producción requiere estado pendiente;
+    desarrollo permite reenviar sin importar estado, siempre entre números de prueba."""
     with conectar(amb) as conn, conn.cursor() as cur:
         cur.execute(f"SELECT COUNT(*) AS total FROM {t}")
         total = int((cur.fetchone() or {}).get("total") or 0)
         conds = []
-        if columna_existe(t, "estado", amb_q):
+        es_desarrollo = entorno_valido(amb) == "desarrollo"
+        if not es_desarrollo and columna_existe(t, "estado", amb_q):
             conds.append("estado = 'pendiente'")
         if columna_existe(t, "whatsapp_opt_out", amb_q):
             conds.append("whatsapp_opt_out = 0")
@@ -4475,7 +4476,7 @@ def _contar_elegibles_tabla(t: str, amb_q: str, amb: str) -> tuple[int, int]:
             + (" WHERE " + " AND ".join(conds) if conds else "")
         )
         telefonos = [r.get("telefono") or "" for r in cur.fetchall()]
-        if entorno_valido(amb) == "desarrollo":
+        if es_desarrollo:
             autorizados = _numeros_prueba_editables("desarrollo")
             elegibles = sum(normalizar_telefono(tel) in autorizados for tel in telefonos)
         else:
@@ -4708,17 +4709,18 @@ def _contar_reservados_prog(t: str, amb: str, amb_q: str) -> int:
 
 
 def _preelegir_pacientes_prog(t: str, amb: str, amb_q: str, n: int, cur=None) -> list[dict]:
-    """Primeros N pacientes libres de la base: pendientes, sin opt-out ni baja y
-    que no estén ya preelegidos por otro programado activo. Orden estable por id
-    (así los grupos de cada horario son siempre los mismos).
+    """Primeros N pacientes libres: sin opt-out ni baja y no preelegidos por
+    otro programado activo. En desarrollo se permite cualquier estado; en
+    producción solo pendientes. Orden estable por id.
 
     Si se pasa `cur` (la misma transacción que va a guardar la lista) la lectura
     se hace con FOR UPDATE: dos programados creados a la vez se serializan y no
     pueden quedarse con los mismos pacientes."""
     if n <= 0:
         return []
+    solo_pruebas = entorno_valido(amb) == "desarrollo"
     cond = []
-    if columna_existe(t, "estado", amb_q):
+    if not solo_pruebas and columna_existe(t, "estado", amb_q):
         cond.append("p.estado = 'pendiente'")
     if columna_existe(t, "whatsapp_opt_out", amb_q):
         cond.append("p.whatsapp_opt_out = 0")
@@ -4732,7 +4734,6 @@ def _preelegir_pacientes_prog(t: str, amb: str, amb_q: str, n: int, cur=None) ->
         " ('pendiente', 'aprobado', 'enviando'))"
     )
     where = (" WHERE " + " AND ".join(cond)) if cond else ""
-    solo_pruebas = entorno_valido(amb) == "desarrollo"
     sql = (f"SELECT p.id, p.nombre, p.apellido, p.telefono FROM {t} p{where}"
            " ORDER BY p.id" + ("" if solo_pruebas else " LIMIT %(n)s")
            + (" FOR UPDATE" if cur else ""))
@@ -4776,8 +4777,8 @@ def _liberar_destinatarios_prog(prog_id: int) -> None:
 
 def _revivir_destinatarios_prog(tabla: str, amb: str, amb_q: str,
                                  ids: list[int]) -> tuple[list[dict], list[dict]]:
-    """Al ejecutar, la lista congelada se vuelve a validar: siguen pendientes,
-    sin opt-out y sin baja. Devuelve (vivos, excluidos con su motivo)."""
+    """Revalida lista congelada: producción exige que sigan pendientes;
+    desarrollo permite cualquier estado. En ambos casos excluye bajas/opt-out."""
     if not ids:
         return [], []
     cols = ["p.id", "p.nombre", "p.apellido", "p.telefono"]
@@ -4786,7 +4787,7 @@ def _revivir_destinatarios_prog(tabla: str, amb: str, amb_q: str,
     if columna_existe(tabla, "respuesta", amb_q):
         cols.append("p.respuesta")
     cond = [f"p.id IN ({', '.join('%s' for _ in ids)})"]
-    if columna_existe(tabla, "estado", amb_q):
+    if entorno_valido(amb) != "desarrollo" and columna_existe(tabla, "estado", amb_q):
         cond.append("p.estado = 'pendiente'")
     with conectar(amb) as conn, conn.cursor() as cur:
         cur.execute(
@@ -4879,10 +4880,9 @@ def _prog_a_respuesta(f: dict, sesion: dict, preelegidos: int | None = None) -> 
 
 def _prog_costo_estimado(f: dict, plantilla_nombre: str = "",
                          elegibles: int | None = None) -> dict | None:
-    """Costo aproximado de ejecutar este envío programado: se estima sobre los
-    destinatarios preelegidos (la lista congelada al crearlo) y, si no se
-    conoce, sobre los elegibles (pendientes, sin opt-out ni baja) de la tabla.
-    None si no hay tarifa o plantilla. El cobro real ocurre cuando se ejecuta."""
+    """Costo aproximado: destinatarios preelegidos o, si no se conocen,
+    elegibles de la tabla. En desarrollo se incluyen todos los estados; en
+    producción solo pendientes. Ninguno incluye opt-out ni bajas."""
     try:
         amb = f.get("ambiente") or "produccion"
         tabla = f.get("tabla") or nombre_base(amb)
@@ -4952,17 +4952,18 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
                     "para pacientes_dev y números de prueba."),
         )
 
-    # Tope real del programado: ni más de lo que el usuario propone, ni más de
-    # los pendientes LIBRES de la base (los que ya tiene otro programado activo
-    # no se pueden volver a tomar), ni más de lo que deja el cupo de Meta.
+    # Tope real: elegibles libres (en desarrollo incluye todos los estados),
+    # sin repetir destinatarios ya reservados ni superar el cupo de Meta.
     amb_q = "produccion" if esp is not None else amb
-    _, pendientes = _contar_elegibles_tabla(tabla, amb_q, amb)
+    _, elegibles = _contar_elegibles_tabla(tabla, amb_q, amb)
     try:
         reservados = _contar_reservados_prog(tabla, amb, amb_q)
     except Exception as e:
         log_error("contar_reservados_prog", e)
         reservados = 0
-    libres = max(0, pendientes - reservados)
+    libres = max(0, elegibles - reservados)
+    etiqueta_elegibles = ("pacientes de prueba elegibles" if amb == "desarrollo"
+                          else "pacientes pendientes")
     info_limite = None
     if amb == "produccion" and config_get("metodo_envio", "").strip() == "api_oficial":
         info_limite = _limite_mensajeria_fecha(cuando.date())
@@ -4975,22 +4976,25 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
     tope = min(libres, info_limite["disponibles"]) if info_limite else libres
     if limite is not None and limite > tope:
         if libres <= 0:
-            if pendientes <= 0:
-                raise HTTPException(422, detail="No hay pacientes pendientes en esta base para programar.")
+            if elegibles <= 0:
+                mensaje = ("No hay pacientes de prueba elegibles en esta base para programar."
+                           if amb == "desarrollo"
+                           else "No hay pacientes pendientes en esta base para programar.")
+                raise HTTPException(422, detail=mensaje)
             raise HTTPException(422, detail=(
-                f"No quedan pacientes libres: los {pendientes} pendientes de esta base ya están "
-                f"preelegidos por otros envíos programados activos. Cancela alguno o espera a que "
+                f"No quedan pacientes libres: los {elegibles} {etiqueta_elegibles} de esta base "
+                f"ya están preelegidos por otros envíos programados activos. Cancela alguno o espera a que "
                 f"se complete."))
         if info_limite:
             raise HTTPException(422, detail=(
-                f"El límite no puede superar los {libres} pendientes libres de la base de datos "
+                f"El límite no puede superar los {libres} {etiqueta_elegibles} libres de la base de datos "
                 f"ni los {info_limite['disponibles']} que quedan del límite diario de Meta para "
                 f"{cuando:%d/%m/%Y} ({info_limite['tier']} usuarios; "
                 f"{info_limite['enviados_dia']} enviados y {info_limite['reservados_dia']} "
                 f"reservados por otros programados). Usa {tope} o menos, o déjalo vacío para enviar a "
                 f"todos los disponibles."))
         raise HTTPException(422, detail=(
-            f"El límite no puede superar los {libres} pacientes pendientes libres de la base de "
+            f"El límite no puede superar los {libres} {etiqueta_elegibles} libres de la base de "
             f"datos. Usa {tope} o menos, o déjalo vacío para enviar a todos."))
 
     plantilla = _validar_plantilla_programable(
@@ -5028,7 +5032,7 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
     n_preelegir = limite if limite is not None else tope
     if n_preelegir <= 0:
         raise HTTPException(422, detail=(
-            f"No quedan pacientes libres en esta base: los {pendientes} pendientes ya están "
+            f"No quedan pacientes libres en esta base: los {elegibles} {etiqueta_elegibles} ya están "
             f"preelegidos por otros envíos programados activos. Cancela alguno o espera a que "
             f"se complete."))
 
@@ -5037,7 +5041,7 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
         if not preelegidos:
             conn.rollback()
             raise HTTPException(422, detail=(
-                f"No quedan pacientes libres en esta base: los {pendientes} pendientes ya están "
+                f"No quedan pacientes libres en esta base: los {elegibles} {etiqueta_elegibles} ya están "
                 f"preelegidos por otros envíos programados activos. Cancela alguno o espera a que "
                 f"se complete."))
         cur.execute(

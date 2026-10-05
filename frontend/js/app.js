@@ -1723,8 +1723,8 @@ function actualizarCantidadManual() {
   actualizarPasosManual();
 }
 
-// El máximo es el menor entre los pacientes pendientes de la base y el cupo
-// restante de Meta, únicamente cuando este último aplica al envío.
+// El máximo es el menor entre los elegibles de la base (en Desarrollo incluye
+// todos los estados) y el cupo restante de Meta cuando corresponda.
 function configurarLimiteConf(pendientes, lim) {
   const nota = $("#limiteNotaConf");
   const disponibles = (lim && lim.disponibles != null) ? lim.disponibles : pendientes;
