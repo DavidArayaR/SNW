@@ -189,10 +189,12 @@ body[data-pagina="inicio"] { --nav-activo-fondo: #337d6c; }
    Los arcos superior e inferior conectan su contorno con el borde vertical. */
 .sidebar__nav > .nav-item {
   position: relative;
+  flex: 0 0 48px;
   height: 48px;
   margin-left: 6px;
   padding: 4px;
 }
+.sidebar__nav > .nav-subnav-wrap { flex: 0 0 auto; }
 .sidebar__nav > .nav-item.active {
   --nav-curva: 16px;
   z-index: 1;
