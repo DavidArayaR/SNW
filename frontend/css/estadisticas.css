@@ -55,6 +55,9 @@
   font-size: .82rem;
   font-weight: 600;
 }
+.resp-toggles .stat[data-respuesta="interesado"]::before { background: var(--ok-fg); }
+.resp-toggles .stat[data-respuesta="no_interesado"]::before { background: var(--danger-fg); }
+.resp-toggles .stat[data-respuesta="sin_clasificar"]::before { background: var(--texto-suave); }
 
 .comp {
   display: flex;
@@ -89,6 +92,9 @@
 .comp-barra--pendiente > span { background: var(--texto-suave); }
 .comp-barra--respondio > span { background: var(--ok-fg); }
 .comp-barra--baja > span      { background: var(--danger-fg); }
+.comp-barra--interesado > span { background: var(--ok-fg); }
+.comp-barra--no_interesado > span { background: var(--danger-fg); }
+.comp-barra--sin_clasificar > span { background: var(--texto-suave); }
 .comp-num {
   text-align: right;
   color: var(--texto-suave);

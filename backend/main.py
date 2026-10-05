@@ -5640,6 +5640,32 @@ def _pacientes_por_respuesta(ambiente: str, tabla: str | None = None) -> dict:
     return base
 
 
+def _pacientes_por_interes(ambiente: str, tabla: str | None = None) -> dict:
+    """Interés explícito de pacientes con un envío realizado; quienes no han
+    expresado interés ni rechazo quedan sin clasificar, no como no interesados."""
+    t = tabla or tabla_pacientes(ambiente)
+    columnas = columnas_tabla(t, ambiente)
+    interesado = "COALESCE(p.interesado, 0)" if "interesado" in columnas else "0"
+    no_interesado = "COALESCE(p.no_interesado, 0)" if "no_interesado" in columnas else "0"
+    estado = (
+        f"CASE WHEN {interesado} = 1 THEN 'interesado' "
+        f"WHEN {no_interesado} = 1 THEN 'no_interesado' "
+        "ELSE 'sin_clasificar' END"
+    )
+    where = " WHERE p.estado = 'enviado'" if "estado" in columnas else ""
+    base = {"interesado": 0, "no_interesado": 0, "sin_clasificar": 0}
+    try:
+        with conectar(ambiente) as conn, conn.cursor() as cur:
+            cur.execute(f"SELECT {estado} AS categoria, COUNT(*) AS n FROM {t} p{where} GROUP BY categoria")
+            for row in cur.fetchall():
+                if row["categoria"] in base:
+                    base[row["categoria"]] = int(row["n"] or 0)
+    except Exception as e:
+        log_error(f"_pacientes_por_interes({ambiente})", e)
+    base["total"] = sum(base.values())
+    return base
+
+
 # En las estadísticas SOLO cuentan los envíos de producción, no los de
 # desarrollo/pruebas. Cada fila de log_envios se ata a su lote (envios.base_datos).
 _SOLO_PROD = "envio_id IN (SELECT id FROM envios WHERE base_datos = 'pacientes_prod')"
@@ -5716,6 +5742,8 @@ def estadisticas(area_id: int | None = Query(None), sesion: dict = Depends(solo_
         "total_enviados_historico": total_enviados,
         "total_batches": total_batches,
         "pacientes_por_respuesta": _pacientes_por_respuesta(
+            "produccion", tabla=(esp["nombre_tabla_base"] if esp else None)),
+        "pacientes_por_interes": _pacientes_por_interes(
             "produccion", tabla=(esp["nombre_tabla_base"] if esp else None)),
         "webhook": webhook,
     }

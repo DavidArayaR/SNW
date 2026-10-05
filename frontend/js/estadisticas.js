@@ -37,6 +37,11 @@ function fechaDMA(iso) {
 }
 
 const num = (n) => Number(n || 0).toLocaleString("es-CL");
+function escaparHtml(valor) {
+  const span = document.createElement("span");
+  span.textContent = valor ?? "";
+  return span.innerHTML;
+}
 
 // Área (solo admin/dev): "" = global producción; con id filtra
 // los tres endpoints (resumen, gráfico y costos).
@@ -130,10 +135,12 @@ function render(d) {
       : "mensajes enviados este mes · solo producción";
   }
   const hintResp = $("#hintRespuestas");
-  if (hintResp && espNombre) {
-    hintResp.innerHTML = `Estado actual de los pacientes de <strong>${espNombre}</strong> ` +
-      `<strong>a los que ya se les envió un mensaje</strong>. Usa los botones para comparar cuántos ` +
-      `respondieron, se dieron de baja o no han respondido. En <a href="historial.html">Historial</a> puedes ver quiénes son.`;
+  if (hintResp) {
+    const alcance = espNombre ? `de <strong>${escaparHtml(espNombre)}</strong>` : "de producción";
+    hintResp.innerHTML = `Estado actual de los pacientes ${alcance} ` +
+      `<strong>a los que ya se les envió un mensaje</strong>. Usa el filtro para comparar ` +
+      `respuestas o interés. Sin una señal explícita de interés o rechazo de la oferta quedan «Sin clasificar». ` +
+      `En <a href="historial.html">Historial</a> puedes ver quiénes son.`;
   }
 
   $("#statsMes").innerHTML =
@@ -147,7 +154,9 @@ function render(d) {
     chip("Mensajes enviados", d.total_enviados_historico, "stat--total") +
     chip("Envíos realizados", d.total_batches, "stat--total");
 
-  renderRespuestasPacientes(d.pacientes_por_respuesta || {});
+  datosPacientesResp = d.pacientes_por_respuesta || {};
+  datosPacientesInteres = d.pacientes_por_interes || {};
+  renderRespuestasPacientes();
   renderWebhookSalud(d.webhook || {});
 }
 
@@ -172,26 +181,41 @@ const RESP_CATS = [
   { cat: "respondio", label: "Respondieron" },
   { cat: "baja", label: "Se dieron de baja" },
 ];
+const INTERES_CATS = [
+  { cat: "interesado", label: "Interesados" },
+  { cat: "no_interesado", label: "No interesados" },
+  { cat: "sin_clasificar", label: "Sin clasificar" },
+];
+let datosPacientesResp = {};
+let datosPacientesInteres = {};
 let respCatSel = "todos";
+const selTipoPacientes = $("#selTipoPacientes");
+selTipoPacientes.addEventListener("change", () => {
+  respCatSel = "todos";
+  renderRespuestasPacientes();
+});
 
-function renderRespuestasPacientes(r) {
+function renderRespuestasPacientes() {
   const el = $("#respuestasPacientes");
-  const total = r && r.total ? r.total : 0;
+  const porInteres = selTipoPacientes.value === "interes";
+  const categorias = porInteres ? INTERES_CATS : RESP_CATS;
+  const r = porInteres ? datosPacientesInteres : datosPacientesResp;
+  const total = Number(r.total) || 0;
   if (!total) {
-    el.innerHTML = '<p class="mes-vacio" style="padding:14px 18px;">Sin pacientes registrados.</p>';
+    el.innerHTML = '<p class="mes-vacio" style="padding:14px 18px;">Sin pacientes con envíos registrados.</p>';
     return;
   }
-  const maxCat = Math.max(...RESP_CATS.map((c) => r[c.cat] || 0), 1);
+  const maxCat = Math.max(...categorias.map((c) => r[c.cat] || 0), 1);
 
   const toggles =
     `<button type="button" class="stat" data-cat="todos">Todos <strong>${num(total)}</strong></button>` +
-    RESP_CATS.map(
+    categorias.map(
       (c) =>
         `<button type="button" class="stat stat--resp" data-respuesta="${c.cat}" data-cat="${c.cat}">` +
         `${c.label} <strong>${num(r[c.cat] || 0)}</strong></button>`
     ).join("");
 
-  const filas = RESP_CATS.map((c) => {
+  const filas = categorias.map((c) => {
     const v = r[c.cat] || 0;
     const pct = Math.round((v / total) * 100);
     return `
@@ -214,9 +238,11 @@ function renderRespuestasPacientes(r) {
 
 function aplicarRespCat(cat) {
   respCatSel = cat;
-  document.querySelectorAll("#respToggles .stat").forEach((b) =>
-    b.classList.toggle("activo", b.dataset.cat === cat)
-  );
+  document.querySelectorAll("#respToggles .stat").forEach((b) => {
+    const activo = b.dataset.cat === cat;
+    b.classList.toggle("activo", activo);
+    b.setAttribute("aria-pressed", String(activo));
+  });
   document.querySelectorAll("#respComp .comp-fila").forEach((f) =>
     f.classList.toggle("atenuada", cat !== "todos" && f.dataset.cat !== cat)
   );

@@ -54,9 +54,16 @@
 
         <section class="panel">
           <div class="panel__head">
-            <h2>Respuestas de pacientes por WhatsApp</h2>
+            <h2>Pacientes por respuesta o interés</h2>
+            <div class="panel__actions">
+              <label for="selTipoPacientes">Ver por:</label>
+              <select id="selTipoPacientes" class="badge badge--select" aria-label="Ver pacientes por">
+                <option value="respuesta">Respuesta</option>
+                <option value="interes">Interés</option>
+              </select>
+            </div>
           </div>
-          <p class="field__hint" id="hintRespuestas" style="margin:12px 18px 0;">Estado actual de los pacientes de producci&oacute;n <strong>a los que ya se les envi&oacute; un mensaje</strong>. Usa los botones para comparar cu&aacute;ntos respondieron, se dieron de baja o no han respondido. En <a href="historial.html">Historial</a> puedes ver qui&eacute;nes son.</p>
+          <p class="field__hint" id="hintRespuestas" style="margin:12px 18px 0;">Estado actual de los pacientes de producci&oacute;n <strong>a los que ya se les envi&oacute; un mensaje</strong>. Usa el filtro para comparar respuestas o inter&eacute;s. Sin una se&ntilde;al expl&iacute;cita de inter&eacute;s o rechazo de la oferta quedan «Sin clasificar». En <a href="historial.html">Historial</a> puedes ver qui&eacute;nes son.</p>
           <p id="webhookSalud" class="webhook-salud" hidden></p>
           <div id="respuestasPacientes"></div>
         </section>

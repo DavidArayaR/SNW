@@ -460,7 +460,7 @@ Las cuentas `usuario` y `supervisor` reciben 403 en estos endpoints (y la migrac
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/estadisticas` | Resumen para Estadísticas (**solo envíos de producción**): mensajes `enviado` del mes, desglose, totales, `pacientes_por_respuesta` (cuántos pacientes de producción respondieron / se dieron de baja / no han respondido) y `webhook` (cuándo llegó el último evento de Meta — sirve para detectar que el webhook dejó de recibir). Con `?area_id=` filtra a esa especialidad |
+| GET | `/api/estadisticas` | Resumen para Estadísticas (**solo envíos de producción**): mensajes `enviado` del mes, desglose, totales, `pacientes_por_respuesta` y `pacientes_por_interes` (interesados, no interesados y sin clasificar entre quienes ya recibieron un envío), más `webhook` (último evento de Meta). Con `?area_id=` filtra a esa especialidad |
 | GET | `/api/estadisticas/envios?granularidad=dia\|mes\|anio` | Mensajes enviados de producción agrupados por periodo, para el gráfico de barras (día = últimos 30, mes = últimos 12, año = últimos 6). Acepta `&area_id=` |
 | GET | `/api/estadisticas/costos?granularidad=dia\|mes\|anio` | (permiso `tarifas_editar`) Costo estimado agrupado por periodo. Acepta `&area_id` y `&categoria=marketing\|utility\|authentication\|service` (filtra; lo no coincidente no se cuenta). Factura cada categoría a su tarifa de `tarifas_whatsapp` vigente en su fecha; servicio usa la tarifa `service` o la de Utility como respaldo (rigen desde el 01-10-2026). Sin categoría facturable o servicio gratuito en ese periodo va a `excluidos` |
 | GET | `/api/tarifas` | (permiso `tarifas_editar`) Tarifas guardadas: `vigente`, `proxima` (tarifa futura ya publicada por Meta), `usd_vigente`, `historial`, moneda de la cuenta y fecha de la última descarga |
@@ -731,6 +731,9 @@ Se calcula igual en:
 - **`GET /api/estadisticas`** → `pacientes_por_respuesta` con los totales por estado (panel
   "Respuestas de pacientes" en Estadísticas: *cuántos*). Solo cuenta pacientes de producción
   con `estado = 'enviado'` — los que aún están `pendiente` o `error` no entran.
+- El mismo endpoint devuelve `pacientes_por_interes`: interés explícito, rechazo explícito
+  de la oferta y pacientes sin ninguna de esas dos señales. El filtro de Estadísticas
+  permite alternar entre esta clasificación y la de respuestas.
 
 ### Idempotencia del webhook
 
@@ -990,12 +993,13 @@ claro** de la sidebar, o con el botón flotante en la portada y el login (págin
   cuenta que lo importó por CSV puede usar «Ver mensajes» y consultar el hilo; el
   título del hilo mantiene las iniciales y el teléfono oculto (`+569 **** *123`).
 - **Estadísticas** (`estadisticas.html`, exclusiva admin/dev, **solo cuenta
-  envíos de producción**): mensajes enviados en el mes con su desglose; panel **"Respuestas
-  de pacientes por WhatsApp"** con botones de filtro (Todos / No han respondido /
-  Respondieron / Se dieron de baja) sobre una **comparación en barras** de los pacientes de
-  producción por estado; un **gráfico de barras** de mensajes enviados conmutable por día /
-  mes / año y los totales históricos. Con el permiso `tarifas_editar` (implícito en
-  admin/dev) se ve además el panel **"Costos de mensajes de WhatsApp"**:
+  envíos de producción**): mensajes enviados en el mes con su desglose; panel de pacientes
+  con filtro **Respuesta / Interés** y comparación en barras. En Respuesta muestra cuántos
+  no han respondido, respondieron o se dieron de baja; en Interés, cuántos están
+  interesados, no interesados o sin clasificar. Un **gráfico de barras** de mensajes
+  enviados es conmutable por día / mes / año y muestra los totales históricos. Con el
+  permiso `tarifas_editar` (implícito en admin/dev) se ve además el panel
+  **"Costos de mensajes de WhatsApp"**:
   tarifas vigentes de Meta para Chile por categoría, aviso cuando hay un cambio o una
   tarifa futura, descarga del CSV de Chile y el mismo gráfico de barras aplicado al costo
    estimado por día / mes / año (solo mensajes de plantilla facturables y mensajes de
