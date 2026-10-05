@@ -71,7 +71,7 @@ snw/
 ├── sql/
 │   └── snw_base.sql           Crea la base snw_base y sus tablas iniciales. El backend
 │                                crea/migra tablas auxiliares al arrancar, incluidas las
-│                                de áreas, programados y acceso a pacientes por CSV
+│                                de áreas, programados y acceso a pacientes
 ├── documentacion/             CONTEXT.md (contexto, arquitectura y decisiones) y
 │                                FEATURES.md (funcionalidades y flujos del sistema)
 ├── backups/                   Volcados manuales (mysqldump) antes de operaciones destructivas
@@ -229,16 +229,16 @@ se cierran las sesiones de esa cuenta. Las filas viejas se limpian en cada arran
 correo; los vencidos/usados se limpian en cada arranque. Creada por el backend en el primer
 arranque (no está en `snw_base.sql`).
 
-**`usuarios_auditoria`** — trazabilidad de lo que un admin/dev hizo a cada cuenta (tabla
-`usuarios_auditoria`): `actor`, `accion` (`invito`, `permisos`, `rol`, `activo`,
-`correo_recuperacion`, `activar_cambio_clave`, `elimino`…), `objetivo` y `detalle`. Alimenta
-la sección «Actividad» del panel de una cuenta en Usuarios. También la crea el backend en el
-primer arranque.
+**`usuarios_auditoria`** — trazabilidad de acciones de cada cuenta:
+`actor`, `accion`, `objetivo` y `detalle`. Incluye cambios de cuentas, plantillas
+y altas individuales de pacientes (`paciente_creado`). Alimenta la sección
+«Actividad» del panel de una cuenta en Usuarios. También la crea el backend
+en el primer arranque.
 
-**`paciente_csv_accesos`** — registra qué cuenta incorporó cada paciente mediante un CSV,
-identificado por tabla, ID de paciente y usuario. Si varias cuentas importan el mismo
-paciente, cada una obtiene acceso a sus datos completos. El rol de administrador o
-desarrollador **no** sustituye esta relación: quien no subió ese paciente solo ve
+**`paciente_csv_accesos`** — registra qué cuenta incorporó cada paciente mediante un CSV
+o un alta individual, identificado por tabla, ID de paciente y usuario. Si varias cuentas
+importan el mismo paciente, cada una obtiene acceso a sus datos completos. El rol de
+administrador o desarrollador **no** sustituye esta relación: quien no incorporó ese paciente solo ve
 iniciales y teléfono oculto (`+569 **** *123`), y no puede abrir sus mensajes. Los
 pacientes anteriores a esta trazabilidad no reciben un dueño supuesto: sus datos quedan
 ocultos. En una tabla de área, volver a cargar un CSV con esos pacientes registra el
@@ -361,12 +361,13 @@ en otras bases si ese mismo número también figura como prueba allí.
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/pacientes?q=&ambiente=&area_id=` | Lista de la base indicada; con `area_id` lee `pacientes_<slug>` (403 si no está asignada). Cada fila indica `datos_completos` y `editable` (si su número está en la lista de prueba de la base). Para quien no importó al paciente, devuelve solo iniciales y teléfono oculto, sin último mensaje ni error. La búsqueda `q` se aplica a esos valores visibles |
+| GET | `/api/pacientes?q=&ambiente=&area_id=` | Lista de la base indicada; con `area_id` lee `pacientes_<slug>` (403 si no está asignada). Cada fila indica `datos_completos` y `editable` (si su número está en la lista de prueba de la base). Para quien no incorporó al paciente, devuelve solo iniciales y teléfono oculto, sin último mensaje ni error. La búsqueda `q` se aplica a esos valores visibles |
+| POST | `/api/pacientes?ambiente=&area_id=` | Agrega un paciente individual con `{nombre, apellido, telefono}` a la base seleccionada. Exige los tres campos, normaliza el celular chileno y rechaza con 409 un número que ya exista allí. En bases generales requiere permiso `pacientes`; en áreas, permiso `mensajeria` y asignación al área (admin/dev también pueden). Registra el acceso de quien lo creó y la acción `paciente_creado` en su auditoría, sin nombre ni teléfono en el registro de actividad |
 | PUT | `/api/pacientes/{id}?ambiente=&area_id=` | Cambiar `estado` (`pendiente`/`enviado`/`error`) de **un** paciente |
 | PUT | `/api/pacientes/estado-masivo?ambiente=` | `{pacientes: [ids], estado}` — igual que arriba pero para **varios** pacientes a la vez (selección en la pestaña Pacientes) |
 | PUT | `/api/pacientes/{id}/respuesta?ambiente=` | Ajuste manual de la respuesta (`pendiente`/`baja`) de **un** paciente de prueba; `baja` activa el opt-out. 409 si el paciente pidió la baja explícitamente por WhatsApp y se intenta poner algo distinto de `baja` (ver `opt_out_explicito`) |
 | PUT | `/api/pacientes/respuesta-masiva?ambiente=` | `{pacientes: [ids], respuesta}` — igual que arriba pero para **varios** pacientes a la vez. Los que tengan la baja bloqueada se saltan (no fallan los demás); responde `{actualizados, bloqueados}`; 409 solo si **todos** los seleccionados están bloqueados |
-| GET | `/api/pacientes/{id}/mensajes?ambiente=&area_id=` | Hilo completo de mensajes entrantes y salientes; marca `interes: true` los entrantes que suenan a interés. **Solo** la cuenta que incorporó a ese paciente por CSV puede consultarlo (403 para las demás, incluso admin/dev). Es lo que muestra «Ver mensajes» en Historial |
+| GET | `/api/pacientes/{id}/mensajes?ambiente=&area_id=` | Hilo completo de mensajes entrantes y salientes; marca `interes: true` los entrantes que suenan a interés. **Solo** la cuenta que incorporó a ese paciente por CSV o individualmente puede consultarlo (403 para las demás, incluso admin/dev). Es lo que muestra «Ver mensajes» en Historial |
 
 ### Plantillas
 
@@ -412,13 +413,13 @@ tiene template de Meta (va como texto libre, ventana de 24 h). No hay gestión d
 - **Registro:** cada envío queda en `call_center_log` con el número asignado. El panel
   **«Registro de respuestas de call center»** del Historial (permiso propio
   `call_center_registro`) lo muestra: fecha, nombre y número del paciente (ocultos para
-  quien no lo incorporó por CSV), número de call
+  quien no lo incorporó por CSV o individualmente), número de call
   center, origen y estado, más los usos por número. Admin y desarrollador lo ven por
   defecto; a un `usuario` se le puede asignar ese permiso.
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/call-center/log` | (permiso `call_center_registro`) `{entradas, contadores}` — últimas 200 respuestas de call center + usos por número. Es el panel *Registro de respuestas de call center* del Historial. Nombre, número y error del paciente se ocultan si la cuenta no lo importó por CSV, independientemente de su rol. Cuentas no privilegiadas solo ven filas de sus especialidades |
+| GET | `/api/call-center/log` | (permiso `call_center_registro`) `{entradas, contadores}` — últimas 200 respuestas de call center + usos por número. Es el panel *Registro de respuestas de call center* del Historial. Nombre, número y error del paciente se ocultan si la cuenta no lo incorporó, independientemente de su rol. Cuentas no privilegiadas solo ven filas de sus especialidades |
 
 ### Envíos
 
@@ -444,7 +445,7 @@ hasta que un administrador o supervisor autorizado las decida.
 | POST | `/api/notificaciones/programados` | Crea un envío con plantilla, base, fecha/hora y cantidad obligatoria; preelige destinatarios sin exceder los libres ni, cuando aplique, el cupo diario de Meta |
 | GET | `/api/notificaciones/programados` | Lista los programados visibles para la cuenta, con base, estado y cantidad preelegida |
 | GET | `/api/notificaciones/programados/resumen` | Estado resumido para actualizar la lista sin descargar todos los detalles |
-| GET | `/api/notificaciones/programados/{id}/destinatarios` | Lista preelegida **solo de la base de desarrollo** (403 para las demás); oculta nombre y teléfono de pacientes que la cuenta no importó por CSV |
+| GET | `/api/notificaciones/programados/{id}/destinatarios` | Lista preelegida **solo de la base de desarrollo** (403 para las demás); oculta nombre y teléfono de pacientes que la cuenta no incorporó |
 | POST | `/api/notificaciones/programados/{id}/aprobar` \| `/rechazar` \| `/cancelar` | Decide o cancela un programado según los permisos de la cuenta |
 
 ### Confirmación / rechazo por correo (producción)
@@ -460,7 +461,7 @@ hasta que un administrador o supervisor autorizado las decida.
 | Método | Endpoint | Descripción |
 |---|---|---|
 | GET | `/api/notificaciones/historial?ambiente=todos&area_id=` | Envíos batch (`ambiente=todos` junta ambas bases). Cuentas no privilegiadas solo ven sus especialidades (las filas legacy las ven solo admin/dev); con `area_id` filtra (403 si no está asignada) |
-| GET | `/api/notificaciones/historial/{id}/detalle?ambiente=` | Pacientes de un envío y campo `datos_completos` por fila. Si quien consulta no importó a ese paciente por CSV, devuelve iniciales, teléfono oculto y omite el mensaje de respuesta y el error, aunque sea admin/dev. Envíos de especialidad: 403 si no está asignada; legacy: solo admin/dev |
+| GET | `/api/notificaciones/historial/{id}/detalle?ambiente=` | Pacientes de un envío y campo `datos_completos` por fila. Si quien consulta no incorporó a ese paciente, devuelve iniciales, teléfono oculto y omite el mensaje de respuesta y el error, aunque sea admin/dev. Envíos de especialidad: 403 si no está asignada; legacy: solo admin/dev |
 | PUT | `/api/notificaciones/historial/{id}/respuesta?ambiente=` | Corregir la respuesta de un registro |
 
 ### Estadísticas (solo `administrador` / `desarrollador`)
@@ -519,7 +520,7 @@ Cada especialidad vive en **una sola tabla** `pacientes_<slug>` dentro de `snw_b
 - **Usuarios** muestra el rol `supervisor` y las áreas asignadas de cada cuenta; «Envíos realizados» y «Actividad» paginan de a 10.
 - **Pacientes**: **selector único de base de datos** (desarrollo/producción/áreas, siempre con el nombre físico de la tabla), **carga CSV** en la tabla de la área (informe de insertados/duplicados/rechazados) y **paginación** (10 a 100 por página, se recuerda).
 - **Mensajería**: área por plantilla (badge en la lista + campo en el editor), **filtro «Filtrar por área»** (Todas/Globales/cada una) y selector de base de datos en los envíos manuales y programados. Se elige la base antes de definir la cantidad; las plantillas de área fuerzan su base y «Hello World» solo admite desarrollo. La cantidad se elige expresamente como porcentaje o número de pacientes. Modales de confirmación al aprobar y de motivo al rechazar.
-- **Historial**: selector de base (Todas/Desarrollo/Producción/áreas según permisos), con indicador de carga en la tabla al cambiarlo. El detalle muestra iniciales; «Ver mensajes» solo aparece para los pacientes que la cuenta importó por CSV.
+- **Historial**: selector de base (Todas/Desarrollo/Producción/áreas según permisos), con indicador de carga en la tabla al cambiarlo. El detalle muestra iniciales; «Ver mensajes» solo aparece para los pacientes que la cuenta incorporó.
 - **Estadísticas** (admin/dev): selector de área o «Todas» en resumen, gráfico y costos.
 - **Confirmación de supervisor**: el correo de solicitud llega también a los supervisores activos del área (con su nombre en el mensaje); los enlaces por token sirven para cualquiera de los destinatarios.
 - **Estilo unificado de selects**: todos los desplegables de todas las vistas comparten el verde pastel corporativo (distinto del sólido de los botones).
@@ -699,7 +700,7 @@ marca de interés (`interesado = 0`), tanto por webhook como por el ajuste manua
 escribió "quiero darme de baja" y más tarde "en realidad me interesa", la badge de
 *interesado* desaparece y vuelve a aparecer con cada cambio. En el **detalle de un envío del
 Historial** hay una columna *Detalle* con un botón **«Ver mensajes»** solo si la cuenta
-importó a ese paciente por CSV. Abre el hilo completo; ahí se ve el estado de interés (de solo
+incorporó a ese paciente. Abre el hilo completo; ahí se ve el estado de interés (de solo
 lectura — **no se puede marcar/desmarcar a mano**, solo lo detecta el webhook) y, con el
 permiso `call_center`, si está interesado se puede enviarle el mensaje de call center.
 El título del detalle muestra solo iniciales y el encabezado del hilo oculta el teléfono
@@ -983,7 +984,8 @@ claro** de la sidebar, o con el botón flotante en la portada y el login (págin
   (trazabilidad) y eliminar. Máximo 4 desarrolladores. Aquí no se cambian contraseñas — cada
   cuenta usa «Mi cuenta» o «¿Olvidaste tu contraseña?».
 - **Pacientes** (`pacientes.html`, para admin/dev y cuentas asignadas a un área): **selector único
-  de base de datos** (desarrollo/producción/áreas con su tabla), tabla con estado
+  de base de datos** (desarrollo/producción/áreas con su tabla), formulario para agregar
+  un paciente individual con nombre, apellido y teléfono, tabla con estado
   editable en línea **solo para números de prueba**, columna **Error** (motivo del último fallo), columna **Respuesta** con
   la señal de WhatsApp (Respondió / Se dio de baja / Sin respuesta) y su fecha, filtros por
   estado/respuesta, **paginación** (10 a 100 por página) y **carga CSV** en el área elegida, y selección múltiple para editar **estado o respuesta de varios
@@ -994,12 +996,12 @@ claro** de la sidebar, o con el botón flotante en la portada y el login (págin
   paciente por WhatsApp (ver «Baja explícita» en «Sistema de baja»). Aquí se ve **quiénes**
   respondieron o se dieron de baja — **no se envían mensajes desde esta página** (ver
   «Módulo de envío»). Los datos completos (incluidos nombre, teléfono y mensajes)
-  solo los ve la cuenta que subió a cada paciente por CSV; para las demás cuentas se
+  solo los ve la cuenta que incorporó a cada paciente por CSV o individualmente; para las demás cuentas se
   muestran iniciales y teléfono oculto, incluso si son admin/dev.
 - **Historial** (`historial.html`): selector de base según los permisos de la cuenta.
   Al cambiar la base, la tabla muestra «Actualizando historial…» mientras llegan los
   nuevos resultados. «Ver detalle» presenta las iniciales de cada paciente. Solo la
-  cuenta que lo importó por CSV puede usar «Ver mensajes» y consultar el hilo; el
+  cuenta que lo incorporó puede usar «Ver mensajes» y consultar el hilo; el
   título del hilo mantiene las iniciales y el teléfono oculto (`+569 **** *123`).
 - **Estadísticas** (`estadisticas.html`, exclusiva admin/dev, **solo cuenta
   envíos de producción**): mensajes enviados en el mes con su desglose; panel de pacientes

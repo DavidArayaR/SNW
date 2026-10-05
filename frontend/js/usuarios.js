@@ -154,6 +154,7 @@ const AUDITORIA_ACCION_LABEL = {
   reset_clave: "Cambio de contraseña activado",
   eliminar: "Cuenta eliminada",
   plantilla_creada: "Plantilla creada",
+  paciente_creado: "Paciente agregado",
 };
 
 function renderAuditoriaUsuario(lista) {
@@ -346,7 +347,7 @@ function renderDetalle() {
         `</div>` +
         `<div class="usr-card--envios" style="margin-top:16px;">` +
           `<h4>Actividad</h4>` +
-          `<p style="margin: 0 0 8px; font-size: .84rem; color: var(--texto-suave);">Acciones que hizo esta cuenta (a quién invitó, editó, eliminó, qué plantilla creó...).</p>` +
+          `<p style="margin: 0 0 8px; font-size: .84rem; color: var(--texto-suave);">Acciones que hizo esta cuenta (invitaciones, cambios, plantillas y pacientes agregados...).</p>` +
           `<div id="usrAuditoria" class="usr-envios__cont">Cargando actividad…</div>` +
         `</div>` +
       `</div>` +

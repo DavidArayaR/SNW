@@ -185,9 +185,16 @@ function aplicarModoBase() {
   const esArea = !!area;
 
   const avisoSinEsp = $("#gestionSinEsp");
-  if (avisoSinEsp) avisoSinEsp.hidden = areas.length > 0;
+  if (avisoSinEsp) avisoSinEsp.hidden = areas.length > 0 || PUEDE_GESTIONAR_PAC;
   const avisoLegacy = $("#gestionLegacy");
-  if (avisoLegacy) avisoLegacy.hidden = esArea || areas.length === 0;
+  if (avisoLegacy) avisoLegacy.hidden = esArea || !PUEDE_GESTIONAR_PAC;
+
+  const puedeCargarArea = !!window.snwEsPrivilegiado ||
+    (!!window.snwPuede && window.snwPuede("mensajeria"));
+  const formIndividual = $("#formPacienteIndividual");
+  if (formIndividual) formIndividual.hidden = !tabla || !(esArea ? puedeCargarArea : PUEDE_GESTIONAR_PAC);
+  const destinoIndividual = $("#destinoPacienteIndividual");
+  if (destinoIndividual) destinoIndividual.textContent = `Base de destino: ${tabla || "—"}`;
 
   const btnSubir = $("#btnSubirCsv");
   const btnVaciar = $("#btnVaciarBase");
@@ -195,7 +202,7 @@ function aplicarModoBase() {
   const inpCsv = $("#csvArchivo");
   const lblCsv = $("#lblArchivoGestion");
   // Sin áreas no hay nada que gestionar; con tabla general tampoco.
-  const puedeOperar = esArea && areas.length > 0;
+  const puedeOperar = esArea && puedeCargarArea;
   if (btnSubir) btnSubir.disabled = !puedeOperar;
   if (btnVaciar) btnVaciar.disabled = !puedeOperar;
   if (inpCsv) inpCsv.disabled = !puedeOperar;
@@ -229,6 +236,8 @@ if (selBasePac) selBasePac.addEventListener("change", async () => {
   seleccionados = new Set();
   todoMarcado = false;
   paginaPac = 1;
+  const formIndividual = $("#formPacienteIndividual");
+  if (formIndividual) formIndividual.reset();
   aplicarModoBase();
   cargar();
 });
@@ -991,6 +1000,41 @@ if (btnConfirmarVaciarTabla) btnConfirmarVaciarTabla.addEventListener("click", a
     console.error("[pacientes.js btnConfirmarVaciarTabla()]", err);
     cerrarModalVaciarTabla();
     toast(err.message || "No se pudo vaciar.", "error");
+  }
+});
+
+// --- Alta individual en la base seleccionada --------------------------------
+const formPacienteIndividual = $("#formPacienteIndividual");
+if (formPacienteIndividual) formPacienteIndividual.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!formPacienteIndividual.reportValidity()) return;
+  const btn = $("#btnAgregarPaciente");
+  const qs = qsBase();
+  const cuerpo = {
+    nombre: $("#nuevoPacienteNombre").value.trim(),
+    apellido: $("#nuevoPacienteApellido").value.trim(),
+    telefono: $("#nuevoPacienteTelefono").value.trim(),
+  };
+  btn.disabled = true;
+  if (selBasePac) selBasePac.disabled = true;
+  try {
+    const res = await fetch(`api/pacientes?${qs}`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(cuerpo),
+    });
+    if (res.status === 401) { window.snwSesionExpirada(); return; }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : "No se pudo agregar el paciente.");
+    formPacienteIndividual.reset();
+    toast(`Paciente #${data.id} agregado a ${data.base_datos}.`, "ok");
+    await cargar();
+  } catch (err) {
+    console.error("[pacientes.js agregar paciente individual]", err);
+    toast(err.message || "No se pudo agregar el paciente.", "error");
+  } finally {
+    btn.disabled = false;
+    if (selBasePac) selBasePac.disabled = false;
   }
 });
 

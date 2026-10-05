@@ -646,6 +646,7 @@ button:disabled:hover { outline: none; }
 .field input[type="password"],
 .field input[type="email"],
 .field input[type="number"],
+.field input[type="tel"],
 .field textarea,
 .field select {
   width: 100%;

@@ -120,7 +120,8 @@
           </div>
 
           <p class="field__hint" style="margin:12px 18px 0;">
-            Acciones sobre la base elegida arriba. Sube pacientes con un CSV de columnas
+            Acciones sobre la base elegida arriba. Puedes agregar un paciente con el formulario
+            o subir un CSV de columnas
             <strong>nombre, apellido, telefono</strong> (UTF-8, máx. 5 MB): los teléfonos se
             normalizan a <strong>+569XXXXXXXX</strong>. Opcionalmente
             <strong>respuesta</strong> (Se dio de baja / Respondió / Sin respuesta) y
@@ -134,9 +135,29 @@
             una para poder cargar y gestionar datos.
           </p>
           <p id="gestionLegacy" class="field__hint" hidden style="margin:12px 18px 0;">
-            La base elegida es una tabla general (desarrollo/producción): estas acciones
-            solo están disponibles para bases de área.
+            En desarrollo y producción puedes agregar pacientes individualmente. La carga
+            CSV y la eliminación de registros desde esta sección son solo para bases de área.
           </p>
+
+          <form id="formPacienteIndividual" class="gestion-individual" hidden>
+            <h3>Agregar registro individual</h3>
+            <p class="field__hint" id="destinoPacienteIndividual">Base de destino: —</p>
+            <div class="gestion-individual__campos">
+              <div class="field">
+                <label for="nuevoPacienteNombre">Nombre</label>
+                <input id="nuevoPacienteNombre" name="nombre" type="text" maxlength="150" autocomplete="off" required>
+              </div>
+              <div class="field">
+                <label for="nuevoPacienteApellido">Apellido</label>
+                <input id="nuevoPacienteApellido" name="apellido" type="text" maxlength="150" autocomplete="off" required>
+              </div>
+              <div class="field">
+                <label for="nuevoPacienteTelefono">Número de teléfono</label>
+                <input id="nuevoPacienteTelefono" name="telefono" type="tel" maxlength="32" inputmode="tel" placeholder="+56912345678" autocomplete="off" required>
+              </div>
+            </div>
+            <button id="btnAgregarPaciente" class="btn btn--primary" type="submit">Agregar paciente</button>
+          </form>
 
           <div class="field gestion-campo">
             <label>Archivo CSV</label>
