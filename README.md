@@ -59,7 +59,7 @@ snw/
 │   ├── estadisticas.html      Resumen, gráficos y costos
 │   ├── configuracion.html     Configuración (solo desarrollador)
 │   ├── administracion.html    Redirige a Usuarios por compatibilidad
-│   ├── css/                   tema.css (paleta claro/oscuro), styles.css (compartido), layout.css (sidebar), componentes.css (tablas/paginador/badges compartidos), pacientes.css (solo Base de datos), estadisticas.css, configuracion.css, usuarios.css
+│   ├── css/                   tema.css (paleta claro/oscuro), styles.css (compartido), layout.css (sidebar/topbar), componentes.css (componentes compartidos), admin.css y hojas por página: inicio.css, auth.css, mensajeria.css, areas.css, historial.css, pacientes.css, estadisticas.css, configuracion.css, usuarios.css
 │   ├── js/                    tema.js (modo claro/oscuro), layout.js (sidebar/sesión/permisos, común), app.js, pacientes.js, historial.js, estadisticas.js, configuracion.js, usuarios.js, pass-toggle.js (ojito en campos de contraseña)
 │   └── vendor/bootstrap/     Bootstrap 5.3.3 (CSS + bundle JS) servido localmente
 ├── data/
@@ -936,10 +936,16 @@ no escribir el archivo constantemente durante un uso activo.
 Todas las pantallas comparten una **barra lateral** (sidebar) construida por `js/layout.js`:
 marca el enlace activo, muestra solo las páginas permitidas para la cuenta (`window.snwPuede`)
 y gestiona el cierre de
-sesión. En escritorio se pliega a modo icono con el botón «‹‹» de la propia sidebar (la
-preferencia se recuerda en `localStorage`); en pantallas angostas se convierte en un cajón
-que abre la «hamburguesa» de la barra superior. El estilo usa **Bootstrap 5.3** (servido
-desde `frontend/vendor/bootstrap/`) más `css/layout.css`.
+sesión. El botón ubicado a la izquierda del título en la topbar pliega/expande la sidebar
+en escritorio (la preferencia se recuerda en `localStorage`) y abre/cierra el cajón en
+pantallas angostas. El estilo usa **Bootstrap 5.3** (servido desde
+`frontend/vendor/bootstrap/`) más las hojas de `frontend/css/`.
+
+**CSS del frontend.** Las reglas de presentación se guardan en archivos `.css`; los HTML
+no deben contener bloques `<style>` ni atributos `style="…"`. `tema.css` define la paleta,
+`styles.css` y `componentes.css` contienen reglas compartidas, `layout.css` define la
+navegación y cada pantalla carga su hoja específica cuando corresponde. Login, Registro
+y Reset comparten `auth.css`.
 
 **Tema claro / oscuro.** La paleta (tonos pastel en ambos modos) vive en `css/tema.css`
 como variables CSS: `:root` para claro y `:root[data-tema="oscuro"]` para oscuro. `js/tema.js`
