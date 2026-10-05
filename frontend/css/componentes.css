@@ -222,6 +222,8 @@
   margin-top: 4px;
   border-top: 1px solid var(--linea);
 }
+.modal__texto-confirmacion { margin: 0 0 12px; font-size: .92rem; line-height: 1.5; }
+.modal__texto-confirmacion--amplio { margin-bottom: 20px; }
 
 
 .detalle-fila {

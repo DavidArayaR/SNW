@@ -8,10 +8,10 @@
   <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
   <link rel="stylesheet" href="css/tema.css">
   <link rel="stylesheet" href="css/styles.css">
-  <link rel="stylesheet" href="css/componentes.css">
-<link rel="stylesheet" href="css/pacientes.css">
+  <link rel="stylesheet" href="css/componentes.css?v=inlinecss1">
+<link rel="stylesheet" href="css/pacientes.css?v=inlinecss1">
   <link rel="stylesheet" href="css/layout.css?v=sidebar25">
-  <link rel="stylesheet" href="css/admin.css">
+  <link rel="stylesheet" href="css/admin.css?v=inlinecss1">
   <script src="js/tema.js"></script>
 </head>
 <body data-pagina="pacientes" data-seccion="administracion">
@@ -92,7 +92,7 @@
               <button type="button" class="btn btn--danger-ghost" id="btnEliminarMasivo">Eliminar</button>
             </div>
 
-          <p class="field__hint" style="margin:8px 18px 12px;">Solo los números de prueba configurados para esta base permiten cambiar manualmente su estado o respuesta.</p>
+          <p class="field__hint pacientes__aviso-pruebas">Solo los números de prueba configurados para esta base permiten cambiar manualmente su estado o respuesta.</p>
 
           <div class="tabla-wrap">
             <table id="tablaPacientes">
@@ -119,7 +119,7 @@
             <h2>Gestionar base de datos</h2>
           </div>
 
-          <p class="field__hint" style="margin:12px 18px 0;">
+          <p class="field__hint gestion-base__intro">
             Acciones sobre la base elegida arriba. Puedes agregar un paciente con el formulario
             o subir un CSV de columnas
             <strong>nombre, apellido, telefono</strong> (UTF-8, máx. 5 MB): los teléfonos se
@@ -129,12 +129,12 @@
             cargado se actualiza, y se aplica lo mismo al mismo número en
             <strong>todas las demás bases</strong>.
           </p>
-          <p class="field__hint" id="csvMsg" style="margin:6px 18px 0; font-weight:600; color:var(--texto);"></p>
-          <p id="gestionSinEsp" class="warn" hidden style="margin:12px 18px 0;">
+          <p class="field__hint pacientes__csv-msg" id="csvMsg"></p>
+          <p id="gestionSinEsp" class="warn" hidden>
             No tienes áreas asignadas: pídele a un administrador que te asigne
             una para poder cargar y gestionar datos.
           </p>
-          <p id="gestionLegacy" class="field__hint" hidden style="margin:12px 18px 0;">
+          <p id="gestionLegacy" class="field__hint" hidden>
             En desarrollo y producción puedes agregar pacientes individualmente. La carga
             CSV y la eliminación de registros desde esta sección son solo para bases de área.
           </p>
@@ -162,7 +162,7 @@
           <div class="field gestion-campo">
             <label>Archivo CSV</label>
             <div class="gestion-archivo">
-              <label for="csvArchivo" class="btn btn--ghost" id="lblArchivoGestion" style="cursor:pointer; margin:0;">
+              <label for="csvArchivo" class="btn btn--ghost" id="lblArchivoGestion">
                 <i class="fa-solid fa-folder-open"></i> <span>Elegir archivo</span>
               </label>
               <span id="nombreArchivoGestion" class="field__hint">No se ha seleccionado ningún archivo</span>
@@ -194,7 +194,7 @@
   <div id="modalEliminarTabla" class="modal" hidden>
     <div class="modal__card" role="dialog" aria-modal="true">
       <h3>Eliminar tabla completa</h3>
-      <p style="margin: 0 0 12px; font-size: .92rem; line-height: 1.5;">
+      <p class="modal__texto-confirmacion">
         Vas a eliminar DEFINITIVAMENTE la tabla <strong id="delTablaNombre">…</strong>
         (<span id="delTablaTotal">…</span> pacientes), su rol y sus asignaciones.
         El historial de envíos se conserva. Esta acción no se puede deshacer.
@@ -210,7 +210,7 @@
   <div id="modalVaciarTabla" class="modal" hidden>
     <div class="modal__card" role="dialog" aria-modal="true">
       <h3>Eliminar registros</h3>
-      <p style="margin: 0 0 12px; font-size: .92rem; line-height: 1.5;">
+      <p class="modal__texto-confirmacion">
         Vas a borrar DEFINITIVAMENTE los <strong id="vaciarTablaTotal">…</strong> pacientes
         de <strong id="vaciarTablaNombre">…</strong>.
         El área, su tabla, su rol y las asignaciones siguen intactos; el historial de envíos se conserva.
@@ -227,7 +227,7 @@
   <div id="modalConfirmarMasivo" class="modal" hidden>
     <div class="modal__card" role="dialog" aria-modal="true">
       <h3 id="masivoTitulo">Confirmar cambio</h3>
-      <p id="masivoTexto" style="margin: 0 0 20px; font-size: .92rem; line-height: 1.5;"></p>
+      <p id="masivoTexto" class="modal__texto-confirmacion modal__texto-confirmacion--amplio"></p>
       <div class="modal__actions">
         <button type="button" class="btn btn--ghost" id="btnCancelarMasivo">Cancelar</button>
         <button type="button" class="btn btn--primary" id="btnConfirmarMasivo">Confirmar</button>

@@ -1,0 +1,5 @@
+/* Ajustes específicos de la página Áreas. */
+.areas__intro { margin: 14px 18px 0; }
+.areas__crear { margin-top: 12px; }
+.areas__mensaje { margin: 0 18px 10px; }
+.areas__vacio { padding: 24px; }

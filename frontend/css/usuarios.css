@@ -7,6 +7,10 @@
   color: var(--texto-suave);
   line-height: 1.55;
 }
+.usuarios__intro { margin: 14px 18px 0; }
+.usuarios__dev-info { margin: 0 18px 4px; font-weight: 600; }
+.usuarios__inv-msg { margin: 0 18px 10px; }
+.usuarios__vacio { padding: 24px; }
 
 .usr-selector {
   display: flex;

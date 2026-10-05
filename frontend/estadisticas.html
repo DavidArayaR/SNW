@@ -10,8 +10,8 @@
   <link rel="stylesheet" href="css/styles.css">
   <link rel="stylesheet" href="css/componentes.css">
   <link rel="stylesheet" href="css/layout.css?v=sidebar25">
-  <link rel="stylesheet" href="css/admin.css">
-  <link rel="stylesheet" href="css/estadisticas.css">
+  <link rel="stylesheet" href="css/admin.css?v=inlinecss1">
+  <link rel="stylesheet" href="css/estadisticas.css?v=inlinecss1">
   <script src="js/tema.js"></script>
 </head>
 <body data-pagina="estadisticas" data-seccion="administracion">
@@ -63,7 +63,7 @@
               </select>
             </div>
           </div>
-          <p class="field__hint" id="hintRespuestas" style="margin:12px 18px 0;">Estado actual de los pacientes de producci&oacute;n <strong>a los que ya se les envi&oacute; un mensaje</strong>. Usa el filtro para comparar respuestas o inter&eacute;s. Sin una se&ntilde;al expl&iacute;cita de inter&eacute;s o rechazo de la oferta quedan «Sin clasificar». En <a href="historial.html">Historial</a> puedes ver qui&eacute;nes son.</p>
+          <p class="field__hint stats__respuestas-hint" id="hintRespuestas">Estado actual de los pacientes de producci&oacute;n <strong>a los que ya se les envi&oacute; un mensaje</strong>. Usa el filtro para comparar respuestas o inter&eacute;s. Sin una se&ntilde;al expl&iacute;cita de inter&eacute;s o rechazo de la oferta quedan «Sin clasificar». En <a href="historial.html">Historial</a> puedes ver qui&eacute;nes son.</p>
           <p id="webhookSalud" class="webhook-salud" hidden></p>
           <div id="respuestasPacientes"></div>
         </section>
@@ -91,7 +91,7 @@
             <button id="btnActualizarTarifas" class="btn btn--ghost" type="button">Actualizar tarifas</button>
           </div>
 
-            <p class="field__hint" style="margin:12px 18px 0;">
+            <p class="field__hint stats__costos-hint">
               Tarifas por mensaje que publica Meta para Chile
               (<a href="https://developers.facebook.com/docs/whatsapp/pricing/" target="_blank" rel="noopener">documentaci&oacute;n de precios</a>).
               El costo es una estimaci&oacute;n: se aplica a cada mensaje enviado la tarifa vigente

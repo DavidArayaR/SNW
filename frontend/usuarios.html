@@ -8,10 +8,10 @@
   <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
   <link rel="stylesheet" href="css/tema.css">
   <link rel="stylesheet" href="css/styles.css">
-  <link rel="stylesheet" href="css/componentes.css">
+  <link rel="stylesheet" href="css/componentes.css?v=inlinecss1">
   <link rel="stylesheet" href="css/layout.css?v=sidebar25">
-  <link rel="stylesheet" href="css/admin.css">
-  <link rel="stylesheet" href="css/usuarios.css">
+  <link rel="stylesheet" href="css/admin.css?v=inlinecss1">
+  <link rel="stylesheet" href="css/usuarios.css?v=inlinecss1">
   <script src="js/tema.js"></script>
 </head>
 <body data-pagina="usuarios" data-seccion="administracion">
@@ -39,7 +39,7 @@
             </div>
           </div>
 
-          <p class="usr-intro" style="margin: 14px 18px 0;">
+          <p class="usr-intro usuarios__intro">
             Las cuentas nuevas se crean invitando a la persona por correo: recibe un enlace para elegir
             su propia contrase&ntilde;a y la cuenta nace con rol <strong>usuario</strong> y acceso
             b&aacute;sico (Mensajer&iacute;a, Historial y edici&oacute;n de plantillas). Aqu&iacute; ajustas qu&eacute;
@@ -49,7 +49,7 @@
             p&aacute;gina <strong>Áreas</strong>. La p&aacute;gina <strong>Configuraci&oacute;n</strong> es
             exclusiva del rol desarrollador. M&aacute;ximo 4 desarrolladores.
           </p>
-          <p id="devInfo" class="usr-intro" style="margin: 0 18px 4px; font-weight: 600;"></p>
+          <p id="devInfo" class="usr-intro usuarios__dev-info"></p>
 
           <form id="formInvitar" class="usr-invitar">
             <div class="usr-invitar__campo">
@@ -58,14 +58,14 @@
             </div>
             <button type="submit" id="btnInvitar" class="btn btn--primary">Enviar invitaci&oacute;n</button>
           </form>
-          <p id="invMsg" class="usr-intro" style="margin: 0 18px 10px;"></p>
+          <p id="invMsg" class="usr-intro usuarios__inv-msg"></p>
 
           <div class="usr-selector">
             <label for="selUsuario">Cuenta</label>
             <select id="selUsuario"></select>
           </div>
           <div id="detalle" class="usr-detalle"></div>
-          <p id="vacio" class="tabla-vacia" hidden style="padding: 24px;">No hay cuentas registradas.</p>
+          <p id="vacio" class="tabla-vacia usuarios__vacio" hidden>No hay cuentas registradas.</p>
         </section>
 
       </main>
@@ -75,7 +75,7 @@
   <div id="modalBorrar" class="modal" hidden>
     <div class="modal__card">
       <h3>Eliminar cuenta</h3>
-      <p id="borrarTexto" style="margin: 0 0 20px; font-size: .92rem; line-height: 1.5;"></p>
+      <p id="borrarTexto" class="modal__texto-confirmacion--amplio"></p>
       <div class="modal__actions">
         <button type="button" class="btn btn--ghost" id="btnCancelarBorrar">Cancelar</button>
         <button type="button" class="btn btn--danger" id="btnConfirmarBorrar">Eliminar</button>

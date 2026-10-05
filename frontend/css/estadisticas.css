@@ -1,5 +1,8 @@
 /* Página de Estadísticas */
 
+.stats__respuestas-hint,
+.stats__costos-hint { margin: 12px 18px 0; }
+
 .hero-grid {
   display: flex;
   flex-wrap: wrap;

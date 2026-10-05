@@ -8,10 +8,11 @@
   <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
   <link rel="stylesheet" href="css/tema.css">
   <link rel="stylesheet" href="css/styles.css">
-  <link rel="stylesheet" href="css/componentes.css">
+  <link rel="stylesheet" href="css/componentes.css?v=inlinecss1">
   <link rel="stylesheet" href="css/layout.css?v=sidebar25">
-  <link rel="stylesheet" href="css/admin.css">
-  <link rel="stylesheet" href="css/usuarios.css">
+  <link rel="stylesheet" href="css/admin.css?v=inlinecss1">
+  <link rel="stylesheet" href="css/usuarios.css?v=inlinecss1">
+  <link rel="stylesheet" href="css/areas.css">
   <script src="js/tema.js"></script>
 </head>
 <body data-pagina="areas" data-seccion="administracion">
@@ -38,7 +39,7 @@
             </div>
           </div>
 
-          <p class="usr-intro" style="margin: 14px 18px 0;">
+          <p class="usr-intro areas__intro">
             Cada área tiene su propia tabla de pacientes
             (<strong>pacientes_&lt;nombre&gt;</strong>, sin separaci&oacute;n desarrollo/producci&oacute;n)
             y su propio rol. Asigna el rol a una cuenta para darle acceso a esa tabla en
@@ -46,21 +47,21 @@
             áreas asignadas; no ven Estad&iacute;sticas.
           </p>
 
-            <form id="formCrearArea" class="usr-invitar" style="margin-top: 12px;">
+            <form id="formCrearArea" class="usr-invitar areas__crear">
             <div class="usr-invitar__campo">
               <label for="espNombre">Nueva área</label>
               <input type="text" id="espNombre" placeholder="Ej: Kinesiología" maxlength="150" required>
             </div>
             <button type="submit" id="btnCrearEspecialidad" class="btn btn--primary">Crear área</button>
           </form>
-          <p id="espMsg" class="usr-intro" style="margin: 0 18px 10px;"></p>
+          <p id="espMsg" class="usr-intro areas__mensaje"></p>
 
           <div class="usr-selector">
               <label for="selArea">Área</label>
               <select id="selArea"></select>
             </div>
             <div id="detalleArea" class="usr-detalle"></div>
-          <p id="espVacio" class="tabla-vacia" hidden style="padding: 24px;">No hay áreas creadas.</p>
+          <p id="espVacio" class="tabla-vacia areas__vacio" hidden>No hay áreas creadas.</p>
         </section>
 
       </main>
@@ -72,7 +73,7 @@
   <div id="modalQuitarRol" class="modal" hidden>
     <div class="modal__card modal__card--sm" role="dialog" aria-modal="true">
       <h3>Quitar acceso</h3>
-      <p id="quitarTexto" style="margin: 0 0 20px; font-size: .92rem; line-height: 1.5;"></p>
+      <p id="quitarTexto" class="modal__texto-confirmacion--amplio"></p>
       <div class="modal__actions">
         <button type="button" class="btn btn--ghost" id="btnCancelarQuitar">Cancelar</button>
         <button type="button" class="btn btn--danger" id="btnConfirmarQuitar">Quitar</button>

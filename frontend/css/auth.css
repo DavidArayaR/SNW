@@ -1,0 +1,165 @@
+/* Estilos externos para inicio de sesión, registro y recuperación de contraseña. */
+body.pagina-auth {
+  margin: 0;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  font-family: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+  background:
+    linear-gradient(rgba(7, 94, 84, .82), rgba(18, 140, 126, .88)),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='.06'%3E%3Ccircle cx='40' cy='40' r='14'/%3E%3Cpath d='M20 60l8-8M52 12l8 8'/%3E%3C/g%3E%3C/svg%3E");
+  color: var(--texto);
+  padding: 20px;
+}
+:root[data-tema="oscuro"] body.pagina-auth {
+  background:
+    linear-gradient(rgba(10, 22, 20, .9), rgba(16, 30, 27, .94)),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='.04'%3E%3Ccircle cx='40' cy='40' r='14'/%3E%3Cpath d='M20 60l8-8M52 12l8 8'/%3E%3C/g%3E%3C/svg%3E");
+}
+.pagina-auth,
+.pagina-auth * { box-sizing: border-box; }
+.pagina-auth .card {
+  width: 100%;
+  background: var(--panel);
+  color: var(--texto);
+  border-top: 3px solid var(--borde);
+  border-bottom: 3px solid var(--borde);
+  border-radius: 16px;
+  box-shadow: 0 22px 60px rgba(0, 0, 0, .35);
+}
+.pagina-login .card { max-width: 380px; padding: 34px 32px 28px; }
+.pagina-registro .card,
+.pagina-reset .card { max-width: 400px; padding: 32px 32px 26px; }
+.pagina-auth .logo {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 14px;
+  border-radius: 50%;
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-fg);
+  font-size: 1.5rem;
+}
+.pagina-auth h1 { margin: 0 0 4px; text-align: center; font-size: 1.25rem; }
+.pagina-auth .sub { text-align: center; color: var(--texto-suave); font-size: .86rem; }
+.pagina-login .sub { margin: 0 0 24px; }
+.pagina-registro .sub,
+.pagina-reset .sub { margin: 0 0 22px; }
+.pagina-login .sub--olvido { margin-bottom: 18px; }
+.pagina-auth label { display: block; margin-bottom: 6px; font-weight: 600; font-size: .87rem; }
+.pagina-auth input {
+  width: 100%;
+  border: 1.5px solid var(--borde);
+  border-radius: 10px;
+  padding: 11px 13px;
+  font: inherit;
+  font-size: .95rem;
+  margin-bottom: 16px;
+  background: var(--surface-2);
+  color: var(--texto);
+}
+.pagina-registro input,
+.pagina-reset input { margin-bottom: 14px; }
+.pagina-auth input:focus { border-color: var(--verde); outline: none; }
+.pagina-auth input.malo { border-color: var(--danger-fg); }
+.pagina-auth input:disabled { opacity: .7; cursor: not-allowed; }
+.pagina-auth button {
+  width: 100%;
+  border: none;
+  border-radius: 10px;
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-fg);
+  padding: 13px;
+  font: inherit;
+  font-weight: 700;
+  font-size: .98rem;
+  cursor: pointer;
+}
+.pagina-auth button:hover { filter: brightness(1.07); }
+.pagina-auth button:disabled { opacity: .6; cursor: wait; }
+.pagina-login .spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, .4);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: auth-spin .7s linear infinite;
+  vertical-align: middle;
+  margin-right: 7px;
+}
+@keyframes auth-spin { to { transform: rotate(360deg); } }
+.pagina-login .btn-check {
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 7px;
+  animation: auth-check-pop .4s cubic-bezier(.34, 1.56, .64, 1);
+}
+@keyframes auth-check-pop {
+  0% { transform: scale(0); opacity: 0; }
+  60% { transform: scale(1.3); opacity: 1; }
+  100% { transform: scale(1); }
+}
+.pagina-login #btnEntrar.exito { animation: auth-btn-pulse .5s ease-out; }
+@keyframes auth-btn-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(255, 255, 255, .45); }
+  100% { box-shadow: 0 0 0 12px rgba(255, 255, 255, 0); }
+}
+.pagina-login .error,
+.pagina-login .info {
+  display: none;
+  margin: -6px 0 14px;
+  padding: 10px 13px;
+  border-radius: 8px;
+  font-size: .85rem;
+}
+.pagina-login .error { background: var(--danger-bg); border: 1px solid var(--danger-bd); color: var(--danger-fg); }
+.pagina-login .info { background: var(--ok-bg); border: 1px solid var(--ok-bd); color: var(--ok-fg); }
+.pagina-login .error.visible,
+.pagina-login .info.visible { display: block; }
+.pagina-auth .nota { text-align: center; color: var(--texto-suave); line-height: 1.7; }
+.pagina-login .nota { margin: 18px 0 0; font-size: .76rem; line-height: 1.6; }
+.pagina-login .nota a { display: inline-block; }
+.pagina-registro .nota,
+.pagina-reset .nota { margin: 18px 0 0; font-size: .8rem; }
+.pagina-login .link-olvide { display: block; margin: -8px 0 16px; text-align: right; font-size: .8rem; }
+.pagina-login .link-olvide--volver { text-align: center; margin: 12px 0 0; }
+.pagina-auth a { color: var(--verde); }
+.pagina-login .toast {
+  position: fixed;
+  bottom: 26px;
+  left: 50%;
+  z-index: 60;
+  transform: translateX(-50%) translateY(10px);
+  padding: 12px 20px;
+  border-radius: 10px;
+  background: var(--toast-bg);
+  color: var(--toast-fg);
+  font-size: .9rem;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .3);
+  opacity: 0;
+  transition: opacity .25s, transform .25s;
+}
+.pagina-login .toast.visible { opacity: 1; transform: translateX(-50%) translateY(0); }
+.pagina-login .toast--ok { background: #2f7d55; color: #fff; }
+.pagina-registro .reglas,
+.pagina-reset .reglas { margin: 0 0 16px; padding-left: 18px; font-size: .78rem; color: var(--texto-suave); line-height: 1.7; }
+.pagina-registro .reglas li.ok,
+.pagina-reset .reglas li.ok { color: var(--ok-fg); }
+.pagina-registro .reglas li.ok::marker,
+.pagina-reset .reglas li.ok::marker { content: "\2713  "; }
+.pagina-registro .aviso,
+.pagina-reset .aviso {
+  display: none;
+  margin: -4px 0 14px;
+  padding: 10px 13px;
+  border-radius: 8px;
+  font-size: .85rem;
+}
+.pagina-registro .aviso.visible,
+.pagina-reset .aviso.visible { display: block; }
+.pagina-registro .aviso--error,
+.pagina-reset .aviso--error { background: var(--danger-bg); border: 1px solid var(--danger-bd); color: var(--danger-fg); }
+.pagina-registro .aviso--ok,
+.pagina-reset .aviso--ok { background: var(--ok-bg); border: 1px solid var(--ok-bd); color: var(--ok-fg); }

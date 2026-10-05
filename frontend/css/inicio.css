@@ -1,0 +1,136 @@
+/* Estilos específicos de la portada Inicio. */
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+  color: var(--texto);
+  background: var(--fondo);
+}
+.hero {
+  background: linear-gradient(135deg, #2f6d5d, #3f9a86);
+  color: #fff;
+  padding: 56px 24px 64px;
+  text-align: center;
+}
+.app-shell:not(.sin-sidebar) .hero {
+  background: linear-gradient(90deg, var(--nav-activo-fondo), transparent 64px),
+    linear-gradient(135deg, #2f6d5d, #3f9a86);
+}
+.hero h1 { margin: 0 0 10px; font-size: 2rem; letter-spacing: -.02em; }
+.hero p { margin: 0 auto; max-width: 640px; opacity: .92; font-size: 1.02rem; line-height: 1.55; }
+main { max-width: 960px; margin: -34px auto 40px; padding: 0 20px; }
+.info-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; }
+.info-card {
+  background: var(--panel);
+  border: 1px solid var(--borde);
+  border-top: 3px solid var(--borde);
+  border-bottom: 3px solid var(--borde);
+  border-radius: 14px;
+  padding: 22px;
+  box-shadow: var(--sombra);
+  display: flex;
+  flex-direction: column;
+  color: var(--texto);
+}
+.info-card h2 { margin: 0 0 8px; font-size: 1.08rem; color: var(--texto); }
+.info-card p { margin: 0; font-size: .9rem; color: var(--texto-suave); line-height: 1.55; flex: 1; }
+.info-card ul { margin: 0 0 16px; padding-left: 18px; font-size: .86rem; color: var(--texto-suave); }
+.info-card ul li { margin-bottom: 4px; }
+.btn {
+  display: inline-block;
+  text-align: center;
+  text-decoration: none;
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-fg);
+  padding: 11px 18px;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: .92rem;
+  transition: filter .15s;
+}
+.btn:hover { filter: brightness(1.07); }
+[hidden] { display: none !important; }
+.aviso-sesion {
+  padding: 12px 18px;
+  border-radius: 10px;
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  border: 1px solid var(--warn-bd);
+  font-size: .9rem;
+  text-align: center;
+}
+.hero__acciones {
+  margin-top: 26px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.hero__acciones .btn { min-width: 220px; }
+.btn--login {
+  background: #fff;
+  color: #2f6d5d;
+  font-weight: 700;
+  padding: 13px 32px;
+  font-size: 1rem;
+  border: 2px solid rgba(255,255,255,.35);
+}
+.btn--login:hover { background: rgba(255,255,255,.92); color: #2f6d5d; text-decoration: none; filter: none; }
+.btn--registro {
+  background: transparent;
+  color: #fff;
+  font-weight: 700;
+  padding: 13px 32px;
+  font-size: 1rem;
+  border: 2px solid rgba(255,255,255,.55);
+}
+.btn--registro:hover { background: rgba(255,255,255,.14); color: #fff; text-decoration: none; filter: none; }
+section.info {
+  background: var(--panel);
+  border: 1px solid var(--borde);
+  border-top: 3px solid var(--borde);
+  border-bottom: 3px solid var(--borde);
+  border-radius: 14px;
+  padding: 26px 28px;
+  margin-top: 18px;
+}
+section.info h2 { margin: 0 0 12px; font-size: 1.15rem; }
+section.info p, section.info li { font-size: .92rem; line-height: 1.65; color: var(--texto); }
+code {
+  background: var(--surface-3);
+  border-radius: 6px;
+  padding: 2px 7px;
+  font-family: Consolas, monospace;
+  font-size: .85em;
+}
+.pasos { margin: 6px 0 0; padding: 0; list-style: none; counter-reset: paso; }
+.pasos li {
+  position: relative;
+  padding: 0 0 18px 44px;
+  border-left: 2px solid var(--brand-tint-bd);
+  margin-left: 14px;
+}
+.pasos li:last-child { border-left-color: transparent; padding-bottom: 0; }
+.pasos li::before {
+  counter-increment: paso;
+  content: counter(paso);
+  position: absolute;
+  left: -16px;
+  top: -2px;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-fg);
+  font-weight: 700;
+  font-size: .9rem;
+}
+.pasos li strong { color: var(--texto); }
+section.info + section.info, .info-cards { margin-top: 18px; }
+footer { text-align: center; color: var(--texto-suave); font-size: .82rem; padding: 8px 20px 34px; }
+@media (max-width: 640px) {
+  .hero { padding: 40px 18px 52px; }
+  .hero h1 { font-size: 1.5rem; }
+}

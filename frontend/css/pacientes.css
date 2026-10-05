@@ -1,5 +1,12 @@
 /* Solo Base de datos (pacientes.html). Lo compartido vive en componentes.css. */
 
+.pacientes__aviso-pruebas { margin: 8px 18px 12px; }
+.gestion-base__intro,
+#gestionSinEsp,
+#gestionLegacy { margin: 12px 18px 0; }
+.pacientes__csv-msg { margin: 6px 18px 0; font-weight: 600; color: var(--texto); }
+#lblArchivoGestion { cursor: pointer; margin: 0; }
+
 /* Card «Gestionar base de datos» (cargar CSV, eliminar registros, eliminar
    tabla). Las acciones se aplican sobre la base elegida en el panel de arriba.
    .panel no trae padding: el aire de los bordes lo da esta regla. */
@@ -148,4 +155,3 @@ tr.es-baja .col-check input[type=checkbox] { cursor: not-allowed; }
   font-size: .72rem;
   color: var(--texto-suave);
 }
-

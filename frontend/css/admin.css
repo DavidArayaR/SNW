@@ -9,6 +9,7 @@
    colores propia de SNW (no la de la plantilla).
    --------------------------------------------------------------- */
 body[data-seccion="administracion"] { --radio: 20px; }
+.administracion-redireccion { font-family: Arial, sans-serif; padding: 40px; text-align: center; }
 body[data-seccion="administracion"] .btn { border-radius: 999px; }
 body[data-seccion="administracion"] .field input[type="text"],
 body[data-seccion="administracion"] .field input[type="password"],
