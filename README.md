@@ -804,9 +804,10 @@ propagar como error 500.
   nombre y el correo de la cuenta que solicitó el envío. Un envío rechazado queda en el **Historial**
   con estado `rechazado` y el comentario del supervisor (ya no se borra). Con el permiso
   `envio_produccion` (implícito para admin/dev) el envío en producción sale directo, sin correo.
-- **Desarrollo**: envío directo, restringido a los números de `numeros_prueba_dev`;
-  sin el permiso `envio_produccion`, con `entorno = desarrollo` la petición nunca
-  puede apuntar a producción aunque lo pida.
+- **Desarrollo**: sin importar el rol, el envío masivo queda restringido a
+  `pacientes_dev` y a los números configurados en `numeros_prueba_dev`. Producción y
+  áreas se bloquean al crear envíos manuales o programados; el worker vuelve a comprobar
+  el entorno y los números autorizados justo antes de llamar al motor.
 - **Motor intercambiable** (`metodo_envio`): `simulado` (no envía nada real, solo
   registra en consola) o `api_oficial` (WhatsApp Business Cloud API).
 - **Cola en background**: cada envío corre como `BackgroundTask` de FastAPI con

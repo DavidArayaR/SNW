@@ -270,21 +270,20 @@ function ambienteEnvioConf() {
 function construirOpcionesBaseConf(forzarEspId) {
   const sel = $("#selBaseConf");
   if (!sel) return;
-  // El usuario normal nunca ve producción legacy: solo su área o
-  // desarrollo (el backend lo exige igual).
+  // En Desarrollo ningún rol puede escoger producción ni áreas para enviar.
   const restringido = usuarioRestringidoADesarrollo() || (window.snwRol || "") === "usuario";
   let html = "";
   if (forzarEspId != null) {
     const espForzada = misAreas.find((e) => e.id === forzarEspId);
     const nombre = espForzada ? espForzada.nombre_visible : (nombreArea(forzarEspId) || "Área");
     const tabla = espForzada ? espForzada.nombre_tabla_base : "";
-    html = `<option value="esp:${forzarEspId}">${escaparHtml(nombre)}${tabla ? ` (${escaparHtml(tabla)})` : ""}</option>`;
+    html = `<option value="esp:${forzarEspId}"${usuarioRestringidoADesarrollo() ? " disabled" : ""}>${escaparHtml(nombre)}${tabla ? ` (${escaparHtml(tabla)})` : ""}${usuarioRestringidoADesarrollo() ? " · No disponible en Desarrollo" : ""}</option>`;
   } else {
     html = `<optgroup label="Bases">` +
       `<option value="desarrollo">Desarrollo (pacientes_dev)</option>` +
       (restringido ? "" : `<option value="produccion">Producción (pacientes_prod)</option>`) +
       `</optgroup>`;
-    if (misAreas.length) {
+    if (misAreas.length && !usuarioRestringidoADesarrollo()) {
       html += `<optgroup label="Áreas">` +
         misAreas.map((e) => `<option value="esp:${e.id}">${escaparHtml(e.nombre_visible)} (${escaparHtml(e.nombre_tabla_base)})</option>`).join("") +
         `</optgroup>`;
@@ -522,7 +521,7 @@ function actualizarProgPlantilla() {
     } else if (p?.area_id != null) {
       const area = areas.find((item) => Number(item.id) === Number(p.area_id));
       selBase.innerHTML = opcionInicial + (area
-        ? `<option value="esp:${area.id}">${escaparHtml(area.nombre_visible)} (${escaparHtml(area.nombre_tabla_base)})</option>`
+        ? `<option value="esp:${area.id}"${usuarioRestringidoADesarrollo() ? " disabled" : ""}>${escaparHtml(area.nombre_visible)} (${escaparHtml(area.nombre_tabla_base)})${usuarioRestringidoADesarrollo() ? " · No disponible en Desarrollo" : ""}</option>`
         : "");
     } else {
       selBase.innerHTML =
@@ -531,7 +530,7 @@ function actualizarProgPlantilla() {
           `<option value="desarrollo">Desarrollo (pacientes_dev)</option>` +
           (restringido ? "" : `<option value="produccion">Producción (pacientes_prod)</option>`) +
         `</optgroup>` +
-        (areas.length
+        (areas.length && !usuarioRestringidoADesarrollo()
           ? `<optgroup label="Bases por área">` +
               areas.map((area) => `<option value="esp:${area.id}">${escaparHtml(area.nombre_visible)} (${escaparHtml(area.nombre_tabla_base)})</option>`).join("") +
             `</optgroup>`
@@ -1474,12 +1473,10 @@ if (!localStorage.getItem("snw_ambiente_admin") && !localStorage.getItem("snw_am
 }
 actualizarBadgeMensajeria();
 
-// Devuelve true si la cuenta debe quedar restringida a la base de desarrollo
-// (cuando el entorno global del sistema es desarrollo y no tiene permiso de
-// envío directo en producción).
+// Desarrollo bloquea producción y áreas para todos los roles; el permiso de
+// envío directo solo elimina la confirmación en producción cuando esa está activa.
 function usuarioRestringidoADesarrollo() {
-  const puedeProd = window.snwPuede && window.snwPuede("envio_produccion");
-  return !puedeProd && entornoGlobal === "desarrollo";
+  return entornoGlobal === "desarrollo";
 }
 
 // Aplica la restricción de base de datos en la card de envío.
@@ -1597,16 +1594,15 @@ if (selBaseConfEl) selBaseConfEl.addEventListener("change", () => {
 
 function refrescarAvisoDevConf() {
   const box = $("#confAvisoDev");
-  const base = baseSeleccionadaConf();
-  const esDev = base === "desarrollo" && !modoAreaConf();
-  box.hidden = !esDev;
-  if (!esDev) return;
-  fetch(`api/configuracion?ambiente=${base}`, { headers: authHeaders() })
+  const entornoDesarrollo = entornoGlobal === "desarrollo";
+  box.hidden = !entornoDesarrollo;
+  if (!entornoDesarrollo) return;
+  fetch("api/configuracion?ambiente=desarrollo", { headers: authHeaders() })
     .then((r) => (r.ok ? r.json() : {}))
     .then((cfg) => {
       const nums = (cfg.numeros_autorizados ?? []).join(", ") || "ninguno";
       box.textContent =
-        `Base de datos desarrollo: solo se enviará a los números autorizados (${nums}). El resto será descartado.`;
+        `El sistema está en Desarrollo: los envíos masivos solo se permiten desde pacientes_dev y a números de prueba (${nums}).`;
     })
     .catch(() => {});
 }

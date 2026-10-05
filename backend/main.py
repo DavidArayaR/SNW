@@ -1411,6 +1411,25 @@ def _numeros_prueba_editables(ambiente: str) -> set[str]:
             if (normalizado := normalizar_telefono(valor))}
 
 
+def _restriccion_envio_desarrollo(ambiente: str, tabla_area: str | None = None,
+                                  telefono: str | None = None) -> str | None:
+    """Regla de salida de emergencia cuando el entorno global es desarrollo.
+
+    En ese modo, ningún rol puede usar una tabla de producción/área y los
+    envíos a pacientes_dev se limitan a la lista de números de prueba.
+    """
+    entorno_global_dev = config_get("entorno", "desarrollo").strip().lower() == "desarrollo"
+    es_desarrollo = entorno_valido(ambiente) == "desarrollo"
+    if entorno_global_dev and (not es_desarrollo or tabla_area is not None):
+        return ("El sistema está en Desarrollo: los envíos masivos solo se permiten "
+                "desde pacientes_dev y a números de prueba.")
+    if es_desarrollo and telefono is not None:
+        normalizado = normalizar_telefono(telefono)
+        if normalizado is None or normalizado not in _numeros_prueba_editables("desarrollo"):
+            return "Número no autorizado: en Desarrollo solo se envía a números de prueba configurados."
+    return None
+
+
 def _es_numero_prueba_editable(telefono: str | None, permitidos: set[str]) -> bool:
     return normalizar_telefono(telefono or "") in permitidos
 
@@ -3844,6 +3863,22 @@ def _procesar_job(job_id: str) -> None:
     intervalo = max(0, int(cfg.get("intervalo_ms", 1000))) / 1000
     total = len(job["destinatarios"])
 
+    bloqueo_base = _restriccion_envio_desarrollo(amb, t_esp)
+    if bloqueo_base:
+        for d in job["destinatarios"]:
+            job["fallidos"] += 1
+            job["errores"].append({"id": d["id"], "telefono": d["telefono"],
+                                   "detalle": bloqueo_base})
+            registrar_historial(d["id"], d["nombre"], d["telefono"], clave,
+                                d["mensaje"], "error", bloqueo_base,
+                                ambiente=amb, envio_id=envio_id,
+                                area_id=esp_id, tabla_pacientes=t_esp)
+        job["estado"] = "error"
+        job["actual"] = ""
+        job["detalle"] = bloqueo_base
+        actualizar_envio_batch(envio_id, amb, fallidos=total, estado="error")
+        return
+
     for i, d in enumerate(job["destinatarios"]):
         if job.get("cancelado"):
             job["actual"] = ""
@@ -3877,6 +3912,19 @@ def _procesar_job(job_id: str) -> None:
                 while time.time() < fin and not job.get("cancelado"):
                     time.sleep(min(1.0, max(0.0, fin - time.time())))
                 job["detalle"] = ""
+
+        # Defensa final justo antes de llamar al motor: cubre cambios de entorno
+        # o de la lista de pruebas ocurridos mientras el job estaba en cola/pausa.
+        bloqueo_numero = _restriccion_envio_desarrollo(amb, t_esp, d["telefono"])
+        if bloqueo_numero:
+            job["fallidos"] += 1
+            job["errores"].append({"id": d["id"], "telefono": d["telefono"],
+                                   "detalle": bloqueo_numero})
+            registrar_historial(d["id"], d["nombre"], d["telefono"], clave,
+                                d["mensaje"], "error", bloqueo_numero,
+                                ambiente=amb, envio_id=envio_id,
+                                area_id=esp_id, tabla_pacientes=t_esp)
+            continue
 
         try:
             resultado = canal.enviar(d["telefono"], d["mensaje"], plantilla=plantilla_datos, variables=d.get("variables"))
@@ -3924,11 +3972,15 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
     except ValueError:
         raise HTTPException(400, detail=f"Entorno inválido: '{body.ambiente}'")
 
-    # En ambiente de desarrollo, quien no tenga permiso de envío en producción
-    # solo puede enviar a la base de desarrollo (números autorizados).
+    # Desarrollo es un candado global para todos los roles: no se permite
+    # apuntar a producción ni a tablas de áreas, que pertenecen a producción.
     entorno_global = config_get("entorno", "desarrollo").strip().lower()
-    if entorno_global == "desarrollo" and not tiene_permiso(sesion, "envio_produccion"):
-        amb = "desarrollo"
+    if entorno_global == "desarrollo" and (amb != "desarrollo" or body.area_id is not None):
+        raise HTTPException(
+            403,
+            detail=("El sistema está en Desarrollo: los envíos masivos solo se permiten "
+                    "desde pacientes_dev y a números de prueba."),
+        )
 
     # El usuario normal solo envía a pacientes de su area o a la base
     # de desarrollo; nunca a producción legacy.
@@ -3958,8 +4010,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         raise HTTPException(400, detail="No se seleccionaron pacientes")
 
     cfg = leer_config(amb)
-    lista_autorizados = cfg.get("numeros_autorizados", [])
-    autorizados = set(lista_autorizados)
+    autorizados = _numeros_prueba_editables(amb)
 
     plantilla = next((p for p in leer_plantillas() if p["id"] == body.plantilla_id), None)
     if plantilla is None:
@@ -4074,7 +4125,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         if telefono != telefono_crudo:
             actualizar_telefono(p["id"], telefono, amb, tabla=t_esp)
 
-        if amb == "desarrollo" and t_esp is None and telefono not in autorizados:
+        if amb == "desarrollo" and telefono not in autorizados:
             rechazados.append({"id": p["id"], "nombre": nombre_completo, "telefono": telefono,
                                "motivo": f"Número no autorizado en base {amb}"})
             registrar_historial(p["id"], nombre_completo, telefono, plantilla["clave"],
@@ -4408,7 +4459,7 @@ class DestinosIn(BaseModel):
 
 def _contar_elegibles_tabla(t: str, amb_q: str, amb: str) -> tuple[int, int]:
     """(total, elegibles) de una tabla: elegibles = pendientes, sin opt-out
-    y sin baja — lo que realmente se va a enviar (igual que iniciar_envio)."""
+    y sin baja. En desarrollo solo cuenta números de prueba autorizados."""
     with conectar(amb) as conn, conn.cursor() as cur:
         cur.execute(f"SELECT COUNT(*) AS total FROM {t}")
         total = int((cur.fetchone() or {}).get("total") or 0)
@@ -4420,10 +4471,15 @@ def _contar_elegibles_tabla(t: str, amb_q: str, amb: str) -> tuple[int, int]:
         if columna_existe(t, "respuesta", amb_q):
             conds.append("(respuesta IS NULL OR respuesta <> 'baja')")
         cur.execute(
-            f"SELECT COUNT(*) AS pendientes FROM {t}"
+            f"SELECT telefono FROM {t}"
             + (" WHERE " + " AND ".join(conds) if conds else "")
         )
-        elegibles = int((cur.fetchone() or {}).get("pendientes") or 0)
+        telefonos = [r.get("telefono") or "" for r in cur.fetchall()]
+        if entorno_valido(amb) == "desarrollo":
+            autorizados = _numeros_prueba_editables("desarrollo")
+            elegibles = sum(normalizar_telefono(tel) in autorizados for tel in telefonos)
+        else:
+            elegibles = len(telefonos)
     return total, elegibles
 
 
@@ -4637,13 +4693,18 @@ def _contar_reservados_prog(t: str, amb: str, amb_q: str) -> int:
     """Pacientes de la base que ya están tomados por otro programado activo."""
     with conectar(amb) as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT COUNT(DISTINCT pd.paciente_id) AS n FROM programado_destinatarios pd"
+            "SELECT DISTINCT pd.paciente_id, pd.telefono FROM programado_destinatarios pd"
             " JOIN envios_programados ep ON ep.id = pd.prog_id"
             " WHERE ep.tabla = %s AND ep.ambiente = %s AND ep.estado IN"
             " ('pendiente', 'aprobado', 'enviando')",
             (t, amb_q),
         )
-        return int((cur.fetchone() or {}).get("n") or 0)
+        filas = cur.fetchall()
+    if amb_q == "desarrollo":
+        autorizados = _numeros_prueba_editables("desarrollo")
+        return len({int(f["paciente_id"]) for f in filas
+                    if normalizar_telefono(f.get("telefono") or "") in autorizados})
+    return len({int(f["paciente_id"]) for f in filas})
 
 
 def _preelegir_pacientes_prog(t: str, amb: str, amb_q: str, n: int, cur=None) -> list[dict]:
@@ -4671,9 +4732,13 @@ def _preelegir_pacientes_prog(t: str, amb: str, amb_q: str, n: int, cur=None) ->
         " ('pendiente', 'aprobado', 'enviando'))"
     )
     where = (" WHERE " + " AND ".join(cond)) if cond else ""
+    solo_pruebas = entorno_valido(amb) == "desarrollo"
     sql = (f"SELECT p.id, p.nombre, p.apellido, p.telefono FROM {t} p{where}"
-           " ORDER BY p.id LIMIT %(n)s" + (" FOR UPDATE" if cur else ""))
-    params = {"t": t, "amb": amb_q, "n": n}
+           " ORDER BY p.id" + ("" if solo_pruebas else " LIMIT %(n)s")
+           + (" FOR UPDATE" if cur else ""))
+    params = {"t": t, "amb": amb_q}
+    if not solo_pruebas:
+        params["n"] = n
     if cur:
         cur.execute(sql, params)
         filas = cur.fetchall()
@@ -4681,12 +4746,15 @@ def _preelegir_pacientes_prog(t: str, amb: str, amb_q: str, n: int, cur=None) ->
         with conectar(amb) as conn, conn.cursor() as c2:
             c2.execute(sql, params)
             filas = c2.fetchall()
-    return [
+    autorizados = _numeros_prueba_editables("desarrollo") if solo_pruebas else None
+    candidatos = [
         {"id": r["id"],
          "nombre": " ".join(x for x in [r.get("nombre"), r.get("apellido")] if x),
          "telefono": (r.get("telefono") or "").strip()}
         for r in filas
+        if not solo_pruebas or normalizar_telefono(r.get("telefono") or "") in autorizados
     ]
+    return candidatos[:n]
 
 
 def _prog_destinatarios(prog_id: int) -> list[dict]:
@@ -4875,6 +4943,14 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
         if sesion.get("rol") == "usuario" and amb != "desarrollo":
             raise HTTPException(403, detail="Solo puedes programar para tu área o la base de desarrollo.")
         tabla = nombre_base(amb)
+
+    if config_get("entorno", "desarrollo").strip().lower() == "desarrollo" \
+            and (amb != "desarrollo" or esp is not None):
+        raise HTTPException(
+            403,
+            detail=("El sistema está en Desarrollo: solo puedes programar envíos "
+                    "para pacientes_dev y números de prueba."),
+        )
 
     # Tope real del programado: ni más de lo que el usuario propone, ni más de
     # los pendientes LIBRES de la base (los que ya tiene otro programado activo
@@ -5374,6 +5450,20 @@ def _ejecutar_programado(f: dict) -> None:
     from schemas import EnvioIn
 
     amb_prog = f.get("ambiente") or "produccion"
+    tabla_prog = f.get("tabla") or nombre_base(amb_prog)
+    tabla_bloqueada = (
+        tabla_prog if f.get("area_id") is not None or tabla_prog != "pacientes_dev"
+        else None
+    )
+    bloqueo_desarrollo = _restriccion_envio_desarrollo(
+        amb_prog, tabla_bloqueada)
+    if bloqueo_desarrollo:
+        _marcar_prog(f["id"], "error", bloqueo_desarrollo)
+        _avisar_creador_prog(
+            f, bloqueo_desarrollo,
+            titulo="Tu envío programado fue bloqueado por el entorno",
+            asunto=f"[SNW] Envío programado de {f.get('creador') or ''} bloqueado")
+        return
     # Si ese día no queda cupo de Meta, no se manda nada: se avisa al creador
     # con cuántos hay disponibles y queda con el motivo a la vista.
     info_limite = _limite_mensajeria_info(amb_prog)
