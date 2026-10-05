@@ -67,7 +67,6 @@
   color: var(--texto-suave);
   font-size: .8rem;
 }
-.sidebar__plegar:hover { background: var(--hover); color: var(--texto); }
 .sidebar__plegar i { transition: transform .2s ease; }
 
 .sidebar__brand {
@@ -130,11 +129,6 @@
   justify-content: center;
   border-radius: 10px;
   font-size: .95rem;
-}
-.sidebar__accion:hover {
-  background: var(--hover);
-  color: var(--texto);
-  outline: none;
 }
 
 /* Submenú desplegable de Administración. */
@@ -229,14 +223,25 @@
   font-size: .95rem;
   transition: background .15s, color .15s;
 }
-.sidebar .nav-link:hover {
-  background: var(--hover);
-  color: var(--texto);
+.sidebar .nav-link:hover > span,
+.sidebar__accion:hover > span,
+.sidebar .nav-link:hover > i,
+.sidebar__accion:hover > i,
+.sidebar__plegar:hover > i {
+  color: #a2ead7;
+  -webkit-text-stroke: .45px rgba(162, 234, 215, .95);
+  text-shadow: 0 0 8px rgba(121, 209, 189, .8);
 }
-:root[data-tema="oscuro"] .sidebar .nav-link:hover,
-:root[data-tema="oscuro"] .sidebar__accion:hover {
-  background: #3a8f7b;
-  color: #ffffff;
+.sidebar__nav > .nav-item > .nav-link.active:hover > span,
+.sidebar__nav > .nav-item > .nav-link.active:hover > i {
+  -webkit-text-stroke: 0;
+  text-shadow: none;
+}
+.sidebar__accion:hover,
+.sidebar__plegar:hover,
+.sidebar .nav-link:hover {
+  outline: none;
+  filter: none;
 }
 .sidebar .nav-link.active {
   z-index: 1;
@@ -337,10 +342,17 @@
   color: rgba(239, 248, 244, .86);
   padding: 8px 14px;
   font-size: .82rem;
-  transition: color .18s ease;
+  transition: color .18s ease, text-shadow .18s ease;
 }
-.app-topbar .msg-tab:hover { color: #ffffff; }
+.app-topbar .msg-tab:hover {
+  color: #ffffff;
+  text-shadow: 0 0 8px rgba(121, 209, 189, .8);
+}
 .app-topbar .msg-tab.activo { color: #12382f; }
+.app-topbar .msg-tab.activo:hover {
+  color: #12382f;
+  text-shadow: none;
+}
 
 /* Hamburguesa de la barra superior: sólo en móvil (abre el cajón).
    En escritorio se pliega con el botón de dentro de la sidebar. */
