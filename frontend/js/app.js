@@ -505,9 +505,12 @@ function seleccionarParaProgramar() {
 
 function actualizarProgPlantilla() {
   const el = document.getElementById("progPlantillaNombre");
-  if (!el) return;
   const p = (plantillas || []).find((x) => x.id === tplSelId);
-  el.textContent = p ? p.nombre : "—";
+  if (el) el.textContent = p ? p.nombre : "—";
+  const sinPlantilla = document.getElementById("progSinPlantilla");
+  const formulario = document.getElementById("progForm");
+  if (sinPlantilla) sinPlantilla.hidden = !!p;
+  if (formulario) formulario.hidden = !p;
   const selBase = document.getElementById("selProgBase");
   if (selBase) {
     const restringido = usuarioRestringidoADesarrollo() || (window.snwRol || "") === "usuario";

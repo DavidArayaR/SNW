@@ -296,6 +296,7 @@ body[data-pagina="mensajeria"] .layout { width: 100%; }
   gap: 12px;
   padding: 14px 18px 18px;
 }
+.prog-form[hidden] { display: none; }
 .prog-form .field { margin: 0; }
 .prog-form input[type="datetime-local"],
 .prog-form input[type="number"],
