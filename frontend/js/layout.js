@@ -176,27 +176,35 @@
     { pagina: "configuracion",   href: "configuracion.html",   icono: "fa-gear",         texto: "Configuración", dev: true },
   ];
 
-  const pintarEnlace = (l) =>
-    `<li class="nav-item">` +
-    `<a class="nav-link${l.pagina === PAGINA ? " active" : ""}" href="${l.href}" title="${l.texto}">` +
-    `<i class="fa-solid ${l.icono}"></i><span>${l.texto}</span></a></li>`;
+  const CURVAS_NAV =
+    `<svg class="nav-curve" viewBox="0 0 226 80" preserveAspectRatio="none" aria-hidden="true" focusable="false">` +
+    `<path class="nav-curve__fill" d="M225 2 A15 15 0 0 1 210 17 L226 17 L226 2 Z"/>` +
+    `<path class="nav-curve__fill" d="M210 63 A15 15 0 0 1 225 78 L226 78 L226 63 Z"/>` +
+    `<path class="nav-curve__stroke" d="M225 2 A15 15 0 0 1 210 17 H24 A23 23 0 0 0 1 40 A23 23 0 0 0 24 63 H210 A15 15 0 0 1 225 78"/></svg>`;
+
+  const pintarEnlace = (l, conCurvas = false) => {
+    const activo = l.pagina === PAGINA;
+    return `<li class="nav-item${activo ? " active" : ""}">` +
+      `<a class="nav-link${activo ? " active" : ""}" href="${l.href}" title="${l.texto}">` +
+      `<i class="fa-solid ${l.icono}"></i><span>${l.texto}</span></a>${conCurvas ? CURVAS_NAV : ""}</li>`;
+  };
 
   const itemsBase = LINKS_BASE
     .filter((l) => (!l.perm || puede(l.perm)) && (!l.priv || ES_PRIV) && (!l.dev || ES_DEV) && (!l.soloNoPriv || !ES_PRIV))
-    .map(pintarEnlace)
+    .map((l) => pintarEnlace(l, true))
     .join("");
 
   let bloqueAdmin = "";
   if (ES_PRIV) {
     const itemsSub = LINKS_ADMIN_SUB
       .filter((l) => (!l.dev || ES_DEV))
-      .map(pintarEnlace)
+      .map((l) => pintarEnlace(l))
       .join("");
     bloqueAdmin =
-      `<li class="nav-item">` +
+      `<li class="nav-item${ES_PAG_ADMIN ? " active" : ""}">` +
       `<button type="button" class="nav-link sidebar__admin-toggle${ES_PAG_ADMIN ? " active" : ""}" id="btnAdminToggle" aria-expanded="false" title="Administración">` +
       `<i class="fa-solid fa-user-shield"></i><span>Administración</span>` +
-      `<i class="fa-solid fa-chevron-down sidebar__admin-flecha"></i></button></li>` +
+      `<i class="fa-solid fa-chevron-down sidebar__admin-flecha"></i></button>${CURVAS_NAV}</li>` +
       `<li class="nav-subnav-wrap"><ul class="sidebar__subnav" id="subnavAdmin">${itemsSub}</ul></li>`;
   }
 
@@ -235,7 +243,10 @@
     navLinks.forEach((link) => {
       link.addEventListener("click", () => {
         navLinks.forEach((l) => l.classList.remove("active"));
+        sidebar.querySelectorAll(".sidebar__nav > .nav-item.active").forEach((item) => item.classList.remove("active"));
         link.classList.add("active");
+        const item = link.closest(".nav-item");
+        if (item?.parentElement === sidebar.querySelector(".sidebar__nav")) item.classList.add("active");
       });
     });
 

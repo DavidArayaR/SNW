@@ -6,7 +6,13 @@
 :root {
   --sidebar-ancho: 244px;
   --topbar-alto: 64px;
+  --sidebar-contorno: #164d42;
+  --sidebar-degradado: linear-gradient(135deg, var(--sidebar-1) 0%, var(--sidebar-2) 100%);
+  --nav-activo-fondo: var(--fondo);
 }
+:root[data-tema="oscuro"] { --sidebar-contorno: #86d2bd; }
+/* En Inicio, el seleccionado continúa visualmente el hero verde que ocupa el contenido. */
+body[data-pagina="inicio"] { --nav-activo-fondo: #337d6c; }
 
 /* Cascarón: sidebar fija + columna de contenido desplazada */
 .app-shell {
@@ -33,13 +39,16 @@
   flex-direction: column;
   gap: 4px;
   padding: 16px 0 16px 12px;
-  background: linear-gradient(135deg, var(--sidebar-1) 0%, var(--sidebar-2) 100%);
+  background: var(--sidebar-degradado);
+  background-attachment: fixed;
   color: #eff8f4;
   z-index: 1040;
   overflow-y: auto;
   overflow-x: hidden;
+  scrollbar-width: none;
   transition: width .2s ease, transform .25s ease;
 }
+.sidebar::-webkit-scrollbar { display: none; }
 .sidebar::after {
   content: "";
   position: absolute;
@@ -47,11 +56,10 @@
   right: 0;
   bottom: 0;
   width: 2px;
-  background: var(--verde-oscuro);
+  background: var(--sidebar-contorno);
   pointer-events: none;
   z-index: 0;
 }
-
 /* Botón para plegar/expandir (dentro de la sidebar, escritorio) */
 .sidebar__plegar {
   align-self: flex-end;
@@ -74,23 +82,27 @@
   align-items: center;
   gap: 12px;
   padding: 8px 14px 14px 10px;
-  color: var(--texto);
+  color: #eff8f4;
   text-decoration: none;
   margin-bottom: 10px;
 }
-.sidebar__brand i { font-size: 1.7rem; flex-shrink: 0; width: 1.9rem; text-align: center; color: var(--verde-oscuro); }
+.sidebar__brand i { font-size: 1.7rem; flex-shrink: 0; width: 1.9rem; text-align: center; color: #a2ead7; }
 .sidebar__brand span { display: flex; flex-direction: column; line-height: 1.2; }
 .sidebar__brand strong { font-size: .98rem; font-weight: 700; }
 .sidebar__brand small { font-size: .72rem; opacity: .8; }
 
 .sidebar__nav {
   flex: 1 1 auto;
+  flex-wrap: nowrap;
   min-height: 0;
   gap: 0;
   list-style: none;
+  padding-block: 16px;
   overflow-y: auto;
   overflow-x: hidden;
+  scrollbar-width: none;
 }
+.sidebar__nav::-webkit-scrollbar { display: none; }
 
 /* Acciones de cuenta ancladas al pie de la sidebar. */
 .sidebar__cuenta {
@@ -112,7 +124,7 @@
   border: none;
   border-radius: 12px;
   background: transparent;
-  color: var(--texto);
+  color: #eff8f4;
   font: inherit;
   font-size: .86rem;
   font-weight: 600;
@@ -167,14 +179,14 @@
   padding: 0 26px 0 14px;
   border-radius: 999px 0 0 999px;
   border: 1px solid transparent;
-  color: var(--texto);
+  color: #eff8f4;
   font-size: .9rem;
   font-weight: 600;
   transition: background-color .2s ease, color .2s ease,
     border-color .2s ease, box-shadow .2s ease, transform .15s ease;
 }
-/* El estado activo sigue el patrón de AdminHub: el LI toma el color de la
-   página y los círculos laterales crean las dos transiciones redondeadas. */
+/* El elemento activo prolonga el fondo de la página hacia la sidebar.
+   Los arcos superior e inferior conectan su contorno con el borde vertical. */
 .sidebar__nav > .nav-item {
   position: relative;
   height: 48px;
@@ -182,27 +194,27 @@
   padding: 4px;
 }
 .sidebar__nav > .nav-item.active {
+  --nav-curva: 16px;
   z-index: 1;
-  background: var(--fondo);
+  padding: 0;
+  background: linear-gradient(90deg, transparent 0 24px, var(--nav-activo-fondo) 24px);
 }
-.sidebar__nav > .nav-item.active::before,
-.sidebar__nav > .nav-item.active::after {
-  content: "";
+.sidebar .nav-curve {
+  display: none;
   position: absolute;
-  right: 0;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
+  left: 0;
+  top: calc(-1 * var(--nav-curva));
+  width: 100%;
+  height: 80px;
   pointer-events: none;
-  z-index: -1;
+  z-index: 2;
 }
-.sidebar__nav > .nav-item.active::before {
-  top: -40px;
-  box-shadow: 20px 20px 0 var(--fondo);
-}
-.sidebar__nav > .nav-item.active::after {
-  bottom: -40px;
-  box-shadow: 20px -20px 0 var(--fondo);
+.sidebar__nav > .nav-item.active > .nav-curve { display: block; }
+.nav-curve__fill { fill: var(--nav-activo-fondo); }
+.nav-curve__stroke {
+  fill: none;
+  stroke: var(--sidebar-contorno);
+  stroke-width: 2;
 }
 .sidebar__nav > .nav-item > .nav-link {
   width: 100%;
@@ -237,6 +249,8 @@
   -webkit-text-stroke: 0;
   text-shadow: none;
 }
+.sidebar__nav > .nav-item > .nav-link.active:hover > span { color: inherit; }
+.sidebar__nav > .nav-item > .nav-link.active:hover > i { color: var(--btn-primary-fg); }
 .sidebar__accion:hover,
 .sidebar__plegar:hover,
 .sidebar .nav-link:hover {
@@ -245,12 +259,19 @@
 }
 .sidebar .nav-link.active {
   z-index: 1;
-  background: var(--nav-bg);
-  color: var(--verde-oscuro);
+  color: var(--texto);
 }
 .sidebar__nav > .nav-item > .nav-link.active {
-  border: 2px solid var(--verde-oscuro);
+  width: calc(100% - var(--nav-curva));
+  border: 0;
+  border-radius: 999px 0 0 999px;
+  padding-right: 8px;
+  background: linear-gradient(90deg, transparent 0%, var(--nav-activo-fondo) 100%),
+    var(--sidebar-degradado);
+  background-attachment: scroll, fixed;
 }
+:root:not([data-tema="oscuro"]) .sidebar .nav-link.active { color: #102f27; }
+:root[data-tema="oscuro"] .sidebar .nav-link.active { color: var(--verde-oscuro); }
 .sidebar .nav-link.active i {
   background: var(--btn-primary-bg);
   color: var(--btn-primary-fg);
@@ -267,8 +288,9 @@
   gap: 8px 12px;
   min-height: var(--topbar-alto);
   padding: 8px 16px;
-  background: linear-gradient(135deg, var(--sidebar-1) 0%, var(--sidebar-2) 100%);
-  border-bottom: 2px solid var(--verde-oscuro);
+  background: var(--sidebar-degradado);
+  background-attachment: fixed;
+  border-bottom: 2px solid var(--sidebar-contorno);
 }
 .app-topbar__titulo {
   font-size: 1rem;
@@ -378,7 +400,7 @@
 
   /* El botón activo sobresale hasta el contenido; el menú de escritorio no
      debe recortarlo horizontalmente. */
-  .sidebar__nav { overflow: visible; }
+  .sidebar-colapsada .sidebar__nav { padding-block: 0; overflow: visible; }
 
   .sidebar-colapsada .sidebar { padding: 16px 10px; }
   .sidebar-colapsada .sidebar__brand {
@@ -406,8 +428,13 @@
   .sidebar-colapsada .sidebar__nav > .nav-item.active {
     background: transparent;
   }
-  .sidebar-colapsada .sidebar__nav > .nav-item.active::before,
-  .sidebar-colapsada .sidebar__nav > .nav-item.active::after { display: none; }
+  .sidebar-colapsada .sidebar__nav > .nav-item.active > .nav-curve { display: none; }
+  .sidebar-colapsada .sidebar__nav > .nav-item > .nav-link.active {
+    width: 100%;
+    padding: 0;
+    border: 2px solid var(--sidebar-contorno);
+    border-radius: 999px;
+  }
 
   .sidebar-colapsada .sidebar__cuenta {
     padding: 12px 0 0;
@@ -458,8 +485,17 @@ code { color: inherit; }
     box-shadow: 0 0 40px rgba(0, 0, 0, .35);
   }
   .sidebar::after { top: 0; }
+  .sidebar__nav { padding-block: 0; }
   .app-shell.sidebar-abierta .sidebar { transform: translateX(0); }
   .app-shell.sidebar-abierta .sidebar-backdrop { display: block; }
+
+  .sidebar__nav > .nav-item.active { padding: 4px; background: transparent; }
+  .sidebar__nav > .nav-item.active > .nav-curve { display: none; }
+  .sidebar__nav > .nav-item > .nav-link.active {
+    width: 100%;
+    border: 2px solid var(--sidebar-contorno);
+    border-radius: 999px;
+  }
 
   .sidebar-toggle { display: inline-flex; }
   /* El botón de dentro de la sidebar sólo sirve en escritorio. */
