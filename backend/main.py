@@ -20,9 +20,12 @@ import smtplib
 import ssl
 
 import httpx
-from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import (BackgroundTasks, Depends, FastAPI, File, Form, HTTPException,
+                     Query, Request, UploadFile, status)
 from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from pydantic import BaseModel
 
 from db import (
@@ -62,8 +65,59 @@ DATA_FILE = BASE_DIR / "data" / "plantillas.json"
 FRONTEND_DIR = BASE_DIR / "frontend"
 
 
-app = FastAPI(title="SNW - API de Notificaciones WhatsApp")
+app = FastAPI(
+    title="SNW - API de Notificaciones WhatsApp",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 app.include_router(whatsapp_router)
+
+_documentacion_basic = HTTPBasic(auto_error=False)
+
+
+def exigir_desarrollador_documentacion(
+        credenciales: HTTPBasicCredentials | None = Depends(_documentacion_basic)):
+    """Protege Swagger, ReDoc y el esquema OpenAPI con credenciales dev."""
+    if credenciales is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Inicia sesión con una cuenta desarrollador para ver la documentación.",
+            headers={"WWW-Authenticate": 'Basic realm="Documentación API"'},
+        )
+    usuario = usuario_buscar(credenciales.username.strip().lower())
+    clave_hash = hashlib.sha256(credenciales.password.encode("utf-8")).hexdigest()
+    hash_guardado = str((usuario or {}).get("clave_hash") or "")
+    if (usuario is None or not usuario.get("activo", True)
+            or usuario.get("rol") != "desarrollador"
+            or not secrets.compare_digest(hash_guardado, clave_hash)):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="La documentación es exclusiva de cuentas desarrollador activas.",
+        )
+    return usuario
+
+
+@app.get("/openapi.json", include_in_schema=False)
+def esquema_openapi(_dev: dict = Depends(exigir_desarrollador_documentacion)):
+    return app.openapi()
+
+
+@app.get("/docs", include_in_schema=False, response_class=HTMLResponse)
+def documentacion_swagger(_dev: dict = Depends(exigir_desarrollador_documentacion)):
+    return get_swagger_ui_html(
+        openapi_url="/openapi.json",
+        title=f"{app.title} - Swagger UI",
+        swagger_ui_parameters={"persistAuthorization": True},
+    )
+
+
+@app.get("/redoc", include_in_schema=False, response_class=HTMLResponse)
+def documentacion_redoc(_dev: dict = Depends(exigir_desarrollador_documentacion)):
+    return get_redoc_html(
+        openapi_url="/openapi.json",
+        title=f"{app.title} - ReDoc",
+    )
 
 
 # Crea/siembra la tabla `configuracion` al arrancar

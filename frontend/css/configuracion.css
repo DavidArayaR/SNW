@@ -13,6 +13,24 @@
   font-size: .85em;
 }
 
+.config-api-docs {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 0 18px 20px;
+  padding: 16px 18px;
+  border: 1px solid var(--borde);
+  border-top: 3px solid var(--verde);
+  border-bottom: 3px solid var(--verde);
+  border-radius: 12px;
+  background: var(--panel-2);
+}
+.config-api-docs h3 { margin: 0 0 4px; font-size: 1rem; }
+.config-api-docs p { margin: 0; color: var(--texto-suave); font-size: .88rem; }
+.config-api-docs .btn { flex: 0 0 auto; }
+
 .config-seccion { margin-bottom: 18px; }
 .config-seccion .panel__head h2 {
   display: flex;
