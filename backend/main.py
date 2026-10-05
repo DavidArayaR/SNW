@@ -1349,6 +1349,41 @@ def expr_select_pacientes(ambiente: str, tabla: str | None = None) -> str:
     return ", ".join(exprs)
 
 
+def _numeros_prueba_editables(ambiente: str) -> set[str]:
+    """Números autorizados para ajustes manuales en la base de este entorno."""
+    clave = "numeros_prueba_dev" if entorno_valido(ambiente) == "desarrollo" else "numeros_prueba_prod"
+    return {normalizado for valor in config_get(clave, "").split(",")
+            if (normalizado := normalizar_telefono(valor))}
+
+
+def _es_numero_prueba_editable(telefono: str | None, permitidos: set[str]) -> bool:
+    return normalizar_telefono(telefono or "") in permitidos
+
+
+def _exigir_numero_prueba_editable(telefono: str | None, permitidos: set[str]) -> None:
+    if not _es_numero_prueba_editable(telefono, permitidos):
+        raise HTTPException(403, detail="Solo se pueden editar el estado y la respuesta de números de prueba configurados para esta base.")
+
+
+def _propagar_baja_manual_a_pruebas(cur, telefono: str, tabla_origen: str,
+                                    ambiente: str, indice: dict | None = None) -> dict:
+    """Propaga un ajuste manual solo a otras copias donde el número también
+    esté configurado como prueba; el webhook conserva su propagación global."""
+    numero = normalizar_telefono(telefono or "")
+    if not numero:
+        return {"bases": [], "omitidos": 0}
+    indice = indice if indice is not None else servicio_areas.indice_pacientes_por_telefono(cur, ambiente)
+    dev = _numeros_prueba_editables("desarrollo")
+    prod = _numeros_prueba_editables("produccion")
+    coincidencias = {
+        tabla: ids for tabla, ids in indice.get(numero, {}).items()
+        if numero in (dev if tabla == "pacientes_dev" else prod)
+    }
+    return servicio_areas.propagar_a_todas_las_bases(
+        cur, numero, respuesta="baja", excluir=tabla_origen, ambiente=ambiente,
+        indice={numero: coincidencias})
+
+
 def listar_pacientes(q: str | None = Query(None), ambiente: str = Query("produccion"),
                      area_id: int | None = Query(None),
                      sesion: dict = Depends(sesion_actual)):
@@ -1368,7 +1403,9 @@ def listar_pacientes(q: str | None = Query(None), ambiente: str = Query("producc
         filas = cur.fetchall()
 
     propios = _ids_csv_propios(t, [f["id"] for f in filas], sesion)
+    numeros_editables = _numeros_prueba_editables("produccion" if _esp else ambiente)
     for f in filas:
+        f["editable"] = _es_numero_prueba_editable(f.get("telefono"), numeros_editables)
         f["datos_completos"] = f["id"] in propios
         if not f["datos_completos"]:
             _ocultar_datos_paciente(f)
@@ -1406,12 +1443,16 @@ def actualizar_estado_pacientes(body: EstadoPacientesBulkIn, ambiente: str = Que
     if body.estado not in ("pendiente", "enviado", "error"):
         raise HTTPException(400, detail="Estado inválido. Use: pendiente, enviado o error")
     t, _esp = _resolver_tabla_pacientes(sesion, ambiente, area_id)
+    numeros_editables = _numeros_prueba_editables("produccion" if _esp else ambiente)
     placeholders = ", ".join("%s" for _ in body.pacientes)
     with conectar(ambiente) as conn, conn.cursor() as cur:
-        cur.execute(f"SELECT id FROM {t} WHERE id IN ({placeholders})", tuple(body.pacientes))
-        encontrados = [r["id"] for r in cur.fetchall()]
+        cur.execute(f"SELECT id, telefono FROM {t} WHERE id IN ({placeholders})", tuple(body.pacientes))
+        filas = cur.fetchall()
+        encontrados = [r["id"] for r in filas]
         if not encontrados:
             raise HTTPException(404, detail="No se encontró ninguno de los pacientes seleccionados")
+        for fila in filas:
+            _exigir_numero_prueba_editable(fila.get("telefono"), numeros_editables)
         if columna_existe(t, "estado", ambiente):
             placeholders_enc = ", ".join("%s" for _ in encontrados)
             cur.execute(
@@ -1439,14 +1480,18 @@ def actualizar_respuesta_pacientes(body: RespuestaPacientesBulkIn, ambiente: str
     if body.respuesta not in ("pendiente", "baja"):
         raise HTTPException(400, detail="Respuesta inválida. Use: pendiente, baja")
     t, _esp = _resolver_tabla_pacientes(sesion, ambiente, area_id)
+    numeros_editables = _numeros_prueba_editables("produccion" if _esp else ambiente)
     tiene_manual = columna_existe(t, "respuesta_manual", ambiente)
     tiene_interesado = columna_existe(t, "interesado", ambiente)
     placeholders = ", ".join("%s" for _ in body.pacientes)
     with conectar(ambiente) as conn, conn.cursor() as cur:
-        cur.execute(f"SELECT id FROM {t} WHERE id IN ({placeholders})", tuple(body.pacientes))
-        encontrados = [r["id"] for r in cur.fetchall()]
+        cur.execute(f"SELECT id, telefono FROM {t} WHERE id IN ({placeholders})", tuple(body.pacientes))
+        filas = cur.fetchall()
+        encontrados = [r["id"] for r in filas]
         if not encontrados:
             raise HTTPException(404, detail="No se encontró ninguno de los pacientes seleccionados")
+        for fila in filas:
+            _exigir_numero_prueba_editable(fila.get("telefono"), numeros_editables)
 
         bloqueados: set[int] = set()
         if body.respuesta != "baja":
@@ -1490,8 +1535,8 @@ def actualizar_respuesta_pacientes(body: RespuestaPacientesBulkIn, ambiente: str
                     f" FROM {t} WHERE id = %s",
                     (f"[Ajuste manual · {sesion.get('nombre', 'admin')}]", body.respuesta, pid),
                 )
-        # La baja se propaga al mismo número en las demás bases (por si el
-        # paciente también está cargado en otra especialidad).
+        # La baja manual solo se propaga a copias donde el número también sea
+        # de prueba; el webhook conserva la propagación global.
         otras: list[dict] = []
         if body.respuesta == "baja":
             cur.execute(f"SELECT telefono FROM {t} WHERE id IN ({placeholders_enc})",
@@ -1500,9 +1545,7 @@ def actualizar_respuesta_pacientes(body: RespuestaPacientesBulkIn, ambiente: str
             por_base: dict[str, dict] = {}
             indice = servicio_areas.indice_pacientes_por_telefono(cur, ambiente)
             for tel in telefonos:
-                res = servicio_areas.propagar_a_todas_las_bases(
-                    cur, tel, respuesta="baja", excluir=t, ambiente=ambiente,
-                    indice=indice)
+                res = _propagar_baja_manual_a_pruebas(cur, tel, t, ambiente, indice)
                 for b in res.get("bases") or []:
                     acc = por_base.setdefault(b["tabla"], {"tabla": b["tabla"], "actualizados": 0})
                     acc["actualizados"] += b["actualizados"]
@@ -1521,10 +1564,13 @@ def actualizar_paciente(paciente_id: int, body: EstadoPacienteIn,
     if body.estado not in ("pendiente", "enviado", "error"):
         raise HTTPException(400, detail="Estado inválido. Use: pendiente, enviado o error")
     t, _esp = _resolver_tabla_pacientes(sesion, ambiente, area_id)
+    numeros_editables = _numeros_prueba_editables("produccion" if _esp else ambiente)
     with conectar(ambiente) as conn, conn.cursor() as cur:
-        cur.execute(f"SELECT id FROM {t} WHERE id = %s", (paciente_id,))
-        if not cur.fetchone():
+        cur.execute(f"SELECT id, telefono FROM {t} WHERE id = %s", (paciente_id,))
+        paciente = cur.fetchone()
+        if not paciente:
             raise HTTPException(404, detail="Paciente no encontrado")
+        _exigir_numero_prueba_editable(paciente.get("telefono"), numeros_editables)
         if columna_existe(t, "estado", ambiente):
             cur.execute(f"UPDATE {t} SET estado = %s WHERE id = %s", (body.estado, paciente_id))
             conn.commit()
@@ -1533,6 +1579,7 @@ def actualizar_paciente(paciente_id: int, body: EstadoPacienteIn,
             (paciente_id,),
         )
         fila = cur.fetchone()
+        fila["editable"] = _es_numero_prueba_editable(fila.get("telefono"), numeros_editables)
         fila["datos_completos"] = paciente_id in _ids_csv_propios(t, [paciente_id], sesion)
         if not fila["datos_completos"]:
             _ocultar_datos_paciente(fila)
@@ -1552,11 +1599,14 @@ def actualizar_respuesta_paciente(paciente_id: int, body: RespuestaIn,
     if body.respuesta not in ("pendiente", "baja"):
         raise HTTPException(400, detail="Respuesta inválida. Use: pendiente, baja")
     t, _esp = _resolver_tabla_pacientes(sesion, ambiente, area_id)
+    numeros_editables = _numeros_prueba_editables("produccion" if _esp else ambiente)
     tiene_manual = columna_existe(t, "respuesta_manual", ambiente)
     with conectar(ambiente) as conn, conn.cursor() as cur:
-        cur.execute(f"SELECT id FROM {t} WHERE id = %s", (paciente_id,))
-        if not cur.fetchone():
+        cur.execute(f"SELECT id, telefono FROM {t} WHERE id = %s", (paciente_id,))
+        paciente = cur.fetchone()
+        if not paciente:
             raise HTTPException(404, detail="Paciente no encontrado")
+        _exigir_numero_prueba_editable(paciente.get("telefono"), numeros_editables)
 
         if body.respuesta != "baja" and _pacientes_baja_bloqueada(cur, t, ambiente, [paciente_id]):
             raise HTTPException(
@@ -1608,9 +1658,8 @@ def actualizar_respuesta_paciente(paciente_id: int, body: RespuestaIn,
     fila["actualizado"] = fecha.strftime("%d-%m-%Y %H:%M") if fecha else "—"
     fr = fila.get("ultima_respuesta_fecha")
     fila["ultima_respuesta_fecha"] = fr.strftime("%d-%m-%Y %H:%M") if fr else None
-    # Si se marcó la baja, el mismo paciente queda dado de baja en las demás
-    # bases donde aparece su número (misma persona, otra especialidad): si no,
-    # el sistema le seguiría mandando mensajes desde la base que no se tocó.
+    fila["editable"] = _es_numero_prueba_editable(fila.get("telefono"), numeros_editables)
+    # La baja manual se replica solo donde este número también sea de prueba.
     if body.respuesta == "baja":
         fila["otras_bases"] = _propagar_baja_otras_bases(t, fila.get("telefono"), ambiente)
     fila["datos_completos"] = paciente_id in _ids_csv_propios(t, [paciente_id], sesion)
@@ -1620,14 +1669,12 @@ def actualizar_respuesta_paciente(paciente_id: int, body: RespuestaIn,
 
 
 def _propagar_baja_otras_bases(tabla: str, telefono: str | None, ambiente: str) -> list[dict]:
-    """Da de baja al mismo número en el resto de bases y devuelve el detalle."""
+    """Da de baja al mismo número en otras bases donde también sea de prueba."""
     if not telefono:
         return []
     with conectar(ambiente) as conn, conn.cursor() as cur:
         indice = servicio_areas.indice_pacientes_por_telefono(cur, ambiente)
-        res = servicio_areas.propagar_a_todas_las_bases(
-            cur, telefono, respuesta="baja", excluir=tabla, ambiente=ambiente,
-            indice=indice)
+        res = _propagar_baja_manual_a_pruebas(cur, telefono, tabla, ambiente, indice)
         conn.commit()
     detalle = res.get("bases") or []
     for b in detalle:
@@ -5592,16 +5639,26 @@ def actualizar_respuesta(registro_id: int, body: EstadoPacienteIn,
     cols_log = columnas_tabla("log_envios", ambiente)
     cols_env = columnas_tabla("envios", ambiente)
     with conectar(ambiente) as conn, conn.cursor() as cur:
-        esp_id_reg = None
-        if "envio_id" in cols_log and "area_id" in cols_env:
+        if "envio_id" in cols_log:
+            area_expr = "e.area_id" if "area_id" in cols_env else "NULL"
+            base_expr = "e.base_datos" if "base_datos" in cols_env else "NULL"
+            tabla_expr = "le.tabla_pacientes" if "tabla_pacientes" in cols_log else "NULL"
             cur.execute(
-                "SELECT e.area_id FROM log_envios le"
-                " JOIN envios e ON e.id = le.envio_id"
+                f"SELECT le.numero_telefono, {area_expr} AS area_id,"
+                f" {base_expr} AS base_datos, {tabla_expr} AS tabla_pacientes"
+                " FROM log_envios le LEFT JOIN envios e ON e.id = le.envio_id"
                 " WHERE le.id = %s",
                 (registro_id,),
             )
-            _r = cur.fetchone() or {}
-            esp_id_reg = _r.get("area_id")
+        else:
+            tabla_expr = "tabla_pacientes" if "tabla_pacientes" in cols_log else "NULL"
+            cur.execute(f"SELECT numero_telefono, NULL AS area_id, NULL AS base_datos,"
+                        f" {tabla_expr} AS tabla_pacientes"
+                        " FROM log_envios WHERE id = %s", (registro_id,))
+        registro = cur.fetchone()
+        if not registro:
+            raise HTTPException(404, detail="Registro no encontrado")
+        esp_id_reg = registro.get("area_id")
         if esp_id_reg is not None:
             if servicio_areas.obtener_area(esp_id_reg) is not None:
                 _exigir_area(sesion, esp_id_reg)
@@ -5609,6 +5666,17 @@ def actualizar_respuesta(registro_id: int, body: EstadoPacienteIn,
                 raise HTTPException(403, detail="No tienes acceso a este registro.")
         elif not _es_privilegiado(sesion):
             raise HTTPException(403, detail="No tienes acceso a este registro.")
+        base_registro = registro.get("tabla_pacientes") or registro.get("base_datos") or ""
+        if base_registro:
+            entorno_registro = "desarrollo" if base_registro == "pacientes_dev" else "produccion"
+            permitidos = _numeros_prueba_editables(entorno_registro)
+        else:
+            # Logs antiguos sin base identificable: nunca admitir números que
+            # no sean de prueba, sin confiar en el `ambiente` del cliente.
+            permitidos = (_numeros_prueba_editables("desarrollo") |
+                          _numeros_prueba_editables("produccion"))
+        _exigir_numero_prueba_editable(
+            registro.get("numero_telefono"), permitidos)
         cur.execute("UPDATE log_envios SET respuesta = %s WHERE id = %s", (body.estado, registro_id))
         conn.commit()
     return {"ok": True}

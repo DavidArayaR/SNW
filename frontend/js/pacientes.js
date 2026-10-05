@@ -162,6 +162,14 @@ async function cargarBasesPac() {
 // desarrollador. El backend lo exige igual (Depends(solo_admin)).
 const PUEDE_ELIMINAR_TABLA = !!window.snwEsPrivilegiado;
 
+function puedeEditarPaciente(p) {
+  return PUEDE_GESTIONAR_PAC && !!p.editable;
+}
+
+function puedeSeleccionarPaciente(p) {
+  return puedeEditarPaciente(p) || (espPacId() != null && PUEDE_ELIMINAR_TABLA);
+}
+
 function areaActual() {
   const esp = espPacId();
   return esp == null ? null : areas.find((x) => x.id === esp) || null;
@@ -204,7 +212,7 @@ function aplicarModoBase() {
 
   // El borrado de registros seleccionados solo existe para tablas de área.
   const btnDelMasivo = $("#btnEliminarMasivo");
-  if (btnDelMasivo) btnDelMasivo.hidden = esp == null;
+  if (btnDelMasivo) btnDelMasivo.hidden = esp == null || !PUEDE_ELIMINAR_TABLA;
   const tituloEl = $("#tituloPacientes");
   if (tituloEl && tabla) tituloEl.textContent = `Pacientes · ${tabla}`;
 }
@@ -269,6 +277,10 @@ async function cargar(mostrarFeedback = false) {
     }));
     config = await rc.json();
 
+    seleccionados = new Set([...seleccionados].filter((id) =>
+      pacientes.some((p) => p.id === id && puedeSeleccionarPaciente(p))));
+    if (!seleccionados.size) todoMarcado = false;
+
     aplicarModoBase();
 
     render();
@@ -286,6 +298,8 @@ function render() {
   tbodyEl.innerHTML = "";
 
   for (const p of enPagina) {
+    const editable = puedeEditarPaciente(p);
+    const seleccionable = puedeSeleccionarPaciente(p);
     const nombreCompleto = [p.nombre, p.apellido].filter(Boolean).join(" ");
     const tr = document.createElement("tr");
     const respuesta = p.respuesta || "pendiente";
@@ -318,13 +332,13 @@ function render() {
       // Sin permiso de gestión la casilla no existe: tampoco su celda, o las
       // filas quedarían con una columna más que la cabecera.
       (PUEDE_GESTIONAR_PAC
-        ? `<td class="col-check"><input type="checkbox" data-id="${p.id}" ${seleccionados.has(p.id) ? "checked" : ""}></td>`
+        ? `<td class="col-check">${seleccionable ? `<input type="checkbox" data-id="${p.id}" ${seleccionados.has(p.id) ? "checked" : ""}>` : ""}</td>`
         : "") +
       `<td class="campo-id">${p.id}</td>` +
       `<td class="campo-nombre">${escaparHtml(nombreCompleto)}</td>` +
       `<td class="campo-tel">${escaparHtml(p.telefono)}</td>` +
       `<td class="campo-estado">` +
-        `<span class="estado-badge estado-${escaparHtml(p.estado)}"${PUEDE_GESTIONAR_PAC ? ` data-editable data-id="${p.id}" title="Click para cambiar estado"` : ""}>${escaparHtml(p.estado)}</span>` +
+        `<span class="estado-badge estado-${escaparHtml(p.estado)}"${editable ? ` data-editable data-id="${p.id}" title="Click para cambiar estado"` : ` title="${PUEDE_GESTIONAR_PAC ? "Solo se edita en números de prueba" : "Sin permiso para editar"}"`}>${escaparHtml(p.estado)}</span>` +
         `<select class="estado-select" data-id="${p.id}" hidden>` +
           `<option value="pendiente"${p.estado === "pendiente" ? " selected" : ""}>pendiente</option>` +
           `<option value="enviado"${p.estado === "enviado" ? " selected" : ""}>enviado</option>` +
@@ -333,8 +347,8 @@ function render() {
       celdaError +
       `<td class="campo-respuesta">` +
         `<span class="respuesta-badge respuesta-${escaparHtml(respuesta)}${bajaBloqueada ? " respuesta-badge--bloqueada" : ""}"` +
-          `${!PUEDE_GESTIONAR_PAC || bajaBloqueada ? "" : " data-editable"} data-id="${p.id}"` +
-          ` title="${escaparHtml(!PUEDE_GESTIONAR_PAC || bajaBloqueada ? tituloResp : tituloResp + " · click para cambiar")}">` +
+          `${!editable || bajaBloqueada ? "" : " data-editable"} data-id="${p.id}"` +
+          ` title="${escaparHtml(!editable || bajaBloqueada ? tituloResp + (PUEDE_GESTIONAR_PAC && !p.editable ? " · Solo se edita en números de prueba" : "") : tituloResp + " · click para cambiar")}">` +
           `${bajaBloqueada ? '<i class="fa-solid fa-lock"></i> ' : ""}${escaparHtml(respuestaLabels[respuesta] ?? respuesta)}</span>` +
         `<select class="respuesta-select" data-id="${p.id}" hidden>` +
           // "Respondió" no es una opción manual: solo la pone el propio
@@ -402,21 +416,29 @@ function render() {
 function refrescarSeleccion(visibles = null) {
   // Sin argumento: la página actual. El "seleccionar todos" opera sobre la
   // página visible, no sobre todo el filtro.
-  visibles = visibles ?? itemsPaginaPac(filtradosPac());
+  visibles = (visibles ?? itemsPaginaPac(filtradosPac())).filter(puedeSeleccionarPaciente);
 
   contadorSel.textContent =
     seleccionados.size > 0 ? `${seleccionados.size} seleccionado${seleccionados.size === 1 ? "" : "s"}` : "";
 
   if (toolbarMasivo) toolbarMasivo.hidden = seleccionados.size === 0;
 
+  const soloPruebas = [...seleccionados].every((id) =>
+    pacientes.some((p) => p.id === id && puedeEditarPaciente(p)));
+  if (selEstadoMasivo) selEstadoMasivo.disabled = !soloPruebas;
+  if (selRespuestaMasivo) selRespuestaMasivo.disabled = !soloPruebas;
+  const avisoMasivo = $("#avisoMasivoPrueba");
+  if (avisoMasivo) avisoMasivo.hidden = seleccionados.size === 0 || soloPruebas;
+
   chkTodos.checked =
     visibles.length > 0 && visibles.every((p) => seleccionados.has(p.id));
+  chkTodos.disabled = visibles.length === 0;
 }
 
 // Devuelve los ids de la página actual (el "seleccionar todos" opera sobre
 // la página visible, no sobre todo el filtro).
 function idsSeleccionables() {
-  return new Set(itemsPaginaPac(filtradosPac()).map((p) => p.id));
+  return new Set(itemsPaginaPac(filtradosPac()).filter(puedeSeleccionarPaciente).map((p) => p.id));
 }
 
 // Mantiene la selección coherente con el filtro actual:
@@ -655,10 +677,8 @@ function marcarFilasActualizando(ids, on) {
 let masivoPendiente = null;
 
 // --- Baja en cascada ---------------------------------------------------------
-// El número identifica a la persona, no la base: al marcar «Se dio de baja» el
-// backend propaga la baja a todas las bases donde esté ese mismo número (por si
-// el paciente también estaba cargado en otra especialidad). Se avisa de cuántas
-// filas se tocaron para que el ajuste no sea una caja negra.
+// Una baja manual se replica en otras bases solo cuando allí el número también
+// figura entre los de prueba. Se informa qué bases se actualizaron.
 function mensajeBaja(paciente, base) {
   const otras = (paciente && paciente.otras_bases) || [];
   if (!otras.length) return base;
@@ -675,6 +695,11 @@ function pedirConfirmacionMasiva(sel, url, campo) {
   if (!ids.length) {
     sel.value = "";
     toast("Selecciona al menos un paciente primero.", "error");
+    return;
+  }
+  if (ids.some((id) => !pacientes.some((p) => p.id === id && puedeEditarPaciente(p)))) {
+    sel.value = "";
+    toast("Solo los números de prueba permiten cambiar estado o respuesta.", "error");
     return;
   }
   const etiquetas = campo === "estado" ? ESTADO_LABEL : RESPUESTA_LABEL;
@@ -715,7 +740,7 @@ async function ejecutarMasivo() {
     if (data.bloqueados) {
       msg += ` ${data.bloqueados} no se pudo${data.bloqueados === 1 ? "" : "n"} cambiar (pidieron la baja por WhatsApp).`;
     }
-    // La baja se propaga al mismo número en las demás bases.
+    // La baja manual se propaga a otras copias de prueba del mismo número.
     if (campo === "respuesta" && valor === "baja" && (data.otras_bases || []).length) {
       const detalle = data.otras_bases
         .map((b) => `${b.nombre || b.tabla} (${b.actualizados})`).join(", ");

@@ -350,12 +350,21 @@ visibles para las cuentas asignadas. En ambos casos, ver una base **no** concede
 los datos personales completos de todos sus pacientes: rige la autoría del CSV descrita
 en `paciente_csv_accesos`.
 
+El **estado y la respuesta solo se pueden editar manualmente en números de prueba**:
+`numeros_prueba_dev` para `pacientes_dev` y `numeros_prueba_prod` para
+`pacientes_prod` y las bases de área. Los demás registros son de solo lectura para
+estos campos, incluso para admin/dev. Una petición individual o masiva que incluya
+un número no autorizado devuelve 403 sin modificar ningún registro. Esto no impide
+las actualizaciones automáticas del motor de envío o del webhook ni el borrado
+autorizado de registros en una base de área. Una baja **manual** solo se replica
+en otras bases si ese mismo número también figura como prueba allí.
+
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/pacientes?q=&ambiente=&area_id=` | Lista de la base indicada; con `area_id` lee `pacientes_<slug>` (403 si no está asignada). Cada fila indica `datos_completos`. Para quien no importó al paciente, devuelve solo iniciales y teléfono oculto, sin último mensaje ni error. La búsqueda `q` se aplica a esos valores visibles, no a los datos originales |
+| GET | `/api/pacientes?q=&ambiente=&area_id=` | Lista de la base indicada; con `area_id` lee `pacientes_<slug>` (403 si no está asignada). Cada fila indica `datos_completos` y `editable` (si su número está en la lista de prueba de la base). Para quien no importó al paciente, devuelve solo iniciales y teléfono oculto, sin último mensaje ni error. La búsqueda `q` se aplica a esos valores visibles |
 | PUT | `/api/pacientes/{id}?ambiente=&area_id=` | Cambiar `estado` (`pendiente`/`enviado`/`error`) de **un** paciente |
 | PUT | `/api/pacientes/estado-masivo?ambiente=` | `{pacientes: [ids], estado}` — igual que arriba pero para **varios** pacientes a la vez (selección en la pestaña Pacientes) |
-| PUT | `/api/pacientes/{id}/respuesta?ambiente=` | Ajuste manual de la respuesta (`pendiente`/`respondio`/`baja`) de **un** paciente; `baja` activa el opt-out. 409 si el paciente pidió la baja explícitamente por WhatsApp y se intenta poner algo distinto de `baja` (ver `opt_out_explicito`) |
+| PUT | `/api/pacientes/{id}/respuesta?ambiente=` | Ajuste manual de la respuesta (`pendiente`/`baja`) de **un** paciente de prueba; `baja` activa el opt-out. 409 si el paciente pidió la baja explícitamente por WhatsApp y se intenta poner algo distinto de `baja` (ver `opt_out_explicito`) |
 | PUT | `/api/pacientes/respuesta-masiva?ambiente=` | `{pacientes: [ids], respuesta}` — igual que arriba pero para **varios** pacientes a la vez. Los que tengan la baja bloqueada se saltan (no fallan los demás); responde `{actualizados, bloqueados}`; 409 solo si **todos** los seleccionados están bloqueados |
 | GET | `/api/pacientes/{id}/mensajes?ambiente=&area_id=` | Hilo completo de mensajes entrantes y salientes; marca `interes: true` los entrantes que suenan a interés. **Solo** la cuenta que incorporó a ese paciente por CSV puede consultarlo (403 para las demás, incluso admin/dev). Es lo que muestra «Ver mensajes» en Historial |
 
@@ -975,10 +984,10 @@ claro** de la sidebar, o con el botón flotante en la portada y el login (págin
   cuenta usa «Mi cuenta» o «¿Olvidaste tu contraseña?».
 - **Pacientes** (`pacientes.html`, para admin/dev y cuentas asignadas a un área): **selector único
   de base de datos** (desarrollo/producción/áreas con su tabla), tabla con estado
-  editable en línea, columna **Error** (motivo del último fallo), columna **Respuesta** con
+  editable en línea **solo para números de prueba**, columna **Error** (motivo del último fallo), columna **Respuesta** con
   la señal de WhatsApp (Respondió / Se dio de baja / Sin respuesta) y su fecha, filtros por
   estado/respuesta, **paginación** (10 a 100 por página) y **carga CSV** en el área elegida, y selección múltiple para editar **estado o respuesta de varios
-  pacientes a la vez** (barra «Con los seleccionados», aparece al marcar alguno; pide
+  pacientes de prueba a la vez** (barra «Con los seleccionados», aparece al marcar alguno; pide
   confirmación con la cantidad antes de aplicar). En tablas de áreas hay además
   borrado por fila (×) y en bloque («Eliminar»). Un badge de «Se dio de baja» con
   &#128274; no se puede editar (ni uno por uno ni en bloque): esa baja la pidió el propio
