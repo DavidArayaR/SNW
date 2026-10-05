@@ -160,6 +160,28 @@
     shellEl.classList.add("sidebar-colapsada");
   }
 
+  // En Inicio, el botón activo acompaña el color del hero mientras esa franja
+  // siga visible debajo de la topbar; al pasarla, se funde con el fondo normal.
+  if (PAGINA === "inicio") {
+    const heroInicio = document.querySelector(".hero");
+    const topbarInicio = document.querySelector(".app-topbar");
+    if (heroInicio && topbarInicio) {
+      let frameHeroInicio = 0;
+      const actualizarColorActivoInicio = () => {
+        if (frameHeroInicio) return;
+        frameHeroInicio = window.requestAnimationFrame(() => {
+          frameHeroInicio = 0;
+          const heroPasado = heroInicio.getBoundingClientRect().bottom <=
+            topbarInicio.getBoundingClientRect().bottom + 32;
+          document.body.classList.toggle("inicio-hero-superado", heroPasado);
+        });
+      };
+      actualizarColorActivoInicio();
+      window.addEventListener("scroll", actualizarColorActivoInicio, { passive: true });
+      window.addEventListener("resize", actualizarColorActivoInicio);
+    }
+  }
+
   const LINKS_BASE = [
     { pagina: "inicio",       href: "index.html",        icono: "fa-house",             texto: "Inicio" },
     { pagina: "mensajeria",   href: "mensajeria.html",   icono: "fa-paper-plane",       texto: "Mensajería y plantillas", perm: "mensajeria" },
@@ -225,8 +247,6 @@
       `<a class="sidebar__brand" href="index.html" title="Notificaciones WhatsApp">` +
       `<i class="fa-brands fa-whatsapp"></i>` +
       `<span><strong>Notificaciones</strong><small>Sistema Notificaciones WhatsApp</small></span></a>` +
-      `<button type="button" class="sidebar__plegar" id="btnPlegar" aria-label="Plegar o expandir el menú">` +
-      `<i class="fa-solid fa-angles-left"></i></button>` +
       `<ul class="nav flex-column sidebar__nav">${items}</ul>` +
       `<div class="sidebar__cuenta" aria-label="Acciones de cuenta">` +
       `<button type="button" class="sidebar__accion" id="btnTema" title="Cambiar entre modo claro y oscuro" aria-label="Cambiar entre modo claro y oscuro">` +
@@ -266,7 +286,8 @@
         e.stopPropagation();
         const abierto = subnavAdmin.hidden;
         pintarAdmin(abierto);
-        if (abierto && window.matchMedia("(max-width: 991.98px)").matches) {
+        if (abierto && (window.matchMedia("(max-width: 991.98px)").matches ||
+            shell?.classList.contains("sidebar-colapsada"))) {
           window.requestAnimationFrame(() => subnavAdmin.scrollIntoView({ block: "nearest" }));
         }
       });
@@ -392,26 +413,52 @@
   const backdrop = document.querySelector(".sidebar-backdrop");
   const cerrarMovil = () => shell && shell.classList.remove("sidebar-abierta");
 
-  // Escritorio: plegar/expandir a modo icono (se recuerda).
-  const btnPlegar = document.getElementById("btnPlegar");
-  if (btnPlegar && shell) {
-    btnPlegar.addEventListener("click", () => {
-      const col = shell.classList.toggle("sidebar-colapsada");
-      try { localStorage.setItem("snw_sidebar_colapsada", col ? "1" : "0"); } catch (e) { /* modo privado */ }
-    });
-  }
-
-  // Móvil: hamburguesa de la barra superior abre/cierra el cajón.
+  // Un solo control junto al título: en escritorio pliega la sidebar y en
+  // móvil abre/cierra el cajón.
   const toggle = document.getElementById("sidebarToggle");
+  const anchoMovil = window.matchMedia("(max-width: 991.98px)");
+  const actualizarControlSidebar = () => {
+    if (!toggle || !shell) return;
+    const icono = toggle.querySelector("i");
+    const movil = anchoMovil.matches;
+    const abierta = shell.classList.contains("sidebar-abierta");
+    const colapsada = shell.classList.contains("sidebar-colapsada");
+    if (icono) {
+      icono.className = movil
+        ? (abierta ? "fa-solid fa-xmark" : "fa-solid fa-bars")
+        : (colapsada ? "fa-solid fa-angles-right" : "fa-solid fa-angles-left");
+    }
+    toggle.setAttribute("aria-label", movil
+      ? (abierta ? "Cerrar menú" : "Abrir menú")
+      : (colapsada ? "Expandir sidebar" : "Contraer sidebar"));
+    toggle.setAttribute("aria-expanded", String(movil ? abierta : !colapsada));
+    if (sidebar) toggle.setAttribute("aria-controls", "sidebar");
+  };
   if (toggle && shell) {
     toggle.addEventListener("click", (e) => {
       e.stopPropagation();
-      shell.classList.toggle("sidebar-abierta");
+      if (anchoMovil.matches) {
+        shell.classList.toggle("sidebar-abierta");
+      } else {
+        const colapsada = shell.classList.toggle("sidebar-colapsada");
+        try { localStorage.setItem("snw_sidebar_colapsada", colapsada ? "1" : "0"); } catch (e) { /* modo privado */ }
+      }
+      actualizarControlSidebar();
     });
+    window.addEventListener("resize", actualizarControlSidebar);
+    actualizarControlSidebar();
   }
 
-  if (backdrop) backdrop.addEventListener("click", cerrarMovil);
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") cerrarMovil(); });
+  if (backdrop) backdrop.addEventListener("click", () => {
+    cerrarMovil();
+    actualizarControlSidebar();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      cerrarMovil();
+      actualizarControlSidebar();
+    }
+  });
 
   // Refresco silencioso: si el administrador cambió el rol o los permisos de
   // esta cuenta, se actualiza el almacenamiento local y se recarga la página

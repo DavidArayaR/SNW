@@ -13,6 +13,7 @@
 :root[data-tema="oscuro"] { --sidebar-contorno: #86d2bd; }
 /* En Inicio, el seleccionado continúa visualmente el hero verde que ocupa el contenido. */
 body[data-pagina="inicio"] { --nav-activo-fondo: #337d6c; }
+body[data-pagina="inicio"].inicio-hero-superado { --nav-activo-fondo: var(--fondo); }
 
 /* Cascarón: sidebar fija + columna de contenido desplazada */
 .app-shell {
@@ -26,6 +27,33 @@ body[data-pagina="inicio"] { --nav-activo-fondo: #337d6c; }
   flex-direction: column;
   min-width: 0;
   transition: margin-left .2s ease;
+}
+
+/* La unión topbar/sidebar es una sola curva, también al plegar el menú. */
+.app-main::before,
+.app-main::after {
+  content: "";
+  position: fixed;
+  top: calc(var(--topbar-alto) - 2px);
+  left: calc(var(--sidebar-ancho) - 2px);
+  width: 18px;
+  height: 18px;
+  pointer-events: none;
+  transition: left .2s ease;
+}
+.app-main::before {
+  z-index: 1040;
+  background: var(--sidebar-degradado);
+  background-attachment: fixed;
+}
+.app-main::after {
+  z-index: 1041;
+  box-sizing: border-box;
+  background: var(--nav-activo-fondo);
+  transition: background-color .24s ease;
+  border-top: 2px solid var(--sidebar-contorno);
+  border-left: 2px solid var(--sidebar-contorno);
+  border-top-left-radius: 18px;
 }
 
 /* ----- Sidebar ----- */
@@ -52,7 +80,7 @@ body[data-pagina="inicio"] { --nav-activo-fondo: #337d6c; }
 .sidebar::after {
   content: "";
   position: absolute;
-  top: calc(var(--topbar-alto) - 2px);
+  top: calc(var(--topbar-alto) + 14px);
   right: 0;
   bottom: 0;
   width: 2px;
@@ -60,23 +88,6 @@ body[data-pagina="inicio"] { --nav-activo-fondo: #337d6c; }
   pointer-events: none;
   z-index: 0;
 }
-/* Botón para plegar/expandir (dentro de la sidebar, escritorio) */
-.sidebar__plegar {
-  align-self: flex-end;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  margin: -6px 14px 6px 2px;
-  border: none;
-  border-radius: 999px;
-  background: var(--surface-2);
-  color: var(--texto-suave);
-  font-size: .8rem;
-}
-.sidebar__plegar i { transition: transform .2s ease; }
-
 .sidebar__brand {
   display: flex;
   align-items: center;
@@ -166,9 +177,6 @@ body[data-pagina="inicio"] { --nav-activo-fondo: #337d6c; }
   transition: transform .2s ease;
 }
 .sidebar__admin-toggle[aria-expanded="true"] .sidebar__admin-flecha { transform: rotate(180deg); }
-/* Con la sidebar plegada no hay espacio para el submenú. */
-.sidebar-colapsada .sidebar__subnav,
-.sidebar-colapsada .sidebar__admin-flecha { display: none; }
 
 .sidebar .nav-link {
   position: relative;
@@ -200,6 +208,7 @@ body[data-pagina="inicio"] { --nav-activo-fondo: #337d6c; }
   z-index: 1;
   padding: 0;
   background: linear-gradient(90deg, transparent 0 24px, var(--nav-activo-fondo) 24px);
+  transition: background .24s ease;
 }
 .sidebar .nav-curve {
   display: none;
@@ -212,7 +221,7 @@ body[data-pagina="inicio"] { --nav-activo-fondo: #337d6c; }
   z-index: 2;
 }
 .sidebar__nav > .nav-item.active > .nav-curve { display: block; }
-.nav-curve__fill { fill: var(--nav-activo-fondo); }
+.nav-curve__fill { fill: var(--nav-activo-fondo); transition: fill .24s ease; }
 .nav-curve__stroke {
   fill: none;
   stroke: var(--sidebar-contorno);
@@ -241,7 +250,7 @@ body[data-pagina="inicio"] { --nav-activo-fondo: #337d6c; }
 .sidebar__accion:hover > span,
 .sidebar .nav-link:hover > i,
 .sidebar__accion:hover > i,
-.sidebar__plegar:hover > i {
+.sidebar-toggle:hover > i {
   color: #a2ead7;
   -webkit-text-stroke: .45px rgba(162, 234, 215, .95);
   text-shadow: 0 0 8px rgba(121, 209, 189, .8);
@@ -254,7 +263,7 @@ body[data-pagina="inicio"] { --nav-activo-fondo: #337d6c; }
 .sidebar__nav > .nav-item > .nav-link.active:hover > span { color: inherit; }
 .sidebar__nav > .nav-item > .nav-link.active:hover > i { color: var(--btn-primary-fg); }
 .sidebar__accion:hover,
-.sidebar__plegar:hover,
+.sidebar-toggle:hover,
 .sidebar .nav-link:hover {
   outline: none;
   filter: none;
@@ -271,6 +280,7 @@ body[data-pagina="inicio"] { --nav-activo-fondo: #337d6c; }
   background: linear-gradient(90deg, transparent 0%, var(--nav-activo-fondo) 100%),
     var(--sidebar-degradado);
   background-attachment: scroll, fixed;
+  transition: background .24s ease, color .2s ease;
 }
 :root:not([data-tema="oscuro"]) .sidebar .nav-link.active { color: #102f27; }
 :root[data-tema="oscuro"] .sidebar .nav-link.active { color: var(--verde-oscuro); }
@@ -292,7 +302,16 @@ body[data-pagina="inicio"] { --nav-activo-fondo: #337d6c; }
   padding: 8px 16px;
   background: var(--sidebar-degradado);
   background-attachment: fixed;
-  border-bottom: 2px solid var(--sidebar-contorno);
+}
+.app-topbar::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 16px;
+  height: 2px;
+  background: var(--sidebar-contorno);
+  pointer-events: none;
 }
 .app-topbar__titulo {
   font-size: 1rem;
@@ -378,18 +397,17 @@ body[data-pagina="inicio"] { --nav-activo-fondo: #337d6c; }
   text-shadow: none;
 }
 
-/* Hamburguesa de la barra superior: sólo en móvil (abre el cajón).
-   En escritorio se pliega con el botón de dentro de la sidebar. */
+/* Control de sidebar junto al título: pliega en escritorio y abre el cajón en móvil. */
 .sidebar-toggle {
-  display: none;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 38px;
-  border: 1px solid var(--borde);
+  width: 36px;
+  height: 36px;
+  border: 1px solid rgba(162, 234, 215, .3);
   border-radius: 9px;
-  background: var(--panel);
-  color: var(--texto);
+  background: rgba(9, 40, 34, .24);
+  color: #eff8f4;
   font-size: 1rem;
 }
 
@@ -400,9 +418,14 @@ body[data-pagina="inicio"] { --nav-activo-fondo: #337d6c; }
 @media (min-width: 992px) {
   .app-shell.sidebar-colapsada { --sidebar-ancho: 72px; }
 
+  /* En modo plegado el submenú se abre como una columna de iconos, sin
+     expandir el ancho de la sidebar. */
+  .sidebar-colapsada .sidebar__admin-flecha { display: none; }
+  .sidebar-colapsada .sidebar__subnav { padding-left: 0; }
+
   /* El botón activo sobresale hasta el contenido; el menú de escritorio no
      debe recortarlo horizontalmente. */
-  .sidebar-colapsada .sidebar__nav { padding-block: 0; overflow: visible; }
+  .sidebar-colapsada .sidebar__nav { padding-block: 42px 16px; overflow: visible; }
 
   .sidebar-colapsada .sidebar { padding: 16px 10px; }
   .sidebar-colapsada .sidebar__brand {
@@ -414,9 +437,6 @@ body[data-pagina="inicio"] { --nav-activo-fondo: #337d6c; }
   .sidebar-colapsada .nav-link span,
   .sidebar-colapsada .sidebar__accion span { display: none; }
 
-  .sidebar-colapsada .sidebar__plegar { align-self: center; margin: -4px 0 8px; }
-  .sidebar-colapsada .sidebar__plegar i { transform: rotate(180deg); }
-
   .sidebar-colapsada .sidebar__nav .nav-link {
     justify-content: center;
     gap: 0;
@@ -425,6 +445,16 @@ body[data-pagina="inicio"] { --nav-activo-fondo: #337d6c; }
     margin-right: 0;
     border: 1px solid transparent;
     border-radius: 999px;
+  }
+  .sidebar-colapsada .sidebar__admin-toggle {
+    justify-content: center;
+    gap: 0;
+    padding: 0;
+    background: transparent;
+  }
+  .sidebar-colapsada .sidebar__admin-toggle.active {
+    background: var(--btn-primary-bg);
+    color: var(--btn-primary-fg);
   }
   .sidebar-colapsada .sidebar__nav > .nav-item { margin-left: 0; padding: 4px; }
   .sidebar-colapsada .sidebar__nav > .nav-item.active {
@@ -454,6 +484,8 @@ body[data-pagina="inicio"] { --nav-activo-fondo: #337d6c; }
 .app-shell.sin-sidebar .sidebar-backdrop,
 .app-shell.sin-sidebar .app-topbar { display: none; }
 .app-shell.sin-sidebar .app-main { margin-left: 0; }
+.app-shell.sin-sidebar .app-main::before,
+.app-shell.sin-sidebar .app-main::after { display: none; }
 
 /* Backdrop para móvil */
 .sidebar-backdrop {
@@ -480,6 +512,9 @@ code { color: inherit; }
 @media (max-width: 991.98px) {
   /* En móvil la sidebar es un cajón deslizante; nunca "plegada". */
   .app-main { margin-left: 0; }
+  .app-main::before,
+  .app-main::after { display: none; }
+  .app-topbar::after { left: 0; }
 
   .sidebar {
     width: var(--sidebar-ancho);
@@ -500,6 +535,4 @@ code { color: inherit; }
   }
 
   .sidebar-toggle { display: inline-flex; }
-  /* El botón de dentro de la sidebar sólo sirve en escritorio. */
-  .sidebar__plegar { display: none; }
 }
