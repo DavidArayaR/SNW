@@ -5,7 +5,7 @@
 
 :root {
   --sidebar-ancho: 244px;
-  --topbar-alto: 56px;
+  --topbar-alto: 64px;
 }
 
 /* Cascarón: sidebar fija + columna de contenido desplazada */
@@ -22,14 +22,7 @@
   transition: margin-left .2s ease;
 }
 
-/* ----- Sidebar -----
-   La sidebar y la barra superior comparten var(--nav-bg) — turquesa
-   clarito/oscuro según el tema — para que se vean como un solo bloque de
-   navegación, distinto del área de contenido (var(--fondo)). El ítem
-   activo es una tarjeta clara (var(--panel)) pegada al borde derecho de
-   la sidebar (redondeada solo a la izquierda), con dos recortes cóncavos
-   arriba/abajo, pintados con var(--nav-bg) en vez de su gris, y con la
-   paleta propia de SNW en el resto. */
+/* ----- Sidebar ----- */
 .sidebar {
   position: fixed;
   top: 0;
@@ -40,8 +33,8 @@
   flex-direction: column;
   gap: 4px;
   padding: 16px 0 16px 12px;
-  background: var(--nav-bg);
-  color: var(--texto);
+  background: linear-gradient(135deg, var(--sidebar-1) 0%, var(--sidebar-2) 100%);
+  color: #eff8f4;
   z-index: 1040;
   overflow-y: auto;
   overflow-x: hidden;
@@ -186,6 +179,44 @@
   transition: background-color .2s ease, color .2s ease,
     border-color .2s ease, box-shadow .2s ease, transform .15s ease;
 }
+/* El estado activo sigue el patrón de AdminHub: el LI toma el color de la
+   página y los círculos laterales crean las dos transiciones redondeadas. */
+.sidebar__nav > .nav-item {
+  position: relative;
+  height: 48px;
+  margin-left: 6px;
+  padding: 4px;
+}
+.sidebar__nav > .nav-item.active {
+  z-index: 1;
+  background: var(--fondo);
+}
+.sidebar__nav > .nav-item.active::before,
+.sidebar__nav > .nav-item.active::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: -1;
+}
+.sidebar__nav > .nav-item.active::before {
+  top: -40px;
+  box-shadow: 20px 20px 0 var(--fondo);
+}
+.sidebar__nav > .nav-item.active::after {
+  bottom: -40px;
+  box-shadow: 20px -20px 0 var(--fondo);
+}
+.sidebar__nav > .nav-item > .nav-link {
+  width: 100%;
+  height: 100%;
+  padding: 0 26px 0 14px;
+  border: 0;
+  border-radius: 48px;
+}
 .sidebar .nav-link i {
   flex-shrink: 0;
   width: 1.9rem;
@@ -209,24 +240,18 @@
 }
 .sidebar .nav-link.active {
   z-index: 1;
-  margin-right: -2px;
-  border: 2px solid var(--verde-oscuro);
-  border-right: none;
-  background: var(--fondo);
+  background: var(--nav-bg);
   color: var(--verde-oscuro);
+}
+.sidebar__nav > .nav-item > .nav-link.active {
+  border: 2px solid var(--verde-oscuro);
 }
 .sidebar .nav-link.active i {
   background: var(--btn-primary-bg);
   color: var(--btn-primary-fg);
 }
 
-/* ----- Barra superior del contenido -----
-   Cuadrada, sin nada en la esquina: con el cuadradito de fondo de antes,
-   la curva quedaba muy pegada a la esquina redondeada de la primera
-   tarjeta de contenido (ver .panel en styles.css) y se veían dos curvas
-   distintas compitiendo ahí — desordenado, no como AdminHub, que tiene
-   harto espacio entre la barra y las tarjetas. La única curva de esa
-   zona queda siendo la de la tarjeta. */
+/* ----- Barra superior del contenido ----- */
 .app-topbar {
   position: sticky;
   top: 0;
@@ -236,14 +261,14 @@
   align-items: center;
   gap: 8px 12px;
   min-height: var(--topbar-alto);
-  padding: 8px 20px;
-  background: var(--nav-bg);
+  padding: 8px 16px;
+  background: linear-gradient(135deg, var(--sidebar-1) 0%, var(--sidebar-2) 100%);
   border-bottom: 2px solid var(--verde-oscuro);
 }
 .app-topbar__titulo {
   font-size: 1rem;
   font-weight: 700;
-  color: var(--texto);
+  color: #eff8f4;
   /* Nunca se corta: si no entra, el resto de la barra pasa a la línea
      siguiente (flex-wrap) antes que recortar el título. */
   white-space: nowrap;
@@ -274,6 +299,48 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.app-topbar .msg-tabs {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 0 12px;
+  padding: 4px;
+  overflow: hidden;
+  border: 1px solid rgba(158, 222, 207, .3);
+  border-radius: 999px;
+  background: rgba(6, 37, 31, .2);
+}
+.app-topbar .msg-tabs::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  top: 4px;
+  bottom: 4px;
+  left: var(--msg-indicador-x, 4px);
+  width: var(--msg-indicador-ancho, 84px);
+  border-radius: 999px;
+  background: #79d1bd;
+  box-shadow: 0 2px 8px rgba(5, 28, 23, .2);
+  transition: left .32s cubic-bezier(.2, .8, .2, 1),
+    width .32s cubic-bezier(.2, .8, .2, 1);
+}
+.app-topbar .msg-tab,
+.app-topbar .msg-tab.activo {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(239, 248, 244, .86);
+  padding: 8px 14px;
+  font-size: .82rem;
+  transition: color .18s ease;
+}
+.app-topbar .msg-tab:hover { color: #ffffff; }
+.app-topbar .msg-tab.activo { color: #12382f; }
 
 /* Hamburguesa de la barra superior: sólo en móvil (abre el cajón).
    En escritorio se pliega con el botón de dentro de la sidebar. */
@@ -323,6 +390,12 @@
     border: 1px solid transparent;
     border-radius: 999px;
   }
+  .sidebar-colapsada .sidebar__nav > .nav-item { margin-left: 0; padding: 4px; }
+  .sidebar-colapsada .sidebar__nav > .nav-item.active {
+    background: transparent;
+  }
+  .sidebar-colapsada .sidebar__nav > .nav-item.active::before,
+  .sidebar-colapsada .sidebar__nav > .nav-item.active::after { display: none; }
 
   .sidebar-colapsada .sidebar__cuenta {
     padding: 12px 0 0;

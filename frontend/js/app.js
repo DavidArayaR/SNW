@@ -2202,9 +2202,20 @@ function guardarSelTpl() {
   } catch { /* sin almacenamiento */ }
 }
 
+function posicionarIndicadorTabsMsg() {
+  const barraTabs = document.querySelector(".app-topbar .msg-tabs");
+  const tabActiva = barraTabs?.querySelector(".msg-tab.activo");
+  if (!barraTabs || !tabActiva) return;
+  const rectBarra = barraTabs.getBoundingClientRect();
+  const rectTab = tabActiva.getBoundingClientRect();
+  barraTabs.style.setProperty("--msg-indicador-x", `${rectTab.left - rectBarra.left - barraTabs.clientLeft}px`);
+  barraTabs.style.setProperty("--msg-indicador-ancho", `${rectTab.width}px`);
+}
+
 function pintarTabsMsg() {
   document.querySelectorAll("[data-msgtab]").forEach((b) =>
     b.classList.toggle("activo", b.dataset.msgtab === tabMsg));
+  posicionarIndicadorTabsMsg();
   const enPlantillas = tabMsg === "plantillas";
   $("#accionesPlantillas").hidden = !enPlantillas;
   $("#avisoSincronizarMeta").hidden = !enPlantillas;
@@ -2217,6 +2228,8 @@ function pintarTabsMsg() {
   if (pV) pV.hidden = tabMsg !== "envios";
   if (pG) pG.hidden = tabMsg !== "programados";
 }
+
+window.addEventListener("resize", posicionarIndicadorTabsMsg);
 
 function cambiarTabMsg(t) {
   tabMsg = t;
