@@ -522,17 +522,9 @@ code { color: inherit; }
     box-shadow: 0 0 40px rgba(0, 0, 0, .35);
   }
   .sidebar::after { top: 0; }
-  .sidebar__nav { padding-block: 0; }
+  .sidebar__nav { padding-block: 16px; }
   .app-shell.sidebar-abierta .sidebar { transform: translateX(0); }
   .app-shell.sidebar-abierta .sidebar-backdrop { display: block; }
-
-  .sidebar__nav > .nav-item.active { padding: 4px; background: transparent; }
-  .sidebar__nav > .nav-item.active > .nav-curve { display: none; }
-  .sidebar__nav > .nav-item > .nav-link.active {
-    width: 100%;
-    border: 2px solid var(--sidebar-contorno);
-    border-radius: 999px;
-  }
 
   .sidebar-toggle { display: inline-flex; }
 }
