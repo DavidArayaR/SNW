@@ -232,7 +232,11 @@
 .usr-envios__tabla tbody tr { cursor: default; user-select: text; transition: background-color .15s ease; }
 .usr-envios__tabla tbody tr:hover { background: var(--hover); }
 .usr-tag--envio-completado { background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-bd); }
+.usr-tag--envio-enviado { background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-bd); }
+.usr-tag--envio-aprobado { background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-bd); }
+.usr-tag--envio-pendiente, .usr-tag--envio-enviando { background: var(--neutral-bg); color: var(--neutral-fg); border-color: var(--neutral-bd); }
 .usr-tag--envio-rechazado { background: var(--danger-bg); color: var(--danger-fg); border-color: var(--danger-bd); }
+.usr-tag--envio-error { background: var(--danger-bg); color: var(--danger-fg); border-color: var(--danger-bd); }
 .usr-tag--envio-cancelado { background: var(--neutral-bg); color: var(--neutral-fg); border-color: var(--neutral-bd); }
 
 .usr-card__pie {

@@ -417,6 +417,19 @@ def asegurar_tabla_config() -> None:
                     " ENUM('pendiente','respondio','baja') DEFAULT 'pendiente'"
                 )
 
+            # Facturación de servicio: la franquicia mensual de Meta es por
+            # número emisor y se consume cuando el mensaje fue entregado.
+            cur.execute(
+                "SELECT COLUMN_NAME FROM information_schema.COLUMNS"
+                " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'log_envios'"
+                " AND COLUMN_NAME IN ('wa_phone_id', 'entregado_en')"
+            )
+            cols_facturacion = {f["COLUMN_NAME"] for f in cur.fetchall()}
+            if "wa_phone_id" not in cols_facturacion:
+                cur.execute("ALTER TABLE log_envios ADD COLUMN wa_phone_id VARCHAR(64) NULL")
+            if "entregado_en" not in cols_facturacion:
+                cur.execute("ALTER TABLE log_envios ADD COLUMN entregado_en DATETIME NULL")
+
             # Un envío rechazado por el supervisor queda en el historial con su
             # comentario, en vez de borrarse.
             cur.execute(
@@ -428,7 +441,9 @@ def asegurar_tabla_config() -> None:
                 "  (SELECT COUNT(*) FROM information_schema.COLUMNS"
                 "     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'envios' AND COLUMN_NAME = 'comentario') AS tiene_com,"
                 "  (SELECT COUNT(*) FROM information_schema.COLUMNS"
-                "     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'envios' AND COLUMN_NAME = 'usuario') AS tiene_usr"
+                "     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'envios' AND COLUMN_NAME = 'usuario') AS tiene_usr,"
+                "  (SELECT COUNT(*) FROM information_schema.COLUMNS"
+                "     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'envios' AND COLUMN_NAME = 'programado_id') AS tiene_prog"
             )
             e = cur.fetchone() or {}
             if e.get("tabla"):
@@ -444,6 +459,11 @@ def asegurar_tabla_config() -> None:
                 if not e.get("tiene_usr"):
                     cur.execute("ALTER TABLE envios ADD COLUMN usuario VARCHAR(150) NULL")
                     cur.execute("ALTER TABLE envios ADD INDEX idx_envios_usuario (usuario)")
+                # Vínculo persistente: permite distinguir lotes programados de
+                # manuales sin duplicarlos en la auditoría de la cuenta.
+                if not e.get("tiene_prog"):
+                    cur.execute("ALTER TABLE envios ADD COLUMN programado_id INT NULL")
+                    cur.execute("ALTER TABLE envios ADD INDEX idx_envios_programado (programado_id)")
 
             # (uno o varios, separados por coma). Se traspasa una vez.
             cur.execute("SELECT clave, valor FROM configuracion WHERE clave IN ('call_center_numero', 'call_center_numeros')")

@@ -61,7 +61,11 @@ function fmtMoneda(monto, moneda) {
   return `${s} ${moneda}`;
 }
 
-const ENVIO_ESTADO_LABEL = { completado: "Aprobado", rechazado: "Rechazado", cancelado: "Cancelado" };
+const ENVIO_ESTADO_LABEL = {
+  completado: "Enviado", enviado: "Enviado", cancelado: "Cancelado",
+  aprobado: "Aprobado", pendiente: "Programado", enviando: "Enviando",
+  rechazado: "Rechazado", error: "Error",
+};
 
 // Paginación de las tablas «Envíos realizados» y «Actividad»: igual que en
 // Pacientes —paginador arriba con flechas, info y «Por página» (10 a 100)—
@@ -118,13 +122,14 @@ function renderEnviosUsuario(lista) {
     return `<tr>` +
       `<td>${esc(e.fecha)}</td>` +
       `<td>${esc(e.plantilla_nombre || e.plantilla_clave || "—")}</td>` +
+      `<td>${e.origen === "programado" ? "Programado" : "Manual"}</td>` +
       `<td><span class="usr-tag usr-tag--envio-${esc(e.estado)}">${esc(ENVIO_ESTADO_LABEL[e.estado] || e.estado)}</span></td>` +
       `<td>${e.total_pacientes ?? 0}</td>` +
       `<td>${costoTxt}</td>` +
     `</tr>`;
   }).join("");
   return `<table class="usr-envios__tabla">` +
-    `<thead><tr><th>Fecha</th><th>Plantilla</th><th>Estado</th><th>Pacientes</th><th>Costo</th></tr></thead>` +
+    `<thead><tr><th>Fecha</th><th>Plantilla</th><th>Tipo de envío</th><th>Estado</th><th>Pacientes</th><th>Costo</th></tr></thead>` +
     `<tbody>${filas}</tbody></table>`;
 }
 

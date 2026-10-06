@@ -71,6 +71,7 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
+from service_pricing import clasificar_entregas_servicio, validar_periodos
 app.include_router(whatsapp_router)
 
 _documentacion_basic = HTTPBasic(auto_error=False)
@@ -903,25 +904,50 @@ def enviar_cambio_clave(usuario: str, sesion: dict = Depends(solo_admin)):
 
 
 def envios_de_usuario(usuario: str, sesion: dict = Depends(solo_admin)):
-    """Envíos masivos que inició esta cuenta: fecha, plantilla, estado
-    (completado/cancelado/rechazado), cantidad de pacientes y costo
-    aproximado. De solo lectura: cualquier admin/dev puede consultar el
-    historial de cualquier cuenta (no aplican las reglas de «quién gestiona a
-    quién», que son solo para editar permisos/rol/acceso)."""
+    """Auditoría de lotes manuales y programados de una cuenta, sin duplicados."""
     obj = usuario_buscar(usuario)
     if obj is None:
         raise HTTPException(404, detail="Usuario no encontrado.")
-    com_col = "comentario" if "comentario" in columnas_tabla("envios", "produccion") else "NULL AS comentario"
-    sql = (f"SELECT id, base_datos, plantilla_clave, plantilla_nombre, total_pacientes,"
-           f" enviados, fallidos, invalidos, estado, {com_col}, fecha_hora FROM envios"
-           " WHERE usuario = %s ORDER BY id DESC LIMIT 200")
+    com_col = "e.comentario" if "comentario" in columnas_tabla("envios", "produccion") else "NULL AS comentario"
+    sql = (f"SELECT e.id, e.base_datos, e.plantilla_clave, e.plantilla_nombre, e.total_pacientes,"
+           f" e.enviados, e.fallidos, e.invalidos, e.estado, e.programado_id,"
+           f" {com_col}, e.fecha_hora, p.creado AS programado_creado"
+           " FROM envios e LEFT JOIN envios_programados p ON p.id = e.programado_id"
+           " WHERE e.usuario = %s ORDER BY e.id DESC LIMIT 200")
     with conectar("produccion") as conn, conn.cursor() as cur:
         cur.execute(sql, (obj["usuario"],))
-        filas = cur.fetchall()
+        filas = list(cur.fetchall())
+        # Los programados ejecutados ya tienen un lote en `envios`. Para datos
+        # anteriores a programado_id se omiten los "enviado" sin vínculo:
+        # no existe forma fiable de asociarles el lote histórico.
+        cur.execute(
+            "SELECT p.id, p.tabla AS base_datos, p.plantilla_nombre, p.limite AS total_pacientes,"
+            " p.estado, p.creado AS fecha_hora, p.motivo AS comentario"
+            " FROM envios_programados p"
+            " WHERE p.creador = %s AND (p.estado <> 'enviado' OR p.job_id IS NULL)"
+            " AND NOT EXISTS (SELECT 1 FROM envios e WHERE e.programado_id = p.id)"
+            " ORDER BY p.id DESC LIMIT 200",
+            (obj["usuario"],),
+        )
+        programados = list(cur.fetchall())
     for f in filas:
-        f["fecha"] = f.pop("fecha_hora").strftime("%d-%m-%Y %H:%M")
+        f["origen"] = "programado" if f.pop("programado_id", None) is not None else "manual"
+        fecha_lote = f.pop("fecha_hora")
+        f["_orden"] = f.pop("programado_creado") or fecha_lote
+        f["fecha"] = f["_orden"].strftime("%d-%m-%Y %H:%M")
         f["costo"] = _costo_estimado_por_clave(f.get("plantilla_clave") or "", f.get("total_pacientes") or 0)
-    return filas
+    for f in programados:
+        f["id"] = f"prog-{f['id']}"
+        f["origen"] = "programado"
+        f["plantilla_clave"] = ""
+        f["_orden"] = f.pop("fecha_hora")
+        f["fecha"] = f["_orden"].strftime("%d-%m-%Y %H:%M") if f["_orden"] else "—"
+        f["costo"] = None
+        filas.append(f)
+    filas.sort(key=lambda f: f["_orden"] or datetime.datetime.min, reverse=True)
+    for f in filas:
+        f.pop("_orden", None)
+    return filas[:200]
 
 
 def auditoria_de_usuario(usuario: str, sesion: dict = Depends(solo_admin)):
@@ -3497,11 +3523,11 @@ def _rate_servicio(tarifa: dict | None, periodo: str) -> float:
     período en formato comparable ("2026-10-01", "2026-10" o "2026").
     """
     ini = periodo if len(periodo) >= 10 else (periodo + "-01" if len(periodo) == 7 else periodo + "-01-01")
+    if ini < "2026-10-01":
+        return 0.0
     srv = (tarifa.get("service") if tarifa else None) or 0.0
     if srv > 0:
         return srv
-    if ini < "2026-10-01":
-        return 0.0
     return ((tarifa.get("utility") if tarifa else None)
             or (tarifa.get("authentication") if tarifa else None) or 0.0)
 
@@ -3764,10 +3790,15 @@ def registrar_historial(paciente_id, nombre, telefono, clave_plantilla, mensaje,
             if "area_id" in cols and "tabla_pacientes" in cols:
                 extra_col = ", area_id, tabla_pacientes"
                 extra_val = (area_id, tabla_pacientes)
+            if "wa_phone_id" in cols:
+                extra_col += ", wa_phone_id"
+                extra_val += ((config_get("wa_phone_id") or "").strip() if whatsapp_message_id else None,)
+            extra_placeholders = ", ".join("%s" for _ in extra_val)
             cur.execute(
                 "INSERT INTO log_envios (envio_id, paciente_id, nombre_paciente, numero_telefono, mensaje,"
                 f" plantilla_clave, estado_envio, descripcion_error, whatsapp_message_id, estado_whatsapp{extra_col})"
-                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s" + ", %s, %s)" if extra_col else ")",
+                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s"
+                + (f", {extra_placeholders})" if extra_val else ")"),
                 (envio_id, paciente_id, nombre, telefono, mensaje, clave_plantilla, estado, error,
                  whatsapp_message_id, "sent" if estado == "enviado" and whatsapp_message_id else None,
                  *extra_val),
@@ -3778,7 +3809,7 @@ def registrar_historial(paciente_id, nombre, telefono, clave_plantilla, mensaje,
 
 
 def crear_envio_batch(base_datos, plantilla_clave, plantilla_nombre, total, ambiente, usuario: str = "",
-                      area_id=None, tabla_pacientes=None) -> int | None:
+                      area_id=None, tabla_pacientes=None, programado_id=None) -> int | None:
     try:
         with conectar(ambiente) as conn, conn.cursor() as cur:
             cols = columnas_tabla("envios", ambiente)
@@ -3786,10 +3817,14 @@ def crear_envio_batch(base_datos, plantilla_clave, plantilla_nombre, total, ambi
             if "area_id" in cols and "tabla_pacientes" in cols:
                 extra_col = ", area_id, tabla_pacientes"
                 extra_val = (area_id, tabla_pacientes)
+            if "programado_id" in cols:
+                extra_col += ", programado_id"
+                extra_val += (programado_id,)
+            placeholders = ", ".join("%s" for _ in extra_val)
             cur.execute(
                 "INSERT INTO envios (base_datos, plantilla_clave, plantilla_nombre, total_pacientes, estado, usuario"
                 f"{extra_col})"
-                " VALUES (%s, %s, %s, %s, 'completado', %s" + (", %s, %s)" if extra_col else ")"),
+                " VALUES (%s, %s, %s, %s, 'completado', %s" + (f", {placeholders})" if extra_val else ")"),
                 (base_datos, plantilla_clave, plantilla_nombre, total, (usuario or "").strip().lower() or None,
                  *extra_val),
             )
@@ -4182,7 +4217,8 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
                                          plantilla["nombre"], len(rechazados), amb,
                                          usuario=sesion.get("usuario", ""),
                                          area_id=(esp["id"] if esp else None),
-                                         tabla_pacientes=t_esp)
+                                         tabla_pacientes=t_esp,
+                                         programado_id=sesion.get("programado_id"))
             if envio_id:
                 actualizar_envio_batch(envio_id, amb, invalidos=len(rechazados))
                 for r in rechazados:
@@ -4260,7 +4296,8 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
                                  len(destinatarios) + len(rechazados), amb,
                                  usuario=sesion.get("usuario", ""),
                                  area_id=(esp["id"] if esp else None),
-                                 tabla_pacientes=t_esp)
+                                 tabla_pacientes=t_esp,
+                                 programado_id=sesion.get("programado_id"))
     if envio_id:
         actualizar_envio_batch(envio_id, amb, invalidos=len(rechazados))
         for r in rechazados:
@@ -5516,6 +5553,7 @@ def _ejecutar_programado(f: dict) -> None:
         "nombre": f.get("creador_nombre") or "Sistema",
         "rol": "administrador",
         "permisos": [],
+        "programado_id": f["id"],
     }
     bg = BackgroundTasks()
     try:
@@ -6369,19 +6407,43 @@ def _categorias_por_clave() -> dict:
 
 def estadisticas_costos(granularidad: str = Query("mes"), area_id: int | None = Query(None),
                         categoria: str | None = Query(None),
+                        fecha: str | None = Query(None),
+                        periodos: str | None = Query(None),
                         sesion: dict = Depends(solo_admin)):
     if granularidad not in ("dia", "mes", "anio"):
         raise HTTPException(400, detail="granularidad debe ser dia, mes o anio")
+    if fecha and periodos:
+        raise HTTPException(400, detail="Usa fecha o periodos, no ambos")
+    fecha_elegida = None
+    if fecha:
+        try:
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", fecha):
+                raise ValueError("Formato de fecha inválido")
+            fecha_elegida = datetime.date.fromisoformat(fecha)
+        except ValueError:
+            raise HTTPException(400, detail="fecha debe tener formato AAAA-MM-DD y ser válida")
+        granularidad = "dia"
+    try:
+        seleccion = validar_periodos(periodos, granularidad) if periodos else set()
+    except ValueError as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
+    if fecha_elegida:
+        seleccion = {fecha_elegida.isoformat()}
     if categoria is not None:
         categoria = (categoria or "").strip().lower()
         if categoria not in _CATS:
             raise HTTPException(400, detail="categoría debe ser marketing, utility, authentication o service")
     fmt = {"dia": "%Y-%m-%d", "mes": "%Y-%m", "anio": "%Y"}[granularidad]
+    marcadores_periodos = ", ".join("%s" for _ in seleccion)
+    filtro_periodos = (f" AND DATE_FORMAT(fecha_hora, %s) IN ({marcadores_periodos})"
+                       if seleccion else "")
+    valores_periodos = tuple(sorted(seleccion))
     filtro_esp, args_esp, esp = _filtro_esp_estadisticas(sesion, area_id)
 
     moneda = _moneda_cuenta()
     tarifas = _tarifas_guardadas(moneda) or _tarifas_guardadas("USD")
     cats_clave = _categorias_por_clave()
+    claves_servicio = [clave for clave, cat in cats_clave.items() if cat == "service"]
 
     # Solo api_oficial se factura: el motor simulado no deja message_id.
     # (En bases antiguas sin la columna no se puede distinguir: se cuenta todo.)
@@ -6389,58 +6451,70 @@ def estadisticas_costos(granularidad: str = Query("mes"), area_id: int | None = 
     col_sim = ", SUM(whatsapp_message_id IS NULL) AS n_sim" if tiene_msgid else ""
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(
-            f"SELECT DATE_FORMAT(fecha_hora, '{fmt}') AS periodo, plantilla_clave AS clave, COUNT(*) AS n{col_sim}"
+            f"SELECT DATE_FORMAT(fecha_hora, %s) AS periodo, plantilla_clave AS clave, COUNT(*) AS n{col_sim}"
             " FROM log_envios"
             " WHERE estado_envio = 'enviado'"
             "   AND plantilla_clave NOT IN ('respuesta', 'ajuste_manual')"
             f"   AND {_SOLO_PROD_O_AUTO}"
             f"{filtro_esp}"
+            f"{filtro_periodos}"
             " GROUP BY periodo, plantilla_clave ORDER BY periodo",
-            args_esp or None,
+            (fmt, *args_esp, *((fmt, *valores_periodos) if seleccion else ())),
         )
         crudo = cur.fetchall()
+        # El cupo gratuito se calcula con TODAS las áreas juntas, antes de
+        # aplicar el filtro visual. Es compartido por número emisor y mes.
+        if claves_servicio and tiene_msgid:
+            marcadores = ", ".join("%s" for _ in claves_servicio)
+            cur.execute(
+                "SELECT le.id, le.wa_phone_id, le.area_id, le.envio_id,"
+                " COALESCE(le.entregado_en, le.fecha_hora) AS fecha_entrega,"
+                " (SELECT e.area_id FROM envios e WHERE e.id = le.envio_id) AS area_lote"
+                " FROM log_envios le"
+                " WHERE le.estado_envio = 'enviado'"
+                " AND le.estado_whatsapp IN ('delivered', 'read')"
+                " AND le.whatsapp_message_id IS NOT NULL"
+                f" AND le.plantilla_clave IN ({marcadores})"
+                f" AND {_SOLO_PROD_O_AUTO}",
+                tuple(claves_servicio),
+            )
+            entregas_servicio = list(cur.fetchall())
+        else:
+            entregas_servicio = []
 
     periodos: dict[str, dict] = {}
     tot = {"mensajes": 0, "costo": 0.0, "por_categoria": {c: 0 for c in _CATS}}
-    excluidos = 0  # mensajes sin categoría facturable o servicio aún gratuito
+    excluidos = 0  # mensajes sin categoría facturable
     simulados = 0  # motor simulado: Meta no los cobra ni se cuentan
+    emisores_registrados = {r["wa_phone_id"] for r in entregas_servicio if r.get("wa_phone_id")}
+    servicio_total = {"entregados": 0, "gratuitos": 0, "pagados": 0,
+                      "emisor_desconocido": 0, "emisor_unico_inferido": len(emisores_registrados) == 1}
     def _nuevo_periodo(per):
         return {
             "periodo": per, "mensajes": 0, "costo": 0.0, "excluidos": 0,
             "simulados": 0, "por_categoria": {c: 0 for c in _CATS},
+            "servicio": {"entregados": 0, "gratuitos": 0, "pagados": 0},
         }
     for r in crudo:
         per = r["periodo"]
+        cat = cats_clave.get(r["clave"])
+        if categoria and cat != categoria:
+            continue
         n_sim = int(r.get("n_sim") or 0) if tiene_msgid else 0
         if n_sim:
             simulados += n_sim
             periodos.setdefault(per, _nuevo_periodo(per))["simulados"] += n_sim
+        if cat == "service":
+            continue  # Se cuenta abajo solo si Meta confirmó la entrega.
         n = int(r["n"] or 0) - n_sim
         if n <= 0:
             continue
-        cat = cats_clave.get(r["clave"])
-        if categoria and cat != categoria:
-            continue  # fuera del filtro por categoría: no se cuenta en nada
-        if cat not in ("marketing", "utility", "authentication", "service"):
+        if cat not in ("marketing", "utility", "authentication"):
             # Sin categoría facturable (texto libre sin clave, etc.): no se cobra.
             excluidos += n
             periodos.setdefault(per, _nuevo_periodo(per))["excluidos"] += n
             continue
         tarifa = _tarifa_para_fecha(tarifas, per if len(per) >= 7 else per + "-12")
-        if cat == "service":
-            # Servicio (no-plantilla, ventana 24 h) SIEMPRE cuenta: mensajes y
-            # desglose por categoría. El costo aplica la tarifa del período
-            # (0 mientras Meta no lo cobraba, antes del 01-10-2026).
-            rate = _rate_servicio(tarifa, per)
-            costo = n * rate
-            p = periodos.setdefault(per, _nuevo_periodo(per))
-            p["mensajes"] += n
-            p["costo"] = round(p["costo"] + costo, 4)
-            p["por_categoria"][cat] += n
-            tot["mensajes"] += n
-            tot["costo"] = round(tot["costo"] + costo, 4)
-            tot["por_categoria"][cat] += n
-            continue
         rate = (tarifa.get(cat) if tarifa else None) or 0.0
         costo = n * rate
 
@@ -6452,14 +6526,43 @@ def estadisticas_costos(granularidad: str = Query("mes"), area_id: int | None = 
         tot["costo"] = round(tot["costo"] + costo, 4)
         tot["por_categoria"][cat] += n
 
+    if categoria in (None, "service"):
+        for r, gratis in clasificar_entregas_servicio(entregas_servicio):
+            if esp and (r.get("area_id") or r.get("area_lote")) != esp["id"]:
+                continue
+            fecha = r["fecha_entrega"]
+            per = fecha.strftime(fmt)
+            if seleccion and per not in seleccion:
+                continue
+            p = periodos.setdefault(per, _nuevo_periodo(per))
+            p["mensajes"] += 1
+            p["por_categoria"]["service"] += 1
+            tot["mensajes"] += 1
+            tot["por_categoria"]["service"] += 1
+            servicio_total["entregados"] += 1
+            p["servicio"]["entregados"] += 1
+            if not r.get("wa_phone_id"):
+                servicio_total["emisor_desconocido"] += 1
+            tipo = "gratuitos" if gratis else "pagados"
+            servicio_total[tipo] += 1
+            p["servicio"][tipo] += 1
+            if not gratis:
+                tarifa = _tarifa_para_fecha(tarifas, fecha.strftime("%Y-%m-%d"))
+                costo = _rate_servicio(tarifa, fecha.strftime("%Y-%m-%d"))
+                p["costo"] = round(p["costo"] + costo, 4)
+                tot["costo"] = round(tot["costo"] + costo, 4)
+
     vig = _tarifa_vigente(tarifas)
     return {
         "granularidad": granularidad,
+        "fecha": fecha_elegida.isoformat() if fecha_elegida else None,
+        "periodos": sorted(seleccion),
         "area": ({"id": esp["id"], "nombre_visible": esp["nombre_visible"]} if esp else None),
         "moneda": (vig or {}).get("moneda") or moneda,
         "tarifa_vigente": vig,
         "sin_tarifas": not tarifas,
         "filas": [periodos[k] for k in sorted(periodos)],
+        "servicio": servicio_total,
         "total": {"mensajes": tot["mensajes"], "costo": round(tot["costo"], 4),
                   "excluidos": excluidos, "simulados": simulados,
                   "por_categoria": tot["por_categoria"]},

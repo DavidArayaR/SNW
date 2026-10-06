@@ -80,6 +80,8 @@ CREATE TABLE IF NOT EXISTS log_envios (
   respuesta ENUM('pendiente','respondio','baja') DEFAULT 'pendiente',
   whatsapp_message_id VARCHAR(255) DEFAULT NULL,
   estado_whatsapp ENUM('sent','delivered','read','failed') DEFAULT NULL,
+  wa_phone_id VARCHAR(64) DEFAULT NULL,
+  entregado_en DATETIME DEFAULT NULL,
   descripcion_error VARCHAR(255) DEFAULT NULL,
   area_id INT DEFAULT NULL,
   tabla_pacientes VARCHAR(64) DEFAULT NULL,

@@ -935,7 +935,7 @@ class WhatsAppService:
             if estado == "failed":
                 detalle_error = self._detalle_errores(s.get("errors"))
                 log_error(f"webhook: mensaje {message_id} a {telefono} falló - {detalle_error}")
-            self._actualizar_estado(message_id, estado, detalle_error)
+            self._actualizar_estado(message_id, estado, detalle_error, s.get("timestamp"))
             acciones.append(f"estado_{estado}")
         return acciones
 
@@ -1260,14 +1260,26 @@ class WhatsAppService:
         except Exception as e:
             log_error(f"_registrar_no_interes({telefono})", e)
 
-    def _actualizar_estado(self, message_id: str, estado: str, detalle_error: str | None = None) -> None:
+    def _actualizar_estado(self, message_id: str, estado: str, detalle_error: str | None = None,
+                           timestamp: str | None = None) -> None:
+        entrega = None
+        if estado in ("delivered", "read"):
+            try:
+                entrega = datetime.fromtimestamp(int(timestamp)) if timestamp else datetime.now()
+            except (TypeError, ValueError, OverflowError, OSError):
+                entrega = datetime.now()
         for ambiente in ("desarrollo", "produccion"):
             try:
                 with conectar(ambiente) as conn, conn.cursor() as cur:
                     cur.execute(
-                        "UPDATE log_envios SET estado_whatsapp = %s"
+                        "UPDATE log_envios SET estado_whatsapp = CASE"
+                        " WHEN estado_whatsapp IN ('delivered','read') AND %s = 'sent'"
+                        " THEN estado_whatsapp"
+                        " WHEN estado_whatsapp = 'read' AND %s = 'delivered'"
+                        " THEN estado_whatsapp ELSE %s END,"
+                        " entregado_en = COALESCE(entregado_en, %s)"
                         " WHERE whatsapp_message_id = %s",
-                        (estado, message_id),
+                        (estado, estado, estado, entrega, message_id),
                     )
                     if estado == "sent":
                         cur.execute(
