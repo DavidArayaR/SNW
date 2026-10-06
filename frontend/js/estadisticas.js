@@ -368,9 +368,89 @@ async function cargarEnvios(gran) {
 
 /* -- Costos de mensajes de WhatsApp (solo administrador) ----------- */
 let granCostos = "mes";
+let solicitudCostos = 0;
+let filtroCalendarioCostos = null;
+const hoyCalendario = new Date();
+const estadoCalendarioCostos = {
+  modo: "dia",
+  anio: hoyCalendario.getFullYear(),
+  mes: hoyCalendario.getMonth(),
+  seleccion: { dia: new Set(), mes: new Set(), anio: new Set() },
+};
 let catCostos = localStorage.getItem("snw_cat_costos") || "todas";
 if (["todas", "marketing", "service"].indexOf(catCostos) === -1) {
   catCostos = "todas";
+}
+
+const dosDigitos = (n) => String(n).padStart(2, "0");
+const etiquetaModoCalendario = { dia: "días", mes: "meses", anio: "años" };
+const etiquetaModoCalendarioSingular = { dia: "día", mes: "mes", anio: "año" };
+
+function cerrarCalendarioCostos(devolverFoco = false) {
+  $("#calendarioCostos").hidden = true;
+  $("#abrirCalendarioCostos").setAttribute("aria-expanded", "false");
+  if (devolverFoco) $("#abrirCalendarioCostos").focus();
+}
+
+function actualizarResumenCalendarioCostos() {
+  const modo = estadoCalendarioCostos.modo;
+  const seleccion = [...estadoCalendarioCostos.seleccion[modo]].sort();
+  const resumen = seleccion.slice(0, 4).map((v) =>
+    modo === "dia" ? fechaDMA(v) : modo === "mes" ? nombreMes(v) : v
+  ).join(" · ");
+  $("#calendarioCostosSeleccion").textContent = seleccion.length
+    ? `${seleccion.length} ${etiquetaModoCalendario[modo]}: ${resumen}${seleccion.length > 4 ? "…" : ""}`
+    : "Selecciona uno o varios períodos.";
+}
+
+function pintarCalendarioCostos() {
+  const { modo, anio, mes, seleccion } = estadoCalendarioCostos;
+  document.querySelectorAll("#calendarioCostos [data-cal-modo]").forEach((b) => {
+    b.setAttribute("aria-selected", String(b.dataset.calModo === modo));
+  });
+  const grid = $("#calendarioCostosGrid");
+  grid.className = `costos-calendario__grid costos-calendario__grid--${modo}`;
+  const botones = [];
+  if (modo === "dia") {
+    $("#calendarioCostosTitulo").textContent = `${MESES[mes]} ${anio}`;
+    ["Lu", "Ma", "Mi", "Ju", "Vi", "Sá", "Do"].forEach((d) =>
+      botones.push(`<span class="costos-calendario__semana">${d}</span>`));
+    const huecos = (new Date(anio, mes, 1).getDay() + 6) % 7;
+    for (let i = 0; i < huecos; i++) botones.push('<span aria-hidden="true"></span>');
+    const ultimo = new Date(anio, mes + 1, 0).getDate();
+    for (let dia = 1; dia <= ultimo; dia++) {
+      const valor = `${anio}-${dosDigitos(mes + 1)}-${dosDigitos(dia)}`;
+      const hoy = anio === hoyCalendario.getFullYear() && mes === hoyCalendario.getMonth()
+        && dia === hoyCalendario.getDate();
+      botones.push(`<button type="button" data-cal-valor="${valor}" aria-label="${dia} de ${MESES[mes]} de ${anio}" ` +
+        `aria-pressed="${seleccion.dia.has(valor)}" data-hoy="${hoy}">${dia}</button>`);
+    }
+  } else if (modo === "mes") {
+    $("#calendarioCostosTitulo").textContent = String(anio);
+    MESES.forEach((nombre, i) => {
+      const valor = `${anio}-${dosDigitos(i + 1)}`;
+      botones.push(`<button type="button" data-cal-valor="${valor}" ` +
+        `aria-pressed="${seleccion.mes.has(valor)}">${nombre}</button>`);
+    });
+  } else {
+    const inicio = Math.floor(anio / 12) * 12;
+    $("#calendarioCostosTitulo").textContent = `${inicio}–${inicio + 11}`;
+    for (let i = 0; i < 12; i++) {
+      const valor = String(inicio + i);
+      botones.push(`<button type="button" data-cal-valor="${valor}" ` +
+        `aria-pressed="${seleccion.anio.has(valor)}">${valor}</button>`);
+    }
+  }
+  grid.innerHTML = botones.join("");
+  actualizarResumenCalendarioCostos();
+}
+
+function limpiarFiltroCalendarioCostos() {
+  filtroCalendarioCostos = null;
+  Object.values(estadoCalendarioCostos.seleccion).forEach((s) => s.clear());
+  $("#resumenCalendarioCostos").textContent = "Elegir fechas";
+  $("#limpiarFechaCostos").hidden = true;
+  pintarCalendarioCostos();
 }
 
 async function cargarTarifas() {
@@ -529,19 +609,22 @@ async function actualizarTarifas() {
 }
 
 async function cargarCostos(gran) {
-  granCostos = gran;
-  document.querySelectorAll("#costosTabs button").forEach((b) =>
-    b.classList.toggle("activo", b.dataset.gran === gran)
-  );
+  granCostos = filtroCalendarioCostos?.modo || gran;
+  const solicitud = ++solicitudCostos;
   try {
     const qsCat = catCostos !== "todas" ? `&categoria=${encodeURIComponent(catCostos)}` : "";
-    const res = await fetch(`api/estadisticas/costos?granularidad=${gran}${qsEspEst()}${qsCat}`, {
+    const qsPeriodos = filtroCalendarioCostos
+      ? `&periodos=${encodeURIComponent(filtroCalendarioCostos.valores.join(","))}` : "";
+    const res = await fetch(`api/estadisticas/costos?granularidad=${granCostos}${qsEspEst()}${qsCat}${qsPeriodos}`, {
       headers: authHeaders(), cache: "no-store",
     });
     if (res.status === 401) { window.snwSesionExpirada(); return; }
     if (!res.ok) throw new Error();
-    renderCostos(await res.json());
+    const datos = await res.json();
+    if (solicitud !== solicitudCostos) return;
+    renderCostos(datos);
   } catch {
+    if (solicitud !== solicitudCostos) return;
     console.error("[estadisticas.js cargarCostos()]");
     $("#costosBarras").innerHTML =
       '<p class="mes-vacio" style="padding:8px 18px;">No se pudieron cargar los costos.</p>';
@@ -552,16 +635,19 @@ async function cargarCostos(gran) {
 function renderCostos(d) {
   const filas = Array.isArray(d.filas) ? d.filas : [];
   const mon = d.moneda;
+  const servicio = d.servicio || { entregados: 0, gratuitos: 0, pagados: 0 };
 
   if (d.sin_tarifas) {
     $("#costosBarras").innerHTML =
       '<p class="mes-vacio" style="padding:8px 18px;">Sin tarifas guardadas: no se puede estimar el costo. Pulsa «Actualizar tarifas».</p>';
-    $("#costosTotal").textContent = "";
+    $("#costosTotal").textContent = servicio.entregados
+      ? `Servicio entregado: ${num(servicio.entregados)} · ${num(servicio.gratuitos)} gratuitos · ${num(servicio.pagados)} pagados (sin importe estimado).`
+      : "";
     return;
   }
   if (!filas.length) {
     $("#costosBarras").innerHTML =
-      '<p class="mes-vacio" style="padding:8px 18px;">Sin mensajes enviados todavía.</p>';
+      `<p class="mes-vacio" style="padding:8px 18px;">${d.periodos?.length ? "Sin mensajes registrados en los períodos seleccionados." : "Sin mensajes enviados todavía."}</p>`;
     $("#costosTotal").textContent = "";
     return;
   }
@@ -571,7 +657,10 @@ function renderCostos(d) {
     filas.map((f) => ({
       periodo: f.periodo,
       valor: f.costo,
-      sub: `${num(f.mensajes)} mensaje(s)`,
+      sub: `${num(f.mensajes)} mensaje(s)` +
+        (f.servicio?.entregados
+          ? ` · servicio: ${num(f.servicio.gratuitos)} gratis / ${num(f.servicio.pagados)} pagados`
+          : ""),
     })),
     { gran: d.granularidad, fmtValor: (v) => fmtMoneda(v, mon) }
   );
@@ -583,13 +672,24 @@ function renderCostos(d) {
     .join(" · ");
   const excl = Number(t.excluidos || 0);
   const sim = Number(t.simulados || 0);
-  const alcance = catCostos !== "todas" ? ` de ${CAT_LABEL[catCostos] || catCostos}` : " de plantilla";
+  const alcance = catCostos !== "todas" ? ` de ${CAT_LABEL[catCostos] || catCostos}` : " registrados";
   $("#costosTotal").innerHTML =
     `<strong>Total:</strong> ${fmtMoneda(t.costo, mon)} · ${num(t.mensajes)} mensajes${alcance}` +
     (desglose ? ` · ${desglose}` : "") +
+    (servicio.entregados
+      ? `<br><span class="costos-nota">Servicio entregado: ${num(servicio.entregados)} · ` +
+        `${num(servicio.gratuitos)} gratuitos · ${num(servicio.pagados)} pagados ` +
+        `(1.000 gratis por número y mes).</span>`
+      : "") +
+    (servicio.emisor_desconocido
+      ? `<br><span class="costos-nota">${num(servicio.emisor_desconocido)} entrega(s) antigua(s) ` +
+        (servicio.emisor_unico_inferido
+          ? `sin identificador de emisor se atribuyeron al único número de empresa registrado.</span>`
+          : `sin identificador de emisor se agruparon por separado; esta cifra es una estimación.</span>`)
+      : "") +
     (excl
-      ? `<br><span class="costos-nota">No se cuentan ${num(excl)} mensaje(s) de texto libre ` +
-        `(respuestas dentro de la ventana de 24 h): Meta no los cobra.</span>`
+      ? `<br><span class="costos-nota">No se cuentan ${num(excl)} mensaje(s) ` +
+        `sin categoría de facturación identificada.</span>`
       : "") +
     (sim
       ? `<br><span class="costos-nota">No se cuentan ${num(sim)} mensaje(s) simulado(s): ` +
@@ -606,9 +706,74 @@ if (ES_ADMIN && $("#panelCostos")) {
     if ($("#btnActualizarTarifas").disabled) return;
     actualizarTarifas();
   });
-  document.querySelectorAll("#costosTabs button").forEach((b) =>
-    b.addEventListener("click", () => cargarCostos(b.dataset.gran))
+  const abrirCalendario = $("#abrirCalendarioCostos");
+  const calendario = $("#calendarioCostos");
+  const limpiarFechaCostos = $("#limpiarFechaCostos");
+  abrirCalendario.addEventListener("click", () => {
+    calendario.hidden = !calendario.hidden;
+    abrirCalendario.setAttribute("aria-expanded", String(!calendario.hidden));
+    if (!calendario.hidden) {
+      pintarCalendarioCostos();
+      calendario.querySelector('[data-cal-modo][aria-selected="true"]').focus();
+    }
+  });
+  limpiarFechaCostos.addEventListener("click", () => {
+    limpiarFiltroCalendarioCostos();
+    cerrarCalendarioCostos();
+    cargarCostos("mes");
+  });
+  document.querySelectorAll("#calendarioCostos [data-cal-modo]").forEach((b) =>
+    b.addEventListener("click", () => {
+      estadoCalendarioCostos.modo = b.dataset.calModo;
+      pintarCalendarioCostos();
+    })
   );
+  document.querySelectorAll("#calendarioCostos [data-cal-nav]").forEach((b) =>
+    b.addEventListener("click", () => {
+      const dir = Number(b.dataset.calNav);
+      if (estadoCalendarioCostos.modo === "dia") {
+        const nueva = new Date(estadoCalendarioCostos.anio, estadoCalendarioCostos.mes + dir, 1);
+        estadoCalendarioCostos.anio = nueva.getFullYear();
+        estadoCalendarioCostos.mes = nueva.getMonth();
+      } else {
+        estadoCalendarioCostos.anio += dir * (estadoCalendarioCostos.modo === "mes" ? 1 : 12);
+      }
+      pintarCalendarioCostos();
+    })
+  );
+  $("#calendarioCostosGrid").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-cal-valor]");
+    if (!b) return;
+    const grupo = estadoCalendarioCostos.seleccion[estadoCalendarioCostos.modo];
+    if (grupo.has(b.dataset.calValor)) grupo.delete(b.dataset.calValor);
+    else if (grupo.size < 120) grupo.add(b.dataset.calValor);
+    else { toast("Puedes seleccionar hasta 120 períodos.", "error"); return; }
+    b.setAttribute("aria-pressed", String(grupo.has(b.dataset.calValor)));
+    actualizarResumenCalendarioCostos();
+  });
+  $("#calendarioCostosLimpiar").addEventListener("click", () => {
+    estadoCalendarioCostos.seleccion[estadoCalendarioCostos.modo].clear();
+    pintarCalendarioCostos();
+  });
+  $("#calendarioCostosAplicar").addEventListener("click", () => {
+    const modo = estadoCalendarioCostos.modo;
+    const valores = [...estadoCalendarioCostos.seleccion[modo]].sort();
+    filtroCalendarioCostos = valores.length ? { modo, valores } : null;
+    $("#resumenCalendarioCostos").textContent = valores.length
+      ? `${valores.length} ${valores.length === 1 ? etiquetaModoCalendarioSingular[modo] : etiquetaModoCalendario[modo]} ` +
+        `seleccionado${valores.length === 1 ? "" : "s"}`
+      : "Elegir fechas";
+    limpiarFechaCostos.hidden = !valores.length;
+    cerrarCalendarioCostos(true);
+    cargarCostos(valores.length ? modo : "mes");
+  });
+  document.addEventListener("click", (e) => {
+    if (!calendario.hidden && !calendario.contains(e.target) && !abrirCalendario.contains(e.target))
+      cerrarCalendarioCostos();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !calendario.hidden) cerrarCalendarioCostos(true);
+  });
   const selCatCostos = $("#selCatCostos");
   if (selCatCostos) {
     selCatCostos.value = catCostos;

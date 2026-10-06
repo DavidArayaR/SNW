@@ -159,17 +159,25 @@
 }
 .costos-cabecera h3 { margin: 0; font-size: 1rem; }
 .costos-cat { font-size: .85rem; font-weight: 600; color: var(--texto); white-space: nowrap; }
-/* Filtros juntos en la misma fila (periodo + categoría); el grupo no se
-   parte y el select se encoge en pantallas angostas. */
+/* Categoría y calendario juntos; el select se encoge en pantallas angostas. */
 .costos-filtros {
   display: flex;
   align-items: center;
   gap: 10px;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   min-width: 0;
 }
 .costos-filtros select { min-width: 0; }
-
+.costos-fecha-grupo { display: inline-flex; align-items: center; gap: 8px; }
+.costos-calendario-abrir { display: inline-flex; align-items: center; gap: 8px; }
+.costos-calendario-abrir[aria-expanded="true"] { border-color: var(--verde); color: var(--verde-oscuro); }
+.costos-fecha-limpiar[hidden] { display: none; }
+.costos-fecha-ayuda {
+  margin: 8px 18px 0;
+  color: var(--texto-suave);
+  font-size: .8rem;
+}
 .grafico-tabs {
   display: inline-flex;
   border: 1px solid var(--borde);
@@ -307,5 +315,7 @@
 @media (max-width: 560px) {
   .hero-num { font-size: 2.6rem; }
   .costos-cabecera { flex-direction: column; align-items: flex-start; }
+  .costos-filtros { justify-content: flex-start; }
+  .costos-calendario { margin-left: 18px; }
   .comp-fila { grid-template-columns: 92px 1fr 88px; gap: 8px; }
 }

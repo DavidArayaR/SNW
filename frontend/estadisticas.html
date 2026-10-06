@@ -11,7 +11,8 @@
   <link rel="stylesheet" href="css/componentes.css">
   <link rel="stylesheet" href="css/layout.css?v=sidebar25">
   <link rel="stylesheet" href="css/admin.css?v=inlinecss1">
-  <link rel="stylesheet" href="css/estadisticas.css?v=inlinecss1">
+  <link rel="stylesheet" href="css/estadisticas.css?v=calendario2">
+  <link rel="stylesheet" href="css/calendario.css?v=base1">
   <script src="js/tema.js"></script>
 </head>
 <body data-pagina="estadisticas" data-seccion="administracion">
@@ -94,12 +95,15 @@
             <p class="field__hint stats__costos-hint">
               Tarifas por mensaje que publica Meta para Chile
               (<a href="https://developers.facebook.com/docs/whatsapp/pricing/" target="_blank" rel="noopener">documentaci&oacute;n de precios</a>).
-              El costo es una estimaci&oacute;n: se aplica a cada mensaje enviado la tarifa vigente
-              en su fecha seg&uacute;n su categor&iacute;a, <strong>solo lo enviado por api_oficial</strong>
+              El costo es una estimaci&oacute;n: se aplica la tarifa vigente
+              seg&uacute;n la categor&iacute;a, <strong>solo a lo enviado por api_oficial</strong>
               (lo simulado no se cuenta). Los mensajes de servicio (texto libre en
-              ventana de 24 h, p. ej. respuestas de call center) se cobran desde el 01-10-2026 a
-              su tarifa (o a la de Utility como respaldo); el resto del texto libre no se cobra
-              y queda fuera.
+              ventana de 24 h, p. ej. respuestas de call center) tienen desde el 01-10-2026
+              <strong>1.000 entregas gratuitas al mes por n&uacute;mero del negocio</strong>.
+              Solo las entregas posteriores se estiman como pagadas, a su tarifa
+              (o a la de Utility como respaldo). El resto del texto libre queda fuera.
+              El c&aacute;lculo local puede diferir de la factura de Meta si faltan webhooks
+              de entrega o el identificador del n&uacute;mero en registros antiguos.
             Para ver una representación más precisa, visita <a href="https://business.facebook.com/latest/whatsapp_manager/insights/?business_id=799315784581199&tab=insights&nav_ref=whatsapp_manager&asset_id=1824108822101466" target="_blank" rel="noopener">el dashboard de meta</a>.
           </p>
 
@@ -111,19 +115,43 @@
           <div class="costos-cabecera">
             <h3>Costo estimado por periodo</h3>
             <div class="costos-filtros">
-              <div class="grafico-tabs" id="costosTabs">
-                <button type="button" data-gran="dia">D&iacute;a</button>
-                <button type="button" data-gran="mes" class="activo">Mes</button>
-                <button type="button" data-gran="anio">A&ntilde;o</button>
-              </div>
               <label class="costos-cat" for="selCatCostos">Categor&iacute;a:</label>
               <select id="selCatCostos" class="badge badge--select" aria-label="Categoría">
                 <option value="todas">Todas</option>
                 <option value="marketing">Marketing</option>
                 <option value="service">Servicio</option>
               </select>
+              <div class="costos-fecha-grupo">
+                <button id="abrirCalendarioCostos" class="btn btn--ghost costos-calendario-abrir" type="button"
+                        aria-expanded="false" aria-controls="calendarioCostos" aria-haspopup="dialog">
+                  <i class="fa-regular fa-calendar" aria-hidden="true"></i>
+                  <span id="resumenCalendarioCostos">Elegir fechas</span>
+                </button>
+                <button id="limpiarFechaCostos" class="btn btn--ghost costos-fecha-limpiar" type="button" hidden>Quitar filtro</button>
+              </div>
             </div>
           </div>
+
+          <div id="calendarioCostos" class="costos-calendario" role="dialog" aria-label="Filtrar costos por fechas" hidden>
+            <div class="costos-calendario__modos" role="tablist" aria-label="Tipo de período">
+              <button type="button" data-cal-modo="dia" role="tab">D&iacute;as</button>
+              <button type="button" data-cal-modo="mes" role="tab">Meses</button>
+              <button type="button" data-cal-modo="anio" role="tab">A&ntilde;os</button>
+            </div>
+            <div class="costos-calendario__nav">
+              <button type="button" data-cal-nav="-1" aria-label="Período anterior"><i class="fa-solid fa-chevron-left" aria-hidden="true"></i></button>
+              <strong id="calendarioCostosTitulo"></strong>
+              <button type="button" data-cal-nav="1" aria-label="Período siguiente"><i class="fa-solid fa-chevron-right" aria-hidden="true"></i></button>
+            </div>
+            <div id="calendarioCostosGrid" class="costos-calendario__grid"></div>
+            <div class="costos-calendario__pie">
+              <span id="calendarioCostosSeleccion">Selecciona uno o varios períodos.</span>
+              <button id="calendarioCostosLimpiar" class="btn btn--ghost" type="button">Limpiar vista</button>
+              <button id="calendarioCostosAplicar" class="btn btn--primary" type="button">Aplicar filtro</button>
+            </div>
+          </div>
+
+          <p class="costos-fecha-ayuda">Puedes elegir varios d&iacute;as, meses o a&ntilde;os. Cambiar de vista reemplaza el filtro; el cupo gratuito se calcula con todas las entregas del mes.</p>
 
           <div class="grafico-barras" id="costosBarras"></div>
           <p class="costos-total" id="costosTotal"></p>
@@ -137,7 +165,7 @@
 
   <script src="js/layout.js?v=navcurve7"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/estadisticas.js"></script>
+  <script src="js/estadisticas.js?v=calendario2"></script>
   <script>
     if (window.snwCargarEstadisticas) window.snwCargarEstadisticas();
   </script>
