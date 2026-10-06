@@ -11,6 +11,8 @@
   <link rel="stylesheet" href="css/componentes.css">
   <link rel="stylesheet" href="css/layout.css?v=sidebar25">
   <link rel="stylesheet" href="css/mensajeria.css">
+  <link rel="stylesheet" href="css/calendario.css?v=base1">
+  <link rel="stylesheet" href="css/calendario-programados.css?v=programados1">
   <script src="js/tema.js"></script>
 </head>
 <body data-pagina="mensajeria">
@@ -277,8 +279,49 @@
           <div class="prog-paso" id="pasoProg3">
             <span class="prog-paso__num">3</span>
             <div class="field">
-              <label for="inpProgFecha">Fecha y hora (hora del servidor)</label>
-              <input type="datetime-local" id="inpProgFecha" disabled>
+              <label>Fecha y hora (hora del servidor)</label>
+              <input type="hidden" id="inpProgFecha" disabled>
+              <div class="prog-fecha-fila">
+                <button type="button" id="btnProgDia" class="prog-fecha-dia" aria-expanded="false"
+                        aria-controls="calendarioProg" aria-haspopup="dialog" disabled>
+                  <i class="fa-regular fa-calendar" aria-hidden="true"></i>
+                  <span id="progDiaTexto">Seleccionar día</span>
+                </button>
+                <div class="prog-hora-campo">
+                  <label for="btnProgHora">Hora</label>
+                  <input type="hidden" id="inpProgHora">
+                  <button type="button" id="btnProgHora" class="prog-fecha-dia prog-hora-boton"
+                          aria-expanded="false" aria-controls="selectorHoraProg" aria-haspopup="dialog" disabled>
+                    <i class="fa-regular fa-clock" aria-hidden="true"></i>
+                    <span id="progHoraTexto">Elegir hora</span>
+                  </button>
+                </div>
+              </div>
+              <div id="calendarioProg" class="costos-calendario prog-calendario" role="dialog"
+                   aria-label="Elegir día del envío programado" hidden>
+                <div class="costos-calendario__nav">
+                  <button type="button" data-prog-cal-nav="-1" aria-label="Mes anterior"><i class="fa-solid fa-chevron-left" aria-hidden="true"></i></button>
+                  <strong id="calendarioProgTitulo"></strong>
+                  <button type="button" data-prog-cal-nav="1" aria-label="Mes siguiente"><i class="fa-solid fa-chevron-right" aria-hidden="true"></i></button>
+                </div>
+                <div id="calendarioProgGrid" class="costos-calendario__grid costos-calendario__grid--dia"></div>
+                <p class="prog-calendario__ayuda">Selecciona un solo día. Los días anteriores no están disponibles.</p>
+              </div>
+              <div id="selectorHoraProg" class="costos-calendario prog-calendario prog-selector-hora" role="dialog"
+                   aria-label="Elegir hora del envío programado" hidden>
+                <div class="prog-selector-hora__columnas">
+                  <div>
+                    <strong id="progHorasTitulo">Hora</strong>
+                    <div id="progHorasGrid" class="prog-selector-hora__grid" role="group" aria-labelledby="progHorasTitulo"></div>
+                  </div>
+                  <div>
+                    <strong id="progMinutosTitulo">Minutos</strong>
+                    <div id="progMinutosGrid" class="prog-selector-hora__grid" role="group" aria-labelledby="progMinutosTitulo"></div>
+                  </div>
+                </div>
+                <p class="prog-calendario__ayuda">Para hoy, las horas y minutos sin 5 minutos de anticipaci&oacute;n quedan deshabilitados.</p>
+              </div>
+              <p id="progFechaError" class="limite-error" role="alert" hidden>La fecha y hora deben ser al menos 5 minutos posteriores a la hora actual.</p>
             </div>
           </div>
           <div class="prog-paso" id="pasoProg4">
@@ -429,7 +472,7 @@
   <div id="toast" class="toast"></div>
   <script src="js/layout.js?v=tabs3-navcurve7"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/app.js?v=plantillas-tabs2"></script>
+  <script src="js/app.js?v=prog-calendario3"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>

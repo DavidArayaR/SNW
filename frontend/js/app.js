@@ -548,6 +548,16 @@ function actualizarProgPlantilla() {
 
 // Pasos 1-plantilla, 2-área, 3-fecha y 4-límite: cada uno se habilita al
 // completar el anterior.
+let diaProgSeleccionado = "";
+let vistaMesProg = new Date();
+let horaProgSeleccionada = "";
+let minutoProgSeleccionado = "";
+
+function fechaProgValida(valor) {
+  const fecha = valor ? new Date(valor) : null;
+  return !!fecha && Number.isFinite(fecha.getTime()) && fecha.getTime() >= Date.now() + 5 * 60000;
+}
+
 function actualizarPasosProg() {
   const p = (plantillas || []).find((x) => x.id === tplSelId);
   const selA = document.getElementById("selProgBase");
@@ -558,7 +568,7 @@ function actualizarPasosProg() {
   const btn = document.getElementById("btnProgramar");
   const paso1 = !!p;
   const paso2 = paso1 && selA && !!selA.value;
-  const paso3Listo = !!(paso2 && inpF && inpF.value);
+  const paso3Listo = !!(paso2 && inpF && fechaProgValida(inpF.value));
   const paso4Listo = !!(paso3Listo && limiteProgElegido());
   for (const [id, listo] of [["pasoProg1", paso1], ["pasoProg2", paso2], ["pasoProg3", paso3Listo], ["pasoProg4", paso4Listo]]) {
     const el = document.getElementById(id);
@@ -566,6 +576,16 @@ function actualizarPasosProg() {
   }
   if (selA) selA.disabled = !paso1;
   if (inpF) inpF.disabled = !paso2;
+  const btnDia = document.getElementById("btnProgDia");
+  const btnHora = document.getElementById("btnProgHora");
+  const inpHora = document.getElementById("inpProgHora");
+  if (btnDia) btnDia.disabled = !paso2;
+  if (btnHora) btnHora.disabled = !paso2 || !diaProgSeleccionado;
+  if (inpHora) inpHora.disabled = !paso2 || !diaProgSeleccionado;
+  const fechaError = document.getElementById("progFechaError");
+  if (fechaError) fechaError.hidden = !inpF?.value || paso3Listo || !paso2;
+  if (!paso2) cerrarCalendarioProg();
+  if (!paso2 || !diaProgSeleccionado) cerrarSelectorHoraProg();
   if (selModo) selModo.disabled = !paso3Listo || progSinCupo;
   const modo = selModo?.value || "";
   if (inpPorcentaje) inpPorcentaje.disabled = !paso3Listo || modo !== "porcentaje" || progSinCupo;
@@ -2288,13 +2308,6 @@ function poblarFormProg(forzarCupo = false) {
   // Al refrescar la lista se fuerza la consulta: cancelar o crear un
   // programado cambia libres/reservados en tiempo real.
   const cupo = cargarCupoProg(forzarCupo);
-  const inpF = $("#inpProgFecha");
-  if (inpF && !inpF.value) {
-    const min = new Date(Date.now() + 5 * 60000);
-    min.setSeconds(0, 0);
-    const tz = new Date(min.getTime() - min.getTimezoneOffset() * 60000);
-    inpF.min = tz.toISOString().slice(0, 16);
-  }
   return cupo;
 }
 
@@ -2459,6 +2472,212 @@ async function cargarCupoProg(forzar = false) {
   aplicarCupoProg();
   actualizarPasosProg();
 }
+
+const mesesCalendarioProg = ["enero", "febrero", "marzo", "abril", "mayo", "junio",
+  "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+const fechaLocalProg = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+function cerrarCalendarioProg(devolverFoco = false) {
+  const cal = $("#calendarioProg");
+  const boton = $("#btnProgDia");
+  if (!cal || !boton) return;
+  cal.hidden = true;
+  boton.setAttribute("aria-expanded", "false");
+  if (devolverFoco && !boton.disabled) boton.focus();
+}
+
+function cerrarSelectorHoraProg(devolverFoco = false) {
+  const selector = $("#selectorHoraProg");
+  const boton = $("#btnProgHora");
+  if (!selector || !boton) return;
+  selector.hidden = true;
+  boton.setAttribute("aria-expanded", "false");
+  if (devolverFoco && !boton.disabled) boton.focus();
+}
+
+function horaProgDisponible(hora, minuto) {
+  if (!diaProgSeleccionado) return false;
+  const valor = new Date(`${diaProgSeleccionado}T${hora}:${minuto}`);
+  // El selector solo ofrece minutos completos; se redondea hacia arriba la
+  // anticipación mínima para que ninguno falle después en la validación.
+  const minimo = Math.ceil((Date.now() + 5 * 60000) / 60000) * 60000;
+  return Number.isFinite(valor.getTime()) && valor.getTime() >= minimo;
+}
+
+function renderSelectorHoraProg() {
+  const horas = $("#progHorasGrid");
+  const minutos = $("#progMinutosGrid");
+  if (!horas || !minutos) return;
+  const dosDigitos = (n) => String(n).padStart(2, "0");
+  horas.innerHTML = Array.from({ length: 24 }, (_, n) => {
+    const valor = dosDigitos(n);
+    return `<button type="button" data-prog-hora="${valor}" aria-pressed="${valor === horaProgSeleccionada}" ` +
+      `aria-label="${valor} horas"${horaProgDisponible(valor, "59") ? "" : " disabled"}>${valor}</button>`;
+  }).join("");
+  minutos.innerHTML = Array.from({ length: 60 }, (_, n) => {
+    const valor = dosDigitos(n);
+    const disponible = !horaProgSeleccionada || horaProgDisponible(horaProgSeleccionada, valor);
+    return `<button type="button" data-prog-minuto="${valor}" aria-pressed="${valor === minutoProgSeleccionado}" ` +
+      `aria-label="${valor} minutos"${disponible ? "" : " disabled"}>${valor}</button>`;
+  }).join("");
+}
+
+function aplicarHoraProg() {
+  const hora = horaProgSeleccionada && minutoProgSeleccionado
+    ? `${horaProgSeleccionada}:${minutoProgSeleccionado}` : "";
+  $("#inpProgHora").value = hora;
+  $("#progHoraTexto").textContent = hora ||
+    (horaProgSeleccionada || minutoProgSeleccionado
+      ? `${horaProgSeleccionada || "--"}:${minutoProgSeleccionado || "--"}` : "Elegir hora");
+  sincronizarFechaHoraProg();
+}
+
+function renderCalendarioProg() {
+  const grid = $("#calendarioProgGrid");
+  if (!grid) return;
+  const anio = vistaMesProg.getFullYear();
+  const mes = vistaMesProg.getMonth();
+  $("#calendarioProgTitulo").textContent = `${mesesCalendarioProg[mes]} ${anio}`;
+  const minimo = fechaLocalProg(new Date(Date.now() + 5 * 60000));
+  const hoy = fechaLocalProg(new Date());
+  const botones = ["Lu", "Ma", "Mi", "Ju", "Vi", "Sá", "Do"].map((dia) =>
+    `<span class="costos-calendario__semana">${dia}</span>`);
+  const huecos = (new Date(anio, mes, 1).getDay() + 6) % 7;
+  for (let i = 0; i < huecos; i++) botones.push('<span aria-hidden="true"></span>');
+  const ultimo = new Date(anio, mes + 1, 0).getDate();
+  for (let dia = 1; dia <= ultimo; dia++) {
+    const valor = `${anio}-${String(mes + 1).padStart(2, "0")}-${String(dia).padStart(2, "0")}`;
+    botones.push(`<button type="button" data-prog-cal-dia="${valor}" ` +
+      `aria-label="${dia} de ${mesesCalendarioProg[mes]} de ${anio}" ` +
+      `aria-pressed="${valor === diaProgSeleccionado}" data-hoy="${valor === hoy}"` +
+      `${valor < minimo ? " disabled" : ""}>${dia}</button>`);
+  }
+  grid.innerHTML = botones.join("");
+  const anterior = $("#calendarioProg [data-prog-cal-nav='-1']");
+  if (anterior) anterior.disabled = fechaLocalProg(new Date(anio, mes, 0)) < minimo;
+}
+
+function sincronizarFechaHoraProg() {
+  const inp = $("#inpProgFecha");
+  const hora = $("#inpProgHora")?.value || "";
+  if (!inp) return;
+  const nuevo = diaProgSeleccionado && hora ? `${diaProgSeleccionado}T${hora}` : "";
+  if (inp.value !== nuevo) {
+    inp.value = nuevo;
+    inp.dispatchEvent(new Event("input", { bubbles: true }));
+  } else actualizarPasosProg();
+}
+
+const btnProgDia = $("#btnProgDia");
+if (btnProgDia) btnProgDia.addEventListener("click", () => {
+  const cal = $("#calendarioProg");
+  if (!cal || btnProgDia.disabled) return;
+  cerrarSelectorHoraProg();
+  cal.hidden = !cal.hidden;
+  btnProgDia.setAttribute("aria-expanded", String(!cal.hidden));
+  if (!cal.hidden) {
+    const d = diaProgSeleccionado
+      ? new Date(`${diaProgSeleccionado}T12:00:00`)
+      : new Date(Date.now() + 5 * 60000);
+    vistaMesProg = new Date(d.getFullYear(), d.getMonth(), 1);
+    renderCalendarioProg();
+    cal.querySelector(".costos-calendario__nav button:not(:disabled)")?.focus();
+  }
+});
+document.querySelectorAll("#calendarioProg [data-prog-cal-nav]").forEach((b) =>
+  b.addEventListener("click", () => {
+    vistaMesProg = new Date(vistaMesProg.getFullYear(),
+      vistaMesProg.getMonth() + Number(b.dataset.progCalNav), 1);
+    renderCalendarioProg();
+  })
+);
+const gridProg = $("#calendarioProgGrid");
+if (gridProg) gridProg.addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-prog-cal-dia]");
+  if (!b || b.disabled) return;
+  diaProgSeleccionado = b.dataset.progCalDia;
+  const d = new Date(`${diaProgSeleccionado}T12:00:00`);
+  $("#progDiaTexto").textContent = new Intl.DateTimeFormat("es-CL",
+    { day: "numeric", month: "long", year: "numeric" }).format(d);
+  cerrarCalendarioProg();
+  if (horaProgSeleccionada && !horaProgDisponible(horaProgSeleccionada, minutoProgSeleccionado || "59")) {
+    horaProgSeleccionada = "";
+    minutoProgSeleccionado = "";
+  }
+  aplicarHoraProg();
+  $("#btnProgHora")?.focus();
+});
+const btnProgHora = $("#btnProgHora");
+if (btnProgHora) btnProgHora.addEventListener("click", () => {
+  const selector = $("#selectorHoraProg");
+  if (!selector || btnProgHora.disabled) return;
+  cerrarCalendarioProg();
+  selector.hidden = !selector.hidden;
+  btnProgHora.setAttribute("aria-expanded", String(!selector.hidden));
+  if (!selector.hidden) {
+    if (horaProgSeleccionada && !horaProgDisponible(horaProgSeleccionada, minutoProgSeleccionado || "59")) {
+      horaProgSeleccionada = "";
+      minutoProgSeleccionado = "";
+      aplicarHoraProg();
+    }
+    renderSelectorHoraProg();
+    const horas = selector.querySelector("#progHorasGrid");
+    const minutos = selector.querySelector("#progMinutosGrid");
+    if (horaProgSeleccionada) horas.scrollTop = Math.max(0, Math.floor(Number(horaProgSeleccionada) / 3) * 40 - 80);
+    if (minutoProgSeleccionado) minutos.scrollTop = Math.max(0, Math.floor(Number(minutoProgSeleccionado) / 3) * 40 - 80);
+    (horas.querySelector("button[aria-pressed='true']") || horas.querySelector("button"))?.focus();
+  }
+});
+const selectorHoraProg = $("#selectorHoraProg");
+function refrescarDisponibilidadHoraProg() {
+  if (!selectorHoraProg || selectorHoraProg.hidden) return;
+  selectorHoraProg.querySelectorAll("button[data-prog-hora]").forEach((b) => {
+    b.disabled = !horaProgDisponible(b.dataset.progHora, "59");
+  });
+  selectorHoraProg.querySelectorAll("button[data-prog-minuto]").forEach((b) => {
+    b.disabled = !!horaProgSeleccionada && !horaProgDisponible(horaProgSeleccionada, b.dataset.progMinuto);
+  });
+}
+setInterval(() => {
+  if (document.hidden) return;
+  refrescarDisponibilidadHoraProg();
+  if ($("#inpProgFecha")?.value) actualizarPasosProg();
+}, 30000);
+if (selectorHoraProg) selectorHoraProg.addEventListener("click", (e) => {
+  const boton = e.target.closest("button[data-prog-hora], button[data-prog-minuto]");
+  if (!boton || boton.disabled) return;
+  const esHora = boton.dataset.progHora !== undefined;
+  if (esHora) {
+    if (!horaProgDisponible(boton.dataset.progHora, "59")) { renderSelectorHoraProg(); return; }
+    horaProgSeleccionada = boton.dataset.progHora;
+    if (minutoProgSeleccionado && !horaProgDisponible(horaProgSeleccionada, minutoProgSeleccionado))
+      minutoProgSeleccionado = "";
+  } else {
+    if (horaProgSeleccionada && !horaProgDisponible(horaProgSeleccionada, boton.dataset.progMinuto)) {
+      renderSelectorHoraProg();
+      return;
+    }
+    minutoProgSeleccionado = boton.dataset.progMinuto;
+  }
+  renderSelectorHoraProg();
+  aplicarHoraProg();
+  if (!esHora && horaProgSeleccionada) cerrarSelectorHoraProg(true);
+  else {
+    const lista = selectorHoraProg.querySelector(esHora ? "#progMinutosGrid" : "#progHorasGrid");
+    (lista?.querySelector("button[aria-pressed='true']") || lista?.querySelector("button"))?.focus();
+  }
+});
+document.addEventListener("click", (e) => {
+  const cal = $("#calendarioProg");
+  if (cal && !cal.hidden && !cal.contains(e.target) && !btnProgDia?.contains(e.target))
+    cerrarCalendarioProg();
+  if (selectorHoraProg && !selectorHoraProg.hidden && !selectorHoraProg.contains(e.target) && !btnProgHora?.contains(e.target))
+    cerrarSelectorHoraProg();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !$("#calendarioProg")?.hidden) cerrarCalendarioProg(true);
+  if (e.key === "Escape" && !$("#selectorHoraProg")?.hidden) cerrarSelectorHoraProg(true);
+});
 
 const selProgBaseEl = $("#selProgBase");
 if (selProgBaseEl) selProgBaseEl.addEventListener("change", () => {
@@ -2755,6 +2974,11 @@ async function programarEnvio() {
   if (!base) { toast("Elige la base de datos.", "error"); return; }
   if (!tpl) { toast("Elige una plantilla de la lista de la izquierda.", "error"); return; }
   if (!inpF || !inpF.value) { toast("Elige fecha y hora.", "error"); return; }
+  if (!fechaProgValida(inpF.value)) {
+    toast("La fecha y hora deben ser al menos 5 minutos posteriores a la hora actual.", "error");
+    actualizarPasosProg();
+    return;
+  }
   if (progSinCupo) { toast("Hoy no hay cupo disponible para programar este envío.", "error"); return; }
   // Campo en rojo + aviso si el límite pasa los pendientes de la base o el cupo
   // de Meta (o no es un entero válido).
@@ -2780,6 +3004,14 @@ async function programarEnvio() {
       ? `Envío programado: ${cuantos} paciente(s) preelegidos, pendiente de aprobación de un superior.`
       : `Envío programado: ${cuantos} paciente(s) preelegidos.`, "ok");
     inpF.value = "";
+    diaProgSeleccionado = "";
+    horaProgSeleccionada = "";
+    minutoProgSeleccionado = "";
+    $("#inpProgHora").value = "";
+    $("#progDiaTexto").textContent = "Seleccionar día";
+    $("#progHoraTexto").textContent = "Elegir hora";
+    cerrarCalendarioProg();
+    cerrarSelectorHoraProg();
     if (inpL) inpL.value = "";
     const selModo = $("#selProgLimiteModo");
     if (selModo) selModo.value = "";
