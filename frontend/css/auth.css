@@ -64,7 +64,7 @@ body.pagina-auth {
 .pagina-auth input:focus { border-color: var(--verde); outline: none; }
 .pagina-auth input.malo { border-color: var(--danger-fg); }
 .pagina-auth input:disabled { opacity: .7; cursor: not-allowed; }
-.pagina-auth button {
+.pagina-auth form > button[type="submit"] {
   width: 100%;
   border: none;
   border-radius: 10px;
@@ -76,8 +76,8 @@ body.pagina-auth {
   font-size: .98rem;
   cursor: pointer;
 }
-.pagina-auth button:hover { filter: brightness(1.07); }
-.pagina-auth button:disabled { opacity: .6; cursor: wait; }
+.pagina-auth form > button[type="submit"]:hover { filter: brightness(1.07); }
+.pagina-auth form > button[type="submit"]:disabled { opacity: .6; cursor: wait; }
 .pagina-login .spinner {
   display: inline-block;
   width: 14px;
