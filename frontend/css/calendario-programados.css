@@ -22,6 +22,9 @@
 .prog-fecha-dia:disabled { opacity: .55; cursor: not-allowed; }
 .prog-fecha-dia:focus-visible { outline: 2px solid var(--verde-oscuro); outline-offset: 2px; }
 .prog-fecha-dia span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prog-dia-campo { flex: 1 1 auto; min-width: 0; }
+.prog-dia-campo label { font-size: .8rem; color: var(--texto-suave); }
+.prog-dia-campo .prog-fecha-dia { width: 100%; }
 .prog-hora-campo { flex: 0 0 135px; min-width: 0; }
 .prog-hora-campo label { font-size: .8rem; color: var(--texto-suave); }
 .prog-hora-boton {

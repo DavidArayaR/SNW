@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="css/layout.css?v=sidebar25">
   <link rel="stylesheet" href="css/mensajeria.css">
   <link rel="stylesheet" href="css/calendario.css?v=base1">
-  <link rel="stylesheet" href="css/calendario-programados.css?v=programados1">
+  <link rel="stylesheet" href="css/calendario-programados.css?v=programados2">
   <script src="js/tema.js"></script>
 </head>
 <body data-pagina="mensajeria">
@@ -282,11 +282,14 @@
               <label>Fecha y hora (hora del servidor)</label>
               <input type="hidden" id="inpProgFecha" disabled>
               <div class="prog-fecha-fila">
-                <button type="button" id="btnProgDia" class="prog-fecha-dia" aria-expanded="false"
-                        aria-controls="calendarioProg" aria-haspopup="dialog" disabled>
-                  <i class="fa-regular fa-calendar" aria-hidden="true"></i>
-                  <span id="progDiaTexto">Seleccionar día</span>
-                </button>
+                <div class="prog-dia-campo">
+                  <label for="btnProgDia">Día</label>
+                  <button type="button" id="btnProgDia" class="prog-fecha-dia" aria-expanded="false"
+                          aria-controls="calendarioProg" aria-haspopup="dialog" disabled>
+                    <i class="fa-regular fa-calendar" aria-hidden="true"></i>
+                    <span id="progDiaTexto">Elegir día</span>
+                  </button>
+                </div>
                 <div class="prog-hora-campo">
                   <label for="btnProgHora">Hora</label>
                   <input type="hidden" id="inpProgHora">
@@ -472,7 +475,7 @@
   <div id="toast" class="toast"></div>
   <script src="js/layout.js?v=tabs3-navcurve7"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/app.js?v=prog-calendario3"></script>
+  <script src="js/app.js?v=prog-calendario6"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>

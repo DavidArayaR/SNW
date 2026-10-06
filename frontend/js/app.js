@@ -552,6 +552,8 @@ let diaProgSeleccionado = "";
 let vistaMesProg = new Date();
 let horaProgSeleccionada = "";
 let minutoProgSeleccionado = "";
+let horaProgElegidaEnApertura = false;
+let minutoProgElegidoEnApertura = false;
 
 function fechaProgValida(valor) {
   const fecha = valor ? new Date(valor) : null;
@@ -2615,6 +2617,8 @@ if (btnProgHora) btnProgHora.addEventListener("click", () => {
   selector.hidden = !selector.hidden;
   btnProgHora.setAttribute("aria-expanded", String(!selector.hidden));
   if (!selector.hidden) {
+    horaProgElegidaEnApertura = false;
+    minutoProgElegidoEnApertura = false;
     if (horaProgSeleccionada && !horaProgDisponible(horaProgSeleccionada, minutoProgSeleccionado || "59")) {
       horaProgSeleccionada = "";
       minutoProgSeleccionado = "";
@@ -2644,24 +2648,33 @@ setInterval(() => {
   if ($("#inpProgFecha")?.value) actualizarPasosProg();
 }, 30000);
 if (selectorHoraProg) selectorHoraProg.addEventListener("click", (e) => {
+  // El render reemplaza el botón pulsado antes de que termine el evento.
+  // Si el clic llega al documento, ese botón ya no está dentro del selector
+  // y el manejador de clic externo lo cerraría prematuramente.
+  e.stopPropagation();
   const boton = e.target.closest("button[data-prog-hora], button[data-prog-minuto]");
   if (!boton || boton.disabled) return;
   const esHora = boton.dataset.progHora !== undefined;
   if (esHora) {
     if (!horaProgDisponible(boton.dataset.progHora, "59")) { renderSelectorHoraProg(); return; }
     horaProgSeleccionada = boton.dataset.progHora;
-    if (minutoProgSeleccionado && !horaProgDisponible(horaProgSeleccionada, minutoProgSeleccionado))
+    horaProgElegidaEnApertura = true;
+    if (minutoProgSeleccionado && !horaProgDisponible(horaProgSeleccionada, minutoProgSeleccionado)) {
       minutoProgSeleccionado = "";
+      minutoProgElegidoEnApertura = false;
+    }
   } else {
     if (horaProgSeleccionada && !horaProgDisponible(horaProgSeleccionada, boton.dataset.progMinuto)) {
       renderSelectorHoraProg();
       return;
     }
     minutoProgSeleccionado = boton.dataset.progMinuto;
+    minutoProgElegidoEnApertura = true;
   }
   renderSelectorHoraProg();
   aplicarHoraProg();
-  if (!esHora && horaProgSeleccionada) cerrarSelectorHoraProg(true);
+  if (horaProgElegidaEnApertura && minutoProgElegidoEnApertura && horaProgSeleccionada && minutoProgSeleccionado)
+    cerrarSelectorHoraProg(true);
   else {
     const lista = selectorHoraProg.querySelector(esHora ? "#progMinutosGrid" : "#progHorasGrid");
     (lista?.querySelector("button[aria-pressed='true']") || lista?.querySelector("button"))?.focus();
@@ -2671,7 +2684,8 @@ document.addEventListener("click", (e) => {
   const cal = $("#calendarioProg");
   if (cal && !cal.hidden && !cal.contains(e.target) && !btnProgDia?.contains(e.target))
     cerrarCalendarioProg();
-  if (selectorHoraProg && !selectorHoraProg.hidden && !selectorHoraProg.contains(e.target) && !btnProgHora?.contains(e.target))
+  if (selectorHoraProg && !selectorHoraProg.hidden &&
+      !e.composedPath().includes(selectorHoraProg) && !btnProgHora?.contains(e.target))
     cerrarSelectorHoraProg();
 });
 document.addEventListener("keydown", (e) => {
@@ -3008,7 +3022,7 @@ async function programarEnvio() {
     horaProgSeleccionada = "";
     minutoProgSeleccionado = "";
     $("#inpProgHora").value = "";
-    $("#progDiaTexto").textContent = "Seleccionar día";
+    $("#progDiaTexto").textContent = "Elegir día";
     $("#progHoraTexto").textContent = "Elegir hora";
     cerrarCalendarioProg();
     cerrarSelectorHoraProg();
