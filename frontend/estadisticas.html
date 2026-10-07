@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="css/componentes.css">
   <link rel="stylesheet" href="css/layout.css?v=sidebar25">
   <link rel="stylesheet" href="css/admin.css?v=inlinecss1">
-  <link rel="stylesheet" href="css/estadisticas.css?v=series5">
+  <link rel="stylesheet" href="css/estadisticas.css?v=series6">
   <link rel="stylesheet" href="css/calendario.css?v=base1">
   <script src="js/tema.js"></script>
 </head>
@@ -123,24 +123,12 @@
           </div>
 
             <p class="field__hint stats__costos-hint">
-              Tarifas por mensaje que publica Meta para Chile
-              (<a href="https://developers.facebook.com/docs/whatsapp/pricing/" target="_blank" rel="noopener">documentaci&oacute;n de precios</a>).
-              El costo es una estimaci&oacute;n: se aplica la tarifa vigente
-              seg&uacute;n la categor&iacute;a, <strong>solo a lo enviado por api_oficial</strong>.
-              Los mensajes de servicio (texto libre en
-              ventana de 24 h, p. ej. respuestas de call center) tienen desde el 01-10-2026
-              <strong>1.000 entregas gratuitas al mes por n&uacute;mero del negocio</strong>.
-              Solo las entregas posteriores se estiman como pagadas, a su tarifa
-              (o a la de Utility como respaldo). El resto del texto libre queda fuera.
-              El c&aacute;lculo local puede diferir de la factura de Meta si faltan webhooks
-              de entrega o el identificador del n&uacute;mero en registros antiguos.
-            Para ver una representación más precisa, visita <a href="https://business.facebook.com/latest/whatsapp_manager/insights/?business_id=799315784581199&tab=insights&nav_ref=whatsapp_manager&asset_id=1824108822101466" target="_blank" rel="noopener">el dashboard de meta</a>.
-          </p>
-
-          <p id="tarifasAlerta" class="webhook-salud" hidden></p>
-
-          <div class="tarifas-grid" id="tarifasVigente"></div>
-          <p class="tarifas-pie" id="tarifasPie"></p>
+              Costo estimado solo de env&iacute;os por API oficial. Desde el 01-10-2026,
+              el servicio incluye 1.000 entregas gratis por n&uacute;mero de empresa al mes;
+              las siguientes son pagadas. La factura de Meta puede diferir.
+              <a href="https://developers.facebook.com/docs/whatsapp/pricing/" target="_blank" rel="noopener">Tarifas de Meta</a>
+              &middot; <a href="https://business.facebook.com/latest/whatsapp_manager/insights/?business_id=799315784581199&amp;tab=insights&amp;nav_ref=whatsapp_manager&amp;asset_id=1824108822101466" target="_blank" rel="noopener">Ver estad&iacute;sticas en Meta</a>.
+            </p>
 
           <div class="costos-cabecera">
             <h3>Costo estimado por periodo</h3>
@@ -156,6 +144,11 @@
 
           <div class="grafico-barras" id="costosBarras"></div>
           <div class="costos-resumen" id="costosTotal"></div>
+
+          <h3>Tarifas de referencia</h3>
+          <p id="tarifasAlerta" class="webhook-salud" hidden></p>
+          <div class="tarifas-grid" id="tarifasVigente"></div>
+          <p class="tarifas-pie" id="tarifasPie"></p>
           </div>
         </section>
 

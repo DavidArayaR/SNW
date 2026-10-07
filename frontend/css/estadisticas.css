@@ -141,7 +141,7 @@
 .tarifa-card__unidad { font-size: .74rem; color: var(--texto-suave); }
 
 .tarifas-pie {
-  margin: 8px 18px 0;
+  margin: 8px 18px 18px;
   font-size: .8rem;
   color: var(--texto-suave);
 }
