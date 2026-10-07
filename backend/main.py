@@ -1532,66 +1532,6 @@ def listar_pacientes(q: str | None = Query(None), ambiente: str = Query("producc
     return filas
 
 
-class PacienteIndividualIn(BaseModel):
-    nombre: str
-    apellido: str
-    telefono: str
-
-
-def crear_paciente_individual(body: PacienteIndividualIn,
-                              ambiente: str = Query("produccion"),
-                              area_id: int | None = Query(None),
-                              sesion: dict = Depends(sesion_actual)):
-    """Agrega un paciente a la base elegida y registra autoría/auditoría en
-    la misma transacción. Un duplicado de teléfono no concede acceso."""
-    if area_id is not None:
-        t, _esp = _resolver_tabla_pacientes(sesion, ambiente, area_id)
-        if not _es_privilegiado(sesion) and not tiene_permiso(sesion, "mensajeria"):
-            raise HTTPException(403, detail="No tienes permiso para agregar pacientes a esta área.")
-    else:
-        if not tiene_permiso(sesion, "pacientes"):
-            raise HTTPException(403, detail="No tienes permiso para agregar pacientes a esta base.")
-        t, _esp = _resolver_tabla_pacientes(sesion, ambiente, None)
-    uid = servicio_areas.usuario_id_por_correo(sesion.get("usuario", ""))
-    if uid is None:
-        raise HTTPException(403, detail="No se pudo identificar la cuenta que agrega el paciente.")
-
-    nombre = servicio_areas.normalizar_texto(body.nombre)
-    apellido = servicio_areas.normalizar_texto(body.apellido)
-    if not nombre or not apellido:
-        raise HTTPException(422, detail="Ingresa el nombre y el apellido del paciente.")
-    if len(nombre) > 150 or len(apellido) > 150:
-        raise HTTPException(422, detail="Nombre y apellido deben tener como máximo 150 caracteres cada uno.")
-    telefono = normalizar_telefono(body.telefono)
-    if telefono is None:
-        raise HTTPException(422, detail="Número de teléfono inválido. Usa un celular chileno, por ejemplo +56912345678.")
-
-    with conectar(ambiente) as conn, conn.cursor() as cur:
-        # El esquema histórico no tiene UNIQUE en teléfono: se compara su
-        # representación normalizada para detectar también formatos antiguos.
-        cur.execute(f"SELECT telefono FROM {t}")
-        if any(normalizar_telefono(f.get("telefono") or "") == telefono for f in cur.fetchall()):
-            raise HTTPException(409, detail="Ese número de teléfono ya existe en la base seleccionada.")
-        cur.execute(
-            f"INSERT INTO {t} (nombre, apellido, telefono) VALUES (%s, %s, %s)",
-            (nombre, apellido, telefono),
-        )
-        paciente_id = int(cur.lastrowid)
-        cur.execute(
-            "INSERT INTO paciente_csv_accesos (tabla_pacientes, paciente_id, usuario_id)"
-            " VALUES (%s, %s, %s)",
-            (t, paciente_id, uid),
-        )
-        cur.execute(
-            "INSERT INTO usuarios_auditoria (actor, accion, objetivo, detalle)"
-            " VALUES (%s, %s, %s, %s)",
-            (str(sesion.get("usuario") or "").strip().lower(), "paciente_creado",
-             t, f"Registro #{paciente_id} agregado individualmente en {t}."),
-        )
-        conn.commit()
-    return {"ok": True, "id": paciente_id, "base_datos": t}
-
-
 class EstadoPacienteIn(BaseModel):
     estado: str
 

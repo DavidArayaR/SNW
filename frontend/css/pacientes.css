@@ -11,27 +11,6 @@
    tabla). Las acciones se aplican sobre la base elegida en el panel de arriba.
    .panel no trae padding: el aire de los bordes lo da esta regla. */
 #cardGestionBase { padding-bottom: 20px; }
-.gestion-individual {
-  margin: 18px 18px 0;
-  padding: 18px;
-  border: 1px solid var(--borde);
-  border-top: 3px solid var(--verde);
-  border-bottom: 3px solid var(--verde);
-  border-radius: 10px;
-  background: var(--panel-2);
-}
-.gestion-individual h3 { margin: 0 0 4px; font-size: 1rem; }
-.gestion-individual > .field__hint { margin: 0 0 14px; }
-.gestion-individual__campos {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 14px;
-}
-.gestion-individual__campos .field { margin: 0; min-width: 0; }
-@media (max-width: 760px) {
-  .gestion-individual__campos { grid-template-columns: 1fr; }
-}
 .gestion-campo { margin: 18px 18px 0; max-width: 640px; }
 .gestion-archivo { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .gestion-archivo .field__hint { margin: 0; }

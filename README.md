@@ -230,13 +230,13 @@ correo; los vencidos/usados se limpian en cada arranque. Creada por el backend e
 arranque (no está en `snw_base.sql`).
 
 **`usuarios_auditoria`** — trazabilidad de acciones de cada cuenta:
-`actor`, `accion`, `objetivo` y `detalle`. Incluye cambios de cuentas, plantillas
-y altas individuales de pacientes (`paciente_creado`). Alimenta la sección
+`actor`, `accion`, `objetivo` y `detalle`. Incluye cambios de cuentas y plantillas;
+conserva las altas individuales históricas (`paciente_creado`). Alimenta la sección
 «Actividad» del panel de una cuenta en Usuarios. También la crea el backend
 en el primer arranque.
 
 **`paciente_csv_accesos`** — registra qué cuenta incorporó cada paciente mediante un CSV
-o un alta individual, identificado por tabla, ID de paciente y usuario. Si varias cuentas
+(y conserva altas individuales históricas), identificado por tabla, ID de paciente y usuario. Si varias cuentas
 importan el mismo paciente, cada una obtiene acceso a sus datos completos. El rol de
 administrador o desarrollador **no** sustituye esta relación: quien no incorporó ese paciente solo ve
 iniciales y teléfono oculto (`+569 **** *123`), y no puede abrir sus mensajes. Los
@@ -362,7 +362,6 @@ en otras bases si ese mismo número también figura como prueba allí.
 | Método | Endpoint | Descripción |
 |---|---|---|
 | GET | `/api/pacientes?q=&ambiente=&area_id=` | Lista de la base indicada; con `area_id` lee `pacientes_<slug>` (403 si no está asignada). Cada fila indica `datos_completos` y `editable` (si su número está en la lista de prueba de la base). Para quien no incorporó al paciente, devuelve solo iniciales y teléfono oculto, sin último mensaje ni error. La búsqueda `q` se aplica a esos valores visibles |
-| POST | `/api/pacientes?ambiente=&area_id=` | Agrega un paciente individual con `{nombre, apellido, telefono}` a la base seleccionada. Exige los tres campos, normaliza el celular chileno y rechaza con 409 un número que ya exista allí. En bases generales requiere permiso `pacientes`; en áreas, permiso `mensajeria` y asignación al área (admin/dev también pueden). Registra el acceso de quien lo creó y la acción `paciente_creado` en su auditoría, sin nombre ni teléfono en el registro de actividad |
 | PUT | `/api/pacientes/{id}?ambiente=&area_id=` | Cambiar `estado` (`pendiente`/`enviado`/`error`) de **un** paciente |
 | PUT | `/api/pacientes/estado-masivo?ambiente=` | `{pacientes: [ids], estado}` — igual que arriba pero para **varios** pacientes a la vez (selección en la pestaña Pacientes) |
 | PUT | `/api/pacientes/{id}/respuesta?ambiente=` | Ajuste manual de la respuesta (`pendiente`/`baja`) de **un** paciente de prueba; `baja` activa el opt-out. 409 si el paciente pidió la baja explícitamente por WhatsApp y se intenta poner algo distinto de `baja` (ver `opt_out_explicito`) |
