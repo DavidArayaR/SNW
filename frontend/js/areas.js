@@ -18,6 +18,7 @@ const toastEl = $("#toast");
 let estado = { lista: [], usuarios: [] };
 let seleccion = null;   // id del área mostrada
 let yaCargada = false;
+let asignacionEnCurso = false;
 
 let toastTimer;
 function toast(msg, tipo = "ok") {
@@ -207,24 +208,42 @@ async function renombrar(card) {
 }
 
 async function asignar(card, attrSel) {
+  if (asignacionEnCurso) return;
   const id = Number(card.dataset.id);
   const sel = card.querySelector(`[data-${attrSel}]`);
-  if (!sel || !sel.value) return;
+  const boton = card.querySelector(`[data-asignar-${attrSel}]`);
+  if (!sel || !sel.value || !boton || boton.disabled) return;
+  const correo = sel.value;
+  const botones = [...card.querySelectorAll("[data-asignar-nuevo-usuario], [data-asignar-nuevo-supervisor]")];
+  const estadosBotones = botones.map((b) => b.disabled);
+  const selectores = [...card.querySelectorAll("[data-nuevo-usuario], [data-nuevo-supervisor]")];
+  const estadosSelectores = selectores.map((s) => s.disabled);
+  asignacionEnCurso = true;
+  botones.forEach((b) => { b.disabled = true; });
+  selectores.forEach((s) => { s.disabled = true; });
+  boton.textContent = "Asignando…";
   try {
     const r = await fetch(`api/areas/${id}/roles`, {
       method: "POST",
       headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ usuario: sel.value }),
+      body: JSON.stringify({ usuario: correo }),
     });
     const d = await r.json().catch(() => ({}));
     if (r.status === 401) { window.snwSesionExpirada(); return; }
     if (!r.ok) throw new Error(typeof d.detail === "string" ? d.detail : `Error ${r.status}`);
-    toast(`Rol asignado a ${sel.value}.`);
+    toast(`Rol asignado a ${correo}.`);
     yaCargada = false;
     await cargar();
   } catch (e) {
     console.error("[areas.js asignar()]", e);
     toast(e.message || "No se pudo asignar el rol.", "error");
+  } finally {
+    asignacionEnCurso = false;
+    if (card.isConnected) {
+      botones.forEach((b, i) => { b.disabled = estadosBotones[i]; });
+      selectores.forEach((s, i) => { s.disabled = estadosSelectores[i]; });
+      boton.textContent = "Asignar";
+    }
   }
 }
 
