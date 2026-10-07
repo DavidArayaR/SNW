@@ -6020,10 +6020,10 @@ def estadisticas(area_id: int | None = Query(None), sesion: dict = Depends(solo_
             "  SUM(respuesta = 'respondio') AS respondio,"
             "  SUM(respuesta = 'baja') AS baja"
             " FROM log_envios"
-            " WHERE fecha_hora >= DATE_FORMAT(CURDATE(), '%Y-%m-01')"
+            " WHERE fecha_hora >= DATE_FORMAT(CURDATE(), %s)"
             f"   AND {_SOLO_PROD}"
             f"{filtro_esp}",
-            args_esp or None,
+            ("%Y-%m-01", *args_esp),
         )
         mes = cur.fetchone() or {}
 
