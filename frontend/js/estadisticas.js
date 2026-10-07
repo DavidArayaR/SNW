@@ -90,12 +90,14 @@ if (selAreaEst) selAreaEst.addEventListener("change", () => {
   const v = selAreaEst.value;
   if (v) localStorage.setItem("snw_esp_estadisticas", v);
   else localStorage.removeItem("snw_esp_estadisticas");
+  limpiarFiltroCalendarioCostos();
+  cerrarCalendarioCostos();
   recargarTodo();
 });
 
-function recargarTodo() {
+async function recargarTodo() {
   cargar();
-  cargarEnvios(granEnvios);
+  await cargarEnvios(granEnvios);
   if (ES_ADMIN && $("#panelCostos")) {
     cargarTarifas();
     cargarCostos(granCostos);
@@ -341,25 +343,36 @@ function pintarGrafico(el, items, { gran, fmtValor, vacio }) {
 
 /* -- Mensajes enviados (para todos los usuarios) -------------------- */
 let granEnvios = "mes";
+let solicitudEnvios = 0;
+let aniosConEnvios = new Set();
 
 async function cargarEnvios(gran) {
-  granEnvios = gran;
-  document.querySelectorAll("#enviosTabs button").forEach((b) =>
-    b.classList.toggle("activo", b.dataset.gran === gran)
-  );
+  granEnvios = filtroCalendarioCostos?.modo || gran;
+  const solicitud = ++solicitudEnvios;
   try {
-    const res = await fetch(`api/estadisticas/envios?granularidad=${gran}${qsEspEst()}`, {
+    const qsPeriodos = filtroCalendarioCostos
+      ? `&periodos=${encodeURIComponent(filtroCalendarioCostos.valores.join(","))}` : "";
+    const res = await fetch(`api/estadisticas/envios?granularidad=${granEnvios}${qsEspEst()}${qsPeriodos}`, {
       headers: authHeaders(), cache: "no-store",
     });
     if (res.status === 401) { window.snwSesionExpirada(); return; }
     if (!res.ok) throw new Error();
     const d = await res.json();
+    if (solicitud !== solicitudEnvios) return;
+    aniosConEnvios = new Set((d.anios_disponibles || []).map(Number));
+    const anios = [...aniosConEnvios].sort((a, b) => a - b);
+    if (anios.length && !aniosConEnvios.has(estadoCalendarioCostos.anio)) {
+      estadoCalendarioCostos.anio = anios[anios.length - 1];
+      estadoCalendarioCostos.mes = 0;
+    }
+    pintarCalendarioCostos();
     pintarGrafico($("#enviosGrafico"), (d.filas || []).map((f) => ({ periodo: f.periodo, valor: f.enviados })), {
       gran: d.granularidad,
       fmtValor: (v) => num(Math.round(v)),
-      vacio: "Sin mensajes enviados en este periodo.",
+      vacio: d.periodos?.length ? "Sin mensajes enviados en los períodos seleccionados." : "Sin mensajes enviados en este periodo.",
     });
   } catch {
+    if (solicitud !== solicitudEnvios) return;
     console.error("[estadisticas.js cargarEnvios()]");
     $("#enviosGrafico").innerHTML =
       '<p class="mes-vacio" style="padding:8px 18px;">No se pudo cargar el gráfico.</p>';
@@ -411,6 +424,9 @@ function pintarCalendarioCostos() {
   const grid = $("#calendarioCostosGrid");
   grid.className = `costos-calendario__grid costos-calendario__grid--${modo}`;
   const botones = [];
+  const anios = [...aniosConEnvios].sort((a, b) => a - b);
+  const minimo = anios[0];
+  const maximo = anios[anios.length - 1];
   if (modo === "dia") {
     $("#calendarioCostosTitulo").textContent = `${MESES[mes]} ${anio}`;
     ["Lu", "Ma", "Mi", "Ju", "Vi", "Sá", "Do"].forEach((d) =>
@@ -423,14 +439,16 @@ function pintarCalendarioCostos() {
       const hoy = anio === hoyCalendario.getFullYear() && mes === hoyCalendario.getMonth()
         && dia === hoyCalendario.getDate();
       botones.push(`<button type="button" data-cal-valor="${valor}" aria-label="${dia} de ${MESES[mes]} de ${anio}" ` +
-        `aria-pressed="${seleccion.dia.has(valor)}" data-hoy="${hoy}">${dia}</button>`);
+        `aria-pressed="${seleccion.dia.has(valor)}" data-hoy="${hoy}"` +
+        `${aniosConEnvios.has(anio) ? "" : " disabled"}>${dia}</button>`);
     }
   } else if (modo === "mes") {
     $("#calendarioCostosTitulo").textContent = String(anio);
     MESES.forEach((nombre, i) => {
       const valor = `${anio}-${dosDigitos(i + 1)}`;
       botones.push(`<button type="button" data-cal-valor="${valor}" ` +
-        `aria-pressed="${seleccion.mes.has(valor)}">${nombre}</button>`);
+        `aria-pressed="${seleccion.mes.has(valor)}"` +
+        `${aniosConEnvios.has(anio) ? "" : " disabled"}>${nombre}</button>`);
     });
   } else {
     const inicio = Math.floor(anio / 12) * 12;
@@ -438,10 +456,19 @@ function pintarCalendarioCostos() {
     for (let i = 0; i < 12; i++) {
       const valor = String(inicio + i);
       botones.push(`<button type="button" data-cal-valor="${valor}" ` +
-        `aria-pressed="${seleccion.anio.has(valor)}">${valor}</button>`);
+        `aria-pressed="${seleccion.anio.has(valor)}"` +
+        `${aniosConEnvios.has(Number(valor)) ? "" : " disabled"}>${valor}</button>`);
     }
   }
   grid.innerHTML = botones.join("");
+  document.querySelectorAll("#calendarioCostos [data-cal-nav]").forEach((b) => {
+    const dir = Number(b.dataset.calNav);
+    const destino = modo === "dia" ? new Date(anio, mes + dir, 1).getFullYear()
+      : modo === "mes" ? anio + dir : Math.floor(anio / 12) * 12 + dir * 12;
+    b.disabled = !anios.length || (modo === "anio"
+      ? !anios.some((a) => a >= destino && a <= destino + 11)
+      : destino < minimo || destino > maximo);
+  });
   actualizarResumenCalendarioCostos();
 }
 
@@ -636,19 +663,35 @@ function renderCostos(d) {
   const filas = Array.isArray(d.filas) ? d.filas : [];
   const mon = d.moneda;
   const servicio = d.servicio || { entregados: 0, gratuitos: 0, pagados: 0 };
+  const t = d.total || { costo: 0, mensajes: 0, excluidos: 0, por_categoria: {} };
+  const filasResumen = [
+    ["Costo total estimado", d.sin_tarifas ? "Sin tarifas disponibles" : fmtMoneda(t.costo, mon)],
+    ["Mensajes registrados", num(t.mensajes)],
+    ...Object.entries(t.por_categoria || {}).filter(([, n]) => n)
+      .map(([categoria, cantidad]) => [CAT_LABEL[categoria] || categoria, num(cantidad)]),
+  ];
+  if (servicio.entregados) {
+    filasResumen.push(["Servicio entregado", num(servicio.entregados)]);
+    filasResumen.push(["Servicio gratuito", `${num(servicio.gratuitos)} de 1.000 por número y mes`]);
+    filasResumen.push(["Servicio pagado", num(servicio.pagados)]);
+  }
+  if (servicio.emisor_desconocido) {
+    filasResumen.push(["Entregas antiguas sin emisor", `${num(servicio.emisor_desconocido)} · ${servicio.emisor_unico_inferido
+      ? "atribuidas al único número de empresa registrado"
+      : "agrupadas por separado; cifra estimada"}`]);
+  }
+  if (t.excluidos) filasResumen.push(["Sin categoría de facturación", `${num(t.excluidos)} · no incluidos en el costo`]);
+  $("#costosTotal").innerHTML = `<table><caption>Resumen del período seleccionado</caption><thead><tr><th scope="col">Concepto</th><th scope="col">Cantidad o costo</th></tr></thead><tbody>${filasResumen.map(([concepto, valor]) =>
+    `<tr><th scope="row">${escaparHtml(concepto)}</th><td>${escaparHtml(valor)}</td></tr>`).join("")}</tbody></table>`;
 
   if (d.sin_tarifas) {
     $("#costosBarras").innerHTML =
       '<p class="mes-vacio" style="padding:8px 18px;">Sin tarifas guardadas: no se puede estimar el costo. Pulsa «Actualizar tarifas».</p>';
-    $("#costosTotal").textContent = servicio.entregados
-      ? `Servicio entregado: ${num(servicio.entregados)} · ${num(servicio.gratuitos)} gratuitos · ${num(servicio.pagados)} pagados (sin importe estimado).`
-      : "";
     return;
   }
   if (!filas.length) {
     $("#costosBarras").innerHTML =
       `<p class="mes-vacio" style="padding:8px 18px;">${d.periodos?.length ? "Sin mensajes registrados en los períodos seleccionados." : "Sin mensajes enviados todavía."}</p>`;
-    $("#costosTotal").textContent = "";
     return;
   }
 
@@ -665,36 +708,6 @@ function renderCostos(d) {
     { gran: d.granularidad, fmtValor: (v) => fmtMoneda(v, mon) }
   );
 
-  const t = d.total || { costo: 0, mensajes: 0, excluidos: 0, por_categoria: {} };
-  const desglose = Object.entries(t.por_categoria || {})
-    .filter(([, n]) => n)
-    .map(([c, n]) => `${CAT_LABEL[c] || c}: ${num(n)}`)
-    .join(" · ");
-  const excl = Number(t.excluidos || 0);
-  const sim = Number(t.simulados || 0);
-  const alcance = catCostos !== "todas" ? ` de ${CAT_LABEL[catCostos] || catCostos}` : " registrados";
-  $("#costosTotal").innerHTML =
-    `<strong>Total:</strong> ${fmtMoneda(t.costo, mon)} · ${num(t.mensajes)} mensajes${alcance}` +
-    (desglose ? ` · ${desglose}` : "") +
-    (servicio.entregados
-      ? `<br><span class="costos-nota">Servicio entregado: ${num(servicio.entregados)} · ` +
-        `${num(servicio.gratuitos)} gratuitos · ${num(servicio.pagados)} pagados ` +
-        `(1.000 gratis por número y mes).</span>`
-      : "") +
-    (servicio.emisor_desconocido
-      ? `<br><span class="costos-nota">${num(servicio.emisor_desconocido)} entrega(s) antigua(s) ` +
-        (servicio.emisor_unico_inferido
-          ? `sin identificador de emisor se atribuyeron al único número de empresa registrado.</span>`
-          : `sin identificador de emisor se agruparon por separado; esta cifra es una estimación.</span>`)
-      : "") +
-    (excl
-      ? `<br><span class="costos-nota">No se cuentan ${num(excl)} mensaje(s) ` +
-        `sin categoría de facturación identificada.</span>`
-      : "") +
-    (sim
-      ? `<br><span class="costos-nota">No se cuentan ${num(sim)} mensaje(s) simulado(s): ` +
-        `solo se factura lo enviado por api_oficial.</span>`
-      : "");
 }
 
 if (ES_ADMIN && $("#panelCostos")) {
@@ -706,6 +719,18 @@ if (ES_ADMIN && $("#panelCostos")) {
     if ($("#btnActualizarTarifas").disabled) return;
     actualizarTarifas();
   });
+  const selCatCostos = $("#selCatCostos");
+  if (selCatCostos) {
+    selCatCostos.value = catCostos;
+    selCatCostos.addEventListener("change", () => {
+      catCostos = selCatCostos.value;
+      localStorage.setItem("snw_cat_costos", catCostos);
+      cargarCostos(granCostos);
+    });
+  }
+}
+
+if ($("#calendarioCostos")) {
   const abrirCalendario = $("#abrirCalendarioCostos");
   const calendario = $("#calendarioCostos");
   const limpiarFechaCostos = $("#limpiarFechaCostos");
@@ -720,7 +745,8 @@ if (ES_ADMIN && $("#panelCostos")) {
   limpiarFechaCostos.addEventListener("click", () => {
     limpiarFiltroCalendarioCostos();
     cerrarCalendarioCostos();
-    cargarCostos("mes");
+    cargarEnvios("mes");
+    if (ES_ADMIN && $("#panelCostos")) cargarCostos("mes");
   });
   document.querySelectorAll("#calendarioCostos [data-cal-modo]").forEach((b) =>
     b.addEventListener("click", () => {
@@ -743,7 +769,7 @@ if (ES_ADMIN && $("#panelCostos")) {
   );
   $("#calendarioCostosGrid").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-cal-valor]");
-    if (!b) return;
+    if (!b || b.disabled) return;
     const grupo = estadoCalendarioCostos.seleccion[estadoCalendarioCostos.modo];
     if (grupo.has(b.dataset.calValor)) grupo.delete(b.dataset.calValor);
     else if (grupo.size < 120) grupo.add(b.dataset.calValor);
@@ -765,7 +791,8 @@ if (ES_ADMIN && $("#panelCostos")) {
       : "Elegir fechas";
     limpiarFechaCostos.hidden = !valores.length;
     cerrarCalendarioCostos(true);
-    cargarCostos(valores.length ? modo : "mes");
+    cargarEnvios(valores.length ? modo : "mes");
+    if (ES_ADMIN && $("#panelCostos")) cargarCostos(valores.length ? modo : "mes");
   });
   document.addEventListener("click", (e) => {
     if (!calendario.hidden && !calendario.contains(e.target) && !abrirCalendario.contains(e.target))
@@ -774,21 +801,34 @@ if (ES_ADMIN && $("#panelCostos")) {
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !calendario.hidden) cerrarCalendarioCostos(true);
   });
-  const selCatCostos = $("#selCatCostos");
-  if (selCatCostos) {
-    selCatCostos.value = catCostos;
-    selCatCostos.addEventListener("change", () => {
-      catCostos = selCatCostos.value;
-      localStorage.setItem("snw_cat_costos", catCostos);
-      cargarCostos(granCostos);
-    });
-  }
 }
 
 window.snwConCooldown($("#btnActualizarEstadisticas"), () => cargar(true));
-document.querySelectorAll("#enviosTabs button").forEach((b) =>
-  b.addEventListener("click", () => cargarEnvios(b.dataset.gran))
-);
+const barraSeries = $("#seriesTabs");
+function posicionarIndicadorSeries() {
+  const activa = barraSeries?.querySelector(".stats-series-tab.activo");
+  if (!activa) return;
+  const rectBarra = barraSeries.getBoundingClientRect();
+  const rectTab = activa.getBoundingClientRect();
+  barraSeries.style.setProperty("--msg-indicador-x", `${rectTab.left - rectBarra.left - barraSeries.clientLeft}px`);
+  barraSeries.style.setProperty("--msg-indicador-ancho", `${rectTab.width}px`);
+}
+if (barraSeries) {
+  barraSeries.querySelectorAll(".stats-series-tab").forEach((b) => b.addEventListener("click", () => {
+    if (b.classList.contains("activo")) return;
+    barraSeries.querySelectorAll(".stats-series-tab").forEach((tab) => {
+      const activa = tab === b;
+      tab.classList.toggle("activo", activa);
+      tab.setAttribute("aria-selected", String(activa));
+      tab.tabIndex = activa ? 0 : -1;
+    });
+    $("#panelEnvios").hidden = b.dataset.serie !== "envios";
+    if ($("#panelCostos")) $("#panelCostos").hidden = b.dataset.serie !== "costos";
+    posicionarIndicadorSeries();
+  }));
+  window.addEventListener("resize", posicionarIndicadorSeries);
+  requestAnimationFrame(posicionarIndicadorSeries);
+}
 
 let yaCargada = false;
 window.snwCargarEstadisticas = function () {

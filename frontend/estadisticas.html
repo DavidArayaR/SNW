@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="css/componentes.css">
   <link rel="stylesheet" href="css/layout.css?v=sidebar25">
   <link rel="stylesheet" href="css/admin.css?v=inlinecss1">
-  <link rel="stylesheet" href="css/estadisticas.css?v=calendario2">
+  <link rel="stylesheet" href="css/estadisticas.css?v=series1">
   <link rel="stylesheet" href="css/calendario.css?v=base1">
   <script src="js/tema.js"></script>
 </head>
@@ -69,24 +69,51 @@
           <div id="respuestasPacientes"></div>
         </section>
 
-        <section class="panel">
+        <section class="panel" id="panelSeriesEst">
           <div class="panel__head">
-            <h2>Mensajes enviados</h2>
-            <div class="grafico-tabs" id="enviosTabs">
-              <button type="button" data-gran="dia">D&iacute;a</button>
-              <button type="button" data-gran="mes" class="activo">Mes</button>
-              <button type="button" data-gran="anio">A&ntilde;o</button>
+            <h2>Actividad de mensajes</h2>
+            <div class="stats-series-tabs" id="seriesTabs" role="tablist" aria-label="Vista de estadísticas">
+              <button type="button" class="stats-series-tab activo" id="tabSeriesEnvios" data-serie="envios" role="tab" aria-controls="panelEnvios" aria-selected="true">Mensajes enviados</button>
+              <button type="button" class="stats-series-tab" id="tabSeriesCostos" data-serie="costos" role="tab" aria-controls="panelCostos" aria-selected="false" data-perm="tarifas_editar">Precios</button>
             </div>
           </div>
-          <div class="grafico-barras" id="enviosGrafico"></div>
-        </section>
+          <div class="stats-series__filtro">
+            <span>Períodos</span>
+            <div class="costos-fecha-grupo">
+              <button id="abrirCalendarioCostos" class="btn btn--ghost costos-calendario-abrir" type="button"
+                      aria-expanded="false" aria-controls="calendarioCostos" aria-haspopup="dialog">
+                <i class="fa-regular fa-calendar" aria-hidden="true"></i>
+                <span id="resumenCalendarioCostos">Elegir fechas</span>
+              </button>
+              <button id="limpiarFechaCostos" class="btn btn--ghost costos-fecha-limpiar" type="button" hidden>Quitar filtro</button>
+            </div>
+          </div>
+          <div id="calendarioCostos" class="costos-calendario" role="dialog" aria-label="Filtrar estadísticas por fechas" hidden>
+            <div class="costos-calendario__modos" role="tablist" aria-label="Tipo de período">
+              <button type="button" data-cal-modo="dia" role="tab">D&iacute;as</button>
+              <button type="button" data-cal-modo="mes" role="tab">Meses</button>
+              <button type="button" data-cal-modo="anio" role="tab">A&ntilde;os</button>
+            </div>
+            <div class="costos-calendario__nav">
+              <button type="button" data-cal-nav="-1" aria-label="Período anterior"><i class="fa-solid fa-chevron-left" aria-hidden="true"></i></button>
+              <strong id="calendarioCostosTitulo"></strong>
+              <button type="button" data-cal-nav="1" aria-label="Período siguiente"><i class="fa-solid fa-chevron-right" aria-hidden="true"></i></button>
+            </div>
+            <div id="calendarioCostosGrid" class="costos-calendario__grid"></div>
+            <div class="costos-calendario__pie">
+              <span id="calendarioCostosSeleccion">Selecciona uno o varios períodos.</span>
+              <button id="calendarioCostosLimpiar" class="btn btn--ghost" type="button">Limpiar vista</button>
+              <button id="calendarioCostosAplicar" class="btn btn--primary" type="button">Aplicar filtro</button>
+            </div>
+          </div>
+          <p class="costos-fecha-ayuda">Puedes elegir varios d&iacute;as, meses o a&ntilde;os. El filtro se conserva al cambiar de pesta&ntilde;a.</p>
 
-        <section class="panel">
-          <div class="panel__head"><h2>Total hist&oacute;rico</h2></div>
-          <div class="stats" id="statsTotal"></div>
-        </section>
+          <div id="panelEnvios" class="stats-series__vista" role="tabpanel" aria-labelledby="tabSeriesEnvios">
+            <h3>Mensajes enviados por período</h3>
+            <div class="grafico-barras" id="enviosGrafico"></div>
+          </div>
 
-        <section class="panel" data-perm="tarifas_editar" id="panelCostos">
+          <div class="stats-series__vista" data-perm="tarifas_editar" id="panelCostos" role="tabpanel" aria-labelledby="tabSeriesCostos" hidden>
           <div class="panel__head">
             <h2>Costos de mensajes de WhatsApp</h2>
             <button id="btnActualizarTarifas" class="btn btn--ghost" type="button">Actualizar tarifas</button>
@@ -96,8 +123,8 @@
               Tarifas por mensaje que publica Meta para Chile
               (<a href="https://developers.facebook.com/docs/whatsapp/pricing/" target="_blank" rel="noopener">documentaci&oacute;n de precios</a>).
               El costo es una estimaci&oacute;n: se aplica la tarifa vigente
-              seg&uacute;n la categor&iacute;a, <strong>solo a lo enviado por api_oficial</strong>
-              (lo simulado no se cuenta). Los mensajes de servicio (texto libre en
+              seg&uacute;n la categor&iacute;a, <strong>solo a lo enviado por api_oficial</strong>.
+              Los mensajes de servicio (texto libre en
               ventana de 24 h, p. ej. respuestas de call center) tienen desde el 01-10-2026
               <strong>1.000 entregas gratuitas al mes por n&uacute;mero del negocio</strong>.
               Solo las entregas posteriores se estiman como pagadas, a su tarifa
@@ -121,40 +148,17 @@
                 <option value="marketing">Marketing</option>
                 <option value="service">Servicio</option>
               </select>
-              <div class="costos-fecha-grupo">
-                <button id="abrirCalendarioCostos" class="btn btn--ghost costos-calendario-abrir" type="button"
-                        aria-expanded="false" aria-controls="calendarioCostos" aria-haspopup="dialog">
-                  <i class="fa-regular fa-calendar" aria-hidden="true"></i>
-                  <span id="resumenCalendarioCostos">Elegir fechas</span>
-                </button>
-                <button id="limpiarFechaCostos" class="btn btn--ghost costos-fecha-limpiar" type="button" hidden>Quitar filtro</button>
-              </div>
             </div>
           </div>
-
-          <div id="calendarioCostos" class="costos-calendario" role="dialog" aria-label="Filtrar costos por fechas" hidden>
-            <div class="costos-calendario__modos" role="tablist" aria-label="Tipo de período">
-              <button type="button" data-cal-modo="dia" role="tab">D&iacute;as</button>
-              <button type="button" data-cal-modo="mes" role="tab">Meses</button>
-              <button type="button" data-cal-modo="anio" role="tab">A&ntilde;os</button>
-            </div>
-            <div class="costos-calendario__nav">
-              <button type="button" data-cal-nav="-1" aria-label="Período anterior"><i class="fa-solid fa-chevron-left" aria-hidden="true"></i></button>
-              <strong id="calendarioCostosTitulo"></strong>
-              <button type="button" data-cal-nav="1" aria-label="Período siguiente"><i class="fa-solid fa-chevron-right" aria-hidden="true"></i></button>
-            </div>
-            <div id="calendarioCostosGrid" class="costos-calendario__grid"></div>
-            <div class="costos-calendario__pie">
-              <span id="calendarioCostosSeleccion">Selecciona uno o varios períodos.</span>
-              <button id="calendarioCostosLimpiar" class="btn btn--ghost" type="button">Limpiar vista</button>
-              <button id="calendarioCostosAplicar" class="btn btn--primary" type="button">Aplicar filtro</button>
-            </div>
-          </div>
-
-          <p class="costos-fecha-ayuda">Puedes elegir varios d&iacute;as, meses o a&ntilde;os. Cambiar de vista reemplaza el filtro; el cupo gratuito se calcula con todas las entregas del mes.</p>
 
           <div class="grafico-barras" id="costosBarras"></div>
-          <p class="costos-total" id="costosTotal"></p>
+          <div class="costos-resumen" id="costosTotal"></div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel__head"><h2>Total hist&oacute;rico</h2></div>
+          <div class="stats" id="statsTotal"></div>
         </section>
 
       </main>
@@ -165,7 +169,7 @@
 
   <script src="js/layout.js?v=navcurve7"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/estadisticas.js?v=calendario2"></script>
+  <script src="js/estadisticas.js?v=series1"></script>
   <script>
     if (window.snwCargarEstadisticas) window.snwCargarEstadisticas();
   </script>

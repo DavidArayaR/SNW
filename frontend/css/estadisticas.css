@@ -178,30 +178,6 @@
   color: var(--texto-suave);
   font-size: .8rem;
 }
-.grafico-tabs {
-  display: inline-flex;
-  border: 1px solid var(--borde);
-  border-radius: 999px;
-  overflow: hidden;
-}
-.grafico-tabs button {
-  border: 0;
-  background: transparent;
-  padding: 6px 16px;
-  font: inherit;
-  font-size: .84rem;
-  color: var(--texto-suave);
-  cursor: pointer;
-}
-.grafico-tabs button + button { border-left: 1px solid var(--borde); }
-.grafico-tabs button.activo {
-  background: var(--btn-primary-bg);
-  color: var(--btn-primary-fg);
-  font-weight: 700;
-}
-/* El contenedor recorta el contorno; se dibuja hacia dentro. */
-.grafico-tabs button:hover { outline-offset: -2px; }
-
 /* Gráfico de barras verticales por periodo (mensajes enviados y costos).
    Alturas en píxeles: zona de barras = 150px, fila de etiquetas = 18px. */
 .grafico-barras {
@@ -300,17 +276,61 @@
   text-transform: capitalize;
 }
 
-.costos-total {
-  margin: 4px 18px 16px;
-  font-size: .86rem;
-  color: var(--texto);
+.stats-series-tabs {
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid rgba(158, 222, 207, .3);
+  border-radius: 999px;
+  background: rgba(6, 37, 31, .2);
 }
-.costos-nota {
-  display: inline-block;
-  margin-top: 4px;
-  font-size: .8rem;
-  color: var(--texto-suave);
+.stats-series-tabs::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  top: 4px;
+  bottom: 4px;
+  left: var(--msg-indicador-x, 4px);
+  width: var(--msg-indicador-ancho, 150px);
+  border-radius: 999px;
+  background: #79d1bd;
+  box-shadow: 0 2px 8px rgba(5, 28, 23, .2);
+  transition: left .32s cubic-bezier(.2, .8, .2, 1), width .32s cubic-bezier(.2, .8, .2, 1);
 }
+.stats-series-tab,
+.stats-series-tab.activo {
+  position: relative;
+  z-index: 1;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(239, 248, 244, .86);
+  padding: 8px 14px;
+  font: inherit;
+  font-size: .82rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: color .18s ease, text-shadow .18s ease;
+}
+.stats-series-tab:hover { color: #fff; text-shadow: 0 0 8px rgba(121, 209, 189, .8); }
+.stats-series-tab.activo,
+.stats-series-tab.activo:hover { color: #12382f; text-shadow: none; }
+.stats-series__vista[hidden] { display: none; }
+.stats-series__filtro { display: flex; align-items: center; gap: 10px; padding: 14px 18px 0; flex-wrap: wrap; }
+.stats-series__filtro > span { font-weight: 700; }
+.stats-series__vista { padding-top: 14px; }
+.stats-series__vista > h3 { margin: 0 18px 12px; font-size: 1rem; }
+.costos-resumen { margin: 8px 18px 18px; overflow-x: auto; }
+.costos-resumen table { width: 100%; border-collapse: collapse; color: var(--texto); font-size: .86rem; }
+.costos-resumen caption { caption-side: top; text-align: left; color: var(--texto); font-weight: 700; padding: 8px 0; }
+.costos-resumen th, .costos-resumen td { padding: 9px 12px; border-bottom: 1px solid var(--borde); vertical-align: top; }
+.costos-resumen thead { background: var(--panel); }
+.costos-resumen th { text-align: left; font-weight: 700; }
+.costos-resumen td { text-align: right; font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: reduce) { .stats-series-tabs::before { transition: none; } }
 
 @media (max-width: 560px) {
   .hero-num { font-size: 2.6rem; }

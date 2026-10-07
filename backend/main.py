@@ -6066,35 +6066,59 @@ def estadisticas(area_id: int | None = Query(None), sesion: dict = Depends(solo_
 
 
 def estadisticas_envios(granularidad: str = Query("mes"), area_id: int | None = Query(None),
+                        periodos: str | None = Query(None),
                         sesion: dict = Depends(solo_admin)):
     """Mensajes enviados agrupados por periodo (para el gráfico de barras)."""
     if granularidad not in ("dia", "mes", "anio"):
         raise HTTPException(400, detail="granularidad debe ser dia, mes o anio")
+    try:
+        seleccion = validar_periodos(periodos, granularidad) if periodos else set()
+    except ValueError as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
     filtro_esp, args_esp, esp = _filtro_esp_estadisticas(sesion, area_id)
-    # (formato de DATE_FORMAT, ventana hacia atrás)
-    # Sin parámetros en execute(): PyMySQL no pasa por mogrify, así que '%' va simple.
+    # Con selección explícita se incluyen también fechas fuera de la ventana
+    # por defecto. El formato se pasa como parámetro para evitar que PyMySQL
+    # interprete sus signos de porcentaje al procesar el IN.
     cfg = {
         "dia": ("%Y-%m-%d", "CURDATE() - INTERVAL 29 DAY"),
-        "mes": ("%Y-%m", "DATE_FORMAT(CURDATE() - INTERVAL 11 MONTH, '%Y-%m-01')"),
-        "anio": ("%Y", "DATE_FORMAT(CURDATE() - INTERVAL 5 YEAR, '%Y-01-01')"),
+        "mes": ("%Y-%m", "DATE_FORMAT(CURDATE() - INTERVAL 11 MONTH, '%%Y-%%m-01')"),
+        "anio": ("%Y", "DATE_FORMAT(CURDATE() - INTERVAL 5 YEAR, '%%Y-01-01')"),
     }[granularidad]
     fmt, desde = cfg
+    filtro_fecha = "" if seleccion else f" AND fecha_hora >= {desde}"
+    marcadores = ", ".join("%s" for _ in seleccion)
+    filtro_periodos = (f" AND DATE_FORMAT(fecha_hora, %s) IN ({marcadores})"
+                       if seleccion else "")
+    parametros = (fmt, *(args_esp or ()),
+                  *((fmt, *sorted(seleccion)) if seleccion else ()))
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(
-            f"SELECT DATE_FORMAT(fecha_hora, '{fmt}') AS periodo, COUNT(*) AS enviados"
-            " FROM log_envios"
+            "SELECT DISTINCT YEAR(fecha_hora) AS anio FROM log_envios"
             " WHERE estado_envio = 'enviado'"
-            f"   AND fecha_hora >= {desde}"
             f"   AND {_SOLO_PROD}"
             f"{filtro_esp}"
-            " GROUP BY periodo ORDER BY periodo",
+            " ORDER BY anio",
             args_esp or None,
+        )
+        anios_disponibles = [int(r["anio"]) for r in cur.fetchall() if r.get("anio")]
+        cur.execute(
+            "SELECT DATE_FORMAT(fecha_hora, %s) AS periodo, COUNT(*) AS enviados"
+            " FROM log_envios"
+            " WHERE estado_envio = 'enviado'"
+            f"{filtro_fecha}"
+            f"   AND {_SOLO_PROD}"
+            f"{filtro_esp}"
+            f"{filtro_periodos}"
+            " GROUP BY periodo ORDER BY periodo",
+            parametros,
         )
         filas = [{"periodo": r["periodo"], "enviados": int(r["enviados"] or 0)}
                  for r in cur.fetchall()]
     return {
         "granularidad": granularidad,
         "area": ({"id": esp["id"], "nombre_visible": esp["nombre_visible"]} if esp else None),
+        "periodos": sorted(seleccion),
+        "anios_disponibles": anios_disponibles,
         "filas": filas,
         "total": sum(f["enviados"] for f in filas),
     }
