@@ -250,26 +250,49 @@
 }
 /* Pestañas dentro de la tarjeta (Cuenta / Permisos / Auditoría). */
 .usr-tabs {
-  display: flex;
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
   gap: 4px;
-  overflow-x: auto;
-  border-bottom: 1px solid var(--borde);
+  max-width: 100%;
+  padding: 4px;
+  border: 1px solid var(--borde);
+  border-radius: 999px;
+  background: var(--surface-2);
   margin-bottom: 14px;
 }
+.usr-tabs::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  top: 4px;
+  bottom: 4px;
+  left: var(--usr-indicador-x, 4px);
+  width: var(--usr-indicador-ancho, 78px);
+  border-radius: 999px;
+  background: var(--btn-primary-bg);
+  transition: left .32s cubic-bezier(.2, .8, .2, 1),
+    width .32s cubic-bezier(.2, .8, .2, 1);
+}
 .usr-tab {
-  border: none;
+  position: relative;
+  z-index: 1;
+  border: 0;
+  border-radius: 999px;
   background: transparent;
   font: inherit;
-  font-size: .88rem;
-  font-weight: 600;
+  font-size: .82rem;
+  font-weight: 700;
   color: var(--texto-suave);
   padding: 8px 14px;
-  margin-bottom: -1px;
-  border-bottom: 2px solid transparent;
   white-space: nowrap;
+  cursor: pointer;
 }
 .usr-tab:hover { color: var(--texto); }
-.usr-tab.activo { color: var(--verde-oscuro); border-bottom-color: var(--verde-oscuro); }
+.usr-tab.activo,
+.usr-tab.activo:hover { color: var(--btn-primary-fg); }
+@media (prefers-reduced-motion: reduce) { .usr-tabs::before { transition: none; } }
 /* El display de los paneles pisaría el atributo [hidden]; esto lo respeta. */
 [data-panel][hidden] { display: none; }
 .usr-card__bloqueo { font-size: .82rem; color: var(--texto-suave); }

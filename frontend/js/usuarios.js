@@ -293,6 +293,16 @@ function render() {
 let tabUsr = localStorage.getItem("snw_tab_usuarios") || "cuenta";
 if (["cuenta", "permisos", "auditoria"].indexOf(tabUsr) === -1) tabUsr = "cuenta";
 
+function posicionarIndicadorTabsUsr() {
+  const barra = detalleEl.querySelector(".usr-tabs");
+  const activa = barra?.querySelector(".usr-tab.activo");
+  if (!barra || !activa) return;
+  const rectBarra = barra.getBoundingClientRect();
+  const rectActiva = activa.getBoundingClientRect();
+  barra.style.setProperty("--usr-indicador-x", `${rectActiva.left - rectBarra.left - barra.clientLeft}px`);
+  barra.style.setProperty("--usr-indicador-ancho", `${rectActiva.width}px`);
+}
+
 function renderDetalle() {
   const u = (estado.usuarios || []).find((x) => x.usuario === seleccion);
   if (!u) { detalleEl.innerHTML = ""; return; }
@@ -366,6 +376,7 @@ function renderDetalle() {
 
   // La auditoría se carga solo al abrir su pestaña (carga diferida).
   const card = detalleEl.querySelector(".usr-card");
+  posicionarIndicadorTabsUsr();
   if (tabUsr === "auditoria") cargarAuditoriaPanel(card, u.usuario);
 
   // Al cambiar el rol: si pasa a «usuario», se muestran los permisos con los
@@ -461,6 +472,7 @@ detalleEl.addEventListener("click", (e) => {
     tabUsr = tab.dataset.tab;
     try { localStorage.setItem("snw_tab_usuarios", tabUsr); } catch { /* sin almacenamiento */ }
     card.querySelectorAll(".usr-tab").forEach((t) => t.classList.toggle("activo", t === tab));
+    posicionarIndicadorTabsUsr();
     card.querySelectorAll("[data-panel]").forEach((p) => { p.hidden = p.dataset.panel !== tabUsr; });
     if (tabUsr === "auditoria") cargarAuditoriaPanel(card, card.dataset.correo);
     return;
@@ -475,6 +487,8 @@ detalleEl.addEventListener("click", (e) => {
   if (e.target.closest("[data-guardar-correo]")) guardarCorreoRecuperacion(card);
   if (e.target.closest("[data-enviar-reset]")) enviarCambioClave(card);
 });
+
+window.addEventListener("resize", posicionarIndicadorTabsUsr);
 
 async function guardarCorreoRecuperacion(card) {
   const correo = card.dataset.correo;
