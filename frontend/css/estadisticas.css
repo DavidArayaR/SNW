@@ -344,12 +344,37 @@
 }
 .stats-series__vista { padding-top: 14px; }
 .stats-series__vista > h3 { margin: 0 18px 12px; font-size: 1rem; }
-.costos-resumen { margin: 8px 18px 18px; overflow-x: auto; }
-.costos-resumen table { width: 100%; border-collapse: collapse; color: var(--texto); font-size: .86rem; }
-.costos-resumen caption { caption-side: top; text-align: left; color: var(--texto); font-weight: 700; padding: 8px 0; }
-.costos-resumen th, .costos-resumen td { padding: 9px 12px; border-bottom: 1px solid var(--borde); vertical-align: top; }
-.costos-resumen thead { background: var(--panel); }
-.costos-resumen th { text-align: left; font-weight: 700; }
+.costos-resumen { margin: 12px 18px 20px; overflow-x: auto; }
+.costos-resumen table {
+  width: 100%;
+  border: 1px solid var(--borde);
+  border-radius: 12px;
+  border-spacing: 0;
+  overflow: hidden;
+  background: var(--panel);
+  color: var(--texto);
+  font-size: .88rem;
+  box-shadow: var(--sombra);
+}
+.costos-resumen caption {
+  caption-side: top;
+  text-align: left;
+  color: var(--texto);
+  font-size: .96rem;
+  font-weight: 750;
+  padding: 8px 2px 12px;
+}
+.costos-resumen th,
+.costos-resumen td { padding: 12px 16px; border-bottom: 1px solid var(--borde); vertical-align: middle; }
+.costos-resumen thead { background: var(--brand-tint); color: var(--brand-tint-fg); }
+.costos-resumen thead th { font-size: .78rem; letter-spacing: .035em; text-transform: uppercase; }
+.costos-resumen tbody tr:nth-child(2n) { background: var(--panel-2); }
+.costos-resumen tbody tr:first-child { background: var(--brand-tint); }
+.costos-resumen tbody tr:first-child th,
+.costos-resumen tbody tr:first-child td { color: var(--brand-tint-fg); font-size: 1rem; font-weight: 800; }
+.costos-resumen tbody tr:last-child th,
+.costos-resumen tbody tr:last-child td { border-bottom: 0; }
+.costos-resumen th { text-align: left; font-weight: 650; }
 .costos-resumen th:last-child,
 .costos-resumen td:last-child { width: 40%; text-align: center; }
 .costos-resumen td { font-variant-numeric: tabular-nums; }
@@ -358,6 +383,7 @@
 @media (max-width: 560px) {
   .hero-num { font-size: 2.6rem; }
   .stats-series__filtro { align-items: flex-start; flex-direction: column; gap: 6px; }
+  .costos-resumen th, .costos-resumen td { padding: 10px 9px; font-size: .8rem; }
   .costos-fecha-grupo > .costos-calendario {
     left: var(--calendario-centro-x, 50%);
     width: min(430px, calc(100vw - 32px));

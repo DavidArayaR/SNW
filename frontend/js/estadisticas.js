@@ -346,6 +346,7 @@ let granEnvios = "mes";
 let solicitudEnvios = 0;
 let aniosConEnvios = new Set();
 let mesesConEnvios = new Set();
+let diasConEnvios = new Set();
 
 async function cargarEnvios(gran) {
   granEnvios = filtroCalendarioCostos?.modo || gran;
@@ -362,6 +363,7 @@ async function cargarEnvios(gran) {
     if (solicitud !== solicitudEnvios) return;
     aniosConEnvios = new Set((d.anios_disponibles || []).map(Number));
     mesesConEnvios = new Set(d.meses_disponibles || []);
+    diasConEnvios = new Set(d.dias_disponibles || []);
     const anios = [...aniosConEnvios].sort((a, b) => a - b);
     if (anios.length && !aniosConEnvios.has(estadoCalendarioCostos.anio)) {
       estadoCalendarioCostos.anio = anios[anios.length - 1];
@@ -447,7 +449,7 @@ function pintarCalendarioCostos() {
         && dia === hoyCalendario.getDate();
       botones.push(`<button type="button" data-cal-valor="${valor}" aria-label="${dia} de ${MESES[mes]} de ${anio}" ` +
         `aria-pressed="${seleccion.dia.has(valor)}" data-hoy="${hoy}"` +
-        `${mesesConEnvios.has(valor.slice(0, 7)) ? "" : " disabled"}>${dia}</button>`);
+        `${diasConEnvios.has(valor) ? "" : " disabled"}>${dia}</button>`);
     }
   } else if (modo === "mes") {
     $("#calendarioCostosTitulo").textContent = String(anio);
@@ -679,7 +681,7 @@ function renderCostos(d) {
   ];
   if (servicio.entregados) {
     filasResumen.push(["Servicio entregado", num(servicio.entregados)]);
-    filasResumen.push(["Servicio gratuito", `${num(servicio.gratuitos)} de 1.000 por número y mes`]);
+    filasResumen.push(["Servicio gratuito", `${num(servicio.gratuitos)} de 1.000 por mes`]);
     filasResumen.push(["Servicio pagado", num(servicio.pagados)]);
   }
   if (servicio.emisor_desconocido) {

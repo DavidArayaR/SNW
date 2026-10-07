@@ -6093,23 +6093,16 @@ def estadisticas_envios(granularidad: str = Query("mes"), area_id: int | None = 
                   *((fmt, *sorted(seleccion)) if seleccion else ()))
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT DISTINCT YEAR(fecha_hora) AS anio FROM log_envios"
+            "SELECT DISTINCT DATE_FORMAT(fecha_hora, %s) AS dia FROM log_envios"
             " WHERE estado_envio = 'enviado'"
             f"   AND {_SOLO_PROD}"
             f"{filtro_esp}"
-            " ORDER BY anio",
-            args_esp or None,
+            " ORDER BY dia",
+            ("%Y-%m-%d", *args_esp),
         )
-        anios_disponibles = [int(r["anio"]) for r in cur.fetchall() if r.get("anio")]
-        cur.execute(
-            "SELECT DISTINCT DATE_FORMAT(fecha_hora, %s) AS mes FROM log_envios"
-            " WHERE estado_envio = 'enviado'"
-            f"   AND {_SOLO_PROD}"
-            f"{filtro_esp}"
-            " ORDER BY mes",
-            ("%Y-%m", *args_esp),
-        )
-        meses_disponibles = [r["mes"] for r in cur.fetchall() if r.get("mes")]
+        dias_disponibles = [r["dia"] for r in cur.fetchall() if r.get("dia")]
+        meses_disponibles = sorted({dia[:7] for dia in dias_disponibles})
+        anios_disponibles = sorted({int(dia[:4]) for dia in dias_disponibles})
         cur.execute(
             "SELECT DATE_FORMAT(fecha_hora, %s) AS periodo, COUNT(*) AS enviados"
             " FROM log_envios"
@@ -6129,6 +6122,7 @@ def estadisticas_envios(granularidad: str = Query("mes"), area_id: int | None = 
         "periodos": sorted(seleccion),
         "anios_disponibles": anios_disponibles,
         "meses_disponibles": meses_disponibles,
+        "dias_disponibles": dias_disponibles,
         "filas": filas,
         "total": sum(f["enviados"] for f in filas),
     }
