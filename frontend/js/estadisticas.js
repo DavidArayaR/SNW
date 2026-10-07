@@ -624,7 +624,11 @@ async function actualizarTarifas() {
   try {
     const res = await fetch("api/tarifas/actualizar", { method: "POST", headers: authHeaders() });
     const d = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(d.detail || "");
+    if (!res.ok) {
+      const error = new Error(d.detail || `HTTP ${res.status}`);
+      error.status = res.status;
+      throw error;
+    }
     toast(
       d.cambio
         ? `Tarifas actualizadas: ${d.nuevas} nueva(s). Moneda: ${d.moneda}.`
@@ -637,7 +641,10 @@ async function actualizarTarifas() {
     await cargarTarifas();
     await cargarCostos(granCostos);
   } catch (err) {
-    console.error("[estadisticas.js actualizarTarifas()]", err);
+    console.error("[estadisticas.js actualizarTarifas()]", {
+      estado: err.status || "sin respuesta HTTP",
+      detalle: err.message,
+    }, err);
     toast("No se pudieron actualizar las tarifas. " + (err.message || ""), "error");
     btn.disabled = false;
     btn.textContent = textoOriginal;

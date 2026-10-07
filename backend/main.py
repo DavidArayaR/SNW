@@ -5,6 +5,8 @@ import hashlib
 import math
 import html as _html
 import io as _io
+import zipfile as _zipfile
+import xml.etree.ElementTree as _etree
 import json
 import random
 import re
@@ -6132,7 +6134,7 @@ def estadisticas_envios(granularidad: str = Query("mes"), area_id: int | None = 
 #  Tarifas de WhatsApp (rate card de Meta) y costos de los envíos  — SOLO ADMIN
 # ===========================================================================
 
-PRICING_PAGE = "https://developers.facebook.com/docs/whatsapp/pricing/"
+PRICING_PAGE = "https://developers.facebook.com/documentation/business-messaging/whatsapp/pricing"
 _MESES_EN = {m: i for i, m in enumerate(
     ["january", "february", "march", "april", "may", "june", "july",
      "august", "september", "october", "november", "december"], 1)}
@@ -6152,10 +6154,8 @@ def _parse_fecha_efectiva(txt: str) -> str | None:
         return None
 
 
-def _extraer_chile_csv(texto: str) -> dict | None:
-    """Del CSV de un rate card de Meta saca la fila de Chile (tarifas por
-    categoría, en USD) y la fecha efectiva."""
-    filas = list(_csv.reader(_io.StringIO(texto)))
+def _extraer_chile_filas(filas: list[list[str]]) -> dict | None:
+    """Saca la fila de Chile de un rate card tabular de Meta."""
     if not filas:
         return None
     efectiva = _parse_fecha_efectiva(filas[0][0] if filas[0] else "")
@@ -6189,37 +6189,84 @@ def _extraer_chile_csv(texto: str) -> dict | None:
                 return None
 
         rates = {c: val(js[c]) for c in _CATS}
+        moneda = (f[1].strip() if len(f) > 1 else "USD") or "USD"
         return {
-            "moneda": (f[1].strip() if len(f) > 1 else "USD") or "USD",
+            "moneda": {"$US": "USD", "US$": "USD"}.get(moneda, moneda),
             "efectiva_desde": efectiva,
             **rates,
         }
     return None
 
 
-async def _bajar_csvs(urls: list[str]) -> list[str]:
+def _extraer_chile_csv(texto: str) -> dict | None:
+    return _extraer_chile_filas(list(_csv.reader(_io.StringIO(texto))))
+
+
+def _filas_xlsx(datos: bytes) -> list[list[str]]:
+    """Lee las celdas de la primera hoja XLSX sin dependencia adicional."""
+    ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    with _zipfile.ZipFile(_io.BytesIO(datos)) as libro:
+        if "xl/worksheets/sheet1.xml" not in libro.namelist():
+            raise ValueError("El XLSX de Meta no contiene la primera hoja")
+        for nombre in ("xl/worksheets/sheet1.xml", "xl/sharedStrings.xml"):
+            if nombre in libro.namelist() and libro.getinfo(nombre).file_size > 20_000_000:
+                raise ValueError("El XLSX de Meta excede el tamaño admitido")
+        compartidas = []
+        if "xl/sharedStrings.xml" in libro.namelist():
+            raiz = _etree.fromstring(libro.read("xl/sharedStrings.xml"))
+            compartidas = ["".join(t.text or "" for t in si.iter(f"{ns}t"))
+                           for si in raiz.iter(f"{ns}si")]
+        hoja = _etree.fromstring(libro.read("xl/worksheets/sheet1.xml"))
+    filas = []
+    for fila in hoja.iter(f"{ns}row"):
+        valores = []
+        for celda in fila.findall(f"{ns}c"):
+            ref = re.match(r"[A-Z]+", celda.get("r", ""))
+            if not ref:
+                continue
+            columna = 0
+            for letra in ref.group():
+                columna = columna * 26 + ord(letra) - ord("A") + 1
+            while len(valores) < columna:
+                valores.append("")
+            valor = celda.findtext(f"{ns}v") or ""
+            if celda.get("t") == "s" and valor:
+                valor = compartidas[int(valor)]
+            elif celda.get("t") == "inlineStr":
+                valor = "".join(t.text or "" for t in celda.iter(f"{ns}t"))
+            valores[columna - 1] = valor
+        filas.append(valores)
+    return filas
+
+
+async def _bajar_tarifarios(urls: list[str]) -> list[bytes]:
     sem = asyncio.Semaphore(16)
-    out: list[str] = []
+    out: list[bytes] = []
     async with httpx.AsyncClient(timeout=15, follow_redirects=True,
                                  headers={"User-Agent": "Mozilla/5.0"}) as c:
         async def uno(u):
             async with sem:
                 try:
                     r = await c.get(u)
-                    if r.status_code == 200 and "chile" in r.text.lower():
-                        out.append(r.text)
+                    if r.status_code == 200 and len(r.content) <= 5_000_000:
+                        out.append(r.content)
+                    else:
+                        log_error("tarifas: descarga de Meta rechazada",
+                                  ValueError(f"HTTP {r.status_code}; tamaño {len(r.content)} bytes"))
                 except Exception as e:
-                    log_error(f"tarifas: no se pudo descargar {u}", e)
+                    log_error("tarifas: no se pudo descargar un tarifario de Meta", e)
         await asyncio.gather(*[uno(u) for u in urls])
     return out
 
 
 def _fetch_tarifas_meta() -> list[dict]:
-    """Descarga la página de precios de Meta, baja sus CSV de rate card y
+    """Descarga la página de precios de Meta, baja sus rate cards y
     devuelve las tarifas de Chile encontradas (una por rate card distinto)."""
     with httpx.Client(timeout=25, follow_redirects=True,
                       headers={"User-Agent": "Mozilla/5.0"}) as c:
-        pg = c.get(PRICING_PAGE).text
+        respuesta = c.get(PRICING_PAGE)
+        respuesta.raise_for_status()
+        pg = respuesta.text
 
     reales, vistos = [], set()
     for L in re.findall(r'href="(https://l\.facebook\.com/l\.php\?u=[^"]+\.csv[^"]*)"', pg):
@@ -6234,14 +6281,26 @@ def _fetch_tarifas_meta() -> list[dict]:
     if not reales:
         return []
 
-    textos = asyncio.run(_bajar_csvs(reales))
+    archivos = asyncio.run(_bajar_tarifarios(reales))
     resultados, hashes = [], set()
-    for txt in textos:
-        ch = _extraer_chile_csv(txt)
+    for archivo in archivos:
+        try:
+            if archivo.startswith(b"PK\x03\x04"):
+                filas = _filas_xlsx(archivo)
+                ch = _extraer_chile_filas(filas)
+                buffer = _io.StringIO()
+                _csv.writer(buffer).writerows(filas)
+                txt = buffer.getvalue()
+            else:
+                txt = archivo.decode("utf-8-sig")
+                ch = _extraer_chile_csv(txt)
+        except Exception as e:
+            log_error("tarifas: formato de rate card no reconocido", e)
+            continue
         if not ch or not any(ch.get(c) for c in ("marketing", "utility", "authentication")):
             continue
         h = hashlib.sha256(
-            "|".join(f"{ch.get(c)}" for c in _CATS).encode("utf-8")
+            "|".join(str(ch.get(c)) for c in ("moneda", "efectiva_desde", *_CATS)).encode("utf-8")
         ).hexdigest()
         if h in hashes:
             continue
@@ -6348,6 +6407,8 @@ def actualizar_tarifas(sesion: dict = Depends(solo_admin)):
         log_error("actualizar_tarifas: no se pudo descargar de Meta", e)
         raise HTTPException(502, detail=f"No se pudo descargar la página de precios de Meta: {e}")
     if not encontradas:
+        log_error("actualizar_tarifas: sin tarifas válidas de Chile",
+                  ValueError("Meta no entregó ningún tarifario compatible o descargable"))
         raise HTTPException(502, detail="No se encontró ningún rate card con la fila de Chile en la página de Meta.")
 
     moneda_meta = _obtener_moneda_meta()
