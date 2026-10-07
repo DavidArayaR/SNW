@@ -1,6 +1,18 @@
 /* Estilos específicos de estados y modales de Mensajería. */
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* Solo entra el panel de la pestaña elegida; la lista común permanece fija. */
+:is(#panelEditor, #panelEnvio, #progColumna):not([hidden]) {
+  animation: msg-panel-entrada .24s ease-out both;
+}
+@keyframes msg-panel-entrada {
+  from { opacity: 0; transform: translateX(var(--msg-panel-entrada-x, 0px)); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  :is(#panelEditor, #panelEnvio, #progColumna):not([hidden]) { animation: none; }
+}
+
 .estado-meta-fila { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 #badgeEstadoMeta.estado-APPROVED { background: #e5f6ec; color: #1e7d4d; border: 1px solid #bfe5cf; }
 #badgeEstadoMeta.estado-PENDING { background: #fdf3e0; color: #a06b08; border: 1px solid #ecd9ac; }

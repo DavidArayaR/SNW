@@ -469,6 +469,12 @@ detalleEl.addEventListener("click", (e) => {
   if (!card) return;
   const tab = e.target.closest("[data-tab]");
   if (tab) {
+    const orden = ["cuenta", "permisos", "auditoria"];
+    const panelDestino = card.querySelector(`[data-panel="${tab.dataset.tab}"]`);
+    panelDestino?.style.setProperty(
+      "--usr-panel-entrada-x", orden.indexOf(tab.dataset.tab) > orden.indexOf(tabUsr)
+        ? "20px" : "-20px"
+    );
     tabUsr = tab.dataset.tab;
     try { localStorage.setItem("snw_tab_usuarios", tabUsr); } catch { /* sin almacenamiento */ }
     card.querySelectorAll(".usr-tab").forEach((t) => t.classList.toggle("activo", t === tab));

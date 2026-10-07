@@ -295,6 +295,17 @@
 @media (prefers-reduced-motion: reduce) { .usr-tabs::before { transition: none; } }
 /* El display de los paneles pisaría el atributo [hidden]; esto lo respeta. */
 [data-panel][hidden] { display: none; }
+.usr-card [data-panel]:not([hidden]) {
+  animation: usr-panel-entrada .24s ease-out both;
+}
+.usr-card--bloqueada .usr-grid { --usr-panel-opacidad: .72; }
+@keyframes usr-panel-entrada {
+  from { opacity: 0; transform: translateX(var(--usr-panel-entrada-x, 0px)); }
+  to { opacity: var(--usr-panel-opacidad, 1); transform: translateX(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .usr-card [data-panel]:not([hidden]) { animation: none; }
+}
 .usr-card__bloqueo { font-size: .82rem; color: var(--texto-suave); }
 .usr-card__pie .usr-card__sep { flex: 1; }
 

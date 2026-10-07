@@ -319,6 +319,16 @@
 .stats-series-tab.activo,
 .stats-series-tab.activo:hover { color: #12382f; text-shadow: none; }
 .stats-series__vista[hidden] { display: none; }
+.stats-series__vista:not([hidden]) {
+  animation: stats-panel-entrada .24s ease-out both;
+}
+@keyframes stats-panel-entrada {
+  from { opacity: 0; transform: translateX(var(--stats-panel-entrada-x, 0px)); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stats-series__vista:not([hidden]) { animation: none; }
+}
 .stats-series__filtro-capa { position: relative; z-index: 2; }
 .stats-series__filtro { display: flex; align-items: center; gap: 10px; padding: 14px 18px 0; flex-wrap: wrap; }
 .stats-series__filtro > span { font-weight: 700; }

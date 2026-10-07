@@ -2254,6 +2254,13 @@ function pintarTabsMsg() {
 window.addEventListener("resize", posicionarIndicadorTabsMsg);
 
 function cambiarTabMsg(t) {
+  const orden = { plantillas: 0, envios: 1, programados: 2 };
+  const panelDestino = {
+    plantillas: "#panelEditor", envios: "#panelEnvio", programados: "#progColumna",
+  }[t];
+  document.querySelector(panelDestino)?.style.setProperty(
+    "--msg-panel-entrada-x", orden[t] > orden[tabMsg] ? "20px" : "-20px"
+  );
   tabMsg = t;
   try { localStorage.setItem("snw_tab_msg", tabMsg); } catch { /* sin almacenamiento */ }
   pintarTabsMsg();

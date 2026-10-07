@@ -840,6 +840,10 @@ function posicionarIndicadorSeries() {
 if (barraSeries) {
   barraSeries.querySelectorAll(".stats-series-tab").forEach((b) => b.addEventListener("click", () => {
     if (b.classList.contains("activo")) return;
+    const panelDestino = b.dataset.serie === "envios" ? $("#panelEnvios") : $("#panelCostos");
+    panelDestino?.style.setProperty(
+      "--stats-panel-entrada-x", b.dataset.serie === "costos" ? "20px" : "-20px"
+    );
     barraSeries.querySelectorAll(".stats-series-tab").forEach((tab) => {
       const activa = tab === b;
       tab.classList.toggle("activo", activa);
