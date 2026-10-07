@@ -117,18 +117,6 @@
           </div>
 
           <div class="stats-series__vista" data-perm="tarifas_editar" id="panelCostos" role="tabpanel" aria-labelledby="tabSeriesCostos" hidden>
-          <div class="panel__head">
-            <h2>Costos de mensajes de WhatsApp</h2>
-            <button id="btnActualizarTarifas" class="btn btn--ghost" type="button">Actualizar tarifas</button>
-          </div>
-
-            <p class="field__hint stats__costos-hint">
-              Costo estimado solo de env&iacute;os por API oficial. Desde el 01-10-2026,
-              el servicio incluye 1.000 entregas gratis por n&uacute;mero de empresa al mes;
-              las siguientes son pagadas. La factura de Meta puede diferir.
-              <a href="https://developers.facebook.com/docs/whatsapp/pricing/" target="_blank" rel="noopener">Tarifas de Meta</a>
-              &middot; <a href="https://business.facebook.com/latest/whatsapp_manager/insights/?business_id=799315784581199&amp;tab=insights&amp;nav_ref=whatsapp_manager&amp;asset_id=1824108822101466" target="_blank" rel="noopener">Ver estad&iacute;sticas en Meta</a>.
-            </p>
 
           <div class="costos-cabecera">
             <h3>Costo estimado por periodo</h3>
@@ -144,7 +132,17 @@
 
           <div class="grafico-barras" id="costosBarras"></div>
           <div class="costos-resumen" id="costosTotal"></div>
-
+            <p class="field__hint stats__costos-hint">
+              Costo estimado solo de env&iacute;os por API oficial. Desde el 01-10-2026,
+              el servicio incluye 1.000 entregas gratis por n&uacute;mero de empresa al mes;
+              las siguientes son pagadas. La factura de Meta puede diferir.
+              <a href="https://developers.facebook.com/documentation/business-messaging/whatsapp/pricing" target="_blank" rel="noopener">Tarifas de Meta</a>
+              &middot; <a href="https://business.facebook.com/latest/whatsapp_manager/insights/?business_id=799315784581199&amp;tab=insights&amp;nav_ref=whatsapp_manager&amp;asset_id=1824108822101466" target="_blank" rel="noopener">Ver estad&iacute;sticas en Meta</a>.
+            </p>
+          <div class="panel__head">
+            <h2>Costos de mensajes de WhatsApp</h2>
+            <button id="btnActualizarTarifas" class="btn btn--ghost" type="button">Actualizar tarifas</button>
+          </div>
           <h3>Tarifas de referencia</h3>
           <p id="tarifasAlerta" class="webhook-salud" hidden></p>
           <div class="tarifas-grid" id="tarifasVigente"></div>
@@ -165,7 +163,7 @@
 
   <script src="js/layout.js?v=navcurve7"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/estadisticas.js?v=series3"></script>
+  <script src="js/estadisticas.js?v=series4"></script>
   <script>
     if (window.snwCargarEstadisticas) window.snwCargarEstadisticas();
   </script>
