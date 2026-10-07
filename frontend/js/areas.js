@@ -19,6 +19,9 @@ let estado = { lista: [], usuarios: [] };
 let seleccion = null;   // id del área mostrada
 let yaCargada = false;
 let asignacionEnCurso = false;
+let tipoAsignando = null;
+let asignarBloqueadoHasta = 0;
+let temporizadorAsignar = null;
 
 let toastTimer;
 function toast(msg, tipo = "ok") {
@@ -111,6 +114,33 @@ function usuariosAgregables(espId) {
   return (estado.usuarios || []).filter((u) => u.editable && !conRol.has(u.usuario));
 }
 
+function actualizarControlesAsignar() {
+  const card = detalleEl.querySelector(".usr-card");
+  if (!card) return;
+  const segundos = Math.max(0, Math.ceil((asignarBloqueadoHasta - Date.now()) / 1000));
+  for (const tipo of ["nuevo-usuario", "nuevo-supervisor"]) {
+    const sel = card.querySelector(`[data-${tipo}]`);
+    const boton = card.querySelector(`[data-asignar-${tipo}]`);
+    if (!sel || !boton) continue;
+    sel.disabled = asignacionEnCurso || segundos > 0 || !sel.options.length;
+    boton.disabled = sel.disabled;
+    boton.textContent = asignacionEnCurso && tipoAsignando === tipo ? "Asignando…"
+      : segundos > 0 ? `Espera ${segundos} s` : "Asignar";
+  }
+}
+
+function iniciarPausaAsignar() {
+  asignarBloqueadoHasta = Date.now() + 5000;
+  clearInterval(temporizadorAsignar);
+  temporizadorAsignar = setInterval(() => {
+    actualizarControlesAsignar();
+    if (Date.now() >= asignarBloqueadoHasta) {
+      clearInterval(temporizadorAsignar);
+      temporizadorAsignar = null;
+    }
+  }, 1000);
+}
+
 function renderDetalle() {
   const esp = (estado.lista || []).find((x) => x.id === seleccion);
   if (!esp) { detalleEl.innerHTML = ""; return; }
@@ -183,6 +213,7 @@ function renderDetalle() {
   card.querySelector("[data-eliminar-tabla]").addEventListener("click", () => eliminarTabla(card));
   card.querySelectorAll("[data-quitar]").forEach((b) =>
     b.addEventListener("click", () => retirar(card, b.dataset.quitar)));
+  actualizarControlesAsignar();
 }
 
 async function renombrar(card) {
@@ -208,20 +239,15 @@ async function renombrar(card) {
 }
 
 async function asignar(card, attrSel) {
-  if (asignacionEnCurso) return;
+  if (asignacionEnCurso || Date.now() < asignarBloqueadoHasta) return;
   const id = Number(card.dataset.id);
   const sel = card.querySelector(`[data-${attrSel}]`);
   const boton = card.querySelector(`[data-asignar-${attrSel}]`);
   if (!sel || !sel.value || !boton || boton.disabled) return;
   const correo = sel.value;
-  const botones = [...card.querySelectorAll("[data-asignar-nuevo-usuario], [data-asignar-nuevo-supervisor]")];
-  const estadosBotones = botones.map((b) => b.disabled);
-  const selectores = [...card.querySelectorAll("[data-nuevo-usuario], [data-nuevo-supervisor]")];
-  const estadosSelectores = selectores.map((s) => s.disabled);
   asignacionEnCurso = true;
-  botones.forEach((b) => { b.disabled = true; });
-  selectores.forEach((s) => { s.disabled = true; });
-  boton.textContent = "Asignando…";
+  tipoAsignando = attrSel;
+  actualizarControlesAsignar();
   try {
     const r = await fetch(`api/areas/${id}/roles`, {
       method: "POST",
@@ -231,7 +257,8 @@ async function asignar(card, attrSel) {
     const d = await r.json().catch(() => ({}));
     if (r.status === 401) { window.snwSesionExpirada(); return; }
     if (!r.ok) throw new Error(typeof d.detail === "string" ? d.detail : `Error ${r.status}`);
-    toast(`Rol asignado a ${correo}.`);
+    iniciarPausaAsignar();
+    toast(d.asignado === false ? `${correo} ya tenía acceso a esta área.` : `Rol asignado a ${correo}.`);
     yaCargada = false;
     await cargar();
   } catch (e) {
@@ -239,11 +266,8 @@ async function asignar(card, attrSel) {
     toast(e.message || "No se pudo asignar el rol.", "error");
   } finally {
     asignacionEnCurso = false;
-    if (card.isConnected) {
-      botones.forEach((b, i) => { b.disabled = estadosBotones[i]; });
-      selectores.forEach((s, i) => { s.disabled = estadosSelectores[i]; });
-      boton.textContent = "Asignar";
-    }
+    tipoAsignando = null;
+    actualizarControlesAsignar();
   }
 }
 

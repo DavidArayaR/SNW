@@ -389,9 +389,10 @@ def asignar_rol_area(area_id: int, usuario_id: int) -> dict:
             " VALUES (%s, %s)",
             (int(usuario_id), int(rol["id"])),
         )
+        asignado = (cur.rowcount or 0) > 0
         conn.commit()
     return {"rol_id": int(rol["id"]), "rol": rol["nombre"],
-            "area_id": int(area_id)}
+            "area_id": int(area_id), "asignado": asignado}
 
 
 def retirar_rol_area(area_id: int, usuario_id: int) -> bool:

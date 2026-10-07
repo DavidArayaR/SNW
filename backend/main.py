@@ -1090,8 +1090,9 @@ def asignar_rol_area(area_id: int, body: RolAreaIn,
         rol = servicio_areas.asignar_rol_area(area_id, uid)
     except ValueError as e:
         raise _error_area(str(e))
-    auditoria_registrar(sesion.get("usuario", ""), "area_rol_asignar",
-                        obj["usuario"], f"Rol «{rol['rol']}» asignado")
+    if rol["asignado"]:
+        auditoria_registrar(sesion.get("usuario", ""), "area_rol_asignar",
+                            obj["usuario"], f"Rol «{rol['rol']}» asignado")
     return {"ok": True, **rol}
 
 
