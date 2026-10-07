@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="css/componentes.css">
   <link rel="stylesheet" href="css/layout.css?v=sidebar25">
   <link rel="stylesheet" href="css/admin.css?v=inlinecss1">
-  <link rel="stylesheet" href="css/estadisticas.css?v=series1">
+  <link rel="stylesheet" href="css/estadisticas.css?v=series4">
   <link rel="stylesheet" href="css/calendario.css?v=base1">
   <script src="js/tema.js"></script>
 </head>
@@ -77,6 +77,7 @@
               <button type="button" class="stats-series-tab" id="tabSeriesCostos" data-serie="costos" role="tab" aria-controls="panelCostos" aria-selected="false" data-perm="tarifas_editar">Precios</button>
             </div>
           </div>
+          <div class="stats-series__filtro-capa">
           <div class="stats-series__filtro">
             <span>Períodos</span>
             <div class="costos-fecha-grupo">
@@ -86,8 +87,6 @@
                 <span id="resumenCalendarioCostos">Elegir fechas</span>
               </button>
               <button id="limpiarFechaCostos" class="btn btn--ghost costos-fecha-limpiar" type="button" hidden>Quitar filtro</button>
-            </div>
-          </div>
           <div id="calendarioCostos" class="costos-calendario" role="dialog" aria-label="Filtrar estadísticas por fechas" hidden>
             <div class="costos-calendario__modos" role="tablist" aria-label="Tipo de período">
               <button type="button" data-cal-modo="dia" role="tab">D&iacute;as</button>
@@ -99,12 +98,16 @@
               <strong id="calendarioCostosTitulo"></strong>
               <button type="button" data-cal-nav="1" aria-label="Período siguiente"><i class="fa-solid fa-chevron-right" aria-hidden="true"></i></button>
             </div>
+            <p class="costos-calendario__ayuda">Los meses sin envíos están deshabilitados.</p>
             <div id="calendarioCostosGrid" class="costos-calendario__grid"></div>
             <div class="costos-calendario__pie">
               <span id="calendarioCostosSeleccion">Selecciona uno o varios períodos.</span>
               <button id="calendarioCostosLimpiar" class="btn btn--ghost" type="button">Limpiar vista</button>
               <button id="calendarioCostosAplicar" class="btn btn--primary" type="button">Aplicar filtro</button>
             </div>
+          </div>
+            </div>
+          </div>
           </div>
           <p class="costos-fecha-ayuda">Puedes elegir varios d&iacute;as, meses o a&ntilde;os. El filtro se conserva al cambiar de pesta&ntilde;a.</p>
 
@@ -169,7 +172,7 @@
 
   <script src="js/layout.js?v=navcurve7"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/estadisticas.js?v=series1"></script>
+  <script src="js/estadisticas.js?v=series2"></script>
   <script>
     if (window.snwCargarEstadisticas) window.snwCargarEstadisticas();
   </script>

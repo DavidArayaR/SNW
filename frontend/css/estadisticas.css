@@ -169,7 +169,7 @@
   min-width: 0;
 }
 .costos-filtros select { min-width: 0; }
-.costos-fecha-grupo { display: inline-flex; align-items: center; gap: 8px; }
+.costos-fecha-grupo { position: relative; display: inline-flex; align-items: center; gap: 8px; }
 .costos-calendario-abrir { display: inline-flex; align-items: center; gap: 8px; }
 .costos-calendario-abrir[aria-expanded="true"] { border-color: var(--verde); color: var(--verde-oscuro); }
 .costos-fecha-limpiar[hidden] { display: none; }
@@ -319,8 +319,29 @@
 .stats-series-tab.activo,
 .stats-series-tab.activo:hover { color: #12382f; text-shadow: none; }
 .stats-series__vista[hidden] { display: none; }
+.stats-series__filtro-capa { position: relative; z-index: 2; }
 .stats-series__filtro { display: flex; align-items: center; gap: 10px; padding: 14px 18px 0; flex-wrap: wrap; }
 .stats-series__filtro > span { font-weight: 700; }
+.costos-fecha-grupo > .costos-calendario {
+  position: absolute;
+  z-index: 3;
+  top: calc(100% + 8px);
+  left: 0;
+  width: min(430px, calc(100vw - 48px));
+  margin: 0;
+  background: color-mix(in srgb, var(--panel-2) 64%, transparent);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .22);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+.costos-fecha-grupo .costos-calendario__modos {
+  background: color-mix(in srgb, var(--surface-2) 60%, transparent);
+}
+.costos-calendario__ayuda {
+  margin: 0 0 10px;
+  color: var(--texto-suave);
+  font-size: .8rem;
+}
 .stats-series__vista { padding-top: 14px; }
 .stats-series__vista > h3 { margin: 0 18px 12px; font-size: 1rem; }
 .costos-resumen { margin: 8px 18px 18px; overflow-x: auto; }
@@ -329,13 +350,20 @@
 .costos-resumen th, .costos-resumen td { padding: 9px 12px; border-bottom: 1px solid var(--borde); vertical-align: top; }
 .costos-resumen thead { background: var(--panel); }
 .costos-resumen th { text-align: left; font-weight: 700; }
-.costos-resumen td { text-align: right; font-variant-numeric: tabular-nums; }
+.costos-resumen th:last-child,
+.costos-resumen td:last-child { width: 40%; text-align: center; }
+.costos-resumen td { font-variant-numeric: tabular-nums; }
 @media (prefers-reduced-motion: reduce) { .stats-series-tabs::before { transition: none; } }
 
 @media (max-width: 560px) {
   .hero-num { font-size: 2.6rem; }
+  .stats-series__filtro { align-items: flex-start; flex-direction: column; gap: 6px; }
+  .costos-fecha-grupo > .costos-calendario {
+    left: var(--calendario-centro-x, 50%);
+    width: min(430px, calc(100vw - 32px));
+    transform: translateX(-50%);
+  }
   .costos-cabecera { flex-direction: column; align-items: flex-start; }
   .costos-filtros { justify-content: flex-start; }
-  .costos-calendario { margin-left: 18px; }
   .comp-fila { grid-template-columns: 92px 1fr 88px; gap: 8px; }
 }

@@ -6102,6 +6102,15 @@ def estadisticas_envios(granularidad: str = Query("mes"), area_id: int | None = 
         )
         anios_disponibles = [int(r["anio"]) for r in cur.fetchall() if r.get("anio")]
         cur.execute(
+            "SELECT DISTINCT DATE_FORMAT(fecha_hora, %s) AS mes FROM log_envios"
+            " WHERE estado_envio = 'enviado'"
+            f"   AND {_SOLO_PROD}"
+            f"{filtro_esp}"
+            " ORDER BY mes",
+            ("%Y-%m", *args_esp),
+        )
+        meses_disponibles = [r["mes"] for r in cur.fetchall() if r.get("mes")]
+        cur.execute(
             "SELECT DATE_FORMAT(fecha_hora, %s) AS periodo, COUNT(*) AS enviados"
             " FROM log_envios"
             " WHERE estado_envio = 'enviado'"
@@ -6119,6 +6128,7 @@ def estadisticas_envios(granularidad: str = Query("mes"), area_id: int | None = 
         "area": ({"id": esp["id"], "nombre_visible": esp["nombre_visible"]} if esp else None),
         "periodos": sorted(seleccion),
         "anios_disponibles": anios_disponibles,
+        "meses_disponibles": meses_disponibles,
         "filas": filas,
         "total": sum(f["enviados"] for f in filas),
     }

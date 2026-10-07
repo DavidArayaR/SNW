@@ -345,6 +345,7 @@ function pintarGrafico(el, items, { gran, fmtValor, vacio }) {
 let granEnvios = "mes";
 let solicitudEnvios = 0;
 let aniosConEnvios = new Set();
+let mesesConEnvios = new Set();
 
 async function cargarEnvios(gran) {
   granEnvios = filtroCalendarioCostos?.modo || gran;
@@ -360,10 +361,16 @@ async function cargarEnvios(gran) {
     const d = await res.json();
     if (solicitud !== solicitudEnvios) return;
     aniosConEnvios = new Set((d.anios_disponibles || []).map(Number));
+    mesesConEnvios = new Set(d.meses_disponibles || []);
     const anios = [...aniosConEnvios].sort((a, b) => a - b);
     if (anios.length && !aniosConEnvios.has(estadoCalendarioCostos.anio)) {
       estadoCalendarioCostos.anio = anios[anios.length - 1];
       estadoCalendarioCostos.mes = 0;
+    }
+    const mesesDelAnio = [...mesesConEnvios].filter((m) => m.startsWith(`${estadoCalendarioCostos.anio}-`)).sort();
+    const mesVisible = `${estadoCalendarioCostos.anio}-${String(estadoCalendarioCostos.mes + 1).padStart(2, "0")}`;
+    if (mesesDelAnio.length && !mesesConEnvios.has(mesVisible)) {
+      estadoCalendarioCostos.mes = Number(mesesDelAnio[mesesDelAnio.length - 1].slice(5)) - 1;
     }
     pintarCalendarioCostos();
     pintarGrafico($("#enviosGrafico"), (d.filas || []).map((f) => ({ periodo: f.periodo, valor: f.enviados })), {
@@ -440,7 +447,7 @@ function pintarCalendarioCostos() {
         && dia === hoyCalendario.getDate();
       botones.push(`<button type="button" data-cal-valor="${valor}" aria-label="${dia} de ${MESES[mes]} de ${anio}" ` +
         `aria-pressed="${seleccion.dia.has(valor)}" data-hoy="${hoy}"` +
-        `${aniosConEnvios.has(anio) ? "" : " disabled"}>${dia}</button>`);
+        `${mesesConEnvios.has(valor.slice(0, 7)) ? "" : " disabled"}>${dia}</button>`);
     }
   } else if (modo === "mes") {
     $("#calendarioCostosTitulo").textContent = String(anio);
@@ -448,7 +455,7 @@ function pintarCalendarioCostos() {
       const valor = `${anio}-${dosDigitos(i + 1)}`;
       botones.push(`<button type="button" data-cal-valor="${valor}" ` +
         `aria-pressed="${seleccion.mes.has(valor)}"` +
-        `${aniosConEnvios.has(anio) ? "" : " disabled"}>${nombre}</button>`);
+        `${mesesConEnvios.has(valor) ? "" : " disabled"}>${nombre}</button>`);
     });
   } else {
     const inicio = Math.floor(anio / 12) * 12;
@@ -734,14 +741,22 @@ if ($("#calendarioCostos")) {
   const abrirCalendario = $("#abrirCalendarioCostos");
   const calendario = $("#calendarioCostos");
   const limpiarFechaCostos = $("#limpiarFechaCostos");
+  function centrarCalendarioMovil() {
+    const grupo = calendario.parentElement;
+    const anchoVisible = window.visualViewport?.width || window.innerWidth;
+    const inicioVisible = window.visualViewport?.offsetLeft || 0;
+    calendario.style.setProperty("--calendario-centro-x", `${inicioVisible + anchoVisible / 2 - grupo.getBoundingClientRect().left}px`);
+  }
   abrirCalendario.addEventListener("click", () => {
     calendario.hidden = !calendario.hidden;
     abrirCalendario.setAttribute("aria-expanded", String(!calendario.hidden));
     if (!calendario.hidden) {
+      centrarCalendarioMovil();
       pintarCalendarioCostos();
       calendario.querySelector('[data-cal-modo][aria-selected="true"]').focus();
     }
   });
+  window.addEventListener("resize", centrarCalendarioMovil);
   limpiarFechaCostos.addEventListener("click", () => {
     limpiarFiltroCalendarioCostos();
     cerrarCalendarioCostos();
