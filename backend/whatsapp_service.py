@@ -1049,16 +1049,17 @@ class WhatsAppService:
                         )
                     except Exception:
                         pass  # esquema sin la columna
-                p0 = pacientes[0]
-                esp0 = servicio_areas.area_por_tabla(p0["tabla"])
-                cur.execute(
-                    "INSERT INTO log_envios (envio_id, paciente_id, nombre_paciente, numero_telefono,"
-                    " mensaje, plantilla_clave, estado_envio, respuesta, descripcion_error,"
-                    " area_id, tabla_pacientes)"
-                    " VALUES (NULL, %s, %s, %s, %s, 'respuesta', 'enviado', 'respondio', NULL, %s, %s)",
-                    (p0["id"], p0["nombre"], p0["telefono"], (texto or "")[:2000],
-                     esp0["id"] if esp0 else None, p0["tabla"] if esp0 else None),
-                )
+                    # El mismo teléfono puede estar en varias bases. Cada una
+                    # necesita su propia señal para la ficha y estadísticas.
+                    esp = servicio_areas.area_por_tabla(p["tabla"])
+                    cur.execute(
+                        "INSERT INTO log_envios (envio_id, paciente_id, nombre_paciente, numero_telefono,"
+                        " mensaje, plantilla_clave, estado_envio, respuesta, descripcion_error,"
+                        " area_id, tabla_pacientes)"
+                        " VALUES (NULL, %s, %s, %s, %s, 'respuesta', 'enviado', 'respondio', NULL, %s, %s)",
+                        (p["id"], p["nombre"], p["telefono"], (texto or "")[:2000],
+                         esp["id"] if esp else None, p["tabla"]),
+                    )
                 conn.commit()
             return "registrada"
         except Exception as e:
@@ -1202,9 +1203,8 @@ class WhatsAppService:
                         f" WHERE paciente_id = %s AND respuesta = 'baja' {cond_t}",
                         (p["id"], *args_t),
                     )
-                # Una sola fila descriptiva (log_envios no distingue ambiente;
-                # mismo criterio que _registrar_respuesta, que también solo
-                # inserta con los datos del primer paciente encontrado).
+                # La oferta se documenta una vez; la respuesta en sí ya queda
+                # registrada por tabla en _registrar_respuesta.
                 p0 = pacientes[0]
                 clave_oferta0 = self._ultima_plantilla_ofertada(cur, p0["id"], p0["tabla"])
                 esp0 = servicio_areas.area_por_tabla(p0["tabla"])

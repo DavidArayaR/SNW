@@ -1328,7 +1328,8 @@ def _filtro_log_paciente(tabla: str, ambiente: str, alias: str) -> str:
 
 
 def expr_respuesta_efectiva(alias: str = "p", tiene_opt_out: bool = True,
-                            tiene_manual: bool = False, tabla_log: str | None = None) -> str:
+                            tiene_manual: bool = False, tabla_log: str | None = None,
+                            tiene_interes: bool = False) -> str:
     """Respuesta de un paciente para saber quién interactuó por WhatsApp.
 
     Prioridad:
@@ -1336,13 +1337,19 @@ def expr_respuesta_efectiva(alias: str = "p", tiene_opt_out: bool = True,
       2. corrección manual (columna respuesta_manual), si existe
       3. señal automática 'pegajosa': la más fuerte que haya tenido alguna vez
          (baja > respondió), ignorando los ajustes manuales antiguos
-      4. 'pendiente'
+      4. interés/no interés registrado en la ficha (webhooks antiguos)
+      5. 'pendiente'
     Se usa igual en /api/pacientes y en /api/estadisticas."""
     baja_opt = f"WHEN {alias}.whatsapp_opt_out = 1 THEN 'baja' " if tiene_opt_out else ""
     manual = (
         f"WHEN {alias}.respuesta_manual IS NOT NULL AND {alias}.respuesta_manual <> '' "
         f"THEN {alias}.respuesta_manual "
         if tiene_manual else ""
+    )
+    interes = (
+        f"WHEN COALESCE({alias}.interesado, 0) = 1 OR "
+        f"COALESCE({alias}.no_interesado, 0) = 1 THEN 'respondio' "
+        if tiene_interes else ""
     )
     ex = lambda r: (
         f"WHEN EXISTS(SELECT 1 FROM log_envios le WHERE le.paciente_id = {alias}.id"
@@ -1356,6 +1363,7 @@ def expr_respuesta_efectiva(alias: str = "p", tiene_opt_out: bool = True,
         + manual
         + ex("baja")
         + ex("respondio")
+        + interes
         + "ELSE 'pendiente' END)"
     )
 
@@ -1393,7 +1401,8 @@ def expr_select_pacientes(ambiente: str, tabla: str | None = None) -> str:
         exprs.append("NULL AS fecha_actualizacion")
     exprs.append(
         expr_respuesta_efectiva("p", "whatsapp_opt_out" in cols, "respuesta_manual" in cols,
-                                tabla_log=t if (tabla and log_tiene_tabla) else None)
+                                tabla_log=t if (tabla and log_tiene_tabla) else None,
+                                tiene_interes={"interesado", "no_interesado"} <= cols)
         + " AS respuesta"
     )
     exprs.append("COALESCE(l.respuesta, 'pendiente') AS respuesta_ultimo_envio")
@@ -1859,7 +1868,8 @@ def mensajes_paciente(paciente_id: int, ambiente: str = Query("produccion"),
     tiene_opt = "whatsapp_opt_out" in cols
     tiene_int = "interesado" in cols
     re_expr = expr_respuesta_efectiva("p", tiene_opt, "respuesta_manual" in cols,
-                                      tabla_log=t if (_esp and "tabla_pacientes" in columnas_tabla("log_envios", ambiente)) else None)
+                                      tabla_log=t if (_esp and "tabla_pacientes" in columnas_tabla("log_envios", ambiente)) else None,
+                                      tiene_interes={"interesado", "no_interesado"} <= cols)
     with conectar(ambiente) as conn, conn.cursor() as cur:
         cur.execute(
             f"SELECT p.id, p.nombre, p.apellido, p.telefono,"
@@ -4238,9 +4248,11 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
     # que la cuenta tenga el permiso de envío directo en producción.
     if amb == "produccion" and not tiene_permiso(sesion, "envio_produccion"):
         token = uuid.uuid4().hex
-        envio_id = crear_envio_batch(nombre_base(amb), plantilla["clave"], plantilla["nombre"],
+        envio_id = crear_envio_batch(t_esp or nombre_base(amb), plantilla["clave"], plantilla["nombre"],
                                      len(destinatarios) + len(rechazados), amb,
-                                     usuario=sesion.get("usuario", ""))
+                                     usuario=sesion.get("usuario", ""),
+                                     area_id=(esp["id"] if esp else None),
+                                     tabla_pacientes=t_esp)
         PENDIENTES[token] = {
             "ambiente": amb,
             "base": base_job,
@@ -5840,7 +5852,8 @@ def detalle_historial(envio_id: str, ambiente: str = Query("produccion"),
     tiene_opt = columna_existe(t, "whatsapp_opt_out", ambiente)
     tiene_int = columna_existe(t, "interesado", ambiente)
     re_expr = expr_respuesta_efectiva("pac", tiene_opt, columna_existe(t, "respuesta_manual", ambiente),
-                                      tabla_log=t if (tabla_env and "tabla_pacientes" in columnas_tabla("log_envios", ambiente)) else None)
+                                      tabla_log=t if (tabla_env and "tabla_pacientes" in columnas_tabla("log_envios", ambiente)) else None,
+                                      tiene_interes=tiene_int and columna_existe(t, "no_interesado", ambiente))
     int_expr = "COALESCE(pac.interesado, 0)" if tiene_int else "0"
     if "tabla_pacientes" in columnas_tabla("log_envios", ambiente):
         cond_r, args_r = (("AND r.tabla_pacientes = %s", (tabla_env,)) if tabla_env
@@ -5943,7 +5956,9 @@ def _pacientes_por_respuesta(ambiente: str, tabla: str | None = None) -> dict:
     tiene_opt = columna_existe(t, "whatsapp_opt_out", ambiente)
     log_tiene_tabla = "tabla_pacientes" in columnas_tabla("log_envios", ambiente)
     re_expr = expr_respuesta_efectiva("p", tiene_opt, columna_existe(t, "respuesta_manual", ambiente),
-                                      tabla_log=t if (tabla and log_tiene_tabla) else None)
+                                      tabla_log=t if (tabla and log_tiene_tabla) else None,
+                                      tiene_interes=columna_existe(t, "interesado", ambiente)
+                                      and columna_existe(t, "no_interesado", ambiente))
     where = " WHERE p.estado = 'enviado'" if columna_existe(t, "estado", ambiente) else ""
     base = {"pendiente": 0, "respondio": 0, "baja": 0}
     try:
@@ -5984,9 +5999,12 @@ def _pacientes_por_interes(ambiente: str, tabla: str | None = None) -> dict:
     return base
 
 
-# En las estadísticas SOLO cuentan los envíos de producción, no los de
-# desarrollo/pruebas. Cada fila de log_envios se ata a su lote (envios.base_datos).
-_SOLO_PROD = "envio_id IN (SELECT id FROM envios WHERE base_datos = 'pacientes_prod')"
+# Las áreas usan tablas pacientes_<slug> en producción. Se incluyen sus lotes
+# además de la base legacy, sin contar pacientes_dev.
+_SOLO_PROD = (
+    "envio_id IN (SELECT id FROM envios WHERE base_datos <> 'pacientes_dev'"
+    " AND (base_datos = 'pacientes_prod' OR area_id IS NOT NULL))"
+)
 
 # Respuestas automáticas del sistema (texto libre, ventana de 24 h): no son
 # parte de un lote (envio_id NULL) y siempre cuentan como servicio.
@@ -6005,8 +6023,11 @@ def _filtro_esp_estadisticas(sesion: dict, area_id: int | None) -> tuple[str, tu
     if area_id is None:
         return "", (), None
     esp = _exigir_area(sesion, area_id)
-    return (" AND envio_id IN (SELECT id FROM envios WHERE area_id = %s)",
-            (esp["id"],), esp)
+    # Algunos lotes pendientes de confirmación antiguos se crearon sin area_id
+    # en envios, pero cada fila de log_envios sí conserva el área real.
+    return (" AND (area_id = %s OR (area_id IS NULL AND"
+            " envio_id IN (SELECT id FROM envios WHERE area_id = %s)))",
+            (esp["id"], esp["id"]), esp)
 
 
 def estadisticas(area_id: int | None = Query(None), sesion: dict = Depends(solo_admin)):
@@ -6032,10 +6053,49 @@ def estadisticas(area_id: int | None = Query(None), sesion: dict = Depends(solo_
         cur.execute(f"SELECT COUNT(*) AS n FROM log_envios WHERE estado_envio = 'enviado' AND {_SOLO_PROD}{filtro_esp}",
                     args_esp or None)
         total_enviados = int((cur.fetchone() or {}).get("n", 0))
+        # Las respuestas entrantes tienen envio_id NULL: no pasan _SOLO_PROD.
+        # Se cuentan teléfonos únicos para evitar duplicar varias réplicas en
+        # el mes. Las respuestas antiguas ya asociadas a un envío se conservan.
+        respuestas_sql = (
+            "SELECT CONVERT(numero_telefono USING utf8mb4) COLLATE utf8mb4_unicode_ci"
+            " AS telefono FROM log_envios"
+            " WHERE fecha_hora >= DATE_FORMAT(CURDATE(), %s)"
+            " AND respuesta = 'respondio'"
+            f" AND ((envio_id IS NOT NULL AND {_SOLO_PROD})"
+            " OR (envio_id IS NULL AND plantilla_clave = 'respuesta'"
+            " AND tabla_pacientes <> 'pacientes_dev'))"
+            f"{filtro_esp}"
+        )
+        respuestas_args = ("%Y-%m-01", *args_esp)
+        tabla_area = esp["nombre_tabla_base"] if esp else None
+        if (tabla_area and servicio_areas.tabla_valida(tabla_area)
+                and {"interesado", "interes_fecha"} <= columnas_tabla(tabla_area, "produccion")):
+            # Antes se guardaba la respuesta solo en la primera base que
+            # contenía el teléfono. La fecha de interés permite reconocer las
+            # respuestas de esa área sin modificar datos históricos.
+            respuestas_sql += (
+                " UNION ALL SELECT CONVERT(telefono USING utf8mb4)"
+                f" COLLATE utf8mb4_unicode_ci FROM {tabla_area}"
+                " WHERE interesado = 1 AND interes_fecha >= DATE_FORMAT(CURDATE(), %s)"
+            )
+            respuestas_args += ("%Y-%m-01",)
+        cur.execute(
+            f"SELECT COUNT(DISTINCT telefono) AS n FROM ({respuestas_sql}) respuestas",
+            respuestas_args,
+        )
+        respondio_mes = int((cur.fetchone() or {}).get("n", 0))
         if esp:
-            cur.execute("SELECT COUNT(*) AS n FROM envios WHERE area_id = %s", (esp["id"],))
+            cur.execute(
+                "SELECT COUNT(*) AS n FROM envios e WHERE e.base_datos <> 'pacientes_dev'"
+                " AND (e.area_id = %s OR EXISTS (SELECT 1 FROM log_envios le"
+                " WHERE le.envio_id = e.id AND le.area_id = %s))",
+                (esp["id"], esp["id"]),
+            )
         else:
-            cur.execute("SELECT COUNT(*) AS n FROM envios WHERE base_datos = 'pacientes_prod'")
+            cur.execute(
+                "SELECT COUNT(*) AS n FROM envios WHERE base_datos <> 'pacientes_dev'"
+                " AND (base_datos = 'pacientes_prod' OR area_id IS NOT NULL)"
+            )
         total_batches = int((cur.fetchone() or {}).get("n", 0))
 
         # Salud del webhook: cuándo llegó el último evento de Meta.
@@ -6055,7 +6115,7 @@ def estadisticas(area_id: int | None = Query(None), sesion: dict = Depends(solo_
         "enviados_mes": enviados_mes,
         "fallidos_mes": int(mes.get("fallidos") or 0),
         "invalidos_mes": int(mes.get("invalidos") or 0),
-        "respondio_mes": int(mes.get("respondio") or 0),
+        "respondio_mes": respondio_mes,
         "baja_mes": int(mes.get("baja") or 0),
         "total_enviados_historico": total_enviados,
         "total_batches": total_batches,
