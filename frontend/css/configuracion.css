@@ -32,6 +32,7 @@
 .config-api-docs .btn { flex: 0 0 auto; }
 
 .config-seccion { margin-bottom: 18px; }
+.config-supresion-aviso { margin: 16px 18px 0; }
 .config-seccion .panel__head h2 {
   display: flex;
   align-items: center;

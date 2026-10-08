@@ -5,14 +5,28 @@ Router del webhook oficial de WhatsApp Business Platform.
 - POST /api/whatsapp/webhook : recepción de eventos (estados y mensajes).
 """
 
+import hashlib
+import hmac
+import re
+
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 
-from db import log_error
+from db import config_get, log_error
 from whatsapp_service import WebhookHandler
 
 router = APIRouter(prefix="/api/whatsapp", tags=["whatsapp"])
 handler = WebhookHandler()
+
+
+def firma_meta_valida(cuerpo: bytes, firma: str, secreto: str) -> bool:
+    """Comprueba la firma SHA-256 de Meta sobre el cuerpo HTTP original."""
+    if not re.fullmatch(r"sha256=[0-9a-fA-F]{64}", firma or ""):
+        return False
+    esperada = "sha256=" + hmac.new(
+        secreto.encode("utf-8"), cuerpo, hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(esperada, firma.lower())
 
 
 @router.get("/webhook")
@@ -36,7 +50,18 @@ def verificar_webhook(
 
 @router.post("/webhook")
 async def recibir_evento(request: Request):
-    """Recibe eventos de Meta. Retorna 200 aunque un evento falle para no reintentar."""
+    """Solo procesa eventos con firma válida; errores internos conservan el 200."""
+    secreto = (config_get("wa_app_secret") or "").strip()
+    if not secreto:
+        log_error("webhook: falta wa_app_secret en configuración; evento no procesado")
+        return JSONResponse({"detail": "Webhook no configurado"}, status_code=503)
+
+    cuerpo = await request.body()
+    if not firma_meta_valida(
+        cuerpo, request.headers.get("X-Hub-Signature-256", ""), secreto
+    ):
+        return JSONResponse({"detail": "Firma del webhook inválida"}, status_code=403)
+
     try:
         payload = await request.json()
     except Exception as e:

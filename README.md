@@ -35,11 +35,10 @@ snw/
 │   ├── schemas.py            Modelos Pydantic de las peticiones (PlantillaIn, EnvioIn, ConfigIn…)
 │   ├── config_service.py     Vista de config para pantallas/motor (leer_config, url_base) y SMTP
 │   │                          (enviar_correo)
-│   ├── servicio_areas.py     Áreas, tablas de pacientes e importación CSV
 │   ├── telefono.py           Normalización/validación de teléfonos chilenos → `+56 9 …`
 │   ├── routes/               Routers por dominio, cada uno llama a los handlers de main.py:
 │   │                          auth, usuarios, pacientes, plantillas, notificaciones,
-│   │                          estadisticas, configuracion, areas (+ _registry)
+│   │                          estadisticas, configuracion (+ _registry)
 │   ├── whatsapp_service.py   Cliente Graph API + WhatsAppService (envío, templates,
 │   │                          webhook handler) — capa de integración con Meta
 │   ├── wa_rate_limit.py      Gobernador de límites de Meta: cuota de la Graph API,
@@ -51,15 +50,14 @@ snw/
 │   ├── login.html             Inicio de sesión + «¿Olvidaste tu contraseña?»
 │   ├── registro.html          Activar cuenta invitada: elige contraseña con el token del correo
 │   ├── reset.html             Restablecer contraseña con el token del correo
-│   ├── mensajeria.html        Plantillas, envíos manuales y programados
+│   ├── mensajeria.html        Editor de plantillas, vista previa estilo WhatsApp, envío
 │   ├── historial.html         Historial de envíos (batch + detalle por paciente)
-│   ├── pacientes.html         Tablas de pacientes e importación CSV
-│   ├── usuarios.html          Gestión de cuentas
-│   ├── areas.html             Gestión de áreas
-│   ├── estadisticas.html      Resumen, gráficos y costos
-│   ├── configuracion.html     Configuración (solo desarrollador)
-│   ├── administracion.html    Redirige a Usuarios por compatibilidad
-│   ├── css/                   tema.css (paleta claro/oscuro), styles.css (compartido), layout.css (sidebar/topbar), componentes.css (componentes compartidos), admin.css y hojas por página: inicio.css, auth.css, mensajeria.css, areas.css, historial.css, pacientes.css, estadisticas.css, configuracion.css, usuarios.css
+│   ├── administracion.html    Panel de administración con pestañas: Pacientes (base de datos:
+│   │                          ver, filtrar, editar estado/respuesta), Usuarios, Estadísticas
+│   │                          (contador mensual de mensajes, desgloses y costos WhatsApp) y
+│   │                          Configuración (pestaña visible solo para desarrollador).
+│   │                          Exclusivo admin/dev
+│   ├── css/                   tema.css (paleta claro/oscuro), styles.css (compartido), layout.css (sidebar), pacientes.css, estadisticas.css, configuracion.css, usuarios.css
 │   ├── js/                    tema.js (modo claro/oscuro), layout.js (sidebar/sesión/permisos, común), app.js, pacientes.js, historial.js, estadisticas.js, configuracion.js, usuarios.js, pass-toggle.js (ojito en campos de contraseña)
 │   └── vendor/bootstrap/     Bootstrap 5.3.3 (CSS + bundle JS) servido localmente
 ├── data/
@@ -69,9 +67,11 @@ snw/
 │                                un `usuarios.json` antiguo se migra a la tabla y
 │                                se archiva como `usuarios.json.migrado`
 ├── sql/
-│   └── snw_base.sql           Crea la base snw_base y sus tablas iniciales. El backend
-│                                crea/migra tablas auxiliares al arrancar, incluidas las
-│                                de áreas, programados y acceso a pacientes
+│   └── snw_base.sql           Crea la base snw_base, sus 10 tablas y siembra los 2
+│                                números autorizados y las cuentas admin/usuario/dev
+│                                (idempotente: IF NOT EXISTS / INSERT IGNORE). El backend
+│                                añade en el primer arranque las tablas `account_invites`
+│                                y `usuarios_auditoria` (y columnas/migraciones menores)
 ├── documentacion/             CONTEXT.md (contexto, arquitectura y decisiones) y
 │                                FEATURES.md (funcionalidades y flujos del sistema)
 ├── backups/                   Volcados manuales (mysqldump) antes de operaciones destructivas
@@ -87,12 +87,9 @@ snw/
 (Linux/macOS — la primera vez: `chmod +x iniciar_snw.sh`). Ambos scripts hacen lo mismo:
 
 1. Verifican que Python y MySQL (XAMPP/LAMPP) estén disponibles.
-2. Base de datos: **primera vez**, cargan `sql/snw_base.sql` tal cual. Si ya fue
-   inicializada, preguntan: **[1] backup e iniciar desde cero** (respalda
-   `snw_base` a `backups/` y la borra/recrea; si el respaldo falla no se sigue),
-   **[2] backup y seguir como está** (respalda igual, no toca nada),
-   **[3] seguir sin backup** o **[4] elegir un backup** de `backups/` e iniciar
-   con ese backup (primero respalda la actual, pide confirmación, borra la base actual).
+2. **Solo la primera vez** (si `snw_base.pacientes_prod` todavía no existe) cargan
+   `sql/snw_base.sql` para crear la base, las tablas y los 2 números autorizados. En
+   arranques posteriores omiten este paso.
 3. Instalan las dependencias de `requirements.txt` si faltan.
 4. Abren `http://127.0.0.1:8000` en el navegador y levantan `uvicorn`.
 
@@ -138,11 +135,11 @@ el `entorno` activo, que las demás pantallas leen al cargar).
 
 ## Base de datos
 
-**Una sola base MySQL, `snw_base`**, con 10 tablas iniciales creadas por `sql/snw_base.sql`
+**Una sola base MySQL, `snw_base`**, con 10 tablas creadas por `sql/snw_base.sql`
 (pacientes_dev, pacientes_prod, envios, log_envios, whatsapp_eventos, configuracion,
-tarifas_whatsapp, call_center_log, usuarios, password_resets). Al arrancar, el backend
-crea o migra las tablas auxiliares necesarias, entre ellas `account_invites`,
-`usuarios_auditoria`, las de áreas y envíos programados, y `paciente_csv_accesos`.
+tarifas_whatsapp, call_center_log, usuarios, password_resets). Al primer arranque el
+**backend añade dos tablas más** (`account_invites` y `usuarios_auditoria`, ver abajo) y
+migraciones menores sobre las existentes.
 La tabla **`usuarios`** guarda las cuentas de la app (`usuario` correo, `nombre`, `rol`,
 `permisos` CSV, `clave_hash` SHA-256, `correo_recuperacion`) y **`password_resets`** los
 enlaces de «Olvidé mi contraseña» (token de 2 h, un solo uso). Las demás:
@@ -201,13 +198,7 @@ que descarga la [página de precios de Meta](https://developers.facebook.com/doc
 baja los CSV de rate card, extrae la fila «Chile» y detecta si hay tarifas nuevas o futuras.
 Se usa en la sección **Costos** de Estadísticas (permiso `tarifas_editar`) para estimar el gasto por
 día / mes / año aplicando a cada mensaje enviado la tarifa vigente en su fecha según la
-categoría de su plantilla. Los mensajes de servicio (respuestas automáticas de call center,
-texto libre en ventana de 24 h) siempre se muestran y calculan a la tarifa `service`, o a la
-de Utility como respaldo cuando el card no trae `service` propia (regla de Meta, sin tramos
-por volumen; rige desde el 01-10-2026: Chile CLP 17.6584 por mensaje, igual que
-Utility/Authentication; antes eran gratuitos y se excluyen). Solo se cuenta lo enviado por
-`api_oficial` (con `whatsapp_message_id`): lo simulado se informa aparte como `simulados`
-y no se factura.
+categoría de su plantilla.
 
 **`call_center_log`** — una fila por cada respuesta de call center enviada a un paciente
 interesado, con el `numero_call_center` que le asignó el servicio de `call_center_url`, si
@@ -229,22 +220,11 @@ se cierran las sesiones de esa cuenta. Las filas viejas se limpian en cada arran
 correo; los vencidos/usados se limpian en cada arranque. Creada por el backend en el primer
 arranque (no está en `snw_base.sql`).
 
-**`usuarios_auditoria`** — trazabilidad de acciones de cada cuenta:
-`actor`, `accion`, `objetivo` y `detalle`. Incluye cambios de cuentas y plantillas;
-conserva las altas individuales históricas (`paciente_creado`). Alimenta la sección
-«Actividad» del panel de una cuenta en Usuarios. También la crea el backend
-en el primer arranque.
-
-**`paciente_csv_accesos`** — registra qué cuenta incorporó cada paciente mediante un CSV
-(y conserva altas individuales históricas), identificado por tabla, ID de paciente y usuario. Si varias cuentas
-importan el mismo paciente, cada una obtiene acceso a sus datos completos. El rol de
-administrador o desarrollador **no** sustituye esta relación: quien no incorporó ese paciente solo ve
-iniciales y teléfono oculto (`+569 **** *123`), y no puede abrir sus mensajes. Los
-pacientes anteriores a esta trazabilidad no reciben un dueño supuesto: sus datos quedan
-ocultos. En una tabla de área, volver a cargar un CSV con esos pacientes registra el
-acceso de la cuenta que lo sube; en las tablas legacy no hay una carga CSV equivalente
-en la interfaz. Al borrar pacientes o una tabla de área se eliminan también sus accesos
-asociados.
+**`usuarios_auditoria`** — trazabilidad de lo que un admin/dev hizo a cada cuenta (tabla
+`usuarios_auditoria`): `actor`, `accion` (`invito`, `permisos`, `rol`, `activo`,
+`correo_recuperacion`, `activar_cambio_clave`, `elimino`…), `objetivo` y `detalle`. Alimenta
+la sección «Actividad» del panel de una cuenta en Usuarios. También la crea el backend en el
+primer arranque.
 
 Las tablas de pacientes comparten `log_envios`, así que el backend siempre ubica el
 "último log" de un paciente con un `LEFT JOIN` correlacionado por `paciente_id`.
@@ -318,7 +298,7 @@ Reglas del editor:
 | POST | `/api/auth/login` | `{usuario, clave}` → `{token, rol, nombre, permisos}`. 403 si la cuenta está desactivada (`activo=false`) |
 | GET | `/api/auth/invitacion/{token}` | Verifica un enlace de invitación (48 h) → `{ok, correo}`. Usado por `registro.html` para mostrar el correo al que se le manda la invitación |
 | POST | `/api/auth/activar` | Último paso de una invitación `{token, clave}`. `clave` ≥ 8 con minúscula, mayúscula y número. Nace con rol `usuario` y permisos básicos (`mensajeria`, `historial`) |
-| GET | `/api/auth/me` | Rol, permisos, especialidades asignadas y `correo_recuperacion` vigentes de la sesión (el frontend lo usa para refrescarse si un admin cambió los permisos) |
+| GET | `/api/auth/me` | Rol, permisos, areas asignadas y `correo_recuperacion` vigentes de la sesión (el frontend lo usa para refrescarse si un admin cambió los permisos) |
 | PUT | `/api/auth/clave` | Cambiar **la propia** contraseña estando dentro: `{clave_actual, clave_nueva}`. Valida la actual y la fuerza de la nueva (botón «Mi cuenta» de la barra lateral); si la cuenta tiene correo de recuperación, le manda un aviso de confirmación |
 | PUT | `/api/auth/correo-recuperacion` | Define a qué correo llega el enlace de «Olvidé mi contraseña» y el aviso de cambio de contraseña: `{correo}`. **Sin campo en la interfaz** (se quitó de «Mi cuenta»); solo queda como endpoint. 409 si el correo es el usuario de otra cuenta |
 | POST | `/api/auth/olvide` | **Pública.** `{correo}` → si hay una cuenta con ese correo (login o de recuperación) se le manda un enlace con un token de **2 horas** desde `correo_emisor`. Responde siempre `{ok: true}` (no revela si existe) |
@@ -330,7 +310,7 @@ Reglas del editor:
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/usuarios` | Cuentas con `rol`, `permisos`, `especialidades` asignadas, `editable`/`motivo_bloqueo` según quién pregunta, más `desarrolladores`/`max_desarrolladores` |
+| GET | `/api/usuarios` | Cuentas con `rol`, `permisos`, `areas` asignadas, `editable`/`motivo_bloqueo` según quién pregunta, más `desarrolladores`/`max_desarrolladores` |
 | POST | `/api/usuarios/invitar` | `{correo}`. Manda un correo de invitación (enlace de 48 h a `registro.html?token=`) para que la persona cree su propia cuenta con contraseña propia; 409 si ya existe una cuenta con ese correo |
 | PUT | `/api/usuarios/{correo}` | `{permisos?, nombre?, rol?, activo?}`. `rol`: un desarrollador lo cambia a cualquier valor (promover a `desarrollador` da 409 si ya hay 4); un administrador gestiona cuentas `usuario` y `supervisor` y puede darles rol `usuario`, `supervisor` o `administrador` (nunca `desarrollador`). `activo=false` desactiva la cuenta (no puede iniciar sesión) y cierra sus sesiones abiertas al instante; `activo=true` la reactiva. Nadie modifica su propia cuenta; un administrador solo toca cuentas de rol `usuario` o `supervisor`. Si `permisos` incluye `tarifas_editar`, se agrega `estadisticas` automáticamente |
 | DELETE | `/api/usuarios/{correo}` | Elimina la cuenta y cierra sus sesiones (mismas reglas que PUT) |
@@ -343,40 +323,26 @@ Reglas del editor:
 cambio (arriba) para que la persona elija una nueva. Si alguien la olvida usa «¿Olvidaste tu
 contraseña?» en el login (`/api/auth/olvide`) — mismo mecanismo, pero autoservicio.
 
-### Pacientes
-
-La base de desarrollo/producción requiere el permiso `pacientes`; las bases de área son
-visibles para las cuentas asignadas. En ambos casos, ver una base **no** concede acceso a
-los datos personales completos de todos sus pacientes: rige la autoría del CSV descrita
-en `paciente_csv_accesos`.
-
-El **estado y la respuesta solo se pueden editar manualmente en números de prueba**:
-`numeros_prueba_dev` para `pacientes_dev` y `numeros_prueba_prod` para
-`pacientes_prod` y las bases de área. Los demás registros son de solo lectura para
-estos campos, incluso para admin/dev. Una petición individual o masiva que incluya
-un número no autorizado devuelve 403 sin modificar ningún registro. Esto no impide
-las actualizaciones automáticas del motor de envío o del webhook ni el borrado
-autorizado de registros en una base de área. Una baja **manual** solo se replica
-en otras bases si ese mismo número también figura como prueba allí.
+### Pacientes (pestaña de administración, exclusiva admin/dev; permiso `pacientes` en el backend)
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/pacientes?q=&ambiente=&area_id=` | Lista de la base indicada; con `area_id` lee `pacientes_<slug>` (403 si no está asignada). Cada fila indica `datos_completos` y `editable` (si su número está en la lista de prueba de la base). Para quien no incorporó al paciente, devuelve solo iniciales y teléfono oculto, sin último mensaje ni error. La búsqueda `q` se aplica a esos valores visibles |
-| PUT | `/api/pacientes/{id}?ambiente=&area_id=` | Cambiar `estado` (`pendiente`/`enviado`/`error`) de **un** paciente |
+| GET | `/api/pacientes?q=&ambiente=&area=` | Lista con respuesta y error del último `log_envios`. Con `area` lee la tabla `pacientes_<slug>` (403 si no está asignada) |
+| PUT | `/api/pacientes/{id}?ambiente=&area=` | Cambiar `estado` (`pendiente`/`enviado`/`error`) de **un** paciente |
 | PUT | `/api/pacientes/estado-masivo?ambiente=` | `{pacientes: [ids], estado}` — igual que arriba pero para **varios** pacientes a la vez (selección en la pestaña Pacientes) |
-| PUT | `/api/pacientes/{id}/respuesta?ambiente=` | Ajuste manual de la respuesta (`pendiente`/`baja`) de **un** paciente de prueba; `baja` activa el opt-out. 409 si el paciente pidió la baja explícitamente por WhatsApp y se intenta poner algo distinto de `baja` (ver `opt_out_explicito`) |
+| PUT | `/api/pacientes/{id}/respuesta?ambiente=` | Ajuste manual de la respuesta (`pendiente`/`respondio`/`baja`) de **un** paciente; `baja` activa el opt-out. 409 si el paciente pidió la baja explícitamente por WhatsApp y se intenta poner algo distinto de `baja` (ver `opt_out_explicito`) |
 | PUT | `/api/pacientes/respuesta-masiva?ambiente=` | `{pacientes: [ids], respuesta}` — igual que arriba pero para **varios** pacientes a la vez. Los que tengan la baja bloqueada se saltan (no fallan los demás); responde `{actualizados, bloqueados}`; 409 solo si **todos** los seleccionados están bloqueados |
-| GET | `/api/pacientes/{id}/mensajes?ambiente=&area_id=` | Hilo completo de mensajes entrantes y salientes; marca `interes: true` los entrantes que suenan a interés. **Solo** la cuenta que incorporó a ese paciente por CSV o individualmente puede consultarlo (403 para las demás, incluso admin/dev). Es lo que muestra «Ver mensajes» en Historial |
+| GET | `/api/pacientes/{id}/mensajes?ambiente=` | **(cualquier usuario, solo lectura)** Todos los mensajes (entrantes y salientes) del paciente, para revisar si su interés es real. Marca `interes: true` los entrantes que suenan a interés. Es lo que muestra el botón **«Ver mensajes»** de la columna *Detalle* en el modal del Historial. `paciente.telefono` viene `null` si quien pregunta no es admin/dev |
 
 ### Plantillas
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/plantillas` | Lista de plantillas (incluye las de call center; el frontend de Mensajería las filtra). Cada cuenta recibe solo su alcance: el usuario normal ve solo las que creó y las de sus especialidades |
-| POST | `/api/plantillas` | Crear `{nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id?}`. `whatsapp_template_categoria` es obligatoria (`UTILITY` / `MARKETING` / `AUTHENTICATION`); sin ella → 400. `area_id` asocia la plantilla (404 si no existe, 403 si no está asignada). **El nombre no se puede repetir** (409 si ya existe) **ni reutilizar el de una eliminada hasta pasados 30 días** (409 con los días restantes; política de Meta, registro en `data/plantillas_eliminadas.json`). **El usuario normal no puede crear plantillas globales** (422): siempre una de sus especialidades. **Aprobación interna**: lo creado por admin/dev/supervisor nace `aprobada` y va a Meta de inmediato; lo creado por un `usuario` nace `pendiente` y **no se registra en Meta** hasta que se aprueba |
+| GET | `/api/plantillas` | Lista de plantillas (incluye las de call center; el frontend de Mensajería las filtra). Cada cuenta recibe solo su alcance: el usuario normal ve solo las que creó y las de sus areas |
+| POST | `/api/plantillas` | Crear `{nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area?}`. `whatsapp_template_categoria` es obligatoria (`UTILITY` / `MARKETING` / `AUTHENTICATION`); sin ella → 400. `area` asocia la plantilla (404 si no existe, 403 si no está asignada). **El nombre no se puede repetir** (409 si ya existe) **ni reutilizar el de una eliminada hasta pasados 30 días** (409 con los días restantes; política de Meta, registro en `data/plantillas_eliminadas.json`). **El usuario normal no puede crear plantillas globales** (422): siempre una de sus areas. **Aprobación interna**: lo creado por admin/dev/supervisor nace `aprobada` y va a Meta de inmediato; lo creado por un `usuario` nace `pendiente` y **no se registra en Meta** hasta que se aprueba |
 | POST | `/api/plantillas/{id}/aprobar` | (admin/dev/supervisor) Aprueba una pendiente y la registra en Meta |
 | POST | `/api/plantillas/{id}/rechazar` | (admin/dev/supervisor) `{motivo?}` Rechaza una pendiente (no va a Meta); su creador puede corregirla y vuelve a pendiente |
-| PUT | `/api/plantillas/{id}` | Actualizar `{nombre, texto, ...}` — rechaza (400) si `nombre` cambió, si falta `whatsapp_template_categoria`, si es una plantilla de call center, o si el estado en Meta no es `APPROVED` ni `REJECTED` (pendiente de revisión). **Solo el creador** (admin/dev, cualquiera; 403 si no). Acepta cambiar `area_id` con la misma validación que al crear; si **solo** cambia el área (valor local), no se reenvía a Meta ni corre el enfriamiento de 24 h |
+| PUT | `/api/plantillas/{id}` | Actualizar `{nombre, texto, ...}` — rechaza (400) si `nombre` cambió, si falta `whatsapp_template_categoria`, si es una plantilla de call center, o si el estado en Meta no es `APPROVED` ni `REJECTED` (pendiente de revisión). **Solo el creador** (admin/dev, cualquiera; 403 si no). Acepta cambiar `area` con la misma validación que al crear |
 | DELETE | `/api/plantillas/{id}` | Eliminar. **Solo el creador** (admin/dev, cualquiera; 403 si no). Borra también el template en Meta (`DELETE /{waba_id}/message_templates?name=…`); si Meta falla la plantilla local se borra igual y la respuesta trae `meta_advertencia`. Rechaza (400) las de call center o las que no estén `APPROVED` ni `REJECTED` en Meta |
 | GET | `/api/plantillas/{id}/estado-meta` | Consulta en Meta el estado real de un template |
 | POST | `/api/plantillas/estado-meta/actualizar` | Refresca el estado de todas las plantillas con template |
@@ -411,41 +377,23 @@ tiene template de Meta (va como texto libre, ventana de 24 h). No hay gestión d
   caso (ambos en **Configuración → Call center**; vacíos = sin autocompletar).
 - **Registro:** cada envío queda en `call_center_log` con el número asignado. El panel
   **«Registro de respuestas de call center»** del Historial (permiso propio
-  `call_center_registro`) lo muestra: fecha, nombre y número del paciente (ocultos para
-  quien no lo incorporó por CSV o individualmente), número de call
+  `call_center_registro`) lo muestra: fecha, nombre y número del paciente, número de call
   center, origen y estado, más los usos por número. Admin y desarrollador lo ven por
   defecto; a un `usuario` se le puede asignar ese permiso.
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/call-center/log` | (permiso `call_center_registro`) `{entradas, contadores}` — últimas 200 respuestas de call center + usos por número. Es el panel *Registro de respuestas de call center* del Historial. Nombre, número y error del paciente se ocultan si la cuenta no lo incorporó, independientemente de su rol. Cuentas no privilegiadas solo ven filas de sus especialidades |
+| GET | `/api/call-center/log` | (permiso `call_center_registro`) `{entradas, contadores}` — últimas 200 respuestas de call center + usos por número. Es el panel *Registro de respuestas de call center* del Historial. `numero_paciente` viene `null` si quien pregunta no es admin/dev. Cuentas no privilegiadas solo ven filas de sus areas |
 
 ### Envíos
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| POST | `/api/notificaciones/enviar` | Inicia el envío `{pacientes: [ids] \| null, plantilla_id, ambiente, limite?, area_id?}`. `pacientes: null` = todos los elegibles (usado desde Mensajería). `limite` (solo producción y especialidades) recorta cuántos pendientes entran en esta tanda; el resto quedan pendientes. Con `area_id` envía a la tabla `pacientes_<slug>` (403 si no está asignada; una plantilla de otra especialidad da 400). El rol `usuario` solo puede enviar a sus especialidades o a desarrollo (403 a producción legacy). Rechaza (400) si la plantilla no está `APPROVED` en Meta; 409 si en ese momento hay **otro envío en curso en esa misma base** |
-| POST | `/api/notificaciones/destinatarios` | Cuenta pacientes totales, elegibles (el campo de compatibilidad se llama `pendientes`) y libres de una base; los libres descuentan los reservados por programados. En desarrollo cuenta números de prueba autorizados sin importar su estado; en producción solo los pendientes. Con `plantilla_id`, incluye el costo aproximado solo para supervisor/admin/dev si hay tarifa disponible. Con fecha, informa el cupo diario de Meta para esa fecha cuando corresponde a `api_oficial` en producción |
+| POST | `/api/notificaciones/enviar` | Inicia el envío `{pacientes: [ids] \| null, plantilla_id, ambiente, limite?, area?}`. `pacientes: null` = todos los elegibles (usado desde Mensajería). `limite` (solo producción y areas) recorta cuántos pendientes entran en esta tanda; el resto quedan pendientes. Con `area` envía a la tabla `pacientes_<slug>` (403 si no está asignada; una plantilla de otra especialidad da 400). El rol `usuario` solo puede enviar a sus areas o a desarrollo (403 a producción legacy). Rechaza (400) si la plantilla no está `APPROVED` en Meta; 409 si en ese momento hay **otro envío en curso en esa misma base** |
+| POST | `/api/notificaciones/destinatarios` | Cuenta pacientes totales/pendientes de un ambiente (o de una especialidad con `area`). Con `plantilla_id`, agrega `costo` (aproximado, mismo cálculo que el correo de confirmación del supervisor) para mostrarlo en el modal antes de enviar; `null` si no hay tarifas cargadas, la plantilla no se factura, o la cuenta no tiene el permiso `tarifas_editar` (admin/dev sí lo ven siempre) |
 | GET | `/api/notificaciones/jobs/{job_id}` | Progreso en vivo del envío en curso |
-| GET | `/api/notificaciones/envio-en-curso` | Envíos masivos activos (en proceso o pausados, sin destinatarios): Mensajería muestra un banner para retomarlos aunque se haya cerrado el modal |
 | POST | `/api/notificaciones/jobs/{job_id}/pausa` \| `/reanudar` \| `/cancelar` | Control del job en curso |
 | POST | `/api/notificaciones/prueba-wa` | (solo desarrollador) Envía un mensaje de prueba real vía API oficial |
-
-### Envíos programados
-
-Al programar se reserva una lista de destinatarios libres; un paciente ya reservado por
-otro programado activo no vuelve a contarse como disponible. La fecha y hora deben estar
-al menos un minuto en el futuro. El cupo de Meta para el día elegido solo se aplica en
-producción con `api_oficial`. Las solicitudes que requieren aprobación quedan pendientes
-hasta que un administrador o supervisor autorizado las decida.
-
-| Método | Endpoint | Descripción |
-|---|---|---|
-| POST | `/api/notificaciones/programados` | Crea un envío con plantilla, base, fecha/hora y cantidad obligatoria; preelige destinatarios sin exceder los libres ni, cuando aplique, el cupo diario de Meta |
-| GET | `/api/notificaciones/programados` | Lista los programados visibles para la cuenta, con base, estado y cantidad preelegida |
-| GET | `/api/notificaciones/programados/resumen` | Estado resumido para actualizar la lista sin descargar todos los detalles |
-| GET | `/api/notificaciones/programados/{id}/destinatarios` | Lista preelegida **solo de la base de desarrollo** (403 para las demás); oculta nombre y teléfono de pacientes que la cuenta no incorporó |
-| POST | `/api/notificaciones/programados/{id}/aprobar` \| `/rechazar` \| `/cancelar` | Decide o cancela un programado según los permisos de la cuenta |
 
 ### Confirmación / rechazo por correo (producción)
 
@@ -459,8 +407,8 @@ hasta que un administrador o supervisor autorizado las decida.
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/notificaciones/historial?ambiente=todos&area_id=` | Envíos batch (`ambiente=todos` junta ambas bases). Cuentas no privilegiadas solo ven sus especialidades (las filas legacy las ven solo admin/dev); con `area_id` filtra (403 si no está asignada) |
-| GET | `/api/notificaciones/historial/{id}/detalle?ambiente=` | Pacientes de un envío y campo `datos_completos` por fila. Si quien consulta no incorporó a ese paciente, devuelve iniciales, teléfono oculto y omite el mensaje de respuesta y el error, aunque sea admin/dev. Envíos de especialidad: 403 si no está asignada; legacy: solo admin/dev |
+| GET | `/api/notificaciones/historial?ambiente=todos&area=` | Envíos batch (`ambiente=todos` junta ambas bases). Cuentas no privilegiadas solo ven sus areas (las filas legacy las ven solo admin/dev); con `area` filtra (403 si no está asignada) |
+| GET | `/api/notificaciones/historial/{id}/detalle?ambiente=` | Pacientes individuales de un envío (une la tabla que corresponda: legacy o `pacientes_<slug>`). `numero_telefono` viene `null` si quien pregunta no es admin/dev. Envíos de especialidad: 403 si no está asignada; legacy: solo admin/dev |
 | PUT | `/api/notificaciones/historial/{id}/respuesta?ambiente=` | Corregir la respuesta de un registro |
 
 ### Estadísticas (solo `administrador` / `desarrollador`)
@@ -469,9 +417,9 @@ Las cuentas `usuario` y `supervisor` reciben 403 en estos endpoints (y la migrac
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/estadisticas` | Resumen para Estadísticas (**solo envíos de producción**): mensajes `enviado` del mes, desglose, totales, `pacientes_por_respuesta` y `pacientes_por_interes` (interesados, no interesados y sin clasificar entre quienes ya recibieron un envío), más `webhook` (último evento de Meta). Con `?area_id=` filtra a esa especialidad |
-| GET | `/api/estadisticas/envios?granularidad=dia\|mes\|anio` | Mensajes enviados de producción agrupados por periodo, para el gráfico de barras (día = últimos 30, mes = últimos 12, año = últimos 6). Acepta `&area_id=` |
-| GET | `/api/estadisticas/costos?granularidad=dia\|mes\|anio` | (permiso `tarifas_editar`) Costo estimado agrupado por periodo. Acepta `&area_id` y `&categoria=marketing\|utility\|authentication\|service` (filtra; lo no coincidente no se cuenta). Factura cada categoría a su tarifa de `tarifas_whatsapp` vigente en su fecha; servicio usa la tarifa `service` o la de Utility como respaldo (rigen desde el 01-10-2026). Sin categoría facturable o servicio gratuito en ese periodo va a `excluidos` |
+| GET | `/api/estadisticas` | Resumen para Estadísticas (**solo envíos de producción**): mensajes `enviado` del mes, desglose, totales, `pacientes_por_respuesta` (cuántos pacientes de producción respondieron / se dieron de baja / no han respondido) y `webhook` (cuándo llegó el último evento de Meta — sirve para detectar que el webhook dejó de recibir). Con `?area=` filtra a esa especialidad |
+| GET | `/api/estadisticas/envios?granularidad=dia\|mes\|anio` | Mensajes enviados de producción agrupados por periodo, para el gráfico de barras (día = últimos 30, mes = últimos 12, año = últimos 6). Acepta `&area=` |
+| GET | `/api/estadisticas/costos?granularidad=dia\|mes\|anio` | (permiso `tarifas_editar`) Costo estimado agrupado por periodo. Acepta `&area`. **Solo cuenta mensajes de plantilla Marketing** (la única categoría que usa el sistema), aplicando la tarifa de `tarifas_whatsapp` vigente en su fecha. El resto (texto libre, otras categorías) va a `excluidos` |
 | GET | `/api/tarifas` | (permiso `tarifas_editar`) Tarifas guardadas: `vigente`, `proxima` (tarifa futura ya publicada por Meta), `usd_vigente`, `historial`, moneda de la cuenta y fecha de la última descarga |
 | POST | `/api/tarifas/actualizar` | (permiso `tarifas_editar`) Descarga la página de precios de Meta y sus CSV, guarda los rate cards nuevos de Chile (`INSERT IGNORE` por hash), autodetecta la moneda de facturación (`GET {waba}?fields=currency` → `wa_moneda`) y devuelve si hubo cambio |
 | GET | `/api/tarifas/chile.csv` | (permiso `tarifas_editar`) Descarga el CSV original del rate card de Chile (prefiere la moneda de la cuenta, si no USD) |
@@ -494,32 +442,32 @@ Cada especialidad vive en **una sola tabla** `pacientes_<slug>` dentro de `snw_b
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/areas` | (admin / dev) Todas las especialidades con su tabla y rol |
-| GET | `/api/areas/mias` | Especialidades visibles para la sesión (todas si es admin/dev, solo asignadas si no) |
+| GET | `/api/areas` | (admin / dev) Todas las areas con su tabla y rol |
+| GET | `/api/areas/mias` | areas visibles para la sesión (todas si es admin/dev, solo asignadas si no) |
 | POST | `/api/areas` | (admin / dev) `{nombre, modo}` — `preguntar` (por defecto): si el nombre visible ya existe responde 409 con las coincidencias sin crear nada; `reutilizar`: usa la existente; `nueva`: crea `pacientes_<slug><n>` con el primer sufijo libre (con base, 2 y 4 ocupados usa 3) |
 | PUT | `/api/areas/{id}` | (admin / dev) `{nombre_visible}` — renombra especialidad y rol; la tabla física **no** cambia |
 | POST | `/api/areas/{id}/roles` | (admin / dev) `{usuario}` — asigna a la cuenta el rol de la especialidad |
 | DELETE | `/api/areas/{id}/roles/{usuario}` | (admin / dev) — retira el rol de la especialidad |
-| POST | `/api/areas/{id}/pacientes/csv` | Carga CSV (`nombre, apellido, telefono`, UTF-8, máx. 5 MB) en la tabla de la especialidad; normaliza a `+569XXXXXXXX` e informa `{procesados, insertados, duplicados, rechazados, errores}`. Registra el acceso de quien lo subió también para los pacientes duplicados que ya existían. Admin/dev o cuentas con permiso de mensajería y el rol asignado |
+| POST | `/api/areas/{id}/pacientes/csv` | Carga CSV (`nombre, apellido, telefono`, UTF-8, máx. 5 MB) en la tabla de la especialidad; normaliza a `+569XXXXXXXX` e informa `{procesados, insertados, duplicados, rechazados, errores}`. Admin/dev o cuentas con permiso de mensajería y el rol asignado |
 | DELETE | `/api/areas/{id}/pacientes/{pid}` | (admin / dev) Borra UN registro de la tabla (más sus filas de log propias) |
 | DELETE | `/api/areas/{id}/tabla` | (admin / dev) Elimina la especialidad entera: tabla, rol, asignaciones y registro. El historial de envíos se conserva. Las tablas legacy (`pacientes_dev`/`pacientes_prod`) no se pueden borrar |
 
 ### Áreas — Fase 2 (autorización en backend)
 
-- **Sesión enriquecida**: `login`, `/api/auth/me` y `/api/auth/activar` devuelven `especialidades` (todas si es admin/dev, solo asignadas si no); cada petición refresca `area_ids` junto a rol y permisos.
+- **Sesión enriquecida**: `login`, `/api/auth/me` y `/api/auth/activar` devuelven `areas` (todas si es admin/dev, solo asignadas si no); cada petición refresca `areas` junto a rol y permisos.
 - **Rol global `supervisor`**: como `usuario` pero pensado para aprobar envíos de sus áreas (el enrutado de la confirmación por área llega en Fase 3). El administrador gestiona cuentas `usuario` y `supervisor`.
-- **Pacientes/envíos/historial/plantillas** aceptan `area_id`: 404 si no existe, **403** si no está asignada. Las plantillas pueden asociarse a una especialidad y solo se envían en ella.
-- **`envios` y `log_envios`** guardan `area_id` + `tabla_pacientes` (NULL = fila legacy); los historiales no mezclan tablas con IDs coincidentes.
+- **Pacientes/envíos/historial/plantillas** aceptan `area`: 404 si no existe, **403** si no está asignada. Las plantillas pueden asociarse a una especialidad y solo se envían en ella.
+- **`envios` y `log_envios`** guardan `area` + `tabla_pacientes` (NULL = fila legacy); los historiales no mezclan tablas con IDs coincidentes.
 - **Estadísticas y tarifas**: solo admin/dev (403 para el resto).
-- **Webhook**: busca pacientes también en `pacientes_<slug>`, etiqueta sus filas de log y el call center automático también responde en especialidades (anti flip-flop siempre activo ahí).
+- **Webhook**: busca pacientes también en `pacientes_<slug>`, etiqueta sus filas de log y el call center automático también responde en areas (anti flip-flop siempre activo ahí).
 
 ### Áreas — Fase 3 (frontend + supervisión)
 
 - **Pestaña Áreas** (administración, admin/dev): crear (con flujo duplicado: usar existente o crear `Kinesiología 2`), renombrar (la tabla no cambia), asignar/retirar roles por cuenta y **eliminar la tabla completa** (zona de peligro, con confirmación; el historial se conserva).
 - **Usuarios** muestra el rol `supervisor` y las áreas asignadas de cada cuenta; «Envíos realizados» y «Actividad» paginan de a 10.
 - **Pacientes**: **selector único de base de datos** (desarrollo/producción/áreas, siempre con el nombre físico de la tabla), **carga CSV** en la tabla de la área (informe de insertados/duplicados/rechazados) y **paginación** (10 a 100 por página, se recuerda).
-- **Mensajería**: área por plantilla (badge en la lista + campo en el editor), **filtro «Filtrar por área»** (Todas/Globales/cada una) y selector de base de datos en los envíos manuales y programados. Se elige la base antes de definir la cantidad; las plantillas de área fuerzan su base y «Hello World» solo admite desarrollo. La cantidad se elige expresamente como porcentaje o número de pacientes. Modales de confirmación al aprobar y de motivo al rechazar.
-- **Historial**: selector de base (Todas/Desarrollo/Producción/áreas según permisos), con indicador de carga en la tabla al cambiarlo. El detalle muestra iniciales; «Ver mensajes» solo aparece para los pacientes que la cuenta incorporó.
+- **Mensajería**: área por plantilla (badge en la lista + campo en el editor), **filtro «Filtrar por área»** (Todas/Globales/cada una) y **selector único de base de datos** en el modal (bases disponibles + una opción por área; si hay una sola disponible, queda esa seleccionada; las plantillas de área fuerzan su base), con conteo, slider y cupo diario. Modales de confirmación al aprobar y de motivo al rechazar.
+- **Historial**: filtros **Base** (Todas/Desarrollo/Producción, solo admin/dev) y **Área** (con su tabla; «Mis áreas» para el resto) y «Ver mensajes» con la tabla correcta.
 - **Estadísticas** (admin/dev): selector de área o «Todas» en resumen, gráfico y costos.
 - **Confirmación de supervisor**: el correo de solicitud llega también a los supervisores activos del área (con su nombre en el mensaje); los enlaces por token sirven para cualquiera de los destinatarios.
 - **Estilo unificado de selects**: todos los desplegables de todas las vistas comparten el verde pastel corporativo (distinto del sólido de los botones).
@@ -594,15 +542,18 @@ vez se turnan. Si aun así Meta devuelve `130429`, backoff como en el punto 3.
   historial y se puede reenviar en otra tanda).
 
 **4 · [Messaging limit](https://developers.facebook.com/documentation/business-messaging/whatsapp/messaging-limits)**
-— el límite configurado en `wa_messaging_limit_24h` se aplica a los envíos de
-**producción con motor `api_oficial`**; no limita los envíos simulados ni la base de
-desarrollo. Para un envío manual se consulta el cupo actual de la ventana de 24 h. Para
-uno programado se calcula el cupo del día elegido descontando los destinatarios ya
-contactados ese día y los reservados por otros programados activos para la misma fecha.
-La interfaz de programados muestra por separado los pacientes libres en la base (paso 2)
-y el límite disponible de Meta para la fecha (paso 4); impide indicar una cantidad mayor que
-cualquiera de ambos. Admin/dev pueden ajustar el límite configurado mediante
-`PUT /api/whatsapp/messaging-limit`.
+— usuarios únicos a los que el negocio puede escribir en una ventana móvil de 24 h
+(250 / 1K / 10K / 100K / ilimitado). Antes de un envío masivo en producción, `iniciar_envio` cuenta los
+teléfonos únicos con envío iniciado por el negocio en `log_envios` de las últimas 24 h: si ya
+se alcanzó `wa_messaging_limit_24h` responde **429**; si el lote lo va a superar, se **recorta**
+a los usuarios que quedan disponibles hoy (el resto queda pendiente para otra tanda) y devuelve
+un aviso (`aviso_limite_mensajeria`). El selector «Cuántos enviar» del envío masivo en producción
+limita su máximo a `min(pendientes, disponibles_hoy)`, muestra cuántos usuarios únicos quedan
+disponibles en la ventana de 24 h y nunca permite superar el cupo. En **desarrollo** el cupo no
+bloquea el envío, pero si el límite diario ya se alcanzó se muestra un aviso (el cupo es de la
+cuenta, compartido por ambos entornos). El **admin/dev** puede ajustar `wa_messaging_limit_24h`
+desde el propio modal de envío (campo «Límite diario (Meta)», `PUT /api/whatsapp/messaging-limit`)
+para ponerlo como diga el dashboard de WhatsApp Business, sin depender de Configuración (dev).
 
 En el envío masivo (`_procesar_job`), si hay que esperar ≥ 1 s el job muestra «Esperando por
 el límite de la API de Meta (~N s)» y la espera es cancelable. `GET /api/whatsapp/rate-limit`
@@ -650,38 +601,39 @@ recibir`, `no molestar`, `borrame`…) y el botón nativo de Meta en templates d
 (`Detener promociones` / `Stop promotions`, incluido su `payload`). Meta no manda un evento
 explícito de baja.
 
-**Avisos automáticos.** El webhook responde al paciente con dos mensajes fijos de texto
-libre, dentro de la ventana de 24 h (ver `_enviar_mensaje_directo` en `main.py`):
-«Lamentamos que te vayas…» al darse de baja, y «¡Bienvenido/a de vuelta! Ya reactivamos tus
-notificaciones» al reactivarse. Ambos se deciden **al cierre del evento**
-(`_procesar_mensajes` en `whatsapp_service.py`), con el estado opt-out con que ese evento
-termina, no mensaje a mensaje:
+**Aviso y eliminación por WhatsApp.** Tras una baja, se responde con un mensaje
+de servicio que explica que `ELIMINAR` borra los registros asociados al número
+en **todas las bases de este sistema**, lo bloquea para futuros envíos y no
+afecta al sistema externo de origen. El aviso se envía una sola vez por número
+desde una base que contenga al paciente (incluidas las áreas), y solo queda
+marcado como ofrecido si salió por `api_oficial`. La baja no se revierte al
+escribir cualquier mensaje: requiere `REACTIVAR`, `ALTA`, `VOLVER A RECIBIR`
+o una manifestación explícita de interés.
 
-- **El evento termina de baja habiéndolo estado al inicio** (el paciente ya estaba de baja y
-  vuelve a escribir que se quiere dar de baja — incluye una reactivación seguida de una baja
-  en el mismo evento): **ninguna respuesta**. Evita el «bienvenido + lamentamos» seguido.
-- **El evento termina de baja sin estarlo al inicio** (baja nueva): «Lamentamos que te
-  vayas…», **una sola vez**. El aviso se manda a una única base (producción, y solo como
-  respaldo desarrollo), así un paciente que existe en ambas no lo recibe doble.
-- **El evento termina reactivado** por un mensaje sin interés (una baja puesta a mano por un
-  admin/dev, y el paciente escribe «hola», «quiero volver»…): «¡Bienvenido/a de vuelta!».
-  Si ese mensaje expresa **interés**, no se suma el aviso de reactivación: la única respuesta
-  es la de call center (ver «Mensaje de call center»).
+Una respuesta `ELIMINAR` (sin distinguir mayúsculas, tildes o espacios) **solo
+se ejecuta si el aviso ya fue enviado**. No se responde después. De inmediato
+se crea una huella HMAC del teléfono en `supresion_telefonos` y se excluye el
+número de envíos manuales, programados, automáticos y simulados, así como de
+futuras cargas CSV. Meta ofrece el endpoint de bloqueo por número de negocio;
+si el bloqueo no se confirma, la solicitud queda `pendiente` y el scheduler
+reintenta sin volver a contactar al paciente. Una vez confirmado, se eliminan
+las filas de pacientes de todas las bases y las cohortes programadas, los
+registros de call center y avisos; el historial de envíos conserva sus
+métricas, pero sustituye el nombre por dos letras de nombre y apellido, el
+teléfono por `****` más cuatro dígitos, y elimina textos, errores e IDs que
+puedan identificarlo. **En áreas de menos de 10 pacientes al momento del
+borrado**, se omiten también el nombre reducido y los cuatro dígitos para
+reducir el riesgo de reidentificación; quedan solo métricas de envío. Los
+payloads nuevos de `whatsapp_eventos` no guardan
+datos personales; los eventos antiguos identificados por ese número se vacían.
 
-Un aviso nunca se reenvía por un webhook repetido ni por un segundo mensaje del paciente que
-no cambie el estado final.
-
-**Anti flip-flop (baja ↔ reintegración).** Para que un paciente no juegue con los botones, un
-paciente que **se dio de baja y se reintegra** no puede volver a darse de baja hasta que pasen
-**24 h** desde la reintegración: solo se permite un ciclo baja → reintegración cada 24 h. Al
-reactivarse (por retractación o por interés) se guarda la fecha en `pacientes.ultimo_reintegro`;
-si intenta darse de baja otra vez dentro de esas 24 h, la baja **se ignora** (no se marca el
-opt-out ni se manda la despedida). Un interés de alguien que nunca estuvo de baja no cuenta
-como reintegración, así que no le impide darse de baja después. La restricción está **siempre
-activa en producción**; en **desarrollo** se controla con la opción Configuración → **Bajas y
-reactivaciones** → *«Aplicar el límite también en desarrollo»* (`anti_flip_flop_dev`; por
-defecto activada). Desactívala para probar el flujo de baja/reintegración sin límite en
-desarrollo.
+La clave de la huella se genera en `.env.supresion` (ignorado por Git) al
+primer uso. **Conserva y respalda ese archivo por separado**: si se pierde,
+el sistema deja de operar con las huellas existentes para evitar una
+reimportación accidental. La huella es un dato seudónimo, no anónimo. Las
+solicitudes pendientes conservan temporalmente el teléfono para reintentar el
+bloqueo; las completas solo conservan huella, fecha y conteos. Los datos del
+sistema de origen y las copias de seguridad requieren procesos separados.
 
 **Mensajes de interés:** el texto literal de cada respuesta del paciente se guarda en
 `log_envios.mensaje`. En el **detalle de un envío del Historial** aparece bajo la respuesta
@@ -698,12 +650,10 @@ paciente a `'respondio'`). Al revés, cuando el paciente **se da de baja** se le
 marca de interés (`interesado = 0`), tanto por webhook como por el ajuste manual. Así, si
 escribió "quiero darme de baja" y más tarde "en realidad me interesa", la badge de
 *interesado* desaparece y vuelve a aparecer con cada cambio. En el **detalle de un envío del
-Historial** hay una columna *Detalle* con un botón **«Ver mensajes»** solo si la cuenta
-incorporó a ese paciente. Abre el hilo completo; ahí se ve el estado de interés (de solo
+Historial** hay una columna *Detalle* con un botón **«Ver mensajes»** (para cualquier
+usuario) que abre el hilo completo del paciente; ahí se ve el estado de interés (de solo
 lectura — **no se puede marcar/desmarcar a mano**, solo lo detecta el webhook) y, con el
 permiso `call_center`, si está interesado se puede enviarle el mensaje de call center.
-El título del detalle muestra solo iniciales y el encabezado del hilo oculta el teléfono
-como `+569 **** *123`, incluso para la cuenta que tiene acceso a los mensajes.
 
 **Ajuste manual:** en Pacientes, hacer click en el badge de la columna **Respuesta** abre
 un selector para marcar a mano `respondió` / `se dio de baja` / etc. — útil si el webhook
@@ -740,9 +690,6 @@ Se calcula igual en:
 - **`GET /api/estadisticas`** → `pacientes_por_respuesta` con los totales por estado (panel
   "Respuestas de pacientes" en Estadísticas: *cuántos*). Solo cuenta pacientes de producción
   con `estado = 'enviado'` — los que aún están `pendiente` o `error` no entran.
-- El mismo endpoint devuelve `pacientes_por_interes`: interés explícito, rechazo explícito
-  de la oferta y pacientes sin ninguna de esas dos señales. El filtro de Estadísticas
-  permite alternar entre esta clasificación y la de respuestas.
 
 ### Idempotencia del webhook
 
@@ -782,14 +729,15 @@ propagar como error 500.
 
 ## Módulo de envío
 
-- **Enviar mensajes solo se hace desde Mensajería** (`mensajeria.html`): se selecciona
-  plantilla, base y cantidad antes de iniciar un envío manual, o se añade fecha y hora
-  para programarlo. La cantidad puede definirse por porcentaje o por número exacto;
-  no puede superar los pacientes libres de la base ni el cupo aplicable de Meta. Los
-  que no pueden recibir (dados de baja, teléfono inválido, no autorizados en desarrollo)
-  se listan como **rechazados** con el motivo, y el intento **igual queda en el Historial**
-  (0 enviados, N inválidos) aunque no salga ningún mensaje.
-- **Pacientes** (`pacientes.html`) **no envía
+- **Enviar mensajes solo se hace desde Mensajería y plantillas** (`mensajeria.html`): al
+  editar una plantilla existente aparece "Enviar mensaje" → envía esa plantilla a **todos
+  los pacientes elegibles** del ambiente elegido (`pacientes: null`, único modo — no se
+  elige un subconjunto puntual). En **producción** el modal muestra un slider + campo
+  numérico (1 … pendientes) para acotar cuántos se envían en esta tanda; el resto quedan
+  pendientes. Los que no pueden recibir (dados de baja, teléfono inválido, no autorizados
+  en dev) se listan como **rechazados** con el motivo, y el intento **igual queda en el
+  Historial** (0 enviados, N inválidos) aunque no salga ningún mensaje.
+- **Pacientes** (pestaña de `administracion.html`, exclusiva admin/dev) **no envía
   mensajes** — ni siquiera admin/desarrollador: es solo para gestionar los registros (ver,
   buscar, filtrar, corregir estado/respuesta, uno por uno o en bloque con la selección — ver
   más abajo).
@@ -803,12 +751,9 @@ propagar como error 500.
   nombre y el correo de la cuenta que solicitó el envío. Un envío rechazado queda en el **Historial**
   con estado `rechazado` y el comentario del supervisor (ya no se borra). Con el permiso
   `envio_produccion` (implícito para admin/dev) el envío en producción sale directo, sin correo.
-- **Desarrollo**: sin importar el rol, el envío masivo queda restringido a
-  `pacientes_dev` y a los números configurados en `numeros_prueba_dev`. Producción y
-  áreas se bloquean al crear envíos manuales o programados; el worker vuelve a comprobar
-  el entorno y los números autorizados justo antes de llamar al motor. Puede reenviar
-  registros con estado `enviado`; la elegibilidad no depende de su estado, pero sí excluye
-  bajas y números fuera de la lista de prueba.
+- **Desarrollo**: envío directo, restringido a los números de `numeros_prueba_dev`;
+  sin el permiso `envio_produccion`, con `entorno = desarrollo` la petición nunca
+  puede apuntar a producción aunque lo pida.
 - **Motor intercambiable** (`metodo_envio`): `simulado` (no envía nada real, solo
   registra en consola) o `api_oficial` (WhatsApp Business Cloud API).
 - **Cola en background**: cada envío corre como `BackgroundTask` de FastAPI con
@@ -935,16 +880,10 @@ no escribir el archivo constantemente durante un uso activo.
 Todas las pantallas comparten una **barra lateral** (sidebar) construida por `js/layout.js`:
 marca el enlace activo, muestra solo las páginas permitidas para la cuenta (`window.snwPuede`)
 y gestiona el cierre de
-sesión. El botón ubicado a la izquierda del título en la topbar pliega/expande la sidebar
-en escritorio (la preferencia se recuerda en `localStorage`) y abre/cierra el cajón en
-pantallas angostas. El estilo usa **Bootstrap 5.3** (servido desde
-`frontend/vendor/bootstrap/`) más las hojas de `frontend/css/`.
-
-**CSS del frontend.** Las reglas de presentación se guardan en archivos `.css`; los HTML
-no deben contener bloques `<style>` ni atributos `style="…"`. `tema.css` define la paleta,
-`styles.css` y `componentes.css` contienen reglas compartidas, `layout.css` define la
-navegación y cada pantalla carga su hoja específica cuando corresponde. Login, Registro
-y Reset comparten `auth.css`.
+sesión. En escritorio se pliega a modo icono con el botón «‹‹» de la propia sidebar (la
+preferencia se recuerda en `localStorage`); en pantallas angostas se convierte en un cajón
+que abre la «hamburguesa» de la barra superior. El estilo usa **Bootstrap 5.3** (servido
+desde `frontend/vendor/bootstrap/`) más `css/layout.css`.
 
 **Tema claro / oscuro.** La paleta (tonos pastel en ambos modos) vive en `css/tema.css`
 como variables CSS: `:root` para claro y `:root[data-tema="oscuro"]` para oscuro. `js/tema.js`
@@ -963,20 +902,15 @@ claro** de la sidebar, o con el botón flotante en la portada y el login (págin
 - **«Mi cuenta»** (modal de la barra lateral, todas las páginas): cambiar la propia
   contraseña (pide la actual); si la cuenta tiene correo de recuperación, avisa el cambio
   ahí. No tiene campo para fijar ese correo (ver «Contraseñas» más arriba).
-- **Mensajería y plantillas** (`mensajeria.html`, permiso `mensajeria`): tres pestañas,
-  **Plantillas**, **Envío manual** y **Envíos programados**. El editor ofrece vista previa
-  estilo WhatsApp (formato `*negrita*`/`_cursiva_`/`~tachado~`), campo y filtro de área,
-  y aprobación interna. **Sincronizar**, **Actualizar estados** y **+ Nueva** solo se
-  muestran en Plantillas. Sin `plantillas_editar`, el editor es de solo lectura; las
-  plantillas ajenas también (salvo admin/dev). «Hello World» solo se puede enviar a la
-  base de desarrollo. Los envíos manuales y programados comparten pasos para elegir
-  plantilla, base y cantidad (porcentaje o número); el programado añade fecha y hora.
-  La base muestra cuántos pacientes quedan libres y el cupo diario de Meta aparece en
-  el paso de cantidad solo en producción con `api_oficial`. El costo aproximado se muestra solo a
-  supervisor/admin/dev después de elegir cómo definir la cantidad, y cambia con la
-  cantidad elegida. La lista de programados indica la base junto al nombre de la
-  plantilla; **Ver preelegidos** aparece únicamente para envíos de desarrollo.
-- **Cargar base de datos** (panel en `pacientes.html`, permiso `mensajeria`): cualquier cuenta sube un CSV
+- **Mensajería y plantillas** (`mensajeria.html`, permiso `mensajeria`): editor de plantillas con vista
+  previa estilo WhatsApp (formato `*negrita*`/`_cursiva_`/`~tachado~`), campo de área
+  (el usuario normal solo las suyas; sin asignadas se le indica pedir una), filtro
+  «Filtrar por área» (Todas/Globales/cada una), nombre y template
+  de Meta permanentes, botón **Sincronizar** con Meta (cada cuenta solo recibe su alcance),
+  badges de aprobación interna («⏳ Por aprobar»/«Rechazada») con botones de aprobar (con
+  confirmación) y rechazar (con motivo) para admin/dev/supervisor, y envío directo a todos los
+  pendientes con selector único de base de datos. Sin el permiso `plantillas_editar` el editor queda de solo lectura; las ajenas también (solo su creador las edita, salvo admin/dev).
+- **Cargar base de datos** (`carga.html`, permiso `mensajeria`): cualquier cuenta sube un CSV
   (`nombre, apellido, telefono`, UTF-8, 5 MB) a una de sus áreas asignadas, con
   informe de insertados/duplicados/rechazados. Sin áreas se le indica pedir una.
 - **Administración** (rol admin/desarrollador): ya no es una página con pestañas — son
@@ -991,41 +925,35 @@ claro** de la sidebar, o con el botón flotante en la portada y el login (págin
   datos: nombre, permisos, rol (solo el desarrollador), envíos realizados, actividad
   (trazabilidad) y eliminar. Máximo 4 desarrolladores. Aquí no se cambian contraseñas — cada
   cuenta usa «Mi cuenta» o «¿Olvidaste tu contraseña?».
-- **Pacientes** (`pacientes.html`, para admin/dev y cuentas asignadas a un área): **selector único
-  de base de datos** (desarrollo/producción/áreas con su tabla), formulario para agregar
-  un paciente individual con nombre, apellido y teléfono, tabla con estado
-  editable en línea **solo para números de prueba**, columna **Error** (motivo del último fallo), columna **Respuesta** con
+- **Pacientes** (pestaña de `administracion.html`, exclusiva admin/dev): **selector único
+  de base de datos** (desarrollo/producción/áreas con su tabla), tabla con estado
+  editable en línea, columna **Error** (motivo del último fallo), columna **Respuesta** con
   la señal de WhatsApp (Respondió / Se dio de baja / Sin respuesta) y su fecha, filtros por
   estado/respuesta, **paginación** (10 a 100 por página) y **carga CSV** en el área elegida, y selección múltiple para editar **estado o respuesta de varios
-  pacientes de prueba a la vez** (barra «Con los seleccionados», aparece al marcar alguno; pide
+  pacientes a la vez** (barra «Con los seleccionados», aparece al marcar alguno; pide
   confirmación con la cantidad antes de aplicar). En tablas de áreas hay además
   borrado por fila (×) y en bloque («Eliminar»). Un badge de «Se dio de baja» con
   &#128274; no se puede editar (ni uno por uno ni en bloque): esa baja la pidió el propio
   paciente por WhatsApp (ver «Baja explícita» en «Sistema de baja»). Aquí se ve **quiénes**
   respondieron o se dieron de baja — **no se envían mensajes desde esta página** (ver
-  «Módulo de envío»). Los datos completos (incluidos nombre, teléfono y mensajes)
-  solo los ve la cuenta que incorporó a cada paciente por CSV o individualmente; para las demás cuentas se
-  muestran iniciales y teléfono oculto, incluso si son admin/dev.
-- **Historial** (`historial.html`): selector de base según los permisos de la cuenta.
-  Al cambiar la base, la tabla muestra «Actualizando historial…» mientras llegan los
-  nuevos resultados. «Ver detalle» presenta las iniciales de cada paciente. Solo la
-  cuenta que lo incorporó puede usar «Ver mensajes» y consultar el hilo; el
-  título del hilo mantiene las iniciales y el teléfono oculto (`+569 **** *123`).
-- **Estadísticas** (`estadisticas.html`, exclusiva admin/dev, **solo cuenta
-  envíos de producción**): mensajes enviados en el mes con su desglose; panel de pacientes
-  con filtro **Respuesta / Interés** y comparación en barras. En Respuesta muestra cuántos
-  no han respondido, respondieron o se dieron de baja; en Interés, cuántos están
-  interesados, no interesados o sin clasificar. Un **gráfico de barras** de mensajes
-  enviados es conmutable por día / mes / año y muestra los totales históricos. Con el
-  permiso `tarifas_editar` (implícito en admin/dev) se ve además el panel
-  **"Costos de mensajes de WhatsApp"**:
+  «Módulo de envío»).
+- **Historial** (`historial.html`): filtros **Base** (Todas/Desarrollo/Producción, admin/dev;
+  el usuario normal solo ve sus áreas) y **Área** (con su tabla),
+  envíos de ambas bases (o filtrado por una), detalle
+  individual por paciente con estado, respuesta y error de cada mensaje.
+- **Estadísticas** (pestaña de `administracion.html`, exclusiva admin/dev, **solo cuenta
+  envíos de producción**): mensajes enviados en el mes con su desglose; panel **"Respuestas
+  de pacientes por WhatsApp"** con botones de filtro (Todos / No han respondido /
+  Respondieron / Se dieron de baja) sobre una **comparación en barras** de los pacientes de
+  producción por estado; un **gráfico de barras** de mensajes enviados conmutable por día /
+  mes / año y los totales históricos. Con el permiso `tarifas_editar` (implícito en
+  admin/dev) se ve además el panel **"Costos de mensajes de WhatsApp"**:
   tarifas vigentes de Meta para Chile por categoría, aviso cuando hay un cambio o una
   tarifa futura, descarga del CSV de Chile y el mismo gráfico de barras aplicado al costo
-   estimado por día / mes / año (solo mensajes de plantilla facturables y mensajes de
-   servicio con tarifa vigente; el resto del texto libre de la ventana de 24 h
-   se excluye y se indica bajo el total).
-  La página **Configuración** (`configuracion.html`, **solo rol desarrollador** —
-  no aparece en la navegación de un administrador): edita **todas** las claves de la
+  estimado por día / mes / año (solo mensajes de plantilla facturables; los de texto libre
+  de la ventana de 24 h se excluyen y se indican bajo el total).
+  La pestaña **Configuración** (dentro de `administracion.html`, **solo rol desarrollador** —
+  la pestaña ni se crea para un administrador): edita **todas** las claves de la
   tabla `configuracion` por secciones (Aplicación, URL pública, Correo/SMTP, WhatsApp).
   Muestra el valor real (los secretos con botón de ojo), marca los campos modificados,
   guarda solo lo cambiado con una barra flotante y avisa si sales con cambios sin guardar.

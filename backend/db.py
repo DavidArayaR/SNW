@@ -28,9 +28,9 @@ TABLAS_PACIENTES = {"desarrollo": "pacientes_dev", "produccion": "pacientes_prod
 
 # ---------------------------------------------------------------------------
 # TODA la configuración vive en la tabla `configuracion` (clave/valor) y se
-# edita desde la página de Configuración. En .env solo quedan las credenciales
-# de la BASE DE DATOS (DB_*), porque se necesitan para conectarse a la base
-# donde vive la tabla. La primera vez que arranca el backend, la tabla se
+# edita desde la página de Configuración. En .env quedan solo las credenciales
+# de la BASE DE DATOS (DB_*), necesarias para consultar la configuración.
+# La primera vez que arranca el backend, la tabla se
 # siembra con estos valores por defecto.
 # ---------------------------------------------------------------------------
 CONFIG_DEFAULTS = {
@@ -74,6 +74,7 @@ CONFIG_DEFAULTS = {
     "wa_phone_id": "",
     "wa_business_account_id": "",
     "wa_verify_token": "",
+    "wa_app_secret": "",
     "wa_template_nombre": "",
     "wa_template_lang": "es",
     "wa_webhook_path": "/api/whatsapp/webhook",

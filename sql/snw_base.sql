@@ -106,6 +106,19 @@ CREATE TABLE IF NOT EXISTS whatsapp_avisos_unicos (
   PRIMARY KEY (telefono, tipo)
 );
 
+-- Se conserva solo una huella HMAC tras ELIMINAR; el número crudo es temporal
+-- mientras se confirma el bloqueo en Meta. La clave HMAC queda fuera de la BD.
+CREATE TABLE IF NOT EXISTS supresion_telefonos (
+  huella CHAR(64) PRIMARY KEY,
+  estado ENUM('pendiente','procesando','completo') NOT NULL DEFAULT 'pendiente',
+  telefono_pendiente VARCHAR(20) NULL,
+  wa_phone_id VARCHAR(64) NULL,
+  bases_afectadas INT NOT NULL DEFAULT 0,
+  pacientes_eliminados INT NOT NULL DEFAULT 0,
+  creado DATETIME DEFAULT CURRENT_TIMESTAMP,
+  completado DATETIME NULL
+) CHARACTER SET utf8mb4;
+
 -- TODA la configuración de la app. En .env solo quedan las credenciales 
 -- de la base de datos (DB_*), que se necesitan para llegar aquí.
 CREATE TABLE IF NOT EXISTS configuracion (
@@ -140,6 +153,7 @@ INSERT IGNORE INTO configuracion (clave, valor) VALUES
   ('wa_phone_id', ''),
   ('wa_business_account_id', ''),
   ('wa_verify_token', ''),
+  ('wa_app_secret', ''),
   ('wa_template_nombre', ''),
   ('wa_template_lang', 'es'),
   ('wa_webhook_path', '/api/whatsapp/webhook'),

@@ -42,6 +42,7 @@ class ConfigIn(BaseModel):
     wa_phone_id: str | None = None
     wa_business_account_id: str | None = None
     wa_verify_token: str | None = None
+    wa_app_secret: str | None = None
     wa_template_nombre: str | None = None
     wa_template_lang: str | None = None
     wa_webhook_path: str | None = None

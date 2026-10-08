@@ -1044,7 +1044,8 @@ if (btnSubirCsv) btnSubirCsv.addEventListener("click", async () => {
         `<p><strong>${inf.insertados ?? 0}</strong> insertados de ` +
         `${inf.procesados ?? 0} procesados ` +
         `(${inf.duplicados ?? 0} ya estaban, ${inf.rechazados ?? 0} rechazados` +
-        `${inf.actualizados ? `, ${inf.actualizados} actualizados` : ""}).</p>` +
+        `${inf.actualizados ? `, ${inf.actualizados} actualizados` : ""}` +
+        `${inf.omitidos_eliminados ? `, ${inf.omitidos_eliminados} excluidos por eliminación` : ""}).</p>` +
         ((inf.bases || []).length
           ? `<p>También se aplicó la respuesta/estado del CSV al mismo número en otras bases: ` +
             `${inf.bases.map((b) => `${escaparHtml(b.nombre || b.tabla)} (${b.actualizados})`).join(", ")}.` +

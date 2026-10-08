@@ -1,5 +1,6 @@
 from db import log_error
 from whatsapp_service import WhatsAppService
+from supresion import esta_suprimido
 
 
 class MotorSimulado:
@@ -9,6 +10,8 @@ class MotorSimulado:
         return True
 
     def enviar(self, telefono: str, mensaje: str, plantilla: dict | None = None, variables: dict | None = None):
+        if esta_suprimido(telefono):
+            return False, None, "Número suprimido por solicitud del paciente"
         vista = mensaje.replace("\n", " ")[:60]
         cta = (plantilla or {}).get("cta") if isinstance(plantilla, dict) else None
         extra = f"  [botón: {cta.get('texto')} -> {cta.get('url')}]" if cta and cta.get("url") else ""
@@ -38,6 +41,8 @@ class MotorApiOficial:
         import asyncio
 
         try:
+            if esta_suprimido(telefono):
+                return False, None, "Número suprimido por solicitud del paciente"
             ok, message_id, error, _ = asyncio.run(
                 self.servicio.enviar(telefono, mensaje, plantilla=plantilla, variables=variables)
             )

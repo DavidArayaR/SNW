@@ -743,7 +743,11 @@ def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int) -> dict:
     col_estado = next((c for c in ("estado", "estado_paciente", "estado_envio")
                        if c in cols), None)
 
+    from supresion import huella_telefono
+
     with conectar() as conn, conn.cursor() as cur:
+        cur.execute("SELECT huella FROM supresion_telefonos")
+        huellas_bloqueadas = {r["huella"] for r in cur.fetchall()}
         indice = indice_pacientes_por_telefono(cur)
         existentes = {
             tel: por_tabla.get(tabla, [])
@@ -754,6 +758,7 @@ def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int) -> dict:
         procesados = insertados = duplicados = actualizados = 0
         propagados = 0
         omitidos = 0
+        omitidos_eliminados = 0
         errores: list[dict] = []
         bases: dict[str, int] = {}
         vistos_archivo: set[str] = set()
@@ -771,6 +776,17 @@ def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int) -> dict:
             if telefono is None:
                 errores.append({"fila": nro,
                                 "motivo": f"Formato de teléfono inválido: '{telefono_crudo}'"})
+                continue
+            huella = huella_telefono(telefono)
+            # Lectura actual y bloqueo InnoDB: si ELIMINAR concurre con el
+            # CSV, una de las dos transacciones espera y gana la supresión.
+            if huella not in huellas_bloqueadas:
+                cur.execute("SELECT 1 FROM supresion_telefonos"
+                            " WHERE huella = %s FOR UPDATE", (huella,))
+                if cur.fetchone():
+                    huellas_bloqueadas.add(huella)
+            if huella in huellas_bloqueadas:
+                omitidos_eliminados += 1
                 continue
             # Respuesta y estado del CSV (si vienen). Sin esas columnas no se
             # toca nada: el import es solo una carga de pacientes.
@@ -860,6 +876,7 @@ def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int) -> dict:
     return {"procesados": procesados, "insertados": insertados,
             "duplicados": duplicados, "actualizados": actualizados,
             "propagados": propagados, "omitidos_candado": omitidos,
+            "omitidos_eliminados": omitidos_eliminados,
             "bases": detalle,
             "rechazados": len(errores), "errores": errores}
 

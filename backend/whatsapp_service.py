@@ -12,11 +12,13 @@ o desde el router de webhook.
 import asyncio
 import hashlib
 import re
+import unicodedata
 from datetime import datetime
 
 import httpx
 
 from db import conectar, config_get, log_error, tabla_pacientes
+from supresion import esta_suprimido, solicitar_eliminacion, oferta_eliminacion_enviada
 import servicio_areas
 from wa_rate_limit import (
     gobernador, es_error_throttle, clasificar_error, reintentos_throttle, TOPE_ESPERA_S,
@@ -217,6 +219,19 @@ _TEL_MATCH = (
     "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(%s, '+', ''), ' ', ''),"
     " '-', ''), '(', ''), ')', ''), '.', '')"
 )
+
+
+def es_solicitud_eliminar(texto: str) -> bool:
+    """Acepta mayúsculas, tildes y espacios sin confundir frases más largas."""
+    plano = unicodedata.normalize("NFKD", (texto or "").casefold())
+    plano = "".join(c for c in plano if not unicodedata.combining(c))
+    return re.sub(r"\s+", "", plano.strip(" .!?¡¿")) == "eliminar"
+
+
+def es_reactivacion_explicita(texto: str) -> bool:
+    plano = unicodedata.normalize("NFKD", (texto or "").casefold())
+    plano = "".join(c for c in plano if not unicodedata.combining(c))
+    return plano.strip(" .!?¡¿") in {"reactivar", "alta", "volver a recibir"}
 
 
 def _hash_evento(payload: dict) -> str:
@@ -718,6 +733,8 @@ class WhatsAppService:
         (campo 'whatsapp_template'), se envía como template aprobado usando los
         valores reales del paciente; en caso contrario, texto libre.
         """
+        if esta_suprimido(telefono):
+            return False, None, "Número suprimido por solicitud del paciente", "failed"
         msg = plantilla or {}
         nombre_template = msg.get("whatsapp_template")
         idioma = msg.get("whatsapp_template_lang") or config_get("wa_template_lang", "es")
@@ -737,6 +754,8 @@ class WhatsAppService:
         else:
             payload_, _ = self.construir_payload_texto(telefono, mensaje)
 
+        if esta_suprimido(telefono):
+            return False, None, "Número suprimido por solicitud del paciente", "failed"
         try:
             data = await self.cliente.enviar(payload_)
         except ErrorWhatsApp as e:
@@ -789,15 +808,17 @@ class WhatsAppService:
         """Mensajes entrantes del cliente (respuestas, bajas, etc.).
 
         Los avisos de reactivación ("bienvenido de vuelta") y de despedida se
-        deciden al final, con el estado opt-out con que termina el evento, no
-        mensaje a mensaje: así un paciente ya de baja que escribe de nuevo una
-        baja (o una retractación seguida de una baja en el mismo evento) no
-        recibe "bienvenido" + "lamentamos", sino ninguna respuesta."""
+        deciden al final, con el estado opt-out con que termina el evento.
+        ELIMINAR solo se acepta tras el aviso de sus consecuencias."""
         acciones = []
         # Meta manda el wa_id sin '+' (ej. "56993921740"); lo normalizamos.
-        crudo = (valor.get("contacts") or [{}])[0].get("wa_id", "")
+        crudo = ((valor.get("contacts") or [{}])[0].get("wa_id")
+                 or (valor.get("messages") or [{}])[0].get("from", ""))
         telefono = _normalizar_telefono(crudo) or crudo
-        opt_out_inicial = self._estaba_opt_out(telefono)
+        if esta_suprimido(telefono):
+            # Si el bloqueo externo sigue pendiente, reintenta sin responder.
+            solicitar_eliminacion(telefono)
+            return ["numero_suprimido"]
         hubo_retract = False
         hubo_baja = False
         hubo_interes = False
@@ -820,6 +841,17 @@ class WhatsAppService:
                 continue
             cuerpo = texto or extra
 
+            if es_solicitud_eliminar(texto) or es_solicitud_eliminar(extra):
+                if oferta_eliminacion_enviada(telefono):
+                    solicitar_eliminacion(telefono)
+                    acciones.append("eliminacion_solicitada")
+                    return acciones
+                # No borrar sin el aviso previo que explica las consecuencias.
+                self._registrar_baja(telefono, aviso=False)
+                hubo_baja = True
+                acciones.append("baja_sin_aviso_de_eliminacion")
+                continue
+
             # Los 3 botones de la plantilla normal se identifican por su texto
             # exacto; el resto pasa por los clasificadores de texto libre.
             es_boton = tipo in ("button", "interactive")
@@ -835,13 +867,11 @@ class WhatsAppService:
                 es_mensaje_no_interes(texto) or es_mensaje_no_interes(extra)
             )
 
-            # Si el paciente escribe estando dado de baja (sea explícita o
-            # puesta a mano), se le reactivan las notificaciones antes de
-            # clasificar este mismo mensaje. El aviso se decide al final del
-            # evento: si este termina de nuevo de baja, no sale ninguna
-            # respuesta (la baja pesa más que la reactivación inmediata).
+            # Una baja no se revierte por cualquier mensaje entrante: requiere
+            # una orden explícita de reactivación o una respuesta de interés.
             estaba_opt_out = self._estaba_opt_out(telefono)
-            if estaba_opt_out and not fue_interes and not fue_baja:
+            if estaba_opt_out and (es_reactivacion_explicita(texto)
+                                   or es_reactivacion_explicita(extra)):
                 self._registrar_retractacion(telefono, aviso=False)
                 hubo_retract = True
                 acciones.append("retractacion")
@@ -896,7 +926,7 @@ class WhatsAppService:
         #    call center (ya programada arriba), sin avisos.
         opt_out_final = self._estaba_opt_out(telefono)
         if opt_out_final:
-            if not opt_out_inicial and hubo_baja:
+            if hubo_baja and not oferta_eliminacion_enviada(telefono):
                 if callable(al_detectar_baja):
                     try:
                         al_detectar_baja(telefono)
@@ -952,7 +982,8 @@ class WhatsAppService:
 
     def _guardar_evento(self, body: dict) -> None:
         clave = _hash_evento(body)
-        texto = str(body)[:2000]
+        # El hash basta para deduplicar; el payload puede incluir datos personales.
+        texto = "[omitido]"
         for ambiente in ("desarrollo", "produccion"):
             try:
                 with conectar(ambiente) as conn, conn.cursor() as cur:

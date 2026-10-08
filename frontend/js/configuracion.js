@@ -22,6 +22,7 @@ toastEl.addEventListener("click", () => toastEl.classList.remove("visible"));
 
 const cont = $("#secciones");
 let valores = {};          // valor guardado (servidor)
+let estadoSupresion = {};  // solo conteos; nunca teléfonos ni huellas
 let campos = {};           // clave -> { def, input }
 let derivados = [];        // campos calculados (ej. URL del webhook)
 
@@ -48,6 +49,7 @@ async function cargar() {
     if (!res.ok) throw new Error();
     const d = await res.json();
     valores = d.valores || {};
+    estadoSupresion = d.supresion || {};
     render(d.secciones || []);
   } catch {
     console.error("[configuracion.js cargar()]");
@@ -67,6 +69,16 @@ function render(secciones) {
       `<div class="panel__head"><h2><i class="${s.marca ? "fa-brands" : "fa-solid"} ${s.icono || "fa-gear"}"></i> ${escaparHtml(s.titulo)}</h2></div>` +
       `<div class="config-campos"></div>`;
     const grid = panel.querySelector(".config-campos");
+    const pendientes = Number(estadoSupresion.pendientes || 0) +
+      Number(estadoSupresion.procesando || 0);
+    if (s.id === "whatsapp" && pendientes > 0) {
+      const aviso = document.createElement("p");
+      aviso.className = "aviso-dev config-supresion-aviso";
+      aviso.textContent = `${pendientes} solicitud(es) de eliminación pendientes: ` +
+        "el número ya está excluido localmente, pero falta confirmar su bloqueo en Meta. " +
+        "Revisa las credenciales y los errores del servidor.";
+      grid.before(aviso);
+    }
 
     for (const c of s.campos) {
       // Campo calculado de solo lectura (ej. URL completa del webhook).
