@@ -51,6 +51,12 @@
         <select id="selBaseHist" class="badge badge--select" aria-label="Base de datos">
           <option value="todos">Todas</option>
         </select>
+        <label for="selOrigenHist">Tipo de envío:</label>
+        <select id="selOrigenHist" class="badge badge--select" aria-label="Tipo de envío">
+          <option value="todos">Todos</option>
+          <option value="manual">Manuales</option>
+          <option value="programado">Programados</option>
+        </select>
         <input type="search" id="buscador" placeholder="Buscar por base de datos o plantilla..." autocomplete="off">
         <span id="contador" class="contador-sel"></span>
         <span class="pag-grupo">
@@ -164,7 +170,7 @@
 
   <script src="js/layout.js?v=navcurve7"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/historial.js?v=historial-carga1"></script>
+  <script src="js/historial.js?v=historial-origen1"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>

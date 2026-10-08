@@ -212,8 +212,19 @@ let pacienteMsgActual = null; // { id, ambiente, interesado }
 
 let basesHist = [];
 const selBaseHist = $("#selBaseHist");
+const selOrigenHist = $("#selOrigenHist");
 if (selBaseHist) {
   selBaseHist.value = localStorage.getItem("snw_base_historial") || "todos";
+}
+if (selOrigenHist) {
+  const guardado = localStorage.getItem("snw_origen_historial") || "todos";
+  selOrigenHist.value = ["todos", "manual", "programado"].includes(guardado) ? guardado : "todos";
+  selOrigenHist.addEventListener("change", () => {
+    if (selOrigenHist.value === "todos") localStorage.removeItem("snw_origen_historial");
+    else localStorage.setItem("snw_origen_historial", selOrigenHist.value);
+    paginaHist = 1;
+    cargar(false, false, true);
+  });
 }
 
 // Selector único de base de datos: admin/dev ven todas (legacy dev/prod +
@@ -322,8 +333,9 @@ async function cargar(mantenerPagina = false, mostrarFeedback = false, mostrarCa
   }
   try {
     const base = (selBaseHist && selBaseHist.value) || "todos";
-    const qs = base !== "todos" ? `tabla=${encodeURIComponent(base)}` : "ambiente=todos";
-    const rh = await fetch(`${API_HISTORIAL}?${qs}`, {
+    const params = new URLSearchParams(base !== "todos" ? { tabla: base } : { ambiente: "todos" });
+    params.set("origen", (selOrigenHist && selOrigenHist.value) || "todos");
+    const rh = await fetch(`${API_HISTORIAL}?${params}`, {
       headers: authHeaders(), cache: "no-store",
     });
     if (rh.status === 401) { window.snwSesionExpirada(); return; }
@@ -426,7 +438,7 @@ function render() {
   contadorEl.textContent = `${visibles.length} envío${visibles.length === 1 ? "" : "s"}`;
   pintarPaginadorHist(visibles.length);
 
-  const totalEnvios = registros.length;
+  const totalEnvios = visibles.length;
   statsEl.innerHTML =
     `<button type="button" class="stat stat--total activo" data-estado="todos">Total envíos <strong>${totalEnvios}</strong></button>`;
 }

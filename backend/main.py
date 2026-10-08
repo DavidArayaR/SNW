@@ -47,6 +47,8 @@ import whatsapp_service
 from wa_rate_limit import gobernador as wa_gobernador
 from whatsapp_service import WhatsAppService, es_mensaje_interes
 from whatsapp_webhook import router as whatsapp_router
+from supresion import (asegurar_tabla_supresion, reintentar_pendientes,
+                      esta_suprimido, oferta_eliminacion_enviada, resumen_supresion)
 from config_service import config_correo as _config_correo, enviar_correo as _enviar_correo, armar_mensaje as _armar_mensaje, leer_config, url_base
 from schemas import (
     ActivarCuentaIn, ClavePropiaIn, ConfigIn, ConfigTodoIn,
@@ -1195,7 +1197,8 @@ async def importar_pacientes_csv(area_id: int, archivo: UploadFile = File(...),
                         esp["nombre_visible"],
                         f"{informe['insertados']} insertados, {informe.get('actualizados', 0)} "
                         f"actualizados y {informe.get('propagados', 0)} propagados de "
-                        f"{informe['procesados']} procesados")
+                        f"{informe['procesados']} procesados; "
+                        f"{informe.get('omitidos_eliminados', 0)} omitidos por eliminación")
     return {"ok": True, "area": esp, "informe": informe}
 
 
@@ -2005,6 +2008,8 @@ def _despachar_call_center(pac: dict, ambiente: str, tabla: str | None = None) -
     telefono = normalizar_telefono((pac.get("telefono") or "").strip())
     if telefono is None:
         return {"ok": False, "error": "El teléfono del paciente no es válido", "telefono": None}
+    if esta_suprimido(telefono):
+        return {"ok": False, "error": "Número suprimido", "telefono": None}
 
     cfg = leer_config(ambiente)
     if tabla is None and entorno_valido(ambiente) == "desarrollo" and telefono not in set(cfg.get("numeros_autorizados", [])):
@@ -2028,6 +2033,9 @@ def _despachar_call_center(pac: dict, ambiente: str, tabla: str | None = None) -
     else:
         ok, error = resultado
         message_id = None
+
+    if esta_suprimido(telefono):
+        return {"ok": False, "error": "Número suprimido", "telefono": None}
 
     registrar_historial(pac.get("id"), nombre, telefono, CALL_CENTER_CLAVE, texto,
                         "enviado" if ok else "error", error, ambiente=ambiente,
@@ -2058,6 +2066,8 @@ def _enviar_call_center_auto(tel: str) -> None:
     medio, no se repite. Una baja y reintegración en cualquier momento lo
     vuelven elegible (si vuelve a estar `interesado`)."""
     try:
+        if esta_suprimido(tel):
+            return
         match = "REPLACE(REPLACE(telefono, '+', ''), ' ', '') = REPLACE(REPLACE(%s, '+', ''), ' ', '')"
         # Bases legacy más cada tabla de area (Fase 2).
         objetivos = [("produccion", None), ("desarrollo", None)]
@@ -2138,12 +2148,14 @@ whatsapp_service.al_detectar_interes = _programar_call_center_auto
 
 
 _MENSAJE_BAJA_DESPEDIDA = (
-    "Lamentamos que te vayas. Puedes darte de baja y reincorporarte cuando quieras."
-    " Para volver a recibir notificaciones, escribe cualquier mensaje."
+    "Lamentamos que te vayas. Ya no recibirás promociones. Si quieres eliminar "
+    "tus datos de todas las bases de este sistema y bloquear tu número para "
+    "futuros envíos, responde ELIMINAR. Esta acción no se puede deshacer aquí "
+    "y no elimina los datos del sistema de origen."
 )
 _MENSAJE_BIENVENIDA_DEVUELTA = (
     "¡Bienvenido/a de vuelta! Ya reactivamos tus notificaciones."
-    " Recuerda que puedes darte de baja y reincorporarte cuando quieras."
+    " Puedes volver a darte de baja cuando quieras."
 )
 
 
@@ -2159,11 +2171,11 @@ def _reservar_aviso_unico(telefono: str, tipo: str) -> bool:
             conn.commit()
             return cur.rowcount == 1
     except Exception as e:
-        log_error(f"_reservar_aviso_unico({tel}, {tipo})", e)
-        return True
+        log_error(f"_reservar_aviso_unico({tipo})", e)
+        return False
 
 
-def _enviar_mensaje_directo(telefono_evento: str, texto: str, clave_log: str) -> None:
+def _enviar_mensaje_directo(telefono_evento: str, texto: str, clave_log: str) -> bool:
     """Manda un mensaje de texto libre (respuesta inmediata, dentro de la
     ventana de 24h) al paciente que coincide con este teléfono. Se usa para
     los avisos automáticos de baja y retractación: no dependen de un template
@@ -2174,10 +2186,26 @@ def _enviar_mensaje_directo(telefono_evento: str, texto: str, clave_log: str) ->
     existe ahí, es el único envío. Desarrollo solo se usa como respaldo
     cuando el paciente no está en producción."""
     tel = normalizar_telefono(telefono_evento) or telefono_evento
-    match = "REPLACE(REPLACE(telefono, '+', ''), ' ', '') = REPLACE(REPLACE(%s, '+', ''), ' ', '')"
-    for amb in ("produccion", "desarrollo"):
+    if esta_suprimido(tel):
+        return False
+    if config_get("entorno", "desarrollo").strip().lower() == "desarrollo":
+        if tel not in _numeros_prueba_editables("desarrollo"):
+            return False
+    match = (
+        "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(telefono, '+', ''), ' ', ''),"
+        " '-', ''), '(', ''), ')', ''), '.', '') = "
+        "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(%s, '+', ''), ' ', ''),"
+        " '-', ''), '(', ''), ')', ''), '.', '')"
+    )
+    if config_get("entorno", "desarrollo").strip().lower() == "desarrollo":
+        objetivos = [("desarrollo", tabla_pacientes("desarrollo"), None)]
+    else:
+        objetivos = [("produccion", tabla_pacientes("produccion"), None)]
+        objetivos += [("produccion", a["nombre_tabla_base"], a["id"])
+                      for a in servicio_areas.listar_tablas_areas()]
+        objetivos.append(("desarrollo", tabla_pacientes("desarrollo"), None))
+    for amb, t, area_id in objetivos:
         try:
-            t = tabla_pacientes(amb)
             with conectar(amb) as conn, conn.cursor() as cur:
                 cur.execute(f"SELECT * FROM {t} WHERE {match} LIMIT 1", (tel,))
                 pac = cur.fetchone()
@@ -2198,17 +2226,33 @@ def _enviar_mensaje_directo(telefono_evento: str, texto: str, clave_log: str) ->
             else:
                 ok, error = resultado
                 message_id = None
+            if esta_suprimido(tel):
+                return False
             registrar_historial(pac.get("id"), nombre, tel, clave_log, texto,
                                 "enviado" if ok else "error", error, ambiente=amb,
-                                whatsapp_message_id=message_id)
-            break
+                                whatsapp_message_id=message_id,
+                                area_id=area_id, tabla_pacientes=t)
+            return bool(ok and canal.nombre == "api_oficial")
         except Exception as e:
-            log_error(f"_enviar_mensaje_directo({telefono_evento}, {amb})", e)
+            log_error(f"_enviar_mensaje_directo({amb}, {t})", e)
+    return False
 
 
 def _avisar_baja(telefono: str) -> None:
-    if _reservar_aviso_unico(telefono, "baja"):
-        _enviar_mensaje_directo(telefono, _MENSAJE_BAJA_DESPEDIDA, "baja_aviso")
+    if esta_suprimido(telefono):
+        return
+    if oferta_eliminacion_enviada(telefono):
+        return
+    if not _reservar_aviso_unico(telefono, "baja_eliminar"):
+        return
+    if _enviar_mensaje_directo(telefono, _MENSAJE_BAJA_DESPEDIDA, "baja_aviso"):
+        _reservar_aviso_unico(telefono, "eliminacion_ofrecida")
+    else:
+        tel = normalizar_telefono(telefono) or telefono
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute("DELETE FROM whatsapp_avisos_unicos"
+                        " WHERE telefono = %s AND tipo = 'baja_eliminar'", (tel,))
+            conn.commit()
 
 
 def _avisar_retractacion(telefono: str) -> None:
@@ -3045,6 +3089,7 @@ def actualizar_configuracion(body: ConfigIn, sesion: dict = Depends(solo_dev)):
         "wa_phone_id": body.wa_phone_id,
         "wa_business_account_id": body.wa_business_account_id,
         "wa_verify_token": body.wa_verify_token,
+        "wa_app_secret": body.wa_app_secret,
         "wa_template_nombre": body.wa_template_nombre,
         "wa_template_lang": body.wa_template_lang,
         "wa_webhook_path": body.wa_webhook_path,
@@ -3115,6 +3160,8 @@ _CONFIG_SECCIONES = [
             {"clave": "wa_phone_id", "etiqueta": "Phone number ID", "tipo": "text"},
             {"clave": "wa_business_account_id", "etiqueta": "WhatsApp Business Account ID (WABA)", "tipo": "text"},
             {"clave": "wa_verify_token", "etiqueta": "Verify token del webhook", "tipo": "password", "secreto": True},
+            {"clave": "wa_app_secret", "etiqueta": "App Secret de Meta", "tipo": "password", "secreto": True,
+             "ayuda": "Se usa para verificar la firma de los webhook POST. Es distinto del Verify token y del Access token."},
             {"clave": "wa_webhook_path", "etiqueta": "Ruta del webhook", "tipo": "text",
              "ayuda": "Se concatena a la URL base. Debe empezar con «/». Ej: /api/whatsapp/webhook"},
             {"tipo": "derivado", "etiqueta": "URL del webhook (para pegar en Meta)",
@@ -3195,7 +3242,8 @@ def _config_valores() -> dict:
 
 def obtener_configuracion_completa(sesion: dict = Depends(solo_dev)):
     """Todas las claves de configuración con su valor real (incluye secretos)."""
-    return {"secciones": _CONFIG_SECCIONES, "valores": _config_valores()}
+    return {"secciones": _CONFIG_SECCIONES, "valores": _config_valores(),
+            "supresion": resumen_supresion()}
 
 
 def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends(solo_dev)):
@@ -3903,6 +3951,10 @@ def _procesar_job(job_id: str) -> None:
 
         # Defensa final justo antes de llamar al motor: cubre cambios de entorno
         # o de la lista de pruebas ocurridos mientras el job estaba en cola/pausa.
+        if esta_suprimido(d["telefono"]):
+            job["fallidos"] += 1
+            job["errores"].append({"id": d["id"], "detalle": "Número suprimido"})
+            continue
         bloqueo_numero = _restriccion_envio_desarrollo(amb, t_esp, d["telefono"])
         if bloqueo_numero:
             job["fallidos"] += 1
@@ -3925,6 +3977,11 @@ def _procesar_job(job_id: str) -> None:
         except Exception as e:
             log_error(f"procesar_job {job_id}: fallo enviando a {d.get('telefono')}", e)
             ok, message_id, error = False, None, f"Error inesperado: {e}"
+
+        if esta_suprimido(d["telefono"]):
+            job["fallidos"] += 1
+            job["errores"].append({"id": d["id"], "detalle": "Número suprimido"})
+            continue
 
         actualizar_estado_paciente(d["id"], "enviado" if ok else "error", amb, tabla=t_esp)
         if ok:
@@ -5586,23 +5643,49 @@ async def _loop_programados() -> None:
         await asyncio.sleep(30)
 
 
+async def _loop_supresion() -> None:
+    while True:
+        try:
+            await asyncio.to_thread(asegurar_tabla_supresion)
+            await asyncio.to_thread(reintentar_pendientes)
+        except Exception as e:
+            log_error("scheduler supresión", e)
+        await asyncio.sleep(60)
+
+
 @app.on_event("startup")
 async def _arrancar_scheduler_programados() -> None:
     asyncio.create_task(_loop_programados())
+    asyncio.create_task(_loop_supresion())
 
 def listar_historial(q: str | None = Query(None), estado: str | None = Query(None),
                      ambiente: str = Query("produccion"),
                      area_id: int | None = Query(None),
                      tabla: str | None = Query(None),
+                     origen: str = Query("todos"),
                      sesion: dict = Depends(exigir("historial"))):
+    if origen not in ("todos", "manual", "programado"):
+        raise HTTPException(422, detail="Tipo de envío inválido.")
     cols_env = columnas_tabla("envios", "produccion")
     com_col = "comentario" if "comentario" in cols_env else "NULL AS comentario"
     esp_col = "area_id" if "area_id" in cols_env else "NULL AS area_id"
     tab_col = "tabla_pacientes" if "tabla_pacientes" in cols_env else "NULL AS tabla_pacientes"
+    prog_col = "programado_id" if "programado_id" in cols_env else "NULL AS programado_id"
+    prog_fecha = ("(SELECT p.creado FROM envios_programados p"
+                  " WHERE p.id = envios.programado_id) AS programado_creado"
+                  if "programado_id" in cols_env else "NULL AS programado_creado")
     sql = ("SELECT id, base_datos, plantilla_clave, plantilla_nombre, total_pacientes,"
-           f" enviados, fallidos, invalidos, estado, {com_col}, {esp_col}, {tab_col}, fecha_hora FROM envios")
+           f" enviados, fallidos, invalidos, estado, {com_col}, {esp_col}, {tab_col},"
+           f" {prog_col}, {prog_fecha}, fecha_hora FROM envios")
     condiciones: list[str] = []
     args: list = []
+
+    if origen != "todos":
+        if "programado_id" in cols_env:
+            condiciones.append("programado_id IS NOT NULL" if origen == "programado"
+                               else "programado_id IS NULL")
+        elif origen == "programado":
+            condiciones.append("1 = 0")
 
     # envios es una única tabla; 'base_datos' guarda 'pacientes_dev',
     # 'pacientes_prod' o la tabla de una area (con area_id).
@@ -5668,15 +5751,21 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
         filas = list(cur.fetchall() or [])
 
     for f in filas:
-        f["_orden"] = f.pop("fecha_hora")
-        f["origen"] = "envio"
+        fecha_lote = f.pop("fecha_hora")
+        f["_orden"] = f.pop("programado_creado", None) or fecha_lote
+        f["origen"] = "programado" if f.pop("programado_id", None) is not None else "manual"
 
-    # Programados (terminados o no): con su fecha programada, mismo formato.
-    with conectar() as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT * FROM envios_programados ORDER BY programado_para DESC, id DESC LIMIT 300"
-        )
-        for g in list(cur.fetchall() or []):
+    # Los programados con lote ejecutado ya están en `envios`; no duplicarlos.
+    if origen != "manual":
+        with conectar() as conn, conn.cursor() as cur:
+            sin_lote = (" WHERE NOT EXISTS (SELECT 1 FROM envios e WHERE e.programado_id = p.id)"
+                        if "programado_id" in cols_env else "")
+            cur.execute(
+                "SELECT p.* FROM envios_programados p"
+                + sin_lote + " ORDER BY p.creado DESC, p.id DESC LIMIT 300"
+            )
+            programados = list(cur.fetchall() or [])
+        for g in programados:
             if not _prog_visible(sesion, g):
                 continue
             if tabla and (g.get("tabla") or "") != tabla:
@@ -5690,8 +5779,9 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
                 if qq not in (g.get("tabla") or "").lower() \
                         and qq not in (g.get("plantilla_nombre") or "").lower():
                     continue
-            g["_orden"] = g.get("programado_para")
+            g["_orden"] = g.get("creado") or g.get("programado_para")
             g["origen"] = "programado"
+            g["_sin_lote"] = True
             filas.append(g)
 
     filas.sort(key=lambda r: (r["_orden"] is not None, r["_orden"]), reverse=True)
@@ -5702,7 +5792,7 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
                  if j.get("estado") in ESTADOS_ENVIO_EN_CURSO and j.get("envio_id")}
     for f in filas:
         orden = f.pop("_orden", None)
-        if f.get("origen") == "programado":
+        if f.pop("_sin_lote", False):
             pc = _prog_a_respuesta(f, sesion)
             f["puede_cancelar"] = pc["puede_cancelar"]
             if f.get("estado") == "enviando":
