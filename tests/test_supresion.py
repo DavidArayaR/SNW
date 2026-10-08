@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 import supresion
 import whatsapp_service
 import servicio_areas
+import main
 from motor_envio import MotorSimulado
 
 
@@ -34,6 +35,8 @@ class SupresionTests(unittest.TestCase):
     def test_eliminar_con_aviso_no_registra_respuesta_ni_reactiva(self):
         servicio = whatsapp_service.WhatsAppService()
         with patch("whatsapp_service.esta_suprimido", return_value=False), \
+                patch("whatsapp_service.es_exento", return_value=False), \
+                patch("whatsapp_service.es_numero_prueba", return_value=False), \
                 patch("whatsapp_service.oferta_eliminacion_enviada", return_value=True), \
                 patch("whatsapp_service.solicitar_eliminacion") as eliminar, \
                 patch.object(servicio, "_estaba_opt_out", return_value=True), \
@@ -48,6 +51,8 @@ class SupresionTests(unittest.TestCase):
     def test_sin_aviso_previo_no_borra(self):
         servicio = whatsapp_service.WhatsAppService()
         with patch("whatsapp_service.esta_suprimido", return_value=False), \
+                patch("whatsapp_service.es_exento", return_value=False), \
+                patch("whatsapp_service.es_numero_prueba", return_value=False), \
                 patch("whatsapp_service.oferta_eliminacion_enviada", return_value=False), \
                 patch("whatsapp_service.solicitar_eliminacion") as eliminar, \
                 patch("whatsapp_service.al_detectar_baja") as aviso, \
@@ -59,14 +64,212 @@ class SupresionTests(unittest.TestCase):
         aviso.assert_called_once_with(TEL)
         eliminar.assert_not_called()
 
-    def test_otro_texto_no_reactiva_la_baja(self):
+    def test_otro_texto_reincorpora_tras_la_baja(self):
         servicio = whatsapp_service.WhatsAppService()
         with patch("whatsapp_service.esta_suprimido", return_value=False), \
+                patch("whatsapp_service.es_exento", return_value=False), \
+                patch("whatsapp_service.es_numero_prueba", return_value=False), \
+                patch.object(servicio, "_estaba_opt_out", side_effect=[True, False]), \
+                patch.object(servicio, "_registrar_respuesta", return_value="registrada"), \
+                patch.object(servicio, "_registrar_retractacion") as retractacion, \
+                patch("whatsapp_service.al_detectar_retractacion") as aviso:
+            acciones = servicio._procesar_mensajes(self._valor("hola"))
+        retractacion.assert_called_once_with(TEL, aviso=False)
+        aviso.assert_called_once_with(TEL)
+        self.assertIn("retractacion", acciones)
+
+    def test_otra_baja_no_reincorpora(self):
+        servicio = whatsapp_service.WhatsAppService()
+        with patch("whatsapp_service.esta_suprimido", return_value=False), \
+                patch("whatsapp_service.es_exento", return_value=False), \
+                patch("whatsapp_service.es_numero_prueba", return_value=False), \
+                patch("whatsapp_service.oferta_eliminacion_enviada", return_value=True), \
                 patch.object(servicio, "_estaba_opt_out", return_value=True), \
                 patch.object(servicio, "_registrar_respuesta", return_value="registrada"), \
+                patch.object(servicio, "_registrar_baja") as baja, \
                 patch.object(servicio, "_registrar_retractacion") as retractacion:
-            servicio._procesar_mensajes(self._valor("hola"))
+            servicio._procesar_mensajes(self._valor("BAJA"))
+        baja.assert_called_once_with(TEL, aviso=False)
         retractacion.assert_not_called()
+
+    def test_peticion_ambigua_de_borrado_no_reincorpora(self):
+        self.assertTrue(whatsapp_service.WhatsAppService._es_baja(
+            "quiero eliminar mis datos"))
+
+    def test_numero_de_prueba_simula_eliminar_y_conserva_datos(self):
+        servicio = whatsapp_service.WhatsAppService()
+        with patch("whatsapp_service.esta_suprimido", return_value=False), \
+                patch("whatsapp_service.es_exento", return_value=True), \
+                patch("whatsapp_service.es_numero_prueba", return_value=True), \
+                patch("whatsapp_service.solicitar_eliminacion") as eliminar, \
+                patch("whatsapp_service.al_detectar_baja") as aviso, \
+                patch.object(servicio, "_registrar_baja") as baja, \
+                patch.object(servicio, "_registrar_respuesta") as respuesta:
+            acciones = servicio._procesar_mensajes(self._valor("ELIMINAR"))
+        self.assertEqual(acciones, ["eliminacion_simulada"])
+        baja.assert_called_once_with(TEL, aviso=False, simulada=True)
+        eliminar.assert_not_called()
+        aviso.assert_not_called()
+        respuesta.assert_not_called()
+
+    def test_eliminacion_simulada_deja_marcador_reversible(self):
+        servicio = whatsapp_service.WhatsAppService()
+        conexion = MagicMock()
+        cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        with patch("whatsapp_service.conectar", return_value=conexion), \
+                patch.object(servicio, "_pacientes_con_tel", return_value=[{
+                    "tabla": "pacientes_dev", "id": 7, "whatsapp_opt_out": 0,
+                }]), \
+                patch.object(servicio, "_cond_tabla", return_value=("", ())):
+            servicio._registrar_baja(TEL, aviso=False, simulada=True)
+        sentencias = [c.args[0] for c in cur.execute.call_args_list]
+        self.assertTrue(any("'eliminacion_simulada'" in s and "INSERT" in s
+                            for s in sentencias))
+        self.assertTrue(any("whatsapp_opt_out = 1" in s for s in sentencias))
+        self.assertTrue(any("tipo = 'reintegro'" in s and "DELETE" in s
+                            for s in sentencias))
+        conexion.__enter__.return_value.commit.assert_called_once()
+
+    def test_baja_real_conserva_aviso_de_reincorporacion_ya_enviado(self):
+        servicio = whatsapp_service.WhatsAppService()
+        conexion = MagicMock()
+        cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        with patch("whatsapp_service.conectar", return_value=conexion), \
+                patch("whatsapp_service.es_numero_prueba", return_value=False), \
+                patch.object(servicio, "_pacientes_con_tel", return_value=[{
+                    "tabla": "pacientes_prod", "id": 7, "whatsapp_opt_out": 0,
+                }]), \
+                patch.object(servicio, "_cond_tabla", return_value=("", ())):
+            servicio._registrar_baja(TEL, aviso=False)
+        sentencias = [c.args[0] for c in cur.execute.call_args_list]
+        self.assertTrue(any("whatsapp_opt_out = 1" in s for s in sentencias))
+        self.assertFalse(any("tipo = 'reintegro'" in s and "DELETE" in s
+                             for s in sentencias))
+        conexion.__enter__.return_value.commit.assert_called_once()
+
+    def test_baja_de_numero_configurado_para_pruebas_reinicia_aviso(self):
+        servicio = whatsapp_service.WhatsAppService()
+        conexion = MagicMock()
+        cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        with patch("whatsapp_service.conectar", return_value=conexion), \
+                patch("whatsapp_service.es_numero_prueba", return_value=True), \
+                patch.object(servicio, "_pacientes_con_tel", return_value=[{
+                    "tabla": "pacientes_dev", "id": 7, "whatsapp_opt_out": 0,
+                }]), \
+                patch.object(servicio, "_cond_tabla", return_value=("", ())):
+            servicio._registrar_baja(TEL, aviso=False)
+        sentencias = [c.args[0] for c in cur.execute.call_args_list]
+        self.assertTrue(any("tipo = 'reintegro'" in s and "DELETE" in s
+                            for s in sentencias))
+
+    def test_reincorporacion_quita_marcador_simulado(self):
+        servicio = whatsapp_service.WhatsAppService()
+        conexion = MagicMock()
+        cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        with patch("whatsapp_service.conectar", return_value=conexion), \
+                patch.object(servicio, "_pacientes_con_tel", return_value=[{
+                    "tabla": "pacientes_dev", "id": 7, "whatsapp_opt_out": 1,
+                }]), \
+                patch.object(servicio, "_cond_tabla", return_value=("", ())):
+            servicio._registrar_retractacion(TEL, aviso=False)
+        sentencias = [c.args[0] for c in cur.execute.call_args_list]
+        self.assertTrue(any("whatsapp_opt_out = 0" in s for s in sentencias))
+        self.assertTrue(any("'eliminacion_simulada'" in s and "DELETE" in s
+                            for s in sentencias))
+        conexion.__enter__.return_value.commit.assert_called_once()
+
+    def test_prueba_puede_reincorporarse_despues_de_eliminar_simulado(self):
+        servicio = whatsapp_service.WhatsAppService()
+        estado = {"baja": False}
+
+        def baja(*_args, **_kwargs):
+            estado["baja"] = True
+
+        def volver(*_args, **_kwargs):
+            estado["baja"] = False
+
+        with patch("whatsapp_service.esta_suprimido", return_value=False), \
+                patch("whatsapp_service.es_exento", return_value=False), \
+                patch("whatsapp_service.es_numero_prueba", return_value=True), \
+                patch.object(servicio, "_estaba_opt_out", side_effect=lambda _: estado["baja"]), \
+                patch.object(servicio, "_registrar_baja", side_effect=baja), \
+                patch.object(servicio, "_registrar_retractacion", side_effect=volver) as retractacion, \
+                patch.object(servicio, "_registrar_respuesta", return_value="registrada"), \
+                patch("whatsapp_service.al_detectar_retractacion"):
+            self.assertEqual(servicio._procesar_mensajes(self._valor("ELIMINAR")),
+                             ["eliminacion_simulada"])
+            self.assertTrue(estado["baja"])
+            self.assertIn("retractacion", servicio._procesar_mensajes(self._valor("hola")))
+        self.assertFalse(estado["baja"])
+        retractacion.assert_called_once_with(TEL, aviso=False)
+
+    def test_lista_de_prueba_acepta_ambos_entornos_y_formatos(self):
+        with patch("supresion.config_get", side_effect=lambda clave, _: {
+                "numeros_prueba_dev": "56912345678", "numeros_prueba_prod": ""}[clave]):
+            self.assertTrue(supresion.es_numero_prueba(TEL))
+        with patch("supresion.config_get", side_effect=lambda clave, _: {
+                "numeros_prueba_dev": "", "numeros_prueba_prod": "9 1234 5678"}[clave]):
+            self.assertTrue(supresion.es_numero_prueba(TEL))
+
+    def test_numero_exento_ignora_eliminar_sin_ofrecer_borrado(self):
+        servicio = whatsapp_service.WhatsAppService()
+        with patch("whatsapp_service.es_exento", return_value=True), \
+                patch("whatsapp_service.es_numero_prueba", return_value=False), \
+                patch("whatsapp_service.esta_suprimido", return_value=False), \
+                patch("whatsapp_service.solicitar_eliminacion") as eliminar, \
+                patch.object(servicio, "_registrar_baja") as baja:
+            acciones = servicio._procesar_mensajes(self._valor("ELIMINAR"))
+        self.assertEqual(acciones, ["eliminacion_exenta"])
+        eliminar.assert_not_called()
+        baja.assert_not_called()
+
+    def test_cohorte_con_baja_no_sale_tras_quedar_en_cola(self):
+        conexion = MagicMock()
+        cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cur.fetchone.return_value = {"telefono": TEL, "whatsapp_opt_out": 1}
+        with patch("main.conectar", return_value=conexion):
+            self.assertFalse(main._paciente_habilitado_antes_de_enviar(
+                7, TEL, "desarrollo", "pacientes_dev"))
+
+    def test_aviso_de_prueba_no_promete_borrado_real(self):
+        with patch("main.esta_suprimido", return_value=False), \
+                patch("main.eliminacion_simulada_activa", return_value=False), \
+                patch("main.es_numero_prueba", return_value=True), \
+                patch("main.es_exento", return_value=False), \
+                patch("main._reservar_aviso_unico", return_value=True) as reservar, \
+                patch("main._enviar_mensaje_directo", return_value=True) as enviar:
+            main._avisar_baja(TEL)
+        mensaje = enviar.call_args.args[1]
+        self.assertIn("simular", mensaje)
+        self.assertIn("reincorporarte", mensaje)
+        self.assertIn("sin borrar tus datos", mensaje)
+        reservar.assert_called_once_with(TEL, "baja_prueba")
+
+    def test_eliminacion_simulada_silencia_avisos_pendientes(self):
+        with patch("main.esta_suprimido", return_value=False), \
+                patch("main.eliminacion_simulada_activa", return_value=True), \
+                patch("main._enviar_mensaje_directo") as enviar:
+            main._avisar_baja(TEL)
+            main._avisar_retractacion(TEL)
+        enviar.assert_not_called()
+
+    def test_aviso_real_anticipa_borrado_y_reincorporacion(self):
+        self.assertIn("ELIMINAR", main._MENSAJE_BAJA_DESPEDIDA)
+        self.assertIn("reincorporarte", main._MENSAJE_BAJA_DESPEDIDA)
+        self.assertIn("sistema de origen", main._MENSAJE_BAJA_DESPEDIDA)
+
+    def test_solicitud_exenta_no_reintroduce_telefono_ni_inicia_worker(self):
+        conexion = MagicMock()
+        cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cur.fetchone.return_value = {"estado": "exento"}
+        with patch("supresion.conectar", return_value=conexion), \
+                patch("supresion.huella_telefono", return_value="x" * 64), \
+                patch("supresion.config_get", return_value="id-test"), \
+                patch("supresion.threading.Thread") as hilo:
+            self.assertEqual(supresion.solicitar_eliminacion(TEL), "x" * 64)
+        hilo.assert_not_called()
+        self.assertTrue(any("estado IN ('completo','exento')" in c.args[0]
+                            for c in cur.execute.call_args_list))
 
     def test_motor_simulado_tambien_rechaza_suprimidos(self):
         with patch("motor_envio.esta_suprimido", return_value=True):

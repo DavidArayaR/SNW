@@ -323,11 +323,13 @@ Reglas del editor:
 cambio (arriba) para que la persona elija una nueva. Si alguien la olvida usa «¿Olvidaste tu
 contraseña?» en el login (`/api/auth/olvide`) — mismo mecanismo, pero autoservicio.
 
-### Pacientes (pestaña de administración, exclusiva admin/dev; permiso `pacientes` en el backend)
+### Pacientes (pestaña de administración; `pacientes_dev` exclusiva admin/dev)
 
 | Método | Endpoint | Descripción |
 |---|---|---|
 | GET | `/api/pacientes?q=&ambiente=&area=` | Lista con respuesta y error del último `log_envios`. Con `area` lee la tabla `pacientes_<slug>` (403 si no está asignada) |
+| POST | `/api/pacientes/prueba` | (admin/dev) Agrega nombre, apellido y celular solo a `pacientes_dev`, sin autorizar automáticamente envíos. Rechaza duplicados y teléfonos suprimidos. El alta queda auditada y la cuenta creadora conserva acceso a los datos completos de esa fila |
+| POST | `/api/pacientes/prueba/{id}/autorizar` | (admin/dev) Botón de la tabla para añadir el celular existente a `numeros_prueba_dev` en Configuración. Es idempotente y queda auditado |
 | PUT | `/api/pacientes/{id}?ambiente=&area=` | Cambiar `estado` (`pendiente`/`enviado`/`error`) de **un** paciente |
 | PUT | `/api/pacientes/estado-masivo?ambiente=` | `{pacientes: [ids], estado}` — igual que arriba pero para **varios** pacientes a la vez (selección en la pestaña Pacientes) |
 | PUT | `/api/pacientes/{id}/respuesta?ambiente=` | Ajuste manual de la respuesta (`pendiente`/`respondio`/`baja`) de **un** paciente; `baja` activa el opt-out. 409 si el paciente pidió la baja explícitamente por WhatsApp y se intenta poner algo distinto de `baja` (ver `opt_out_explicito`) |
@@ -375,21 +377,19 @@ tiene template de Meta (va como texto libre, ventana de 24 h). No hay gestión d
   enviada al paciente mencionaba un descuento / oferta / precio especial (detección por
   palabras clave sobre `log_envios.mensaje`), o `call_center_boton_mensaje` en cualquier otro
   caso (ambos en **Configuración → Call center**; vacíos = sin autocompletar).
-- **Registro:** cada envío queda en `call_center_log` con el número asignado. El panel
-  **«Registro de respuestas de call center»** del Historial (permiso propio
-  `call_center_registro`) lo muestra: fecha, nombre y número del paciente, número de call
-  center, origen y estado, más los usos por número. Admin y desarrollador lo ven por
-  defecto; a un `usuario` se le puede asignar ese permiso.
+- **Registro:** cada envío queda en `call_center_log` con el número asignado.
+  El panel de respuestas de call center se retiró de Historial; no se borran
+  las filas de auditoría ni se detiene el registro de nuevas respuestas.
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/call-center/log` | (permiso `call_center_registro`) `{entradas, contadores}` — últimas 200 respuestas de call center + usos por número. Es el panel *Registro de respuestas de call center* del Historial. `numero_paciente` viene `null` si quien pregunta no es admin/dev. Cuentas no privilegiadas solo ven filas de sus areas |
+| GET | `/api/call-center/log` | (permiso `call_center_registro`) `{entradas, contadores}` — últimas 200 respuestas de call center + usos por número. Se conserva como API protegida, sin panel en Historial. `numero_paciente` viene `null` si quien pregunta no es admin/dev. Cuentas no privilegiadas solo ven filas de sus áreas |
 
 ### Envíos
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| POST | `/api/notificaciones/enviar` | Inicia el envío `{pacientes: [ids] \| null, plantilla_id, ambiente, limite?, area?}`. `pacientes: null` = todos los elegibles (usado desde Mensajería). `limite` (solo producción y areas) recorta cuántos pendientes entran en esta tanda; el resto quedan pendientes. Con `area` envía a la tabla `pacientes_<slug>` (403 si no está asignada; una plantilla de otra especialidad da 400). El rol `usuario` solo puede enviar a sus areas o a desarrollo (403 a producción legacy). Rechaza (400) si la plantilla no está `APPROVED` en Meta; 409 si en ese momento hay **otro envío en curso en esa misma base** |
+| POST | `/api/notificaciones/enviar` | Inicia el envío `{pacientes: [ids] \| null, plantilla_id, ambiente, limite?, area?}`. `pacientes: null` = todos los elegibles (usado desde Mensajería). `limite` (solo producción y areas) recorta cuántos pendientes entran en esta tanda; el resto quedan pendientes. Con `area` envía a la tabla `pacientes_<slug>` (403 si no está asignada; una plantilla de otra especialidad da 400). Solo admin/dev pueden enviar a desarrollo; el rol `usuario` solo puede enviar a sus áreas (403 a las bases legacy). Rechaza (400) si la plantilla no está `APPROVED` en Meta; 409 si en ese momento hay **otro envío en curso en esa misma base** |
 | POST | `/api/notificaciones/destinatarios` | Cuenta pacientes totales/pendientes de un ambiente (o de una especialidad con `area`). Con `plantilla_id`, agrega `costo` (aproximado, mismo cálculo que el correo de confirmación del supervisor) para mostrarlo en el modal antes de enviar; `null` si no hay tarifas cargadas, la plantilla no se factura, o la cuenta no tiene el permiso `tarifas_editar` (admin/dev sí lo ven siempre) |
 | GET | `/api/notificaciones/jobs/{job_id}` | Progreso en vivo del envío en curso |
 | POST | `/api/notificaciones/jobs/{job_id}/pausa` \| `/reanudar` \| `/cancelar` | Control del job en curso |
@@ -607,11 +607,15 @@ en **todas las bases de este sistema**, lo bloquea para futuros envíos y no
 afecta al sistema externo de origen. El aviso se envía una sola vez por número
 desde una base que contenga al paciente (incluidas las áreas), y solo queda
 marcado como ofrecido si salió por `api_oficial`. La baja no se revierte al
-escribir cualquier mensaje: requiere `REACTIVAR`, `ALTA`, `VOLVER A RECIBIR`
-o una manifestación explícita de interés.
+escribir `ELIMINAR` ni con otra baja; cualquier otra respuesta del paciente
+lo reincorpora a las notificaciones. El aviso lo explica expresamente.
+Para números reales, el aviso de baja y la confirmación de reincorporación
+se envían como máximo una vez por número; alternar entre baja y alta no
+genera nuevos mensajes automáticos. El estado sí se actualiza en cada cambio.
 
 Una respuesta `ELIMINAR` (sin distinguir mayúsculas, tildes o espacios) **solo
-se ejecuta si el aviso ya fue enviado**. No se responde después. De inmediato
+se ejecuta de verdad si el aviso ya fue enviado y el número no es de prueba**.
+No se responde después. De inmediato
 se crea una huella HMAC del teléfono en `supresion_telefonos` y se excluye el
 número de envíos manuales, programados, automáticos y simulados, así como de
 futuras cargas CSV. Meta ofrece el endpoint de bloqueo por número de negocio;
@@ -634,6 +638,20 @@ reimportación accidental. La huella es un dato seudónimo, no anónimo. Las
 solicitudes pendientes conservan temporalmente el teléfono para reintentar el
 bloqueo; las completas solo conservan huella, fecha y conteos. Los datos del
 sistema de origen y las copias de seguridad requieren procesos separados.
+
+Los números autorizados como prueba en desarrollo o producción reciben un
+aviso distinto: `ELIMINAR` **simula** la eliminación marcando la baja en todas
+sus copias, sin borrar datos, registrar una supresión permanente ni bloquear
+el número en Meta. No se envía respuesta tras ese comando; una respuesta
+posterior distinta de otra baja/`ELIMINAR` los reincorpora. Los envíos que
+ya estaban en cola vuelven a comprobar la baja antes de salir. La simulación
+guarda un marcador reversible para impedir que salga un aviso automático
+pendiente después de `ELIMINAR`; la reincorporación lo retira. Una excepción
+de prueba aprobada se representa además con `estado = 'exento'` y solo una
+huella HMAC: evita que ese número se borre realmente aunque deje de estar en
+la lista de pruebas. Para retirar la excepción y solicitar borrado real se
+requiere intervención administrativa. No se agrega el teléfono exento al
+código fuente.
 
 **Mensajes de interés:** el texto literal de cada respuesta del paciente se guarda en
 `log_envios.mensaje`. En el **detalle de un envío del Historial** aparece bajo la respuesta

@@ -33,6 +33,7 @@ from pydantic import BaseModel
 from db import (
     conectar, entorno_valido, log_error, nombre_base, columnas_tabla, columna_existe,
     tabla_pacientes, asegurar_tabla_config, config_all, config_get, config_set,
+    agregar_numero_prueba_dev,
     CONFIG_DEFAULTS,
     ROLES_USUARIO, PERMISOS_VALIDOS, PERMISOS_BASICOS, MAX_DESARROLLADORES,
     usuarios_listar, usuario_buscar, usuario_crear, usuario_actualizar, usuario_borrar,
@@ -48,7 +49,9 @@ from wa_rate_limit import gobernador as wa_gobernador
 from whatsapp_service import WhatsAppService, es_mensaje_interes
 from whatsapp_webhook import router as whatsapp_router
 from supresion import (asegurar_tabla_supresion, reintentar_pendientes,
-                      esta_suprimido, oferta_eliminacion_enviada, resumen_supresion)
+                      esta_suprimido, es_exento, es_numero_prueba,
+                      eliminacion_simulada_activa, oferta_eliminacion_enviada,
+                      resumen_supresion)
 from config_service import config_correo as _config_correo, enviar_correo as _enviar_correo, armar_mensaje as _armar_mensaje, leer_config, url_base
 from schemas import (
     ActivarCuentaIn, ClavePropiaIn, ConfigIn, ConfigTodoIn,
@@ -382,12 +385,18 @@ def _resolver_tabla_pacientes(sesion: dict, ambiente: str,
     """Tabla de pacientes a usar: la de la area (autorizada) o la
     legacy del entorno. Devuelve (tabla, area|None)."""
     if area_id is None:
+        _exigir_base_desarrollo(sesion, entorno_valido(ambiente))
         return tabla_pacientes(ambiente), None
     esp = _exigir_area(sesion, area_id)
     tabla = esp["nombre_tabla_base"]
     if not servicio_areas.tabla_valida(tabla):
         raise HTTPException(500, detail="La tabla registrada del área no es válida.")
     return tabla, esp
+
+
+def _exigir_base_desarrollo(sesion: dict, ambiente: str, area_id: int | None = None) -> None:
+    if area_id is None and ambiente == "desarrollo" and not _es_privilegiado(sesion):
+        raise HTTPException(403, detail="La base de desarrollo es exclusiva de administradores y desarrolladores.")
 
 
 def _ids_csv_propios(tabla: str, ids: list[int], sesion: dict) -> set[int]:
@@ -1521,6 +1530,7 @@ def listar_pacientes(q: str | None = Query(None), ambiente: str = Query("producc
     numeros_editables = _numeros_prueba_editables("produccion" if _esp else ambiente)
     for f in filas:
         f["editable"] = _es_numero_prueba_editable(f.get("telefono"), numeros_editables)
+        f["autorizado_prueba"] = t == "pacientes_dev" and f["editable"]
         f["datos_completos"] = f["id"] in propios
         if not f["datos_completos"]:
             _ocultar_datos_paciente(f)
@@ -1532,7 +1542,71 @@ def listar_pacientes(q: str | None = Query(None), ambiente: str = Query("producc
         texto = q.strip().casefold()
         filas = [f for f in filas if texto in f["nombre"].casefold()
                  or texto in f["telefono"].casefold()]
+    # El backend ordena antes de que la interfaz filtre y pagine: los números
+    # de prueba quedan siempre primero, también tras recargar o buscar.
+    filas.sort(key=lambda f: (not f["editable"], f["id"]))
     return filas
+
+
+class PacientePruebaIn(BaseModel):
+    nombre: str
+    apellido: str = ""
+    telefono: str
+
+
+def crear_paciente_prueba(body: PacientePruebaIn, sesion: dict = Depends(solo_admin)):
+    """Alta individual exclusivamente en pacientes_dev, sin alterar otras bases."""
+    nombre = body.nombre.strip()
+    apellido = body.apellido.strip()
+    telefono = normalizar_telefono(body.telefono)
+    if not nombre or len(nombre) > 150 or len(apellido) > 150:
+        raise HTTPException(422, detail="Ingresa un nombre válido (máximo 150 caracteres por campo).")
+    if telefono is None:
+        raise HTTPException(422, detail="Ingresa un celular chileno válido, por ejemplo +56912345678.")
+    if esta_suprimido(telefono):
+        raise HTTPException(409, detail="Este número pidió ser eliminado y no puede volver a incorporarse.")
+    usuario_id = servicio_areas.usuario_id_por_correo(sesion.get("usuario", ""))
+    if usuario_id is None:
+        raise HTTPException(403, detail="No se pudo identificar la cuenta que incorpora el registro.")
+    with conectar("desarrollo") as conn, conn.cursor() as cur:
+        cur.execute("SELECT id, telefono FROM pacientes_dev FOR UPDATE")
+        if any(normalizar_telefono(f.get("telefono") or "") == telefono for f in cur.fetchall()):
+            raise HTTPException(409, detail="Ese número ya existe en la base de desarrollo.")
+        cur.execute(
+            "INSERT INTO pacientes_dev (nombre, apellido, telefono, estado, whatsapp_opt_out, interesado)"
+            " VALUES (%s, %s, %s, 'pendiente', 0, 0)",
+            (nombre, apellido, telefono),
+        )
+        paciente_id = cur.lastrowid
+        cur.execute(
+            "INSERT INTO paciente_csv_accesos (tabla_pacientes, paciente_id, usuario_id)"
+            " VALUES ('pacientes_dev', %s, %s)",
+            (paciente_id, usuario_id),
+        )
+        conn.commit()
+    auditoria_registrar(sesion.get("usuario", ""), "paciente_prueba_creado",
+                        f"pacientes_dev:{paciente_id}", f"Celular terminado en {telefono[-4:]}")
+    return {"id": paciente_id, "nombre": nombre, "apellido": apellido, "telefono": telefono,
+            "autorizado": telefono in _numeros_prueba_editables("desarrollo")}
+
+
+def autorizar_numero_paciente_prueba(paciente_id: int, sesion: dict = Depends(solo_admin)):
+    """Autoriza en Configuración el teléfono de un registro existente en desarrollo."""
+    with conectar("desarrollo") as conn, conn.cursor() as cur:
+        cur.execute("SELECT telefono FROM pacientes_dev WHERE id = %s", (paciente_id,))
+        fila = cur.fetchone()
+    if not fila:
+        raise HTTPException(404, detail="Paciente de prueba no encontrado.")
+    telefono = normalizar_telefono(fila.get("telefono") or "")
+    if telefono is None:
+        raise HTTPException(422, detail="El paciente no tiene un celular válido.")
+    if esta_suprimido(telefono):
+        raise HTTPException(409, detail="Este número pidió ser eliminado y no puede autorizarse.")
+    agregado = agregar_numero_prueba_dev(telefono)
+    if agregado:
+        auditoria_registrar(sesion.get("usuario", ""), "numero_prueba_agregado",
+                            f"pacientes_dev:{paciente_id}", f"Celular terminado en {telefono[-4:]}")
+    return {"ok": True, "agregado": agregado}
 
 
 class EstadoPacienteIn(BaseModel):
@@ -2148,10 +2222,17 @@ whatsapp_service.al_detectar_interes = _programar_call_center_auto
 
 
 _MENSAJE_BAJA_DESPEDIDA = (
-    "Lamentamos que te vayas. Ya no recibirás promociones. Si quieres eliminar "
-    "tus datos de todas las bases de este sistema y bloquear tu número para "
-    "futuros envíos, responde ELIMINAR. Esta acción no se puede deshacer aquí "
-    "y no elimina los datos del sistema de origen."
+    "Lamentamos que te vayas. Ya no recibirás notificaciones. Si quieres "
+    "eliminar tus datos de este sistema y bloquear tu número para futuros "
+    "envíos, escribe ELIMINAR. Si quieres reincorporarte, responde con "
+    "cualquier otro mensaje que no sea otra baja. La eliminación es permanente aquí y no borra "
+    "los datos del sistema de origen."
+)
+_MENSAJE_BAJA_PRUEBA = (
+    "Lamentamos que te vayas. Ya no recibirás notificaciones. Este es un "
+    "número de prueba: escribe ELIMINAR para simular la eliminación, sin "
+    "borrar tus datos ni bloquear tu número. Si quieres reincorporarte, "
+    "responde con cualquier otro mensaje que no sea otra baja."
 )
 _MENSAJE_BIENVENIDA_DEVUELTA = (
     "¡Bienvenido/a de vuelta! Ya reactivamos tus notificaciones."
@@ -2239,23 +2320,29 @@ def _enviar_mensaje_directo(telefono_evento: str, texto: str, clave_log: str) ->
 
 
 def _avisar_baja(telefono: str) -> None:
-    if esta_suprimido(telefono):
+    if esta_suprimido(telefono) or eliminacion_simulada_activa(telefono):
         return
-    if oferta_eliminacion_enviada(telefono):
+    prueba = es_numero_prueba(telefono) or es_exento(telefono)
+    if not prueba and oferta_eliminacion_enviada(telefono):
         return
-    if not _reservar_aviso_unico(telefono, "baja_eliminar"):
+    tipo_aviso = "baja_prueba" if prueba else "baja_eliminar"
+    if not _reservar_aviso_unico(telefono, tipo_aviso):
         return
-    if _enviar_mensaje_directo(telefono, _MENSAJE_BAJA_DESPEDIDA, "baja_aviso"):
-        _reservar_aviso_unico(telefono, "eliminacion_ofrecida")
+    mensaje = _MENSAJE_BAJA_PRUEBA if prueba else _MENSAJE_BAJA_DESPEDIDA
+    if _enviar_mensaje_directo(telefono, mensaje, "baja_aviso"):
+        if not prueba:
+            _reservar_aviso_unico(telefono, "eliminacion_ofrecida")
     else:
         tel = normalizar_telefono(telefono) or telefono
         with conectar() as conn, conn.cursor() as cur:
             cur.execute("DELETE FROM whatsapp_avisos_unicos"
-                        " WHERE telefono = %s AND tipo = 'baja_eliminar'", (tel,))
+                        " WHERE telefono = %s AND tipo = %s", (tel, tipo_aviso))
             conn.commit()
 
 
 def _avisar_retractacion(telefono: str) -> None:
+    if esta_suprimido(telefono) or eliminacion_simulada_activa(telefono):
+        return
     if _reservar_aviso_unico(telefono, "reintegro"):
         _enviar_mensaje_directo(telefono, _MENSAJE_BIENVENIDA_DEVUELTA, "retractacion_aviso")
 
@@ -3044,7 +3131,10 @@ def _leer_config_legacy(ambiente: str | None = None) -> dict:
 def obtener_configuracion(ambiente: str | None = Query(None),
                           sesion: dict = Depends(sesion_actual)):
     try:
-        return leer_config(ambiente)
+        valores = leer_config(ambiente)
+        if valores.get("entorno") == "desarrollo" and not _es_privilegiado(sesion):
+            valores.pop("numeros_autorizados", None)
+        return valores
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
 
@@ -3871,6 +3961,20 @@ def procesar_job(job_id: str) -> None:
             job["detalle"] = f"Error interno del envío: {e}"
 
 
+def _paciente_habilitado_antes_de_enviar(paciente_id: int, telefono: str,
+                                          ambiente: str, tabla: str) -> bool:
+    """Revalida una cohorte congelada justo antes del envío (baja o borrado)."""
+    try:
+        with conectar(ambiente) as conn, conn.cursor() as cur:
+            cur.execute(f"SELECT telefono, whatsapp_opt_out FROM {tabla} WHERE id = %s", (paciente_id,))
+            fila = cur.fetchone()
+        return bool(fila and not fila.get("whatsapp_opt_out")
+                    and normalizar_telefono(fila.get("telefono") or "") == normalizar_telefono(telefono))
+    except Exception as e:
+        log_error("_paciente_habilitado_antes_de_enviar", e)
+        return False
+
+
 def _procesar_job(job_id: str) -> None:
     job = JOBS[job_id]
     amb = job["ambiente"]
@@ -3955,6 +4059,11 @@ def _procesar_job(job_id: str) -> None:
             job["fallidos"] += 1
             job["errores"].append({"id": d["id"], "detalle": "Número suprimido"})
             continue
+        if not _paciente_habilitado_antes_de_enviar(
+                d["id"], d["telefono"], amb, t_esp or tabla_pacientes(amb)):
+            job["fallidos"] += 1
+            job["errores"].append({"id": d["id"], "detalle": "Paciente dado de baja o ya no disponible"})
+            continue
         bloqueo_numero = _restriccion_envio_desarrollo(amb, t_esp, d["telefono"])
         if bloqueo_numero:
             job["fallidos"] += 1
@@ -4016,6 +4125,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         amb = entorno_valido(body.ambiente)
     except ValueError:
         raise HTTPException(400, detail=f"Entorno inválido: '{body.ambiente}'")
+    _exigir_base_desarrollo(sesion, amb, body.area_id)
 
     # Desarrollo es un candado global para todos los roles: no se permite
     # apuntar a producción ni a tablas de áreas, que pertenecen a producción.
@@ -4443,6 +4553,13 @@ def confirmar_envio(token: str, background_tasks: BackgroundTasks):
         return HTMLResponse(f"<html><body style='font-family:Arial; text-align:center; padding:40px;'><h2>Este envío ya fue confirmado</h2><p>Job: {pend.get('job_id')}</p></body></html>")
     if pend["estado"] == "rechazado":
         return HTMLResponse("<html><body style='font-family:Arial; text-align:center; padding:40px;'><h2>Este envío ya fue rechazado</h2></body></html>")
+    if pend["ambiente"] == "desarrollo" and pend.get("area_id") is None:
+        cuenta = usuario_buscar((pend.get("usuario") or "").strip().lower()) or {}
+        if cuenta.get("rol") not in ROLES_PRIVILEGIADOS:
+            return HTMLResponse(
+                "<html><body><h2>Envío bloqueado</h2><p>La base de desarrollo es exclusiva de administradores y desarrolladores.</p></body></html>",
+                status_code=403,
+            )
     pend["estado"] = "confirmado"
     job_id = uuid.uuid4().hex[:8]
     # Un solo envío a la vez POR BASE: si mientras la solicitud esperaba
@@ -4538,6 +4655,7 @@ def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensaj
         amb = entorno_valido(body.ambiente)
     except ValueError:
         raise HTTPException(400, detail=f"Entorno inválido: '{body.ambiente}'")
+    _exigir_base_desarrollo(sesion, amb, body.area_id)
 
     esp = None
     if body.area_id is not None:
@@ -4592,6 +4710,8 @@ def estado_job(job_id: str, sesion: dict = Depends(exigir("mensajeria"))):
     job = JOBS.get(job_id)
     if job is None:
         raise HTTPException(404, detail="Envío no encontrado")
+    if job.get("ambiente") == "desarrollo" and job.get("area_id") is None:
+        _exigir_base_desarrollo(sesion, "desarrollo")
 
     respuesta = {k: v for k, v in job.items()
                  if k not in ("destinatarios", "actual", "errores")}
@@ -4629,6 +4749,8 @@ def envios_en_progreso(sesion: dict = Depends(exigir("mensajeria"))):
         prog_vivos = cur.fetchall()
     jobs_reclamados: set[str] = set()
     for f in prog_vivos:
+        if not _prog_visible(sesion, f):
+            continue
         if not ver_todo and (f.get("creador") or "").strip().lower() != yo \
                 and (f.get("area_id") is None or f["area_id"] not in mias):
             continue
@@ -4659,6 +4781,9 @@ def envios_en_progreso(sesion: dict = Depends(exigir("mensajeria"))):
     for job_id, job in jobs:
         if job.get("estado") not in ESTADOS_ENVIO_EN_CURSO:
             continue
+        if job.get("ambiente") == "desarrollo" and job.get("area_id") is None \
+                and not _es_privilegiado(sesion):
+            continue
         if str(job_id) in jobs_reclamados:
             continue  # ya sale con su tag programado
         if not ver_todo and (job.get("usuario") or "").strip().lower() != yo \
@@ -4683,6 +4808,8 @@ def cancelar_job(job_id: str, sesion: dict = Depends(exigir("mensajeria"))):
     job = JOBS.get(job_id)
     if job is None:
         raise HTTPException(404, detail="Envío no encontrado")
+    if job.get("ambiente") == "desarrollo" and job.get("area_id") is None:
+        _exigir_base_desarrollo(sesion, "desarrollo")
     if job.get("estado") in ("completado", "cancelado", "error"):
         return {"ok": False, "estado": job.get("estado"), "detail": "El envío ya finalizó"}
     job["cancelado"] = True
@@ -4693,6 +4820,8 @@ def pausar_job(job_id: str, sesion: dict = Depends(exigir("mensajeria"))):
     job = JOBS.get(job_id)
     if job is None:
         raise HTTPException(404, detail="Envío no encontrado")
+    if job.get("ambiente") == "desarrollo" and job.get("area_id") is None:
+        _exigir_base_desarrollo(sesion, "desarrollo")
     if job.get("estado") in ("completado", "cancelado", "error"):
         return {"ok": False, "estado": job.get("estado"), "detail": "El envío ya finalizó"}
     job["pausado"] = True
@@ -4703,6 +4832,8 @@ def reanudar_job(job_id: str, sesion: dict = Depends(exigir("mensajeria"))):
     job = JOBS.get(job_id)
     if job is None:
         raise HTTPException(404, detail="Envío no encontrado")
+    if job.get("ambiente") == "desarrollo" and job.get("area_id") is None:
+        _exigir_base_desarrollo(sesion, "desarrollo")
     if job.get("estado") in ("completado", "cancelado", "error"):
         return {"ok": False, "estado": job.get("estado"), "detail": "El envío ya finalizó"}
     job["pausado"] = False
@@ -5000,6 +5131,7 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
             detail=("El sistema está en Desarrollo: solo puedes programar envíos "
                     "para pacientes_dev y números de prueba."),
         )
+    _exigir_base_desarrollo(sesion, amb, body.area_id)
 
     # Tope real: elegibles libres (en desarrollo incluye todos los estados),
     # sin repetir destinatarios ya reservados ni superar el cupo de Meta.
@@ -5190,6 +5322,8 @@ def _enviar_correo_prog(destinatarios: list, prog_id: int, plantilla_nombre: str
 def _prog_visible(sesion: dict, f: dict) -> bool:
     """Visibilidad de un programado: admin/dev/supervisor todo; usuario solo
     los suyos y los de su area."""
+    if _prog_es_base_desarrollo(f) and not _es_privilegiado(sesion):
+        return False
     if _es_privilegiado(sesion) or sesion.get("rol") == "supervisor":
         return True
     yo = (sesion.get("usuario") or "").strip().lower()
@@ -5252,7 +5386,7 @@ def resumen_programados(sesion: dict = Depends(exigir("mensajeria"))):
     Mismo orden que `listar_programados` para que las firmas coincidan."""
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT id, estado, creador, area_id FROM envios_programados"
+            "SELECT id, estado, creador, area_id, ambiente FROM envios_programados"
             " ORDER BY creado DESC, id DESC LIMIT 200"
         )
         filas = cur.fetchall()
@@ -5274,6 +5408,8 @@ def _traer_programado(prog_id: int) -> dict:
 
 def aprobar_programado(prog_id: int, sesion: dict = Depends(exigir("mensajeria"))):
     f = _traer_programado(prog_id)
+    if _prog_es_base_desarrollo(f):
+        _exigir_base_desarrollo(sesion, "desarrollo")
     if f["estado"] == "aprobado":
         return _prog_a_respuesta(f, sesion)  # idempotente (doble click)
     if f["estado"] != "pendiente":
@@ -5292,6 +5428,8 @@ def aprobar_programado(prog_id: int, sesion: dict = Depends(exigir("mensajeria")
 
 def rechazar_programado(prog_id: int, body: dict | None = None, sesion: dict = Depends(exigir("mensajeria"))):
     f = _traer_programado(prog_id)
+    if _prog_es_base_desarrollo(f):
+        _exigir_base_desarrollo(sesion, "desarrollo")
     if f["estado"] != "pendiente":
         raise HTTPException(409, detail=f"Ya está {f['estado']}: no se puede rechazar.")
     _exigir_prog_decisor(sesion, f)
@@ -5310,6 +5448,8 @@ def rechazar_programado(prog_id: int, body: dict | None = None, sesion: dict = D
 def cancelar_programado(prog_id: int, sesion: dict = Depends(exigir("mensajeria"))):
     # Solo se cancela una vez aprobado: lo pendiente solo se acepta o rechaza.
     f = _traer_programado(prog_id)
+    if _prog_es_base_desarrollo(f):
+        _exigir_base_desarrollo(sesion, "desarrollo")
     if f["estado"] != "aprobado":
         raise HTTPException(409, detail=f"Ya está {f['estado']}: no se puede cancelar.")
     if not _es_privilegiado(sesion):
@@ -5503,6 +5643,13 @@ def _ejecutar_programado(f: dict) -> None:
     from schemas import EnvioIn
 
     amb_prog = f.get("ambiente") or "produccion"
+    if _prog_es_base_desarrollo(f):
+        cuenta = usuario_buscar((f.get("creador") or "").strip().lower()) or {}
+        if cuenta.get("rol") not in ROLES_PRIVILEGIADOS:
+            motivo = "No se envió: la base de desarrollo es exclusiva de administradores y desarrolladores."
+            _marcar_prog(f["id"], "error", motivo)
+            _avisar_creador_prog(f, motivo)
+            return
     tabla_prog = f.get("tabla") or nombre_base(amb_prog)
     tabla_bloqueada = (
         tabla_prog if f.get("area_id") is not None or tabla_prog != "pacientes_dev"
@@ -5666,6 +5813,8 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
                      sesion: dict = Depends(exigir("historial"))):
     if origen not in ("todos", "manual", "programado"):
         raise HTTPException(422, detail="Tipo de envío inválido.")
+    if not tabla and ambiente == "desarrollo":
+        _exigir_base_desarrollo(sesion, ambiente)
     cols_env = columnas_tabla("envios", "produccion")
     com_col = "comentario" if "comentario" in cols_env else "NULL AS comentario"
     esp_col = "area_id" if "area_id" in cols_env else "NULL AS area_id"

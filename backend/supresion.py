@@ -26,7 +26,7 @@ def asegurar_tabla_supresion() -> None:
         cur.execute(
             "CREATE TABLE IF NOT EXISTS supresion_telefonos ("
             " huella CHAR(64) PRIMARY KEY,"
-            " estado ENUM('pendiente','procesando','completo') NOT NULL DEFAULT 'pendiente',"
+            " estado ENUM('pendiente','procesando','completo','exento') NOT NULL DEFAULT 'pendiente',"
             " telefono_pendiente VARCHAR(20) NULL,"
             " wa_phone_id VARCHAR(64) NULL,"
             " bases_afectadas INT NOT NULL DEFAULT 0,"
@@ -41,10 +41,10 @@ def asegurar_tabla_supresion() -> None:
             " AND COLUMN_NAME = 'estado'"
         )
         tipo = (cur.fetchone() or {}).get("COLUMN_TYPE") or ""
-        if "procesando" not in tipo:
+        if "procesando" not in tipo or "exento" not in tipo:
             cur.execute(
                 "ALTER TABLE supresion_telefonos MODIFY COLUMN estado"
-                " ENUM('pendiente','procesando','completo') NOT NULL DEFAULT 'pendiente'"
+                " ENUM('pendiente','procesando','completo','exento') NOT NULL DEFAULT 'pendiente'"
             )
         conn.commit()
 
@@ -85,7 +85,42 @@ def esta_suprimido(telefono: str) -> bool:
         return False
     huella = huella_telefono(telefono)
     with conectar() as conn, conn.cursor() as cur:
-        cur.execute("SELECT 1 FROM supresion_telefonos WHERE huella = %s", (huella,))
+        cur.execute("SELECT 1 FROM supresion_telefonos"
+                    " WHERE huella = %s AND estado <> 'exento'", (huella,))
+        return cur.fetchone() is not None
+
+
+def es_exento(telefono: str) -> bool:
+    """Excepción de prueba explícita: conserva la huella, no el número crudo."""
+    if not normalizar_telefono(telefono):
+        return False
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM supresion_telefonos"
+                    " WHERE huella = %s AND estado = 'exento'",
+                    (huella_telefono(telefono),))
+        return cur.fetchone() is not None
+
+
+def es_numero_prueba(telefono: str) -> bool:
+    """Un teléfono autorizado para pruebas en desarrollo o producción."""
+    tel = normalizar_telefono(telefono)
+    if not tel:
+        return False
+    for clave in ("numeros_prueba_dev", "numeros_prueba_prod"):
+        if any(normalizar_telefono(valor) == tel
+               for valor in config_get(clave, "").split(",") if valor.strip()):
+            return True
+    return False
+
+
+def eliminacion_simulada_activa(telefono: str) -> bool:
+    """Marcador reversible de prueba: no es una supresión ni bloquea en Meta."""
+    tel = normalizar_telefono(telefono)
+    if not tel:
+        return False
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM whatsapp_avisos_unicos"
+                    " WHERE telefono = %s AND tipo = 'eliminacion_simulada'", (tel,))
         return cur.fetchone() is not None
 
 
@@ -100,11 +135,15 @@ def solicitar_eliminacion(telefono: str) -> str:
             "INSERT INTO supresion_telefonos (huella, telefono_pendiente, wa_phone_id)"
             " VALUES (%s, %s, %s)"
             " ON DUPLICATE KEY UPDATE"
-            " telefono_pendiente = IF(estado = 'completo', NULL, VALUES(telefono_pendiente)),"
-            " wa_phone_id = IF(estado = 'completo', wa_phone_id, VALUES(wa_phone_id))",
+            " telefono_pendiente = IF(estado IN ('completo','exento'), NULL, VALUES(telefono_pendiente)),"
+            " wa_phone_id = IF(estado IN ('completo','exento'), wa_phone_id, VALUES(wa_phone_id))",
             (huella, tel, (config_get("wa_phone_id") or "").strip()),
         )
+        cur.execute("SELECT estado FROM supresion_telefonos WHERE huella = %s", (huella,))
+        exento = (cur.fetchone() or {}).get("estado") == "exento"
         conn.commit()
+    if exento:
+        return huella
     hilo = threading.Thread(target=_procesar_sin_excepcion, args=(huella,), daemon=True)
     hilo.start()
     return huella
@@ -343,11 +382,12 @@ def reintentar_pendientes() -> None:
 
 def resumen_supresion() -> dict:
     """Conteos operativos sin huellas ni teléfonos, para desarrolladores."""
-    resultado = {"pendientes": 0, "procesando": 0, "completas": 0}
+    resultado = {"pendientes": 0, "procesando": 0, "completas": 0, "exentos": 0}
     with conectar() as conn, conn.cursor() as cur:
         cur.execute("SELECT estado, COUNT(*) AS n FROM supresion_telefonos GROUP BY estado")
         for row in cur.fetchall():
-            clave = "completas" if row["estado"] == "completo" else row["estado"]
+            clave = {"completo": "completas", "exento": "exentos"}.get(
+                row["estado"], row["estado"])
             if clave in resultado:
                 resultado[clave] = int(row["n"])
     return resultado
