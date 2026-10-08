@@ -280,7 +280,7 @@ function construirOpcionesBaseConf(forzarEspId) {
     html = `<option value="esp:${forzarEspId}"${usuarioRestringidoADesarrollo() ? " disabled" : ""}>${escaparHtml(nombre)}${tabla ? ` (${escaparHtml(tabla)})` : ""}${usuarioRestringidoADesarrollo() ? " · No disponible en Desarrollo" : ""}</option>`;
   } else {
     html = `<optgroup label="Bases">` +
-      `<option value="desarrollo">Desarrollo (pacientes_dev)</option>` +
+      (window.snwEsPrivilegiado ? `<option value="desarrollo">Desarrollo (pacientes_dev)</option>` : "") +
       (restringido ? "" : `<option value="produccion">Producción (pacientes_prod)</option>`) +
       `</optgroup>`;
     if (misAreas.length && !usuarioRestringidoADesarrollo()) {
@@ -520,7 +520,8 @@ function actualizarProgPlantilla() {
     const seleccionAnterior = selBase.dataset.plantillaId === plantillaId ? selBase.value : "";
     const opcionInicial = `<option value="" selected disabled>— Seleccione base de datos —</option>`;
     if (esHelloWorld) {
-      selBase.innerHTML = opcionInicial + `<option value="desarrollo">Desarrollo (pacientes_dev)</option>`;
+      selBase.innerHTML = opcionInicial + (window.snwEsPrivilegiado
+        ? `<option value="desarrollo">Desarrollo (pacientes_dev)</option>` : "");
     } else if (p?.area_id != null) {
       const area = areas.find((item) => Number(item.id) === Number(p.area_id));
       selBase.innerHTML = opcionInicial + (area
@@ -530,7 +531,7 @@ function actualizarProgPlantilla() {
       selBase.innerHTML =
         opcionInicial +
         `<optgroup label="Bases de datos">` +
-          `<option value="desarrollo">Desarrollo (pacientes_dev)</option>` +
+          (window.snwEsPrivilegiado ? `<option value="desarrollo">Desarrollo (pacientes_dev)</option>` : "") +
           (restringido ? "" : `<option value="produccion">Producción (pacientes_prod)</option>`) +
         `</optgroup>` +
         (areas.length && !usuarioRestringidoADesarrollo()
@@ -1541,7 +1542,7 @@ function abrirModalConf(id = tplSelId) {
     const sel = $("#selBaseConf");
     if (sel) {
       sel.innerHTML = `<option value="" selected disabled>— Seleccione base de datos —</option>` +
-        `<option value="desarrollo">Desarrollo (pacientes_dev)</option>`;
+        (window.snwEsPrivilegiado ? `<option value="desarrollo">Desarrollo (pacientes_dev)</option>` : "");
       sel.value = "";
     }
   }
@@ -1622,6 +1623,10 @@ function refrescarAvisoDevConf() {
   const entornoDesarrollo = entornoGlobal === "desarrollo";
   box.hidden = !entornoDesarrollo;
   if (!entornoDesarrollo) return;
+  if (!window.snwEsPrivilegiado) {
+    box.textContent = "El sistema está en Desarrollo: esta base y sus envíos son exclusivos de administradores y desarrolladores.";
+    return;
+  }
   fetch("api/configuracion?ambiente=desarrollo", { headers: authHeaders() })
     .then((r) => (r.ok ? r.json() : {}))
     .then((cfg) => {

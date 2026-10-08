@@ -123,10 +123,10 @@ async function cargarBasesPac() {
     areas = [];
   }
   selBasePac.innerHTML =
+    (window.snwEsPrivilegiado
+      ? `<option value="dev">Base de datos desarrollo (pacientes_dev)</option>` : "") +
     (PUEDE_GESTIONAR_PAC
-      ? `<option value="dev">Base de datos desarrollo (pacientes_dev)</option>` +
-        `<option value="prod">Base de datos producción (pacientes_prod)</option>`
-      : "") +
+      ? `<option value="prod">Base de datos producción (pacientes_prod)</option>` : "") +
     areas.map((e) => `<option value="esp:${e.id}">${escaparHtml(e.nombre_visible)} (${escaparHtml(e.nombre_tabla_base)})</option>`).join("") +
     (!PUEDE_GESTIONAR_PAC && !areas.length
       ? `<option value="" disabled>Sin bases asignadas: pide un área a un administrador</option>`
@@ -183,6 +183,11 @@ function aplicarModoBase() {
   const tabla = tablaPacActual();
   const area = areaActual();
   const esArea = !!area;
+  const esDesarrollo = basePacActual() === "dev" && !!window.snwEsPrivilegiado;
+  const cardPacientePrueba = $("#cardPacientePrueba");
+  if (cardPacientePrueba) cardPacientePrueba.hidden = !esDesarrollo;
+  const colAutorizacion = $("#colAutorizacionPrueba");
+  if (colAutorizacion) colAutorizacion.hidden = !esDesarrollo;
 
   const avisoSinEsp = $("#gestionSinEsp");
   if (avisoSinEsp) avisoSinEsp.hidden = areas.length > 0 || PUEDE_GESTIONAR_PAC;
@@ -251,13 +256,21 @@ async function cargar(mostrarFeedback = false) {
           const c0 = await r0.json();
           ambienteAdmin = c0.entorno;
           if (selBasePac && espPacId() == null) {
-            selBasePac.value = ambienteAdmin === "produccion" ? "prod" : "dev";
-            localStorage.setItem("snw_ambiente_admin", ambienteAdmin);
-            aplicarModoBase();
+            const preferida = ambienteAdmin === "produccion" ? "prod" : "dev";
+            if ([...selBasePac.options].some((opcion) => opcion.value === preferida)) {
+              selBasePac.value = preferida;
+              localStorage.setItem("snw_ambiente_admin", ambienteAdmin);
+              aplicarModoBase();
+            }
           }
         }
       } catch {}
       _ambienteInicializado = true;
+    }
+    if (!selBasePac?.value) {
+      pacientes = [];
+      render();
+      return;
     }
     const esp = espPacId();
     const amb = esp != null ? "produccion" : (basePacActual() === "prod" ? "produccion" : "desarrollo");
@@ -367,6 +380,11 @@ function render() {
         subResp +
       `</td>` +
       `<td class="campo-fecha">${escaparHtml(p.actualizado)}</td>`;
+    if (basePacActual() === "dev" && window.snwEsPrivilegiado) {
+      tr.innerHTML += `<td class="campo-prueba">${p.autorizado_prueba
+        ? `<span class="paciente-prueba__estado">Autorizado</span>`
+        : `<button type="button" class="btn btn--ghost paciente-prueba__autorizar" data-autorizar-id="${p.id}">Agregar a números de prueba</button>`}</td>`;
+    }
     const chk = tr.querySelector('input[type="checkbox"]');
     if (chk) chk.addEventListener("change", (e) => {
       e.target.checked ? seleccionados.add(p.id) : seleccionados.delete(p.id);
@@ -857,6 +875,56 @@ window.snwCargarPacientes = function () {
   yaCargada = true;
   (async () => { await cargarBasesPac(); cargar(); })();
 };
+
+async function errorApiPrueba(res) {
+  const dato = await res.json().catch(() => ({}));
+  return typeof dato.detail === "string" ? dato.detail : "No se pudo completar la acción.";
+}
+
+const formPacientePrueba = $("#formPacientePrueba");
+if (formPacientePrueba) formPacientePrueba.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!window.snwEsPrivilegiado || basePacActual() !== "dev") return;
+  const boton = $("#btnCrearPacientePrueba");
+  boton.disabled = true;
+  try {
+    const res = await fetch("api/pacientes/prueba", {
+      method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        nombre: $("#pruebaNombre").value.trim(),
+        apellido: $("#pruebaApellido").value.trim(),
+        telefono: $("#pruebaTelefono").value.trim(),
+      }),
+    });
+    if (res.status === 401) { window.snwSesionExpirada(); return; }
+    if (!res.ok) throw new Error(await errorApiPrueba(res));
+    formPacientePrueba.reset();
+    toast("Paciente de prueba agregado. Puedes autorizar su número en la tabla.");
+    await cargar();
+  } catch (err) {
+    toast(err.message || "No se pudo agregar el paciente.", "error");
+  } finally {
+    boton.disabled = false;
+  }
+});
+
+tbodyEl.addEventListener("click", async (e) => {
+  const boton = e.target.closest("[data-autorizar-id]");
+  if (!boton || !tbodyEl.contains(boton) || !window.snwEsPrivilegiado || basePacActual() !== "dev") return;
+  boton.disabled = true;
+  try {
+    const res = await fetch(`api/pacientes/prueba/${boton.dataset.autorizarId}/autorizar`, {
+      method: "POST", headers: authHeaders(),
+    });
+    if (res.status === 401) { window.snwSesionExpirada(); return; }
+    if (!res.ok) throw new Error(await errorApiPrueba(res));
+    toast("Número agregado a los números de prueba de desarrollo.");
+    await cargar();
+  } catch (err) {
+    toast(err.message || "No se pudo autorizar el número.", "error");
+    boton.disabled = false;
+  }
+});
 
 // --- Eliminar tabla completa (solo área; esta página es exclusiva
 // admin/dev): modal con 10 s de espera antes de activar Confirmar; Cancelar

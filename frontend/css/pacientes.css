@@ -7,6 +7,15 @@
 .pacientes__csv-msg { margin: 6px 18px 0; font-weight: 600; color: var(--texto); }
 #lblArchivoGestion { cursor: pointer; margin: 0; }
 
+#cardPacientePrueba { padding-bottom: 20px; }
+.paciente-prueba__intro { margin: 12px 18px 0; }
+.paciente-prueba__form { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 18px; }
+.paciente-prueba__form .field { flex: 1 1 180px; min-width: 160px; margin: 0; }
+.paciente-prueba__form input { width: 100%; }
+.paciente-prueba__form .btn { min-height: 42px; }
+.paciente-prueba__estado { color: var(--ok-fg); font-weight: 600; white-space: nowrap; }
+.paciente-prueba__autorizar { white-space: nowrap; }
+
 /* Card «Gestionar base de datos» (cargar CSV, eliminar registros, eliminar
    tabla). Las acciones se aplican sobre la base elegida en el panel de arriba.
    .panel no trae padding: el aire de los bordes lo da esta regla. */

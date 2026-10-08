@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pymysql
 from dotenv import load_dotenv
+from telefono import normalizar_telefono
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
@@ -995,6 +996,26 @@ def config_set(cambios: dict) -> None:
             )
         conn.commit()
     _config_cache = None
+
+
+def agregar_numero_prueba_dev(numero: str) -> bool:
+    """Añade un número normalizado sin perder altas concurrentes; devuelve si era nuevo."""
+    global _config_cache
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("SELECT valor FROM configuracion WHERE clave = 'numeros_prueba_dev' FOR UPDATE")
+        fila = cur.fetchone()
+        numeros = [n.strip() for n in (fila.get("valor") or "").split(",") if n.strip()] if fila else []
+        if any(normalizar_telefono(n) == numero for n in numeros):
+            return False
+        numeros.append(numero)
+        cur.execute(
+            "INSERT INTO configuracion (clave, valor) VALUES ('numeros_prueba_dev', %s)"
+            " ON DUPLICATE KEY UPDATE valor = VALUES(valor)",
+            (",".join(numeros),),
+        )
+        conn.commit()
+    _config_cache = None
+    return True
 
 
 def entorno_valido(entorno: str | None = None) -> str:

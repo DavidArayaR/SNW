@@ -14,6 +14,7 @@ class PacientesSinAltaIndividualTests(unittest.TestCase):
     def test_api_no_expone_alta_individual_y_mantiene_lectura_y_csv(self):
         rutas = app.openapi()["paths"]
         self.assertNotIn("post", rutas["/api/pacientes"])
+        self.assertIn("post", rutas["/api/pacientes/prueba"])
         self.assertIn("get", rutas["/api/pacientes"])
         self.assertIn("post", rutas["/api/areas/{area_id}/pacientes/csv"])
         respuesta = TestClient(app).post(
@@ -25,6 +26,7 @@ class PacientesSinAltaIndividualTests(unittest.TestCase):
     def test_pagina_no_ofrece_formulario_individual(self):
         pagina = (ROOT / "frontend" / "pacientes.html").read_text(encoding="utf-8")
         self.assertNotIn('id="formPacienteIndividual"', pagina)
+        self.assertIn('id="formPacientePrueba"', pagina)
         self.assertIn('id="csvArchivo"', pagina)
 
 

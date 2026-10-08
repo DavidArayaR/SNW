@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="css/tema.css">
   <link rel="stylesheet" href="css/styles.css">
   <link rel="stylesheet" href="css/componentes.css?v=inlinecss1">
-<link rel="stylesheet" href="css/pacientes.css?v=inlinecss1">
+<link rel="stylesheet" href="css/pacientes.css?v=pruebas1">
   <link rel="stylesheet" href="css/layout.css?v=sidebar25">
   <link rel="stylesheet" href="css/admin.css?v=inlinecss1">
   <script src="js/tema.js"></script>
@@ -106,12 +106,24 @@
                   <th>Error</th>
                   <th>Respuesta</th>
                   <th>Actualizado</th>
+                  <th id="colAutorizacionPrueba" hidden>Número de prueba</th>
                 </tr>
               </thead>
               <tbody></tbody>
             </table>
             <p id="tablaVacia" class="tabla-vacia" hidden>Sin resultados.</p>
           </div>
+        </section>
+
+        <section class="panel" id="cardPacientePrueba" hidden>
+          <div class="panel__head"><h2>Agregar paciente de prueba</h2></div>
+          <p class="field__hint paciente-prueba__intro">Solo se guarda en la base de desarrollo. Después puedes autorizar su número para recibir envíos desde la tabla.</p>
+          <form id="formPacientePrueba" class="paciente-prueba__form">
+            <div class="field"><label for="pruebaNombre">Nombre</label><input id="pruebaNombre" name="nombre" type="text" maxlength="150" required autocomplete="off"></div>
+            <div class="field"><label for="pruebaApellido">Apellido</label><input id="pruebaApellido" name="apellido" type="text" maxlength="150" autocomplete="off"></div>
+            <div class="field"><label for="pruebaTelefono">Teléfono</label><input id="pruebaTelefono" name="telefono" type="tel" inputmode="tel" placeholder="+56912345678" required autocomplete="off"></div>
+            <button class="btn btn--primary" id="btnCrearPacientePrueba" type="submit">Agregar paciente</button>
+          </form>
         </section>
 
         <section class="panel" id="cardGestionBase">
@@ -215,7 +227,7 @@
 
   <script src="js/layout.js?v=navcurve7"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/pacientes.js"></script>
+  <script src="js/pacientes.js?v=pruebas1"></script>
   <script>
     (function () {
       if (window.snwCargarPacientes) window.snwCargarPacientes();
