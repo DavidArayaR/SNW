@@ -28,7 +28,7 @@ function filtradosPac() {
     (p) =>
       (filtroEstado === "todos" || p.estado === filtroEstado) &&
       (filtroRespuesta === "todas" || (p.respuesta || "pendiente") === filtroRespuesta) &&
-      (filtroInteres === "todos" || !!p.no_interesado) &&
+      (filtroInteres === "todos" || !!p[filtroInteres]) &&
       (!q ||
         [p.nombre, p.apellido, p.telefono]
           .filter(Boolean)
@@ -407,11 +407,13 @@ function render() {
     const r = p.respuesta || "pendiente";
     if (conteoResp[r] !== undefined) conteoResp[r]++;
   }
+  const conteoInteresados = pacientes.filter((p) => !!p.interesado).length;
   const conteoNoInteresados = pacientes.filter((p) => !!p.no_interesado).length;
 
   const esActivoEstado = (estado) => filtroRespuesta === "todas" && filtroInteres === "todos" && filtroEstado === estado;
   const esActivoResp = (resp) => filtroEstado === "todos" && filtroInteres === "todos" && filtroRespuesta === resp;
-  const esActivoInteres = filtroEstado === "todos" && filtroRespuesta === "todas" && filtroInteres === "no_interesado";
+  const esActivoInteres = (interes) =>
+    filtroEstado === "todos" && filtroRespuesta === "todas" && filtroInteres === interes;
   // Tarjeta con ícono en chip de color (mismo tono que usaban los puntitos
   // de antes), en vez de la píldora chica: mismo botón/atributos de
   // filtro, solo cambia cómo se ve.
@@ -426,9 +428,9 @@ function render() {
     statCard("ok", "fa-paper-plane", esActivoEstado("enviado"), 'data-estado="enviado"', "Enviados", conteo.enviado) +
     statCard("danger", "fa-triangle-exclamation", esActivoEstado("error"), 'data-estado="error"', "Errores", conteo.error) +
     statCard("neutral", "fa-comment-slash", esActivoResp("pendiente"), 'data-respuesta="pendiente"', "Sin resp.", conteoResp.pendiente) +
-    statCard("ok", "fa-comments", esActivoResp("respondio"), 'data-respuesta="respondio"', "Respondió", conteoResp.respondio) +
+    statCard("ok", "fa-thumbs-up", esActivoInteres("interesado"), 'data-interes="interesado"', "Interesados", conteoInteresados) +
     statCard("danger", "fa-user-slash", esActivoResp("baja"), 'data-respuesta="baja"', "Baja", conteoResp.baja) +
-    statCard("info", "fa-thumbs-down", esActivoInteres, 'data-interes="no_interesado"', "No le interesa", conteoNoInteresados);
+    statCard("info", "fa-thumbs-down", esActivoInteres("no_interesado"), 'data-interes="no_interesado"', "No le interesa", conteoNoInteresados);
 
   refrescarSeleccion(enPagina);
 }
