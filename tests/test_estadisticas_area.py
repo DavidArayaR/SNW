@@ -1,4 +1,5 @@
 import sys
+import datetime
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -39,6 +40,74 @@ class CursorFalso:
 
 
 class EstadisticasAreaTests(unittest.TestCase):
+    def test_desarrollo_no_se_combina_con_area(self):
+        with self.assertRaises(main.HTTPException) as error:
+            main._alcance_estadisticas({}, 7, "desarrollo")
+        self.assertEqual(error.exception.status_code, 400)
+
+    def test_respuestas_de_pacientes_dev_no_usan_logs_de_produccion_con_igual_id(self):
+        cursor = CursorFalso(filas=([],))
+        with patch.object(main, "conectar", return_value=cursor), \
+             patch.object(main, "columna_existe", return_value=False), \
+             patch.object(main, "columnas_tabla", return_value={"tabla_pacientes"}):
+            main._pacientes_por_respuesta("desarrollo")
+        self.assertIn("le.tabla_pacientes = 'pacientes_dev'", cursor.consultas[0][0])
+
+    def test_resumen_desarrollo_cuenta_solo_sus_lotes_y_respuestas(self):
+        cursor = CursorFalso()
+        with patch.object(main, "conectar", return_value=cursor), \
+             patch.object(main, "_pacientes_por_respuesta", return_value={"total": 2}) as respuestas, \
+             patch.object(main, "_pacientes_por_interes", return_value={"total": 2}) as interes:
+            resultado = main.estadisticas(area_id=None, base="desarrollo", sesion={})
+
+        self.assertEqual(resultado["base"], "desarrollo")
+        self.assertIn("base_datos = 'pacientes_dev'", cursor.consultas[0][0])
+        self.assertIn("tabla_pacientes = 'pacientes_dev'", cursor.consultas[2][0])
+        self.assertIn("base_datos = 'pacientes_dev'", cursor.consultas[3][0])
+        respuestas.assert_called_once_with("desarrollo", tabla=None)
+        interes.assert_called_once_with("desarrollo", tabla=None)
+
+    def test_calendario_desarrollo_solo_tiene_sus_envios(self):
+        cursor = CursorFalso(filas=(
+            [{"dia": "2026-10-08"}],
+            [{"periodo": "2026-10", "enviados": 1}],
+        ))
+        with patch.object(main, "conectar", return_value=cursor):
+            resultado = main.estadisticas_envios(granularidad="mes", area_id=None,
+                                                  base="desarrollo", periodos=None, sesion={})
+        self.assertEqual(resultado["dias_disponibles"], ["2026-10-08"])
+        self.assertEqual(resultado["total"], 1)
+        self.assertTrue(all("base_datos = 'pacientes_dev'" in sql
+                            for sql, _ in cursor.consultas))
+
+    def test_costos_desarrollo_no_mezclan_simulados_y_comparten_cupo_servicio(self):
+        cursor = CursorFalso(filas=(
+            [],
+            [{"id": 1, "base_lote": "pacientes_prod", "tabla_pacientes": "pacientes_prod",
+              "wa_phone_id": "empresa", "area_id": None, "envio_id": 10,
+              "fecha_entrega": datetime.datetime(2026, 10, 8)},
+             {"id": 2, "base_lote": "pacientes_dev", "tabla_pacientes": "pacientes_dev",
+              "wa_phone_id": "empresa", "area_id": None, "envio_id": 11,
+              "fecha_entrega": datetime.datetime(2026, 10, 8)}],
+        ))
+        with patch.object(main, "conectar", return_value=cursor), \
+             patch.object(main, "_moneda_cuenta", return_value="USD"), \
+             patch.object(main, "_tarifas_guardadas", return_value=[]), \
+             patch.object(main, "_tarifa_vigente", return_value=None), \
+             patch.object(main, "_categorias_por_clave", return_value={"baja_aviso": "service"}), \
+             patch.object(main, "columnas_tabla", return_value={"whatsapp_message_id"}), \
+             patch.object(main, "clasificar_entregas_servicio",
+                          side_effect=lambda filas: [(fila, True) for fila in filas]):
+            resultado = main.estadisticas_costos(granularidad="mes", area_id=None,
+                                                  base="desarrollo", categoria=None,
+                                                  fecha=None, periodos=None, sesion={})
+        self.assertEqual(resultado["base"], "desarrollo")
+        self.assertEqual(resultado["total"]["mensajes"], 1)
+        self.assertEqual(resultado["servicio"]["entregados"], 1)
+        self.assertIn("base_datos = 'pacientes_dev'", cursor.consultas[0][0])
+        self.assertIn("base_lote", cursor.consultas[1][0])
+        self.assertNotIn("base_datos = 'pacientes_dev'", cursor.consultas[1][0])
+
     def test_resumen_con_area_no_interpreta_formato_fecha_como_parametro(self):
         cursor = CursorFalso()
         area = {"id": 7, "nombre_visible": "Área 7", "nombre_tabla_base": "pacientes_7"}

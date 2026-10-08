@@ -6135,7 +6135,7 @@ def _pacientes_por_respuesta(ambiente: str, tabla: str | None = None) -> dict:
     tiene_opt = columna_existe(t, "whatsapp_opt_out", ambiente)
     log_tiene_tabla = "tabla_pacientes" in columnas_tabla("log_envios", ambiente)
     re_expr = expr_respuesta_efectiva("p", tiene_opt, columna_existe(t, "respuesta_manual", ambiente),
-                                      tabla_log=t if (tabla and log_tiene_tabla) else None,
+                                      tabla_log=t if ((tabla or ambiente == "desarrollo") and log_tiene_tabla) else None,
                                       tiene_interes=columna_existe(t, "interesado", ambiente)
                                       and columna_existe(t, "no_interesado", ambiente))
     where = " WHERE p.estado = 'enviado'" if columna_existe(t, "estado", ambiente) else ""
@@ -6178,11 +6178,15 @@ def _pacientes_por_interes(ambiente: str, tabla: str | None = None) -> dict:
     return base
 
 
-# Las áreas usan tablas pacientes_<slug> en producción. Se incluyen sus lotes
-# además de la base legacy, sin contar pacientes_dev.
+# Las áreas usan tablas pacientes_<slug> en producción. Desarrollo se consulta
+# por separado para no mezclar datos de prueba con métricas de producción.
 _SOLO_PROD = (
     "envio_id IN (SELECT id FROM envios WHERE base_datos <> 'pacientes_dev'"
     " AND (base_datos = 'pacientes_prod' OR area_id IS NOT NULL))"
+)
+_SOLO_DEV = (
+    "envio_id IN (SELECT id FROM envios WHERE base_datos = 'pacientes_dev'"
+    " AND area_id IS NULL)"
 )
 
 # Respuestas automáticas del sistema (texto libre, ventana de 24 h): no son
@@ -6192,7 +6196,13 @@ _CLAVES_RESPUESTA_AUTO = ("call_center", "baja_aviso", "retractacion_aviso")
 # las cobró de verdad (las simuladas se excluyen por no tener message_id).
 _SOLO_PROD_O_AUTO = (
     f"({_SOLO_PROD} OR (envio_id IS NULL AND plantilla_clave IN"
-    f" ({', '.join(repr(c) for c in _CLAVES_RESPUESTA_AUTO)})))"
+    f" ({', '.join(repr(c) for c in _CLAVES_RESPUESTA_AUTO)})"
+    " AND COALESCE(tabla_pacientes, '') <> 'pacientes_dev'))"
+)
+_SOLO_DEV_O_AUTO = (
+    f"({_SOLO_DEV} OR (envio_id IS NULL AND plantilla_clave IN"
+    f" ({', '.join(repr(c) for c in _CLAVES_RESPUESTA_AUTO)})"
+    " AND tabla_pacientes = 'pacientes_dev'))"
 )
 
 
@@ -6209,10 +6219,22 @@ def _filtro_esp_estadisticas(sesion: dict, area_id: int | None) -> tuple[str, tu
             (esp["id"], esp["id"]), esp)
 
 
-def estadisticas(area_id: int | None = Query(None), sesion: dict = Depends(solo_admin)):
-    """Resumen de envíos para la página de Estadísticas (solo producción, o una
-    area con `area_id`)."""
+def _alcance_estadisticas(sesion: dict, area_id: int | None, base: str):
+    """Separa desarrollo de producción en los tres paneles estadísticos."""
+    if base not in ("produccion", "desarrollo"):
+        raise HTTPException(400, detail="base debe ser produccion o desarrollo")
+    if base == "desarrollo":
+        if area_id is not None:
+            raise HTTPException(400, detail="Desarrollo no se combina con un área")
+        return _SOLO_DEV, _SOLO_DEV_O_AUTO, "", (), None
     filtro_esp, args_esp, esp = _filtro_esp_estadisticas(sesion, area_id)
+    return _SOLO_PROD, _SOLO_PROD_O_AUTO, filtro_esp, args_esp, esp
+
+
+def estadisticas(area_id: int | None = Query(None), base: str = "produccion",
+                 sesion: dict = Depends(solo_admin)):
+    """Resumen de producción/área o de la base de desarrollo."""
+    alcance, _, filtro_esp, args_esp, esp = _alcance_estadisticas(sesion, area_id, base)
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT"
@@ -6223,26 +6245,30 @@ def estadisticas(area_id: int | None = Query(None), sesion: dict = Depends(solo_
             "  SUM(respuesta = 'baja') AS baja"
             " FROM log_envios"
             " WHERE fecha_hora >= DATE_FORMAT(CURDATE(), %s)"
-            f"   AND {_SOLO_PROD}"
+            f"   AND {alcance}"
             f"{filtro_esp}",
             ("%Y-%m-01", *args_esp),
         )
         mes = cur.fetchone() or {}
 
-        cur.execute(f"SELECT COUNT(*) AS n FROM log_envios WHERE estado_envio = 'enviado' AND {_SOLO_PROD}{filtro_esp}",
+        cur.execute(f"SELECT COUNT(*) AS n FROM log_envios WHERE estado_envio = 'enviado' AND {alcance}{filtro_esp}",
                     args_esp or None)
         total_enviados = int((cur.fetchone() or {}).get("n", 0))
-        # Las respuestas entrantes tienen envio_id NULL: no pasan _SOLO_PROD.
+        # Las respuestas entrantes tienen envio_id NULL: se filtran por tabla.
         # Se cuentan teléfonos únicos para evitar duplicar varias réplicas en
         # el mes. Las respuestas antiguas ya asociadas a un envío se conservan.
+        filtro_respuesta_sin_lote = (
+            "tabla_pacientes = 'pacientes_dev'" if base == "desarrollo"
+            else "COALESCE(tabla_pacientes, '') <> 'pacientes_dev'"
+        )
         respuestas_sql = (
             "SELECT CONVERT(numero_telefono USING utf8mb4) COLLATE utf8mb4_unicode_ci"
             " AS telefono FROM log_envios"
             " WHERE fecha_hora >= DATE_FORMAT(CURDATE(), %s)"
             " AND respuesta = 'respondio'"
-            f" AND ((envio_id IS NOT NULL AND {_SOLO_PROD})"
+            f" AND ((envio_id IS NOT NULL AND {alcance})"
             " OR (envio_id IS NULL AND plantilla_clave = 'respuesta'"
-            " AND tabla_pacientes <> 'pacientes_dev'))"
+            f" AND {filtro_respuesta_sin_lote}))"
             f"{filtro_esp}"
         )
         respuestas_args = ("%Y-%m-01", *args_esp)
@@ -6263,7 +6289,10 @@ def estadisticas(area_id: int | None = Query(None), sesion: dict = Depends(solo_
             respuestas_args,
         )
         respondio_mes = int((cur.fetchone() or {}).get("n", 0))
-        if esp:
+        if base == "desarrollo":
+            cur.execute("SELECT COUNT(*) AS n FROM envios"
+                        " WHERE base_datos = 'pacientes_dev' AND area_id IS NULL")
+        elif esp:
             cur.execute(
                 "SELECT COUNT(*) AS n FROM envios e WHERE e.base_datos <> 'pacientes_dev'"
                 " AND (e.area_id = %s OR EXISTS (SELECT 1 FROM log_envios le"
@@ -6290,6 +6319,7 @@ def estadisticas(area_id: int | None = Query(None), sesion: dict = Depends(solo_
     enviados_mes = int(mes.get("enviados") or 0)
     return {
         "mes": time.strftime("%Y-%m"),
+        "base": base,
         "area": ({"id": esp["id"], "nombre_visible": esp["nombre_visible"]} if esp else None),
         "enviados_mes": enviados_mes,
         "fallidos_mes": int(mes.get("fallidos") or 0),
@@ -6299,14 +6329,15 @@ def estadisticas(area_id: int | None = Query(None), sesion: dict = Depends(solo_
         "total_enviados_historico": total_enviados,
         "total_batches": total_batches,
         "pacientes_por_respuesta": _pacientes_por_respuesta(
-            "produccion", tabla=(esp["nombre_tabla_base"] if esp else None)),
+            base, tabla=(esp["nombre_tabla_base"] if esp else None)),
         "pacientes_por_interes": _pacientes_por_interes(
-            "produccion", tabla=(esp["nombre_tabla_base"] if esp else None)),
+            base, tabla=(esp["nombre_tabla_base"] if esp else None)),
         "webhook": webhook,
     }
 
 
 def estadisticas_envios(granularidad: str = Query("mes"), area_id: int | None = Query(None),
+                        base: str = "produccion",
                         periodos: str | None = Query(None),
                         sesion: dict = Depends(solo_admin)):
     """Mensajes enviados agrupados por periodo (para el gráfico de barras)."""
@@ -6316,7 +6347,7 @@ def estadisticas_envios(granularidad: str = Query("mes"), area_id: int | None = 
         seleccion = validar_periodos(periodos, granularidad) if periodos else set()
     except ValueError as exc:
         raise HTTPException(400, detail=str(exc)) from exc
-    filtro_esp, args_esp, esp = _filtro_esp_estadisticas(sesion, area_id)
+    alcance, _, filtro_esp, args_esp, esp = _alcance_estadisticas(sesion, area_id, base)
     # Con selección explícita se incluyen también fechas fuera de la ventana
     # por defecto. El formato se pasa como parámetro para evitar que PyMySQL
     # interprete sus signos de porcentaje al procesar el IN.
@@ -6336,7 +6367,7 @@ def estadisticas_envios(granularidad: str = Query("mes"), area_id: int | None = 
         cur.execute(
             "SELECT DISTINCT DATE_FORMAT(fecha_hora, %s) AS dia FROM log_envios"
             " WHERE estado_envio = 'enviado'"
-            f"   AND {_SOLO_PROD}"
+            f"   AND {alcance}"
             f"{filtro_esp}"
             " ORDER BY dia",
             ("%Y-%m-%d", *args_esp),
@@ -6349,7 +6380,7 @@ def estadisticas_envios(granularidad: str = Query("mes"), area_id: int | None = 
             " FROM log_envios"
             " WHERE estado_envio = 'enviado'"
             f"{filtro_fecha}"
-            f"   AND {_SOLO_PROD}"
+            f"   AND {alcance}"
             f"{filtro_esp}"
             f"{filtro_periodos}"
             " GROUP BY periodo ORDER BY periodo",
@@ -6359,6 +6390,7 @@ def estadisticas_envios(granularidad: str = Query("mes"), area_id: int | None = 
                  for r in cur.fetchall()]
     return {
         "granularidad": granularidad,
+        "base": base,
         "area": ({"id": esp["id"], "nombre_visible": esp["nombre_visible"]} if esp else None),
         "periodos": sorted(seleccion),
         "anios_disponibles": anios_disponibles,
@@ -6735,6 +6767,7 @@ def _categorias_por_clave() -> dict:
 
 
 def estadisticas_costos(granularidad: str = Query("mes"), area_id: int | None = Query(None),
+                        base: str = "produccion",
                         categoria: str | None = Query(None),
                         fecha: str | None = Query(None),
                         periodos: str | None = Query(None),
@@ -6767,7 +6800,7 @@ def estadisticas_costos(granularidad: str = Query("mes"), area_id: int | None = 
     filtro_periodos = (f" AND DATE_FORMAT(fecha_hora, %s) IN ({marcadores_periodos})"
                        if seleccion else "")
     valores_periodos = tuple(sorted(seleccion))
-    filtro_esp, args_esp, esp = _filtro_esp_estadisticas(sesion, area_id)
+    _, alcance_costos, filtro_esp, args_esp, esp = _alcance_estadisticas(sesion, area_id, base)
 
     moneda = _moneda_cuenta()
     tarifas = _tarifas_guardadas(moneda) or _tarifas_guardadas("USD")
@@ -6784,27 +6817,27 @@ def estadisticas_costos(granularidad: str = Query("mes"), area_id: int | None = 
             " FROM log_envios"
             " WHERE estado_envio = 'enviado'"
             "   AND plantilla_clave NOT IN ('respuesta', 'ajuste_manual')"
-            f"   AND {_SOLO_PROD_O_AUTO}"
+            f"   AND {alcance_costos}"
             f"{filtro_esp}"
             f"{filtro_periodos}"
             " GROUP BY periodo, plantilla_clave ORDER BY periodo",
             (fmt, *args_esp, *((fmt, *valores_periodos) if seleccion else ())),
         )
         crudo = cur.fetchall()
-        # El cupo gratuito se calcula con TODAS las áreas juntas, antes de
-        # aplicar el filtro visual. Es compartido por número emisor y mes.
+        # El cupo gratuito se calcula con producción Y desarrollo juntos,
+        # antes del filtro visual: es compartido por número emisor y mes.
         if claves_servicio and tiene_msgid:
             marcadores = ", ".join("%s" for _ in claves_servicio)
             cur.execute(
-                "SELECT le.id, le.wa_phone_id, le.area_id, le.envio_id,"
+                "SELECT le.id, le.wa_phone_id, le.area_id, le.envio_id, le.tabla_pacientes,"
                 " COALESCE(le.entregado_en, le.fecha_hora) AS fecha_entrega,"
-                " (SELECT e.area_id FROM envios e WHERE e.id = le.envio_id) AS area_lote"
+                " (SELECT e.area_id FROM envios e WHERE e.id = le.envio_id) AS area_lote,"
+                " (SELECT e.base_datos FROM envios e WHERE e.id = le.envio_id) AS base_lote"
                 " FROM log_envios le"
                 " WHERE le.estado_envio = 'enviado'"
                 " AND le.estado_whatsapp IN ('delivered', 'read')"
                 " AND le.whatsapp_message_id IS NOT NULL"
-                f" AND le.plantilla_clave IN ({marcadores})"
-                f" AND {_SOLO_PROD_O_AUTO}",
+                f" AND le.plantilla_clave IN ({marcadores})",
                 tuple(claves_servicio),
             )
             entregas_servicio = list(cur.fetchall())
@@ -6857,6 +6890,10 @@ def estadisticas_costos(granularidad: str = Query("mes"), area_id: int | None = 
 
     if categoria in (None, "service"):
         for r, gratis in clasificar_entregas_servicio(entregas_servicio):
+            es_dev = (r.get("base_lote") == "pacientes_dev" or
+                      (not r.get("base_lote") and r.get("tabla_pacientes") == "pacientes_dev"))
+            if (base == "desarrollo") != es_dev:
+                continue
             if esp and (r.get("area_id") or r.get("area_lote")) != esp["id"]:
                 continue
             fecha = r["fecha_entrega"]
@@ -6884,6 +6921,7 @@ def estadisticas_costos(granularidad: str = Query("mes"), area_id: int | None = 
     vig = _tarifa_vigente(tarifas)
     return {
         "granularidad": granularidad,
+        "base": base,
         "fecha": fecha_elegida.isoformat() if fecha_elegida else None,
         "periodos": sorted(seleccion),
         "area": ({"id": esp["id"], "nombre_visible": esp["nombre_visible"]} if esp else None),

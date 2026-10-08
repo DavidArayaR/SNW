@@ -43,22 +43,24 @@ function escaparHtml(valor) {
   return span.innerHTML;
 }
 
-// Área (solo admin/dev): "" = global producción; con id filtra
-// los tres endpoints (resumen, gráfico y costos).
+// Base/área (solo admin/dev): producción por defecto, desarrollo separado;
+// un id filtra los tres endpoints a un área de producción.
 let areasEst = [];
 const selAreaEst = $("#selAreaEst");
 
 function areaEstActual() {
   const v = selAreaEst ? selAreaEst.value : "";
-  return v ? Number(v) : null;
+  return /^\d+$/.test(v) ? Number(v) : null;
 }
 
 function qsEspEst() {
+  if (selAreaEst?.value === "desarrollo") return "&base=desarrollo";
   const esp = areaEstActual();
   return esp ? `&area_id=${esp}` : "";
 }
 
 function nombreAreaEst() {
+  if (selAreaEst?.value === "desarrollo") return "desarrollo";
   const esp = areaEstActual();
   const e = areasEst.find((x) => x.id === esp);
   return e ? e.nombre_visible : "";
@@ -76,14 +78,15 @@ async function cargarAreasEst() {
   }
   const guardada = localStorage.getItem("snw_esp_estadisticas") || "";
   selAreaEst.innerHTML =
-    `<option value="">Todas</option>` +
-    areasEst.map((e) => `<option value="${e.id}">${e.nombre_visible} (${e.nombre_tabla_base})</option>`).join("");
-  if (guardada && areasEst.some((e) => String(e.id) === guardada)) {
+    `<option value="">Producción · todas las áreas</option>` +
+    `<option value="desarrollo">Desarrollo</option>` +
+    areasEst.map((e) => `<option value="${e.id}">${escaparHtml(e.nombre_visible)} (${escaparHtml(e.nombre_tabla_base)})</option>`).join("");
+  if (guardada === "desarrollo" || areasEst.some((e) => String(e.id) === guardada)) {
     selAreaEst.value = guardada;
   } else {
     localStorage.removeItem("snw_esp_estadisticas");
   }
-  selAreaEst.hidden = !areasEst.length;
+  selAreaEst.hidden = false;
 }
 
 if (selAreaEst) selAreaEst.addEventListener("change", () => {
@@ -113,8 +116,8 @@ async function cargar(mostrarFeedback = false) {
   // El botón lo deshabilita/rehabilita el cooldown de snwConCooldown, no
   // esta función (ver el addEventListener más abajo).
   try {
-    const esp = areaEstActual();
-    const res = await fetch(`api/estadisticas${esp ? `?area_id=${esp}` : ""}`, { headers: authHeaders(), cache: "no-store" });
+    const alcance = qsEspEst();
+    const res = await fetch(`api/estadisticas${alcance ? `?${alcance.slice(1)}` : ""}`, { headers: authHeaders(), cache: "no-store" });
     if (res.status === 401) { window.snwSesionExpirada(); return; }
     if (!res.ok) throw new Error();
     render(await res.json());
@@ -134,7 +137,7 @@ function render(d) {
   if (heroSub) {
     heroSub.textContent = espNombre
       ? `mensajes enviados este mes · ${espNombre}`
-      : "mensajes enviados este mes · solo producción";
+      : "mensajes enviados este mes · producción";
   }
   const hintResp = $("#hintRespuestas");
   if (hintResp) {

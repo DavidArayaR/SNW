@@ -35,9 +35,10 @@
           <div class="panel__head">
             <h2>Mensajes enviados en <span id="nombreMes">este mes</span></h2>
             <div class="panel__actions">
-              <label for="selAreaEst">Área:</label>
-              <select id="selAreaEst" class="badge badge--select" aria-label="Área">
-                <option value="">Todas</option>
+              <label for="selAreaEst">Base/área:</label>
+              <select id="selAreaEst" class="badge badge--select" aria-label="Base o área">
+                <option value="">Producción · todas las áreas</option>
+                <option value="desarrollo">Desarrollo</option>
               </select>
               <button id="btnActualizarEstadisticas" class="btn btn--ghost" type="button">Actualizar</button>
             </div>
@@ -46,7 +47,7 @@
           <div class="hero-grid">
             <div class="hero-num-wrap">
               <span class="hero-num" id="enviadosMes">&mdash;</span>
-              <span class="hero-sub">mensajes enviados este mes &middot; solo producci&oacute;n</span>
+              <span class="hero-sub">mensajes enviados este mes &middot; producci&oacute;n</span>
             </div>
           </div>
 
@@ -163,7 +164,7 @@
 
   <script src="js/layout.js?v=navcurve7"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/estadisticas.js?v=tabs-contenido-lateral1"></script>
+  <script src="js/estadisticas.js?v=estadisticas-desarrollo1"></script>
   <script>
     if (window.snwCargarEstadisticas) window.snwCargarEstadisticas();
   </script>
