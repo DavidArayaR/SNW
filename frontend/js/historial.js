@@ -621,50 +621,6 @@ function toast(msg, tipo = "ok") {
 // Los errores no se desvanecen solos: se cierran con click para leerlos bien.
 toastEl.addEventListener("click", () => toastEl.classList.remove("visible"));
 
-/* ---------- Panel "Registro de respuestas de call center" ---------- */
-/* null si no se tiene el permiso `call_center_registro` (data-perm en el HTML) */
-const panelCCLogEl = $("#panelCCRegistro");
-
-async function cargarLogCC(mostrarFeedback = false) {
-  if (!panelCCLogEl) return;
-  const body = $("#ccLogBody");
-  const cont = $("#ccLogContadores");
-  body.innerHTML = `<tr><td colspan="4" style="text-align:center;color:var(--texto-suave);">Cargando…</td></tr>`;
-  try {
-    const r = await fetch("api/call-center/log", { headers: authHeaders(), cache: "no-store" });
-    if (r.status === 401) { window.snwSesionExpirada(); return; }
-    if (!r.ok) throw new Error();
-    const data = await r.json();
-    const c = data.contadores || {};
-    cont.innerHTML = Object.keys(c).length
-      ? "Usos por número: " + Object.entries(c).map(([n, u]) => `<strong>+${escaparHtml(n)}</strong> ${u}`).join(" · ")
-      : "Todavía no se ha usado ningún número.";
-    const filas = data.entradas || [];
-    body.innerHTML = filas.length
-      ? filas.map((f) => {
-          const est = f.estado === "error"
-            ? `<span class="respuesta-badge respuesta-baja">error</span>`
-            : `<span class="respuesta-badge respuesta-respondio">enviado</span>`;
-          return `<tr>` +
-            `<td class="campo-fecha">${escaparHtml(f.fecha)}</td>` +
-            `<td class="campo-nombre">${escaparHtml(f.nombre_paciente ?? "—")}<br><span class="campo-tel">${escaparHtml(f.numero_paciente ?? "")}</span></td>` +
-            `<td class="campo-tel">+${escaparHtml(f.numero_call_center)}</td>` +
-            `<td>${est}${f.descripcion_error ? `<div class="hist-msg">${escaparHtml(f.descripcion_error)}</div>` : ""}</td>` +
-            `</tr>`;
-        }).join("")
-      : `<tr><td colspan="4" style="text-align:center;color:var(--texto-suave);">Todavía no se ha enviado ninguna respuesta de call center.</td></tr>`;
-    if (mostrarFeedback) toast("Registro de call center actualizado correctamente.");
-  } catch {
-    console.error("[historial.js cargarLogCC()]");
-    body.innerHTML = `<tr><td colspan="4" style="text-align:center;color:var(--danger-fg);">No se pudo cargar el registro.</td></tr>`;
-  }
-}
-
-if (panelCCLogEl) {
-  window.snwConCooldown($("#btnActualizarCCLog"), () => cargarLogCC(true));
-}
-
 cargarBasesHist();
 cargar();
-cargarLogCC();
 cargarEnProgreso();

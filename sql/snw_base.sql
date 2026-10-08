@@ -110,7 +110,7 @@ CREATE TABLE IF NOT EXISTS whatsapp_avisos_unicos (
 -- mientras se confirma el bloqueo en Meta. La clave HMAC queda fuera de la BD.
 CREATE TABLE IF NOT EXISTS supresion_telefonos (
   huella CHAR(64) PRIMARY KEY,
-  estado ENUM('pendiente','procesando','completo') NOT NULL DEFAULT 'pendiente',
+  estado ENUM('pendiente','procesando','completo','exento') NOT NULL DEFAULT 'pendiente',
   telefono_pendiente VARCHAR(20) NULL,
   wa_phone_id VARCHAR(64) NULL,
   bases_afectadas INT NOT NULL DEFAULT 0,

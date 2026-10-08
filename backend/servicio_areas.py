@@ -746,7 +746,7 @@ def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int) -> dict:
     from supresion import huella_telefono
 
     with conectar() as conn, conn.cursor() as cur:
-        cur.execute("SELECT huella FROM supresion_telefonos")
+        cur.execute("SELECT huella FROM supresion_telefonos WHERE estado <> 'exento'")
         huellas_bloqueadas = {r["huella"] for r in cur.fetchall()}
         indice = indice_pacientes_por_telefono(cur)
         existentes = {
@@ -782,7 +782,7 @@ def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int) -> dict:
             # CSV, una de las dos transacciones espera y gana la supresión.
             if huella not in huellas_bloqueadas:
                 cur.execute("SELECT 1 FROM supresion_telefonos"
-                            " WHERE huella = %s FOR UPDATE", (huella,))
+                            " WHERE huella = %s AND estado <> 'exento' FOR UPDATE", (huella,))
                 if cur.fetchone():
                     huellas_bloqueadas.add(huella)
             if huella in huellas_bloqueadas:

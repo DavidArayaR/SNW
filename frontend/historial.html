@@ -10,7 +10,6 @@
   <link rel="stylesheet" href="css/styles.css">
   <link rel="stylesheet" href="css/componentes.css?v=historial-carga1">
   <link rel="stylesheet" href="css/layout.css?v=sidebar25">
-  <link rel="stylesheet" href="css/historial.css">
   <script src="js/tema.js"></script>
 </head>
 <body data-pagina="historial">
@@ -82,7 +81,7 @@
           <thead>
             <tr>
               <th>Fecha</th>
-              <th>Origen</th>
+              <th>Tipo</th>
               <th>Base de datos</th>
               <th>Plantilla</th>
               <th>Estado</th>
@@ -96,31 +95,6 @@
           <tbody></tbody>
         </table>
         <p id="tablaVacia" class="tabla-vacia" hidden>Sin env&iacute;os registrados.</p>
-      </div>
-    </section>
-
-    <section class="panel" id="panelCCRegistro" data-perm="call_center_registro">
-      <div class="panel__head">
-        <h2>Registro de respuestas de call center</h2>
-        <button id="btnActualizarCCLog" class="btn btn--ghost" type="button">Actualizar</button>
-      </div>
-      <p class="field__hint historial__cc-intro">
-        Cada respuesta que se le env&iacute;a a un paciente interesado, con el n&uacute;mero de call center
-        que se le asign&oacute; y los datos del paciente.
-      </p>
-      <p id="ccLogContadores" class="field__hint historial__cc-contadores"></p>
-      <div class="tabla-wrap">
-        <table id="tablaCCLog">
-          <thead>
-            <tr>
-              <th>Fecha</th>
-              <th>Paciente</th>
-              <th>N&uacute;mero de call center</th>
-              <th>Estado</th>
-            </tr>
-          </thead>
-          <tbody id="ccLogBody"></tbody>
-        </table>
       </div>
     </section>
 
@@ -170,7 +144,7 @@
 
   <script src="js/layout.js?v=navcurve7"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/historial.js?v=historial-origen1"></script>
+  <script src="js/historial.js?v=historial-tipo1"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>
