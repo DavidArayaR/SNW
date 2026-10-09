@@ -1526,7 +1526,8 @@ def listar_pacientes(q: str | None = Query(None), ambiente: str = Query("producc
 
     with conectar(ambiente) as conn, conn.cursor() as cur:
         cur.execute(sql)
-        filas = cur.fetchall()
+        # PyMySQL devuelve fetchall() como tupla; más abajo se ordena la lista.
+        filas = list(cur.fetchall() or [])
 
     propios = _ids_csv_propios(t, [f["id"] for f in filas], sesion)
     puede_ver_todos_dev = t == "pacientes_dev" and _es_privilegiado(sesion)

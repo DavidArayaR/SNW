@@ -142,10 +142,10 @@ class PacientesPruebaTests(unittest.TestCase):
         self.assertFalse(main._prog_visible({"rol": "supervisor"}, fila))
         self.assertTrue(main._prog_visible(self.admin, fila))
 
-    def test_numeros_de_prueba_aparecen_antes_de_paginar(self):
+    def test_numeros_de_prueba_aparecen_antes_de_paginar_con_fetchall_tupla(self):
         db = MagicMock()
         cursor = db.__enter__.return_value.cursor.return_value.__enter__.return_value
-        cursor.fetchall.return_value = [
+        cursor.fetchall.return_value = (
             {"id": 1, "nombre": "A", "apellido": "", "telefono": "+56911111111",
              "fecha_actualizacion": None, "ultima_respuesta_fecha": None},
             {"id": 2, "nombre": "B", "apellido": "", "telefono": "+56922222222",
@@ -154,7 +154,7 @@ class PacientesPruebaTests(unittest.TestCase):
              "fecha_actualizacion": None, "ultima_respuesta_fecha": None},
             {"id": 4, "nombre": "D", "apellido": "", "telefono": "+56944444444",
              "fecha_actualizacion": None, "ultima_respuesta_fecha": None},
-        ]
+        )
         with patch.object(main, "conectar", return_value=db), \
                 patch.object(main, "expr_select_pacientes", return_value="p.*"), \
                 patch.object(main, "from_pacientes", return_value=" FROM pacientes_dev p"), \
