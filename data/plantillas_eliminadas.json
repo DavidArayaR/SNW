@@ -1,0 +1,26 @@
+[
+  {
+    "nombre": "hola123",
+    "clave": "hola123",
+    "whatsapp_template": "hola123",
+    "eliminada_en": 1790358929928
+  },
+  {
+    "nombre": "Recordar cita",
+    "clave": "recordar_cita",
+    "whatsapp_template": "recordar_cita",
+    "eliminada_en": 1790607437971
+  },
+  {
+    "nombre": "testes",
+    "clave": "testes",
+    "whatsapp_template": "testes",
+    "eliminada_en": 1790871566796
+  },
+  {
+    "nombre": "plantillanombre",
+    "clave": "plantillanombre",
+    "whatsapp_template": "plantillanombre",
+    "eliminada_en": 1790889347023
+  }
+]
