@@ -491,7 +491,7 @@ detalleEl.addEventListener("click", (e) => {
     $("#modalBorrar").hidden = false;
   }
   if (e.target.closest("[data-guardar-correo]")) guardarCorreoRecuperacion(card);
-  if (e.target.closest("[data-enviar-reset]")) enviarCambioClave(card);
+  if (e.target.closest("[data-enviar-reset]")) abrirModalCambioClave(card);
 });
 
 window.addEventListener("resize", posicionarIndicadorTabsUsr);
@@ -524,15 +524,42 @@ async function guardarCorreoRecuperacion(card) {
   }
 }
 
-async function enviarCambioClave(card) {
+const modalCambioClave = $("#modalCambioClave");
+let cambioClavePendiente = null;
+let enviandoCambioClave = false;
+
+function abrirModalCambioClave(card) {
   const correo = card.dataset.correo;
   const btnReset = card.querySelector("[data-enviar-reset]");
   const correoRec = (btnReset && btnReset.dataset.correoGuardado) || "";
   if (!correoRec) return;
-  if (!confirm(`Se enviará un enlace para cambiar la contraseña a "${correoRec}". ¿Confirmar el correo y continuar?`)) {
-    return;
-  }
+  cambioClavePendiente = { correo, correoRec, btnReset };
+  $("#resetCuenta").textContent = correo;
+  $("#resetDestino").textContent = correoRec;
+  $("#resetModalError").hidden = true;
+  $("#resetModalError").textContent = "";
+  modalCambioClave.hidden = false;
+  $("#btnConfirmarCambioClave").focus();
+}
+
+function cerrarModalCambioClave() {
+  if (enviandoCambioClave) return;
+  modalCambioClave.hidden = true;
+  const origen = cambioClavePendiente?.btnReset;
+  cambioClavePendiente = null;
+  if (origen?.isConnected) origen.focus();
+}
+
+async function enviarCambioClave() {
+  if (!cambioClavePendiente || enviandoCambioClave) return;
+  const { correo, btnReset } = cambioClavePendiente;
+  const btnConfirmar = $("#btnConfirmarCambioClave");
+  enviandoCambioClave = true;
   btnReset.disabled = true;
+  btnConfirmar.disabled = true;
+  btnConfirmar.textContent = "Enviando…";
+  $("#btnCancelarCambioClave").disabled = true;
+  $("#resetModalError").hidden = true;
   try {
     const r = await fetch("api/usuarios/" + encodeURIComponent(correo) + "/enviar-cambio-clave", {
       method: "POST",
@@ -540,12 +567,20 @@ async function enviarCambioClave(card) {
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.detail || "No se pudo enviar el enlace.");
+    modalCambioClave.hidden = true;
+    cambioClavePendiente = null;
     toast("Enlace de cambio de contraseña enviado a " + data.destino + ".");
   } catch (ex) {
     console.error("[usuarios.js enviarCambioClave()]", ex);
-    toast(ex.message, "error");
+    $("#resetModalError").textContent = ex.message;
+    $("#resetModalError").hidden = false;
   } finally {
+    enviandoCambioClave = false;
     btnReset.disabled = false;
+    btnConfirmar.disabled = false;
+    btnConfirmar.textContent = "Enviar enlace";
+    $("#btnCancelarCambioClave").disabled = false;
+    if (modalCambioClave.hidden && btnReset.isConnected) btnReset.focus();
   }
 }
 
@@ -572,7 +607,7 @@ formInvitar.addEventListener("submit", async (e) => {
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.detail || "No se pudo enviar la invitación.");
-    toast("Invitación enviada a " + correo + ".");
+    toast("Si corresponde, se enviará una invitación a ese correo.");
     inp.value = "";
   } catch (ex) {
     console.error("[usuarios.js enviarCambioClave()]", ex);
@@ -586,7 +621,16 @@ window.snwConCooldown($("#btnRecargar"), () => cargar(true));
 $("#btnCancelarBorrar").addEventListener("click", cerrarModal);
 $("#btnConfirmarBorrar").addEventListener("click", eliminar);
 $("#modalBorrar").addEventListener("click", (e) => { if (e.target.id === "modalBorrar") cerrarModal(); });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") cerrarModal(); });
+$("#btnCancelarCambioClave").addEventListener("click", cerrarModalCambioClave);
+$("#btnConfirmarCambioClave").addEventListener("click", enviarCambioClave);
+modalCambioClave.addEventListener("click", (e) => {
+  if (e.target === modalCambioClave) cerrarModalCambioClave();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (!modalCambioClave.hidden) cerrarModalCambioClave();
+  else if (!$("#modalBorrar").hidden) cerrarModal();
+});
 
 cargar();
 })();

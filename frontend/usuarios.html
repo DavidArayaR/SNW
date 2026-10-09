@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="css/componentes.css?v=inlinecss1">
   <link rel="stylesheet" href="css/layout.css?v=sidebar25">
   <link rel="stylesheet" href="css/admin.css?v=inlinecss1">
-  <link rel="stylesheet" href="css/usuarios.css?v=tabs-contenido-lateral1">
+  <link rel="stylesheet" href="css/usuarios.css?v=reset-modal1">
   <script src="js/tema.js"></script>
 </head>
 <body data-pagina="usuarios" data-seccion="administracion">
@@ -83,11 +83,28 @@
     </div>
   </div>
 
+  <div id="modalCambioClave" class="modal" role="dialog" aria-modal="true" aria-labelledby="tituloCambioClave" hidden>
+    <div class="modal__card modal__card--reset">
+      <h3 id="tituloCambioClave">Activar cambio de contraseña</h3>
+      <p>Se enviará un enlace para que esta persona cree una contraseña nueva.</p>
+      <div class="usr-reset-modal__datos">
+        <span>Cuenta</span><strong id="resetCuenta"></strong>
+        <span>Correo de destino</span><strong id="resetDestino"></strong>
+      </div>
+      <p class="usr-reset-modal__nota">Comprueba el correo antes de continuar. El enlace será válido durante 2 horas.</p>
+      <p id="resetModalError" class="usr-reset-modal__error" role="alert" hidden></p>
+      <div class="modal__actions">
+        <button type="button" class="btn btn--ghost" id="btnCancelarCambioClave">Cancelar</button>
+        <button type="button" class="btn btn--primary" id="btnConfirmarCambioClave">Enviar enlace</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toast" class="toast"></div>
 
   <script src="js/layout.js?v=navcurve7"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/usuarios.js?v=tabs-contenido-lateral1"></script>
+  <script src="js/usuarios.js?v=reset-modal1"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>
