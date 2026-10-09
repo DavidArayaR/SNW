@@ -9,10 +9,14 @@
     "whatsapp_template_categoria": "MARKETING",
     "whatsapp_template_id": "1737252654192451",
     "whatsapp_template_status": "APPROVED",
-    "whatsapp_template_rejected_reason": null,
+    "whatsapp_template_rejected_reason": "NONE",
     "whatsapp_template_error": null,
     "actualizada": 1790617559020,
-    "area_id": null
+    "area_id": null,
+    "whatsapp_template_quality_score": {
+      "score": "UNKNOWN",
+      "date": 1788793537
+    }
   },
   {
     "id": 3,
@@ -24,14 +28,18 @@
     "whatsapp_template_categoria": "MARKETING",
     "whatsapp_template_id": "1382444860710230",
     "whatsapp_template_status": "APPROVED",
-    "whatsapp_template_rejected_reason": null,
+    "whatsapp_template_rejected_reason": "NONE",
     "whatsapp_template_error": null,
     "actualizada": 1791488974951,
     "ultima_edicion": 1791488974951,
     "whatsapp_template_aprobada_en": 1791489129400,
     "area_id": null,
     "encabezado_media_id": "acda5c4ff087492fa73dc16b3d48c30d",
-    "encabezado_meta_registrado": true
+    "encabezado_meta_registrado": true,
+    "whatsapp_template_quality_score": {
+      "score": "UNKNOWN",
+      "date": 1788793570
+    }
   },
   {
     "id": 4,
@@ -43,12 +51,16 @@
     "whatsapp_template_categoria": "UTILITY",
     "whatsapp_template_id": "1285483704651425",
     "whatsapp_template_status": "APPROVED",
-    "whatsapp_template_rejected_reason": null,
+    "whatsapp_template_rejected_reason": "NONE",
     "whatsapp_template_error": null,
     "actualizada": 1790617613535,
     "area_id": null,
     "ultima_edicion": 1790617613535,
-    "whatsapp_template_aprobada_en": 1790617655686
+    "whatsapp_template_aprobada_en": 1790617655686,
+    "whatsapp_template_quality_score": {
+      "score": "UNKNOWN",
+      "date": 1788551720
+    }
   },
   {
     "id": 6,
@@ -60,9 +72,13 @@
     "whatsapp_template_categoria": "MARKETING",
     "whatsapp_template_id": "1078069998347221",
     "whatsapp_template_status": "APPROVED",
-    "whatsapp_template_rejected_reason": null,
+    "whatsapp_template_rejected_reason": "NONE",
     "whatsapp_template_error": null,
-    "actualizada": 1790871513451
+    "actualizada": 1790871513451,
+    "whatsapp_template_quality_score": {
+      "score": "UNKNOWN",
+      "date": 1791491704
+    }
   },
   {
     "id": 7,
@@ -103,7 +119,11 @@
     "encabezado_texto": null,
     "whatsapp_header_format": "VIDEO",
     "whatsapp_template_aprobada_en": 1791555221526,
-    "whatsapp_template_rejected_reason": null
+    "whatsapp_template_rejected_reason": "NONE",
+    "whatsapp_template_quality_score": {
+      "score": "UNKNOWN",
+      "date": 1791555258
+    }
   },
   {
     "id": 8,
@@ -144,6 +164,10 @@
     "encabezado_texto": null,
     "whatsapp_header_format": "IMAGE",
     "whatsapp_template_aprobada_en": 1791560430603,
-    "whatsapp_template_rejected_reason": null
+    "whatsapp_template_rejected_reason": "NONE",
+    "whatsapp_template_quality_score": {
+      "score": "UNKNOWN",
+      "date": 1791560482
+    }
   }
 ]
