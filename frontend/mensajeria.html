@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="css/styles.css?v=plantillas-tabs1">
   <link rel="stylesheet" href="css/componentes.css">
   <link rel="stylesheet" href="css/layout.css?v=sidebar25">
-  <link rel="stylesheet" href="css/mensajeria.css?v=tabs-contenido-lateral1">
+  <link rel="stylesheet" href="css/mensajeria.css?v=plantillas-prueba3">
   <link rel="stylesheet" href="css/calendario.css?v=base1">
   <link rel="stylesheet" href="css/calendario-programados.css?v=programados2">
   <script src="js/tema.js"></script>
@@ -95,6 +95,15 @@
           </div>
         </div>
 
+        <div class="field field--encabezado">
+          <label for="inpEncabezadoMedia">Encabezado multimedia (opcional)</label>
+          <div class="encabezado-media__fila">
+            <input type="file" id="inpEncabezadoMedia" accept="image/jpeg,image/png,image/gif,.jpg,.jpeg,.png,.gif">
+            <button type="button" id="btnQuitarEncabezado" class="btn btn--ghost" hidden>Quitar</button>
+          </div>
+          <p id="estadoEncabezado" class="field__hint">JPG, PNG o GIF, máximo 3,5 MB. Los GIF se convierten a video para Meta.</p>
+        </div>
+
         <div class="wildcards" role="group" aria-label="Datos automáticos">
           <span class="wildcards__label">Insertar dato automático:</span>
           <button type="button" class="chip" data-wc="{nombre}" title="Nombre del paciente">{nombre}</button>
@@ -105,16 +114,33 @@
         <div class="preview-wrap">
           <div class="preview-head">
             <h3>Vista previa</h3>
-            <span class="preview-note">Así lo recibirá el paciente (datos de ejemplo)</span>
+            <span class="preview-note">Así se verá el template con datos de ejemplo</span>
           </div>
           <div class="phone">
             <div class="chat">
               <div class="bubble">
+                <img id="previewMedia" class="bubble__media" alt="Vista previa del encabezado" hidden>
+                <div id="previewEncabezadoTexto" class="bubble__encabezado" hidden></div>
                 <div id="previewTexto"></div>
+                <div id="previewPie" class="bubble__pie" hidden></div>
                 <span class="bubble__time" id="previewHora"></span>
               </div>
               <div id="previewBotones" class="bubble__botones"></div>
             </div>
+          </div>
+          <div id="previewValidaciones" class="preview-validaciones" role="status" aria-live="polite"></div>
+          <div class="preview-prueba">
+            <div class="preview-ejemplos" role="group" aria-label="Datos de ejemplo para la prueba">
+              <label for="inpEjemploNombre">Nombre de ejemplo<input id="inpEjemploNombre" type="text" value="David" maxlength="80" autocomplete="off"></label>
+              <label for="inpEjemploApellido">Apellido de ejemplo<input id="inpEjemploApellido" type="text" value="Araya" maxlength="80" autocomplete="off"></label>
+            </div>
+            <label for="selNumeroPrueba">Enviar prueba a un número autorizado</label>
+            <div class="preview-prueba__acciones">
+              <select id="selNumeroPrueba"><option value="">— Seleccione número de prueba —</option></select>
+              <button type="button" id="btnRecargarNumerosPrueba" class="btn btn--ghost">Actualizar números</button>
+              <button type="button" id="btnEnviarPrueba" class="btn btn--primary" disabled>Enviar prueba</button>
+            </div>
+            <p id="estadoEnvioPrueba" class="field__hint" role="status" aria-live="polite">La prueba envía un solo mensaje, sin crear una campaña.</p>
           </div>
         </div>
 
@@ -475,7 +501,7 @@
   <div id="toast" class="toast"></div>
   <script src="js/layout.js?v=tabs3-navcurve7"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/app.js?v=solo-privilegios-dev1"></script>
+  <script src="js/app.js?v=plantillas-prueba3"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>

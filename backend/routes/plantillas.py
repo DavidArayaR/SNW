@@ -1,6 +1,11 @@
 from ._registry import crear_router
 
 RUTAS = (
+    ("/api/plantillas/previsualizar", "POST", "previsualizar_plantilla", None),
+    ("/api/plantillas/prueba/destinatarios", "GET", "destinatarios_prueba_plantilla", None),
+    ("/api/plantillas/{plantilla_id}/prueba", "POST", "enviar_prueba_plantilla", None),
+    ("/api/plantillas/media", "POST", "subir_encabezado_plantilla", None),
+    ("/api/plantillas/media/{media_id}", "GET", "ver_encabezado_plantilla", None),
     ("/api/plantillas", "GET", "listar_plantillas", None), ("/api/plantillas/{plantilla_id}/estado-meta", "GET", "estado_plantilla_meta", None),
     ("/api/plantillas/estado-meta/actualizar", "POST", "actualizar_todos_estados_meta", None),
     ("/api/plantillas/sincronizar-meta", "POST", "sincronizar_plantillas_meta", None),

@@ -11,6 +11,12 @@ const esPlantillaValida = (p) =>
 let plantillas = [];
 let activaId = null;
 let snapshot = null;
+let encabezadoMediaId = null;
+let subiendoEncabezado = false;
+let urlPreviewMedia = null;
+let versionPreviewMedia = 0;
+let versionEditor = 0;
+let appIdMetaConfigurada = null;
 
 // Áreas visibles para la cuenta (Fase 3): todas si es
 // privilegiada, solo las asignadas si no. Las plantillas pueden asociarse a
@@ -43,6 +49,10 @@ let filtroArea = localStorage.getItem("snw_filtro_tpl") || "todas";
 const formEl = $("#formPlantilla");
 const inpNombre = $("#inpNombre");
 const inpMensaje = $("#inpMensaje");
+const inpEncabezadoMedia = $("#inpEncabezadoMedia");
+const btnQuitarEncabezado = $("#btnQuitarEncabezado");
+const estadoEncabezado = $("#estadoEncabezado");
+const previewMedia = $("#previewMedia");
 const inpTemplate = $("#inpTemplate");
 const inpTemplateLang = $("#inpTemplateLang");
 const inpTemplateCategoria = $("#inpTemplateCategoria");
@@ -67,8 +77,23 @@ const hintNombre = $("#hintNombre");
 const hintTemplate = $("#hintTemplate");
 const infoCreacion = $("#infoCreacion");
 const previewTexto = $("#previewTexto");
+const previewEncabezadoTexto = $("#previewEncabezadoTexto");
+const previewPie = $("#previewPie");
 const previewHora = $("#previewHora");
 const previewBotones = $("#previewBotones");
+const inpEjemploNombre = $("#inpEjemploNombre");
+const inpEjemploApellido = $("#inpEjemploApellido");
+const previewValidaciones = $("#previewValidaciones");
+const selNumeroPrueba = $("#selNumeroPrueba");
+const btnRecargarNumerosPrueba = $("#btnRecargarNumerosPrueba");
+const btnEnviarPrueba = $("#btnEnviarPrueba");
+const estadoEnvioPrueba = $("#estadoEnvioPrueba");
+let erroresPreview = [];
+let puedeEnviarPrueba = false;
+let enviandoPrueba = false;
+let previewTimer = null;
+let previewSolicitud = 0;
+let validandoPreview = false;
 const tituloForm = $("#tituloFormulario");
 const estadoVacio = $("#estadoVacio");
 const btnEliminar = $("#btnEliminar");
@@ -76,13 +101,6 @@ const btnGuardar = $("#btnGuardar");
 const btnEnviarActual = $("#btnEnviarActual");
 const modalEl = $("#modalEliminar");
 const toastEl = $("#toast");
-
-const BOTONES_PREDEFINIDOS = ["Me interesa", "No me interesa", "Dar de baja"];
-
-const DATOS_EJEMPLO = {
-  nombre: "David",
-  apellido: "Araya",
-};
 
 // Estado del template en Meta. Solo una plantilla APPROVED se puede usar para
 // enviar mensajes. Editar, guardar y eliminar se permiten en APPROVED y
@@ -365,11 +383,11 @@ async function revisarPlantillasEnSegundoPlano() {
   }
 }
 
-async function crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id) {
+async function crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezado_media_id, ejemplos) {
   const res = await fetch(API_URL, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ clave: slug(nombre), nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id }),
+    body: JSON.stringify({ clave: slug(nombre), nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezado_media_id, ejemplos }),
   });
   if (res.status === 401) { window.snwSesionExpirada(); return Promise.reject(new Error("Sesión expirada")); }
   const data = await res.json().catch(() => ({}));
@@ -377,11 +395,11 @@ async function crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_te
   return data;
 }
 
-async function actualizarPlantilla(id, nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id) {
+async function actualizarPlantilla(id, nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezado_media_id, ejemplos) {
   const res = await fetch(`${API_URL}/${id}`, {
     method: "PUT",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id }),
+    body: JSON.stringify({ nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezado_media_id, ejemplos }),
   });
   if (res.status === 401) { window.snwSesionExpirada(); return Promise.reject(new Error("Sesión expirada")); }
   const data = await res.json().catch(() => ({}));
@@ -694,31 +712,225 @@ function renderLista(filtro = "") {
 }
 
 function actualizarPreview() {
-  const texto = inpMensaje.value.trim();
-
-  if (!texto) {
-    previewTexto.textContent = "Aquí verás cómo llega el mensaje al paciente...";
-    previewTexto.parentElement.classList.add("bubble--vacia");
-  } else {
-    let reemplazado = texto;
-    for (const [clave, valor] of Object.entries(DATOS_EJEMPLO)) {
-      reemplazado = reemplazado.replaceAll(`{${clave}}`, valor);
-    }
-    previewTexto.innerHTML = formatearWhatsApp(reemplazado);
-    previewTexto.parentElement.classList.remove("bubble--vacia");
-  }
-
+  clearTimeout(previewTimer);
+  previewSolicitud++;
   previewHora.textContent = new Date().toLocaleTimeString("es-CL", {
     hour: "2-digit",
     minute: "2-digit",
   });
+  if (formEl.style.display === "none") return;
+  puedeEnviarPrueba = false;
+  validandoPreview = true;
+  actualizarEstadoBotonGuardar();
+  previewTimer = setTimeout(() => consultarPreview(previewSolicitud), 180);
+}
 
-  if (previewBotones) {
-    previewBotones.innerHTML = BOTONES_PREDEFINIDOS
-      .map((b) => `<div class="bubble__boton"><i class="fa-solid fa-reply"></i> ${escaparHtml(b)}</div>`)
-      .join("");
+function ejemplosPreview() {
+  return { nombre: inpEjemploNombre.value.trim(), apellido: inpEjemploApellido.value.trim() };
+}
+
+function actualizarEstadoBotonPrueba() {
+  btnEnviarPrueba.disabled = enviandoPrueba || !puedeEnviarPrueba || !activaId ||
+    !selNumeroPrueba.value || hayCambios() || subiendoEncabezado;
+}
+
+function mostrarValidaciones(errores, avisos) {
+  previewValidaciones.replaceChildren();
+  for (const [lista, tipo] of [[errores, "error"], [avisos, "aviso"]]) {
+    for (const mensaje of lista) {
+      const nodo = document.createElement("p");
+      nodo.className = `preview-validaciones__item preview-validaciones__item--${tipo}`;
+      nodo.textContent = mensaje;
+      previewValidaciones.appendChild(nodo);
+    }
   }
 }
+
+function mostrarPreviewServidor(data) {
+  previewTexto.innerHTML = formatearWhatsApp(data.cuerpo || "Aquí verás cómo llega el mensaje al paciente...");
+  previewTexto.parentElement.classList.toggle("bubble--vacia", !data.cuerpo);
+  previewEncabezadoTexto.textContent = data.encabezado?.tipo === "texto" ? data.encabezado.texto : "";
+  previewEncabezadoTexto.hidden = !previewEncabezadoTexto.textContent;
+  previewPie.textContent = data.pie || "";
+  previewPie.hidden = !previewPie.textContent;
+  previewBotones.replaceChildren();
+  for (const boton of data.botones || []) {
+    const nodo = document.createElement("div");
+    nodo.className = "bubble__boton";
+    const icono = document.createElement("i");
+    icono.className = `fa-solid ${boton.tipo === "url" ? "fa-arrow-up-right-from-square" :
+      boton.tipo === "telefono" ? "fa-phone" : "fa-reply"}`;
+    nodo.append(icono, document.createTextNode(` ${boton.texto}`));
+    previewBotones.appendChild(nodo);
+  }
+  erroresPreview = data.errores || [];
+  puedeEnviarPrueba = !!data.puede_enviar_prueba;
+  mostrarValidaciones(erroresPreview, data.avisos || []);
+  actualizarEstadoBotonGuardar();
+  actualizarEstadoBotonPrueba();
+}
+
+async function consultarPreview(solicitud) {
+  try {
+    const res = await fetch(`${API_URL}/previsualizar`, {
+      method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ plantilla_id: activaId, texto: inpMensaje.value,
+        encabezado_media_id: encabezadoMediaId, ejemplos: ejemplosPreview() }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || `Error ${res.status}`);
+    if (solicitud !== previewSolicitud) return null;
+    validandoPreview = false;
+    mostrarPreviewServidor(data);
+    return data;
+  } catch (err) {
+    if (solicitud === previewSolicitud) {
+      validandoPreview = false;
+      erroresPreview = ["No se pudo validar la vista previa. Revisa la conexión."];
+      puedeEnviarPrueba = false;
+      mostrarValidaciones(erroresPreview, []);
+      actualizarEstadoBotonGuardar();
+      actualizarEstadoBotonPrueba();
+    }
+    return null;
+  }
+}
+
+async function cargarDestinatariosPrueba() {
+  btnRecargarNumerosPrueba.disabled = true;
+  try {
+    const res = await fetch(`${API_URL}/prueba/destinatarios`, {
+      headers: authHeaders(), cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const anterior = selNumeroPrueba.value;
+    selNumeroPrueba.replaceChildren(new Option("— Seleccione número de prueba —", ""));
+    for (const telefono of data.telefonos || []) selNumeroPrueba.add(new Option(telefono, telefono));
+    if ([...selNumeroPrueba.options].some((o) => o.value === anterior)) selNumeroPrueba.value = anterior;
+    if (!(data.telefonos || []).length) {
+      estadoEnvioPrueba.textContent = "Configura un número de prueba para este entorno antes de enviar.";
+    } else {
+      estadoEnvioPrueba.textContent = `Números autorizados en ${data.ambiente}: ${data.telefonos.length}. La prueba envía un solo mensaje.`;
+    }
+    actualizarEstadoBotonPrueba();
+  } catch (err) {
+    estadoEnvioPrueba.textContent = "No se pudieron cargar los números de prueba. Pulsa «Actualizar números».";
+    console.error("[app.js cargarDestinatariosPrueba()]", err);
+  } finally {
+    btnRecargarNumerosPrueba.disabled = false;
+  }
+}
+
+inpEjemploNombre.addEventListener("input", actualizarPreview);
+inpEjemploApellido.addEventListener("input", actualizarPreview);
+selNumeroPrueba.addEventListener("change", actualizarEstadoBotonPrueba);
+btnRecargarNumerosPrueba.addEventListener("click", cargarDestinatariosPrueba);
+btnEnviarPrueba.addEventListener("click", async () => {
+  if (!activaId || enviandoPrueba) return;
+  clearTimeout(previewTimer);
+  const vista = await consultarPreview(++previewSolicitud);
+  if (!vista?.puede_enviar_prueba || hayCambios()) {
+    return toast("Corrige la vista previa y guarda la plantilla antes de probarla.", "error");
+  }
+  const telefono = selNumeroPrueba.value;
+  if (!telefono || !confirm(`¿Enviar una sola prueba de «${inpNombre.value}» a ${telefono}?`)) return;
+  enviandoPrueba = true;
+  estadoEnvioPrueba.textContent = "Enviando prueba a Meta…";
+  actualizarEstadoBotonPrueba();
+  try {
+    const res = await fetch(`${API_URL}/${activaId}/prueba`, {
+      method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ telefono, ejemplos: ejemplosPreview() }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || `Error ${res.status}`);
+    estadoEnvioPrueba.textContent = data.mensaje;
+    toast("Prueba aceptada por Meta. Comprueba que llegó al teléfono.", "ok");
+  } catch (err) {
+    estadoEnvioPrueba.textContent = `No se pudo enviar la prueba: ${err.message}`;
+    toast(err.message, "error");
+  } finally {
+    enviandoPrueba = false;
+    actualizarEstadoBotonPrueba();
+  }
+});
+cargarDestinatariosPrueba();
+
+function limpiarVistaEncabezado() {
+  versionPreviewMedia++;
+  if (urlPreviewMedia) URL.revokeObjectURL(urlPreviewMedia);
+  urlPreviewMedia = null;
+  previewMedia.removeAttribute("src");
+  previewMedia.hidden = true;
+}
+
+async function mostrarEncabezadoGuardado(mediaId) {
+  limpiarVistaEncabezado();
+  if (!mediaId) return;
+  const version = versionPreviewMedia;
+  try {
+    const res = await fetch(`${API_URL}/media/${mediaId}`, { headers: authHeaders(), cache: "no-store" });
+    if (!res.ok) return;
+    const blob = await res.blob();
+    if (version !== versionPreviewMedia || encabezadoMediaId !== mediaId) return;
+    urlPreviewMedia = URL.createObjectURL(blob);
+    previewMedia.src = urlPreviewMedia;
+    previewMedia.hidden = false;
+  } catch { /* El editor sigue disponible aunque falle la vista previa. */ }
+}
+
+function establecerEncabezado(mediaId) {
+  encabezadoMediaId = mediaId || null;
+  inpEncabezadoMedia.value = "";
+  btnQuitarEncabezado.hidden = !encabezadoMediaId;
+  estadoEncabezado.textContent = encabezadoMediaId
+    ? (appIdMetaConfigurada === false
+      ? "Configura el App ID de Meta antes de guardar esta plantilla."
+      : "Encabezado listo. Puedes quitarlo o reemplazarlo.")
+    : "JPG, PNG o GIF, máximo 3,5 MB. Los GIF se convierten a video para Meta.";
+  mostrarEncabezadoGuardado(encabezadoMediaId);
+  actualizarEstadoBotonGuardar();
+  actualizarPreview();
+}
+
+inpEncabezadoMedia.addEventListener("change", async () => {
+  const archivo = inpEncabezadoMedia.files[0];
+  const editorAlIniciar = versionEditor;
+  if (!archivo) return;
+  if (archivo.size > 3500000 || archivo.size === 0) {
+    inpEncabezadoMedia.value = "";
+    return toast("El encabezado debe pesar como máximo 3,5 MB.", "error");
+  }
+  subiendoEncabezado = true;
+  btnQuitarEncabezado.disabled = true;
+  estadoEncabezado.textContent = "Preparando encabezado…";
+  actualizarEstadoBotonGuardar();
+  try {
+    const cuerpo = new FormData();
+    cuerpo.append("archivo", archivo);
+    const res = await fetch(`${API_URL}/media`, { method: "POST", headers: authHeaders(), body: cuerpo });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || `Error ${res.status}`);
+    if (editorAlIniciar !== versionEditor) return;
+    establecerEncabezado(data.id);
+    if (appIdMetaConfigurada !== false) {
+      estadoEncabezado.textContent = data.tipo === "gif"
+        ? "GIF convertido a video para Meta. Vista previa animada disponible."
+        : "Imagen lista para el encabezado.";
+    }
+  } catch (err) {
+    if (editorAlIniciar !== versionEditor) return;
+    estadoEncabezado.textContent = err.message;
+    toast(err.message, "error");
+  } finally {
+    subiendoEncabezado = false;
+    actualizarBloqueoCampos();
+    inpEncabezadoMedia.value = "";
+    actualizarEstadoBotonGuardar();
+  }
+});
+
+btnQuitarEncabezado.addEventListener("click", () => establecerEncabezado(null));
 
 function actualizarContador() {
   const largo = inpMensaje.value.length;
@@ -751,7 +963,7 @@ function refrescarEditor() {
 if (inpArea) inpArea.addEventListener("change", refrescarEditor);
 
 function estadoActualEditor() {
-  return JSON.stringify([inpNombre.value, inpMensaje.value, valTemplate(), valTemplateLang(), valTemplateCategoria(), inpArea ? inpArea.value : ""]);
+  return JSON.stringify([inpNombre.value, inpMensaje.value, valTemplate(), valTemplateLang(), valTemplateCategoria(), inpArea ? inpArea.value : "", encabezadoMediaId]);
 }
 
 function marcarSnapshot() {
@@ -771,7 +983,9 @@ function actualizarEstadoBotonGuardar() {
   if (!btnGuardar) return;
   const incompleto = !inpNombre.value.trim() || !inpMensaje.value.trim() ||
     ((window.snwRol || "") === "usuario" && !(inpArea && inpArea.value));
-  btnGuardar.disabled = !hayCambios() || incompleto;
+  btnGuardar.disabled = !hayCambios() || incompleto || subiendoEncabezado ||
+    (!!encabezadoMediaId && appIdMetaConfigurada === false) || validandoPreview || !!erroresPreview.length;
+  actualizarEstadoBotonPrueba();
 }
 
 function renderEstadoMeta(p) {
@@ -942,6 +1156,12 @@ function actualizarBloqueoCampos() {
 
   if (!PUEDE_EDITAR_PLANTILLAS || (p && (!esPlantillaEditable(p) || editadaRecientemente(p) || !puedeEditarEsta(p)))) {
     formEl.querySelectorAll("input, textarea, select").forEach((el) => { el.disabled = true; });
+    // La revisión y la prueba son independientes de editar la plantilla.
+    // Una plantilla aprobada puede estar en solo lectura y aun así probarse.
+    inpEjemploNombre.disabled = false;
+    inpEjemploApellido.disabled = false;
+    selNumeroPrueba.disabled = false;
+    btnQuitarEncabezado.disabled = true;
     return;
   }
   // El mensaje se deja sin disabled explícito acá arriba: solo se pone
@@ -949,6 +1169,11 @@ function actualizarBloqueoCampos() {
   // false al pasar a una plantilla sí editable — quedaba pegado en
   // disabled para siempre después de abrir la primera no editable.
   inpMensaje.disabled = false;
+  inpEjemploNombre.disabled = false;
+  inpEjemploApellido.disabled = false;
+  selNumeroPrueba.disabled = false;
+  inpEncabezadoMedia.disabled = false;
+  btnQuitarEncabezado.disabled = false;
   inpNombre.disabled = esExistente;
   inpNombre.title = esExistente
     ? "El nombre es permanente y no se puede cambiar. Para usar otro nombre, elimina la plantilla y crea una nueva."
@@ -981,6 +1206,7 @@ function actualizarBloqueoCampos() {
 function abrir(id) {
   const p = plantillas.find((x) => x.id === id);
   if (!p) return;
+  versionEditor++;
   activaId = id;
   tplSelId = id;
   guardarSelTpl();
@@ -989,6 +1215,9 @@ function abrir(id) {
   tituloForm.textContent = (PUEDE_EDITAR_PLANTILLAS && esPlantillaEditable(p)) ? `Editando: ${p.nombre}` : p.nombre;
   inpNombre.value = p.nombre;
   inpMensaje.value = p.texto;
+  inpEjemploNombre.value = "David";
+  inpEjemploApellido.value = "Araya";
+  establecerEncabezado(p.encabezado_media_id);
   if (inpArea) {
     const espVal = p.area_id != null ? String(p.area_id) : "";
     if (espVal && ![...inpArea.options].some((o) => o.value === espVal)) {
@@ -1034,12 +1263,16 @@ function actualizarInfoCreacion(p) {
 }
 
 function modoNueva() {
+  versionEditor++;
   activaId = null;
   estadoVacio.style.display = "none";
   formEl.style.display = "";
   tituloForm.textContent = "Nueva plantilla";
   inpNombre.value = "";
   inpMensaje.value = "";
+  inpEjemploNombre.value = "David";
+  inpEjemploApellido.value = "Araya";
+  establecerEncabezado(null);
   if (inpArea) inpArea.value = "";
   if (hayTemplateMeta) {
     inpTemplateLang.value = "es";
@@ -1060,10 +1293,17 @@ function modoNueva() {
 }
 
 function modoVacia() {
+  versionEditor++;
   activaId = null;
   tplSelId = null;
   snapshot = null;
+  clearTimeout(previewTimer);
+  previewSolicitud++;
+  erroresPreview = [];
+  puedeEnviarPrueba = false;
+  validandoPreview = false;
   formEl.style.display = "none";
+  establecerEncabezado(null);
   estadoVacio.style.display = "flex";
   tituloForm.textContent = "Plantillas";
   actualizarBotonesSegunEstado(null);
@@ -1099,6 +1339,10 @@ function cancelarEdicion() {
 
 formEl.addEventListener("submit", async (e) => {
   e.preventDefault();
+  if (subiendoEncabezado) return toast("Espera a que termine la carga del encabezado.", "error");
+  if (encabezadoMediaId && appIdMetaConfigurada === false) {
+    return toast("Configura el App ID de Meta antes de guardar esta plantilla.", "error");
+  }
   if (!PUEDE_EDITAR_PLANTILLAS) return;
   // Blindaje: aunque el botón esté oculto, el formulario no debe guardarse
   // si la plantilla activa todavía está pendiente de revisión en Meta, o se
@@ -1163,6 +1407,11 @@ formEl.addEventListener("submit", async (e) => {
     );
   }
 
+  const vistaPrevia = await consultarPreview(++previewSolicitud);
+  if (!vistaPrevia || vistaPrevia.errores?.length) {
+    return toast("Corrige los errores de la vista previa antes de guardar.", "error");
+  }
+
   setGuardando(true);
 
   try {
@@ -1172,11 +1421,11 @@ formEl.addEventListener("submit", async (e) => {
     }
     let fila;
     if (activaId) {
-      fila = await actualizarPlantilla(activaId, nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id);
+      fila = await actualizarPlantilla(activaId, nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezadoMediaId, ejemplosPreview());
       const i = plantillas.findIndex((x) => x.id === activaId);
       if (i >= 0) plantillas[i] = fila;
     } else {
-      fila = await crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id);
+      fila = await crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezadoMediaId, ejemplosPreview());
       plantillas.push(fila);
     }
     setGuardando(false);
@@ -1457,6 +1706,11 @@ function setBloqueoEnvioConf(bloquear) {
 fetch("api/configuracion", { headers: authHeaders(), cache: "no-store" })
   .then((r) => (r.ok ? r.json() : null))
   .then((cfg) => {
+    if (cfg && typeof cfg.app_id_meta_configurada === "boolean") {
+      appIdMetaConfigurada = cfg.app_id_meta_configurada;
+      if (encabezadoMediaId) establecerEncabezado(encabezadoMediaId);
+      actualizarEstadoBotonGuardar();
+    }
     if (cfg && cfg.entorno) {
       entornoGlobal = cfg.entorno;
     }
@@ -2150,6 +2404,7 @@ function refrescarVistaPlantillaActiva(p) {
   renderEstadoMeta(p);
   actualizarBotonesSegunEstado(p);
   actualizarBloqueoCampos();
+  actualizarPreview();
 }
 
 if (btnRevisarTodos) {

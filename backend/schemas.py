@@ -14,6 +14,20 @@ class PlantillaIn(BaseModel):
     whatsapp_template_lang: str | None = None
     whatsapp_template_categoria: str | None = None
     area_id: int | None = None
+    encabezado_media_id: str | None = None
+    ejemplos: dict[str, str] | None = None
+
+
+class PlantillaPreviaIn(BaseModel):
+    plantilla_id: int | None = None
+    texto: str
+    encabezado_media_id: str | None = None
+    ejemplos: dict[str, str] | None = None
+
+
+class PruebaPlantillaIn(BaseModel):
+    telefono: str
+    ejemplos: dict[str, str] | None = None
 
 
 class EnvioIn(BaseModel):
@@ -41,6 +55,7 @@ class ConfigIn(BaseModel):
     wa_token: str | None = None
     wa_phone_id: str | None = None
     wa_business_account_id: str | None = None
+    wa_app_id: str | None = None
     wa_verify_token: str | None = None
     wa_app_secret: str | None = None
     wa_template_nombre: str | None = None

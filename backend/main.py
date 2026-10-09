@@ -28,7 +28,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from db import (
     conectar, entorno_valido, log_error, nombre_base, columnas_tabla, columna_existe,
@@ -45,6 +45,8 @@ from db import (
 )
 from motor_envio import obtener_canal
 import whatsapp_service
+from plantilla_media import MAX_MEDIA_BYTES, guardar_media, obtener_media, ruta_media
+from plantilla_revision import MAX_CUERPO, presentar_plantilla, componentes_para_vista
 from wa_rate_limit import gobernador as wa_gobernador
 from whatsapp_service import WhatsAppService, es_mensaje_interes
 from whatsapp_webhook import router as whatsapp_router
@@ -58,7 +60,7 @@ from schemas import (
     CorreoRecuperacionIn, EnvioIn, AreaIn, AreaRenombrarIn,
     InvitarIn, LoginIn, OlvideIn,
     PlantillaIn, PruebaWAIn, ResetIn, RolAreaIn, UsuarioUpdIn,
-    RechazoPlantillaIn,
+    RechazoPlantillaIn, PlantillaPreviaIn, PruebaPlantillaIn,
 )
 from telefono import normalizar_telefono
 import servicio_areas
@@ -144,7 +146,7 @@ async def sin_cache(request, call_next):
     return respuesta
 
 
-MAX_TEXTO_PLANTILLA = 1024  # máximo de caracteres del cuerpo del mensaje (límite de Meta)
+MAX_TEXTO_PLANTILLA = MAX_CUERPO  # representación común de preview y envío
 CATEGORIAS_TEMPLATE = ("UTILITY", "MARKETING", "AUTHENTICATION")  # categorías válidas de Meta
 # Estados de plantilla en los que SÍ se puede editar/guardar/eliminar:
 # aprobada, o rechazada (para poder corregirla y volver a mandarla a revisión,
@@ -2406,6 +2408,7 @@ def _registrar_template_meta(p: dict, nombre_anterior: str | None = None,
         resultado = servicio.guardar_template_meta(
             nombre_template, p.get("texto", ""), lang, categoria,
             template_id_conocido=id_conocido,
+            media_id=p.get("encabezado_media_id"),
         )
     except Exception as e:
         log_error(f"_registrar_template_meta({nombre_template!r})", e)
@@ -2414,6 +2417,16 @@ def _registrar_template_meta(p: dict, nombre_anterior: str | None = None,
     p["whatsapp_template_id"] = resultado.get("template_id") or id_conocido
     p["whatsapp_template_status"] = resultado.get("status")
     p["whatsapp_template_error"] = resultado.get("error")
+    p["encabezado_meta_registrado"] = bool(resultado.get("ok")) if p.get("encabezado_media_id") else None
+    if resultado.get("ok"):
+        # El payload que acabamos de registrar usa los botones fijos del
+        # editor; no conservar una descripción vieja importada desde Meta.
+        p["botones"] = [{"tipo": "respuesta", "texto": b["text"]}
+                        for b in whatsapp_service.BOTONES_RESPUESTA]
+        p["pie_texto"] = None
+        p["encabezado_texto"] = None
+        p["whatsapp_header_format"] = (obtener_media(p["encabezado_media_id"])["formato_meta"]
+                                         if p.get("encabezado_media_id") else None)
     # Crear o reenviar a revisión nunca deja la plantilla en APPROVED de
     # entrada (Meta siempre la vuelve a revisar); se limpia el aviso de
     # «aprobada recientemente» de una aprobación previa si la hubo.
@@ -2465,6 +2478,11 @@ def _actualizar_estado_meta(p: dict) -> dict:
     que el estado pasa a APPROVED, para mostrar el aviso de «aprobada
     recientemente» un rato después de detectarlo (se limpia si deja de estar
     aprobada)."""
+    if p.get("encabezado_media_id") and not p.get("encabezado_meta_registrado"):
+        p["whatsapp_template_status"] = None
+        p["whatsapp_template_error"] = (p.get("whatsapp_template_error")
+                                         or "El encabezado aún no se registró en Meta.")
+        return p
     nombre_template = (p.get("whatsapp_template") or "").strip()
     if not nombre_template:
         p["whatsapp_template_status"] = None
@@ -2684,12 +2702,17 @@ def sincronizar_plantillas_meta(sesion: dict = Depends(exigir("mensajeria"))):
             )
             actualizadas += 1 if cambio else 0
             p["whatsapp_template_id"] = match.get("id")
-            p["whatsapp_template_status"] = match.get("status")
+            p["whatsapp_template_status"] = (match.get("status") if not p.get("encabezado_media_id")
+                                              or p.get("encabezado_meta_registrado") else None)
             p["whatsapp_template_categoria"] = match.get("category") or p.get("whatsapp_template_categoria")
             p["whatsapp_template_lang"] = match.get("language") or lang
             p["whatsapp_template_rejected_reason"] = match.get("rejected_reason") or match.get("reject_reason")
-            p["whatsapp_template_error"] = None
+            p["whatsapp_template_error"] = (None if not p.get("encabezado_media_id")
+                                             or p.get("encabezado_meta_registrado")
+                                             else p.get("whatsapp_template_error")
+                                             or "El encabezado aún no se registró en Meta.")
             p["texto"] = texto_nuevo
+            p.update(componentes_para_vista(match.get("components")))
         else:
             p["whatsapp_template_status"] = None
             p["whatsapp_template_error"] = (
@@ -2720,6 +2743,7 @@ def sincronizar_plantillas_meta(sesion: dict = Depends(exigir("mensajeria"))):
             "whatsapp_template_status": t.get("status"),
             "whatsapp_template_rejected_reason": t.get("rejected_reason") or t.get("reject_reason"),
             "whatsapp_template_error": None,
+            **componentes_para_vista(t.get("components")),
             "actualizada": int(time.time() * 1000),
         })
         siguiente_id += 1
@@ -2753,6 +2777,166 @@ def _es_creador_plantilla(p: dict, sesion: dict) -> bool:
     return bool(yo) and (p.get("creado_por") or "").strip().lower() == yo
 
 
+def _validar_media_plantilla(media_id: str | None, sesion: dict,
+                            plantilla_actual: dict | None = None) -> str | None:
+    if not media_id:
+        return None
+    if not (config_get("wa_app_id") or "").strip():
+        raise HTTPException(400, detail="Configura el App ID de Meta antes de guardar una plantilla con encabezado.")
+    metadata = obtener_media(media_id)
+    if (metadata["creador"] != (sesion.get("usuario") or "").lower()
+            and not _es_privilegiado(sesion)
+            and media_id != (plantilla_actual or {}).get("encabezado_media_id")):
+        raise HTTPException(403, detail="No puedes usar este encabezado multimedia.")
+    return media_id
+
+
+def _exigir_revision_valida(plantilla: dict, ejemplos: dict | None = None) -> dict:
+    vista = presentar_plantilla(plantilla, ejemplos)
+    if vista["errores"]:
+        raise HTTPException(400, detail=" ".join(vista["errores"]))
+    return vista
+
+
+def previsualizar_plantilla(body: PlantillaPreviaIn,
+                           sesion: dict = Depends(exigir("mensajeria"))):
+    actual = None
+    if body.plantilla_id is not None:
+        actual = next((p for p in _plantillas_visibles(sesion, leer_plantillas())
+                       if p["id"] == body.plantilla_id), None)
+        if actual is None:
+            raise HTTPException(404, detail="Plantilla no encontrada.")
+    if body.encabezado_media_id:
+        media = obtener_media(body.encabezado_media_id)
+        if (media["creador"] != (sesion.get("usuario") or "").lower()
+                and body.encabezado_media_id != (actual or {}).get("encabezado_media_id")
+                and not _es_privilegiado(sesion)):
+            raise HTTPException(403, detail="No puedes previsualizar ese encabezado.")
+    borrador = dict(actual or {})
+    borrador["texto"] = body.texto
+    borrador["encabezado_media_id"] = body.encabezado_media_id
+    if actual and (body.texto != actual.get("texto") or
+                   body.encabezado_media_id != actual.get("encabezado_media_id")):
+        # El editor reenvía BODY + botones fijos y, opcionalmente, HEADER;
+        # el FOOTER o botones importados no sobreviven a esa edición.
+        borrador["botones"] = None
+        borrador["pie_texto"] = None
+        borrador["encabezado_texto"] = None
+        borrador["whatsapp_header_format"] = None
+    if body.encabezado_media_id != (actual or {}).get("encabezado_media_id"):
+        borrador["encabezado_meta_registrado"] = False
+    vista = presentar_plantilla(borrador, body.ejemplos)
+    if not actual:
+        vista["avisos"].append("Guarda la plantilla y espera la aprobación de Meta para enviar una prueba.")
+    elif _aprobacion_plantilla(actual) != "aprobada" or \
+            actual.get("whatsapp_template_status") != "APPROVED":
+        vista["avisos"].append("La prueba estará disponible cuando la plantilla esté aprobada.")
+    elif (config_get("metodo_envio") or "").strip() != "api_oficial":
+        vista["avisos"].append("Activa api_oficial para hacer una prueba real.")
+    if actual and (body.texto != actual.get("texto") or
+                   body.encabezado_media_id != actual.get("encabezado_media_id")):
+        vista["avisos"].append("Estos cambios requieren guardar y esperar una nueva revisión de Meta.")
+    vista["puede_enviar_prueba"] = bool(actual and not vista["errores"]
+                                      and not vista["avisos"]
+                                      and actual.get("whatsapp_template_status") == "APPROVED"
+                                      and _aprobacion_plantilla(actual) == "aprobada")
+    return vista
+
+
+def destinatarios_prueba_plantilla(sesion: dict = Depends(exigir("mensajeria"))):
+    ambiente = config_get("entorno", "desarrollo").strip().lower()
+    return {"ambiente": ambiente, "telefonos": sorted(_numeros_prueba_editables(ambiente))}
+
+
+_pruebas_plantilla_en_curso: set[tuple[int, str]] = set()
+_pruebas_plantilla_ultima: dict[tuple[int, str], float] = {}
+_pruebas_plantilla_lock = threading.Lock()
+
+
+def enviar_prueba_plantilla(plantilla_id: int, body: PruebaPlantillaIn,
+                           sesion: dict = Depends(exigir("mensajeria"))):
+    """Un solo mensaje a un número de prueba; sin job, lote ni log de campañas."""
+    plantilla = next((p for p in _plantillas_visibles(sesion, leer_plantillas())
+                      if p["id"] == plantilla_id), None)
+    if plantilla is None:
+        raise HTTPException(404, detail="Plantilla no encontrada.")
+    if plantilla.get("especial") or _aprobacion_plantilla(plantilla) != "aprobada" or \
+            plantilla.get("whatsapp_template_status") != "APPROVED":
+        raise HTTPException(400, detail="Espera la aprobación interna y de Meta antes de enviar una prueba.")
+    if plantilla.get("encabezado_media_id") and not plantilla.get("encabezado_meta_registrado"):
+        raise HTTPException(400, detail="El encabezado aún no está registrado en Meta.")
+    telefono = normalizar_telefono(body.telefono)
+    ambiente = config_get("entorno", "desarrollo").strip().lower()
+    if telefono is None or telefono not in _numeros_prueba_editables(ambiente):
+        raise HTTPException(403, detail="Elige un número de prueba autorizado en Configuración.")
+    if (config_get("metodo_envio") or "").strip() != "api_oficial":
+        raise HTTPException(400, detail="Activa api_oficial para enviar una prueba real.")
+    if not WhatsAppService().configurada():
+        raise HTTPException(400, detail="Configura el token y el Phone number ID de Meta antes de probar.")
+    vista = presentar_plantilla(plantilla, body.ejemplos)
+    if vista["errores"]:
+        raise HTTPException(400, detail=" ".join(vista["errores"]))
+    llave = (plantilla_id, telefono)
+    with _pruebas_plantilla_lock:
+        if llave in _pruebas_plantilla_en_curso:
+            raise HTTPException(429, detail="Ya hay una prueba en curso para este número. Espera a que termine.")
+        segundos_restantes = math.ceil(
+            30 - (time.monotonic() - _pruebas_plantilla_ultima.get(llave, -1e9)))
+        if segundos_restantes > 0:
+            raise HTTPException(
+                429,
+                detail=f"Espera {segundos_restantes} segundo{'s' if segundos_restantes != 1 else ''} antes de repetir esta prueba.",
+                headers={"Retry-After": str(segundos_restantes)},
+            )
+        _pruebas_plantilla_en_curso.add(llave)
+    try:
+        ok, message_id, error, _ = asyncio.run(WhatsAppService().enviar(
+            telefono, vista["cuerpo"], plantilla=plantilla,
+            variables=vista["ejemplos"], es_prueba=True))
+        if not ok:
+            log_error(f"Prueba de plantilla {plantilla_id}: Meta no aceptó el envío")
+            raise HTTPException(502, detail=error or "Meta no aceptó el mensaje de prueba.")
+        with _pruebas_plantilla_lock:
+            _pruebas_plantilla_ultima[llave] = time.monotonic()
+        try:
+            auditoria_registrar(sesion.get("usuario", ""), "plantilla_prueba_enviada",
+                                plantilla.get("clave", ""), "Prueba unitaria aceptada por Meta")
+        except Exception as exc:
+            log_error(f"Prueba de plantilla {plantilla_id}: no se pudo auditar", exc)
+        return {"ok": True, "message_id": message_id,
+                "mensaje": "Meta aceptó la prueba. Confirma su recepción en el teléfono."}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log_error(f"Prueba de plantilla {plantilla_id}: error de integración", exc)
+        raise HTTPException(502, detail="No se pudo contactar a Meta. Revisa la configuración y vuelve a intentar.") from exc
+    finally:
+        with _pruebas_plantilla_lock:
+            _pruebas_plantilla_en_curso.discard(llave)
+
+
+async def subir_encabezado_plantilla(
+        archivo: UploadFile = File(...),
+        sesion: dict = Depends(exigir("plantillas_editar"))):
+    datos = await archivo.read(MAX_MEDIA_BYTES + 1)
+    metadata = guardar_media(datos, sesion.get("usuario") or "")
+    return {"id": metadata["id"], "tipo": metadata["tipo"],
+            "url": f"/api/plantillas/media/{metadata['id']}"}
+
+
+def ver_encabezado_plantilla(media_id: str,
+                            sesion: dict = Depends(exigir("mensajeria"))):
+    metadata = obtener_media(media_id)
+    visibles = _plantillas_visibles(sesion, leer_plantillas())
+    if (metadata["creador"] != (sesion.get("usuario") or "").lower()
+            and not any(p.get("encabezado_media_id") == media_id for p in visibles)):
+        raise HTTPException(403, detail="No tienes acceso a este encabezado.")
+    return FileResponse(ruta_media(metadata, vista=True),
+                        media_type=metadata["mime_vista"],
+                        headers={"X-Content-Type-Options": "nosniff",
+                                 "Cache-Control": "private, max-age=300"})
+
+
 def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(exigir("plantillas_editar"))):
     if not body.nombre.strip() or not body.texto.strip():
         raise HTTPException(400, detail="Nombre y mensaje son obligatorios")
@@ -2760,6 +2944,8 @@ def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(exigir("plantillas
         raise HTTPException(400, detail=f"El mensaje supera el limite de {MAX_TEXTO_PLANTILLA} caracteres")
     categoria = _validar_categoria_template(body.whatsapp_template_categoria)
     esp_id = _validar_plantilla_area(sesion, body.area_id)
+    media_id = _validar_media_plantilla(body.encabezado_media_id, sesion)
+    _exigir_revision_valida({"texto": body.texto, "encabezado_media_id": media_id}, body.ejemplos)
 
     plantillas = leer_plantillas()
     clave = slug(body.clave or body.nombre)
@@ -2778,6 +2964,7 @@ def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(exigir("plantillas
         "nombre": body.nombre.strip(),
         "texto": body.texto,
         "area_id": esp_id,
+        "encabezado_media_id": media_id,
         # El nombre del template de Meta se deriva SIEMPRE del nombre de la
         # plantilla (no se acepta uno arbitrario desde el cliente).
         "whatsapp_template": slug(body.nombre) or None,
@@ -2842,6 +3029,17 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
                     detail="Solo puedes editar las plantillas que tú creaste.",
                 )
             _exigir_plantilla_en_alcance(sesion, p)
+            media_solicitada = (body.encabezado_media_id
+                               if "encabezado_media_id" in body.model_fields_set
+                               else p.get("encabezado_media_id"))
+            media_id = _validar_media_plantilla(media_solicitada, sesion, p)
+            revision_borrador = {**p, "texto": body.texto, "encabezado_media_id": media_id}
+            if body.texto != p.get("texto") or media_id != p.get("encabezado_media_id"):
+                revision_borrador["whatsapp_header_format"] = None
+                revision_borrador["encabezado_texto"] = None
+                revision_borrador["pie_texto"] = None
+                revision_borrador["botones"] = None
+            _exigir_revision_valida(revision_borrador, body.ejemplos)
             if _aprobacion_plantilla(p) != "aprobada":
                 # Pendiente/rechazada: aún no existe en Meta. Si la edita su
                 # creador y estaba rechazada, vuelve a pendiente (pide revisión
@@ -2859,6 +3057,7 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
                     or area_id_nueva != p.get("area_id")
                     or lang_nuevo != p.get("whatsapp_template_lang")
                     or categoria != p.get("whatsapp_template_categoria")
+                    or media_id != p.get("encabezado_media_id")
                 )
                 if _aprobacion_plantilla(p) == "rechazada" and not hubo_cambio:
                     raise HTTPException(
@@ -2869,6 +3068,7 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
                 p["area_id"] = area_id_nueva
                 p["whatsapp_template_lang"] = lang_nuevo
                 p["whatsapp_template_categoria"] = categoria
+                p["encabezado_media_id"] = media_id
                 p["actualizada"] = int(time.time() * 1000)
                 if _aprobacion_plantilla(p) == "rechazada":
                     p["aprobacion_estado"] = "pendiente"
@@ -2920,16 +3120,19 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
                 body.texto != (p.get("texto") or "")
                 or nueva_lang != p.get("whatsapp_template_lang")
                 or categoria != p.get("whatsapp_template_categoria")
+                or media_id != p.get("encabezado_media_id")
             )
             p["texto"] = body.texto
             p["area_id"] = _validar_plantilla_area(sesion, body.area_id)
             p["whatsapp_template"] = p.get("whatsapp_template") or (slug(p.get("nombre", "")) or None)
             p["whatsapp_template_lang"] = nueva_lang
             p["whatsapp_template_categoria"] = categoria
+            p["encabezado_media_id"] = media_id
             p["actualizada"] = int(time.time() * 1000)
             if meta_cambio:
-                p["ultima_edicion"] = p["actualizada"]
                 p = _registrar_template_meta(p, nombre_template_anterior, lang_anterior, template_id_anterior)
+                if p.get("whatsapp_template_status"):
+                    p["ultima_edicion"] = p["actualizada"]
             escribir_plantillas(plantillas)
             return p
 
@@ -3132,6 +3335,7 @@ def obtener_configuracion(ambiente: str | None = Query(None),
                           sesion: dict = Depends(sesion_actual)):
     try:
         valores = leer_config(ambiente)
+        valores["app_id_meta_configurada"] = bool((config_get("wa_app_id") or "").strip())
         if valores.get("entorno") == "desarrollo" and not _es_privilegiado(sesion):
             valores.pop("numeros_autorizados", None)
         return valores
@@ -3178,6 +3382,7 @@ def actualizar_configuracion(body: ConfigIn, sesion: dict = Depends(solo_dev)):
         "wa_token": body.wa_token,
         "wa_phone_id": body.wa_phone_id,
         "wa_business_account_id": body.wa_business_account_id,
+        "wa_app_id": body.wa_app_id,
         "wa_verify_token": body.wa_verify_token,
         "wa_app_secret": body.wa_app_secret,
         "wa_template_nombre": body.wa_template_nombre,
@@ -3249,6 +3454,8 @@ _CONFIG_SECCIONES = [
             {"clave": "wa_token", "etiqueta": "Access token", "tipo": "password", "secreto": True},
             {"clave": "wa_phone_id", "etiqueta": "Phone number ID", "tipo": "text"},
             {"clave": "wa_business_account_id", "etiqueta": "WhatsApp Business Account ID (WABA)", "tipo": "text"},
+            {"clave": "wa_app_id", "etiqueta": "App ID de Meta", "tipo": "text",
+             "ayuda": "Necesario para registrar plantillas con imagen o GIF de encabezado."},
             {"clave": "wa_verify_token", "etiqueta": "Verify token del webhook", "tipo": "password", "secreto": True},
             {"clave": "wa_app_secret", "etiqueta": "App Secret de Meta", "tipo": "password", "secreto": True,
              "ayuda": "Se usa para verificar la firma de los webhook POST. Es distinto del Verify token y del Access token."},

@@ -1,4 +1,33 @@
 /* Estilos específicos de estados y modales de Mensajería. */
+.encabezado-media__fila { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.encabezado-media__fila input[type="file"] { flex: 1 1 220px; min-width: 0; padding: 7px; border: 1px solid var(--borde); border-radius: 10px; background: var(--surface-2); color: var(--texto-suave); font: inherit; font-size: .85rem; cursor: pointer; }
+.encabezado-media__fila input[type="file"]::file-selector-button { margin-right: 12px; padding: 10px 14px; border: 0; border-radius: 8px; background: var(--btn-primary-bg); color: var(--btn-primary-fg); font: inherit; font-weight: 700; cursor: pointer; transition: filter .15s ease; }
+.encabezado-media__fila input[type="file"]:hover::file-selector-button { filter: brightness(1.08); }
+.encabezado-media__fila input[type="file"]:focus-visible { outline: 2px solid var(--verde); outline-offset: 2px; }
+.encabezado-media__fila input[type="file"]:disabled,
+.encabezado-media__fila input[type="file"]:disabled::file-selector-button { cursor: not-allowed; opacity: .65; }
+.bubble__media { display: block; width: 100%; max-height: 220px; object-fit: contain; border-radius: 8px; margin-bottom: 8px; }
+.bubble__media[hidden] { display: none; }
+.bubble__encabezado { font-weight: 700; margin-bottom: 7px; }
+.bubble__pie { opacity: .75; font-size: .82rem; margin-top: 8px; }
+.preview-ejemplos, .preview-prueba__acciones { display: flex; gap: 10px; flex-wrap: wrap; }
+.preview-ejemplos { margin-bottom: 14px; padding: 12px; border: 1px solid var(--borde); border-radius: 10px; background: var(--surface-2); }
+.preview-ejemplos label { flex: 1 1 145px; min-width: 0; font-size: .82rem; font-weight: 600; color: var(--texto); }
+.preview-ejemplos input { display: block; width: 100%; margin-top: 6px; padding: 10px 12px; border: 1px solid var(--borde); border-radius: 8px; background: var(--panel-2); color: var(--texto); font: inherit; font-size: .92rem; }
+.preview-ejemplos input:focus-visible { outline: 2px solid var(--verde); outline-offset: 1px; }
+.preview-prueba { margin-top: 14px; padding: 14px; border: 1px solid var(--border, #5a7770); border-radius: 12px; }
+.preview-prueba > label { display: block; margin-bottom: 8px; font-weight: 600; }
+.preview-prueba select { flex: 1 1 190px; min-width: 0; }
+/* En el editor el mensaje debe verse completo, sin un recuadro de 220 px con scroll. */
+.preview-wrap .phone { height: auto; min-height: 340px; overflow: visible; }
+.preview-wrap .bubble,
+.preview-wrap .bubble__botones { width: 100%; max-width: 100%; }
+.preview-wrap .bubble__media { max-height: 420px; }
+.preview-validaciones { margin-top: 12px; }
+.preview-validaciones:empty { display: none; }
+.preview-validaciones__item { padding: 8px 10px; border-radius: 8px; margin: 5px 0; font-size: .85rem; }
+.preview-validaciones__item--error { color: #a32a2a; background: #fff0ef; border: 1px solid #d79595; }
+.preview-validaciones__item--aviso { color: #916600; background: #fff8df; border: 1px solid #d6ba69; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* Solo entra el panel de la pestaña elegida; la lista común permanece fija. */

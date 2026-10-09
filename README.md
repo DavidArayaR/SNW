@@ -130,7 +130,9 @@ el `entorno` activo, que las demás pantallas leen al cargar).
 | App / envío | `entorno` (`desarrollo`/`produccion`), `metodo_envio` (`simulado`/`api_oficial`), `numeros_prueba_dev`, `numeros_prueba_prod`, `intervalo_ms`, `sesion_expira_horas` (horas de inactividad antes de cerrar una sesión sola; 0 = no expiran; por defecto 5), `url_base` |
 | Call center | `call_center_url` (servicio que devuelve un número de call center; se consulta en cada respuesta y ese servicio reparte la carga), `call_center_numeros` (respaldo manual, uno o varios separados por coma, solo si la URL no responde), `call_center_boton_mensaje` / `call_center_boton_mensaje_oferta` (texto que autocompleta el botón; el de oferta se usa si la última plantilla enviada mencionaba un descuento o precio especial). El mensaje de call center y su espera (1s fija) no son configurables, ver [Mensaje de call center](#mensaje-de-call-center) |
 | Correo | `smtp_host`, `smtp_port`, `smtp_user`, `smtp_pass`, `smtp_tls`, `correo_emisor`, `correo_destino` |
-| WhatsApp / Meta | `wa_token`, `wa_phone_id`, `wa_business_account_id`, `wa_verify_token`, `wa_template_nombre`, `wa_template_lang`, `wa_webhook_path`, `wa_graph_version` (por defecto `v26.0`), `wa_moneda` (moneda de facturación de la cuenta, se autodetecta desde Meta al actualizar tarifas — por defecto `USD`), `plantillas_revision_minutos` (cada cuántos minutos se revisa sola en Meta el estado de las plantillas pendientes; 0 = desactivado; por defecto 2), `plantillas_badge_aprobada_minutos` (cuánto se muestra el aviso «Aprobada recientemente»; 0 = nunca; por defecto 10) |
+| WhatsApp / Meta | `wa_token`, `wa_phone_id`, `wa_business_account_id`, `wa_app_id` (necesario para encabezados multimedia), `wa_verify_token`, `wa_template_nombre`, `wa_template_lang`, `wa_webhook_path`, `wa_graph_version` (por defecto `v26.0`), `wa_moneda` (moneda de facturación de la cuenta, se autodetecta desde Meta al actualizar tarifas — por defecto `USD`), `plantillas_revision_minutos` (cada cuántos minutos se revisa sola en Meta el estado de las plantillas pendientes; 0 = desactivado; por defecto 2), `plantillas_badge_aprobada_minutos` (cuánto se muestra el aviso «Aprobada recientemente»; 0 = nunca; por defecto 10) |
+
+Las plantillas admiten opcionalmente un encabezado JPG, PNG o GIF de hasta **3,5 MB**. El GIF se conserva animado en la vista previa y se convierte a MP4 para Meta; el video convertido también debe caber en 3,5 MB. Instala las dependencias actualizadas con `pip install -r requirements.txt` y configura `wa_app_id` (App ID de Meta) junto al token y la WABA para poder subir la muestra que Meta exige al revisar una plantilla con encabezado. Los archivos quedan en `data/plantillas_media/` (ignorado por Git): inclúyelos en las copias de seguridad junto a las plantillas. Si quitas o cambias el encabezado de una plantilla aprobada, Meta debe volver a revisarla.
 | Límites de envío Meta | `wa_rate_limit_activo` (frenado proactivo on/off), `wa_rate_limit_umbral_pct` (% de cuota a partir del cual se espera, 80), `wa_rate_limit_pausa_max_s` (espera entre mensajes al 100 % de cuota, 30), `wa_rate_limit_espera_defecto_s` (espera tras un 429 sin dato, 60), `wa_rate_limit_reintentos` (reintentos de una llamada tras un 429, 3), `wa_throughput_mps` (ritmo máximo de salida hacia Meta, msg/s; 0 = sin límite; 10), `wa_messaging_limit_24h` (usuarios únicos que se pueden contactar en 24 h antes de bloquear el envío masivo; 0 = ilimitado; 2000) |
 
 ## Base de datos
@@ -235,6 +237,20 @@ Viven en `data/plantillas.json` (no en MySQL). Cada plantilla tiene comodines
 `{nombre}` y `{apellido}` que se reemplazan al enviar, y la vista previa en
 **Mensajería** interpreta además el formato de WhatsApp: `*negrita*`, `_cursiva_`,
 `~tachado~` y `` ```monoespaciado``` ``.
+
+La vista previa del editor consulta al servidor para usar el mismo orden de
+variables que el envío real. Permite cambiar los ejemplos de nombre/apellido y
+muestra encabezado, cuerpo, pie y botones conocidos de Meta. Las variables sin
+ejemplo, enlaces inválidos, archivos ausentes o incompatibles y componentes que
+este editor no puede representar se señalan antes de guardar o probar. El botón
+**Enviar prueba** requiere plantilla aprobada y `api_oficial`: solo acepta un
+número configurado como prueba para el entorno actual, envía un mensaje y no
+crea campaña ni suma estadísticas. Su resultado confirma que Meta aceptó la
+solicitud, **no** que el destinatario ya recibió el mensaje; hay que comprobarlo
+en el teléfono antes de programar un envío real. Tiene un intervalo de 30 s
+entre pruebas del mismo template y número. Una plantilla importada con medios
+sin archivo local, enlaces dinámicos sin parámetros o componentes no admitidos
+se muestra con una advertencia/error; no se simula como si estuviera lista.
 
 Reglas del editor:
 
@@ -341,6 +357,11 @@ contraseña?» en el login (`/api/auth/olvide`) — mismo mecanismo, pero autose
 | Método | Endpoint | Descripción |
 |---|---|---|
 | GET | `/api/plantillas` | Lista de plantillas (incluye las de call center; el frontend de Mensajería las filtra). Cada cuenta recibe solo su alcance: el usuario normal ve solo las que creó y las de sus areas |
+| POST | `/api/plantillas/previsualizar` | Renderiza un borrador `{plantilla_id?, texto, encabezado_media_id?, ejemplos?}`; devuelve cuerpo, encabezado, pie, botones, errores y avisos sin enviar nada. |
+| GET | `/api/plantillas/prueba/destinatarios` | Lista los números de prueba autorizados para el entorno activo. |
+| POST | `/api/plantillas/{id}/prueba` | Envía un solo template aprobado a `{telefono, ejemplos?}` si el número está autorizado. No crea campaña ni registro de estadísticas; devuelve aceptación de Meta o error. |
+| POST | `/api/plantillas/media` | Sube `archivo` JPG, PNG o GIF de hasta 3,5 MB; devuelve `id` para usar como `encabezado_media_id` al crear o editar una plantilla. Requiere permiso de edición. |
+| GET | `/api/plantillas/media/{id}` | Vista previa protegida del encabezado; disponible para el creador o quienes pueden ver la plantilla asociada. |
 | POST | `/api/plantillas` | Crear `{nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area?}`. `whatsapp_template_categoria` es obligatoria (`UTILITY` / `MARKETING` / `AUTHENTICATION`); sin ella → 400. `area` asocia la plantilla (404 si no existe, 403 si no está asignada). **El nombre no se puede repetir** (409 si ya existe) **ni reutilizar el de una eliminada hasta pasados 30 días** (409 con los días restantes; política de Meta, registro en `data/plantillas_eliminadas.json`). **El usuario normal no puede crear plantillas globales** (422): siempre una de sus areas. **Aprobación interna**: lo creado por admin/dev/supervisor nace `aprobada` y va a Meta de inmediato; lo creado por un `usuario` nace `pendiente` y **no se registra en Meta** hasta que se aprueba |
 | POST | `/api/plantillas/{id}/aprobar` | (admin/dev/supervisor) Aprueba una pendiente y la registra en Meta |
 | POST | `/api/plantillas/{id}/rechazar` | (admin/dev/supervisor) `{motivo?}` Rechaza una pendiente (no va a Meta); su creador puede corregirla y vuelve a pendiente |
@@ -723,6 +744,7 @@ volver a procesarlo.
 4. En **API Setup** copia a la tabla `configuracion` (con `PUT /api/configuracion` o `UPDATE`):
    - `Phone number ID` → `wa_phone_id`
    - `WhatsApp Business Account ID` → `wa_business_account_id`
+   - `App ID` de Meta for Developers → `wa_app_id` (para plantillas con encabezado)
    - `Access Token` → `wa_token` (usa uno de *System User* si necesitas que no
      caduque; los tokens temporales de API Setup expiran en 24 h)
 5. Define tu propio **Verify Token** → `wa_verify_token`, y configura el **Webhook**

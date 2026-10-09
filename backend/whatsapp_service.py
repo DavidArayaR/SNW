@@ -12,12 +12,16 @@ o desde el router de webhook.
 import asyncio
 import hashlib
 import re
+import threading
+import time
 import unicodedata
 from datetime import datetime
 
 import httpx
 
 from db import conectar, config_get, log_error, tabla_pacientes
+from plantilla_media import obtener_media, ruta_media
+from plantilla_revision import presentar_plantilla, variables_del_cuerpo
 from supresion import (esta_suprimido, es_exento, es_numero_prueba, solicitar_eliminacion,
                       oferta_eliminacion_enviada)
 import servicio_areas
@@ -28,6 +32,8 @@ from wa_rate_limit import (
 # Versión de la Graph API de Meta. Configurable en la tabla `configuracion`
 # (clave `wa_graph_version`); si no está, se usa este valor por defecto.
 GRAPH_VERSION_DEFAULT = "v26.0"
+_media_cache: dict[tuple[str, str], tuple[str, float]] = {}
+_media_cache_lock = threading.Lock()
 
 
 def graph_version() -> str:
@@ -311,6 +317,36 @@ class WhatsAppApiClient:
         url = f"{graph_url()}/{self.phone_number_id}/messages"
         return await self._peticion("POST", url, json=payload, throughput=True)
 
+    async def subir_muestra_template(self, app_id: str, media: dict) -> str:
+        """Meta: sesión de upload + bytes para obtener el handle del ejemplo."""
+        archivo = ruta_media(media)
+        inicio = await self._peticion(
+            "POST", f"{graph_url()}/{app_id}/uploads",
+            params={"file_name": archivo.name, "file_length": archivo.stat().st_size,
+                    "file_type": media["mime_envio"]},
+        )
+        async with httpx.AsyncClient(timeout=60) as cliente:
+            respuesta = await cliente.post(
+                f"{graph_url()}/{inicio['id']}",
+                headers={"Authorization": f"OAuth {self.token}", "file_offset": "0",
+                         "Content-Type": "application/octet-stream"},
+                content=archivo.read_bytes(),
+            )
+        return self._procesar_respuesta(respuesta)["h"]
+
+    async def subir_media_envio(self, media: dict) -> str:
+        """Sube el archivo a /media y devuelve su ID para el parámetro HEADER."""
+        archivo = ruta_media(media)
+        async with httpx.AsyncClient(timeout=60) as cliente:
+            with archivo.open("rb") as flujo:
+                respuesta = await cliente.post(
+                    f"{graph_url()}/{self.phone_number_id}/media",
+                    headers={"Authorization": f"Bearer {self.token}"},
+                    data={"messaging_product": "whatsapp"},
+                    files={"file": (archivo.name, flujo, media["mime_envio"])},
+                )
+        return self._procesar_respuesta(respuesta)["id"]
+
     async def crear_template(self, waba_id: str, payload: dict) -> dict:
         """Crea un template de mensaje en Meta (POST /{waba_id}/message_templates)."""
         url = f"{graph_url()}/{waba_id}/message_templates"
@@ -417,6 +453,32 @@ class WhatsAppService:
     def waba_id(self) -> str:
         return (config_get("wa_business_account_id") or "").strip()
 
+    @property
+    def app_id(self) -> str:
+        return (config_get("wa_app_id") or "").strip()
+
+    async def _id_media_envio(self, media_id: str) -> tuple[str, str]:
+        metadata = obtener_media(media_id)
+        llave = (self.phone_number_id, media_id)
+        with _media_cache_lock:
+            anterior = _media_cache.get(llave)
+            if anterior and anterior[1] > time.time():
+                return anterior[0], metadata["formato_meta"].lower()
+        nuevo = await self.cliente.subir_media_envio(metadata)
+        with _media_cache_lock:
+            _media_cache[llave] = (nuevo, time.time() + 23 * 3600)
+        return nuevo, metadata["formato_meta"].lower()
+
+    def _componente_encabezado_meta(self, media_id: str | None) -> dict | None:
+        if not media_id:
+            return None
+        if not self.app_id:
+            raise ValueError("Configura el App ID de Meta para registrar el encabezado multimedia.")
+        metadata = obtener_media(media_id)
+        handle = asyncio.run(self.cliente.subir_muestra_template(self.app_id, metadata))
+        return {"type": "HEADER", "format": metadata["formato_meta"],
+                "example": {"header_handle": [handle]}}
+
     def configurada(self) -> bool:
         return bool(self.token) and bool(self.phone_number_id)
 
@@ -448,7 +510,7 @@ class WhatsAppService:
         return texto_meta, ejemplo
 
     def crear_template_meta(self, nombre: str, texto: str, lang: str = "es",
-                            category: str = "UTILITY") -> dict:
+                            category: str = "UTILITY", media_id: str | None = None) -> dict:
         """Crea el template en Meta. Devuelve {ok, template_id, status, error}.
 
         Los templates en Meta quedan en estado PENDING hasta ser aprobados."""
@@ -461,7 +523,11 @@ class WhatsAppService:
         if ejemplo:
             componente_body["example"] = {"body_text": [ejemplo]}
 
-        components = [componente_body]
+        try:
+            encabezado = self._componente_encabezado_meta(media_id)
+        except Exception as exc:
+            return {"ok": False, "template_id": None, "status": None, "error": str(exc)}
+        components = ([encabezado] if encabezado else []) + [componente_body]
         if category != "AUTHENTICATION":
             components.append({"type": "BUTTONS", "buttons": BOTONES_RESPUESTA})
 
@@ -482,7 +548,8 @@ class WhatsAppService:
         status = data.get("status") or "PENDING"
         return {"ok": True, "template_id": tid, "status": status, "error": None}
 
-    def editar_template_meta(self, template_id: str, texto: str, category: str = "UTILITY") -> dict:
+    def editar_template_meta(self, template_id: str, texto: str, category: str = "UTILITY",
+                            media_id: str | None = None) -> dict:
         """Edita un template ya existente en Meta usando su ID.
 
         Importante: Meta NO permite cambiar la categoría de un template ya
@@ -514,7 +581,11 @@ class WhatsAppService:
         if ejemplo:
             componente_body["example"] = {"body_text": [ejemplo]}
 
-        components = [componente_body]
+        try:
+            encabezado = self._componente_encabezado_meta(media_id)
+        except Exception as exc:
+            return {"ok": False, "template_id": template_id, "status": None, "error": str(exc)}
+        components = ([encabezado] if encabezado else []) + [componente_body]
         if categoria_real != "AUTHENTICATION":
             components.append({"type": "BUTTONS", "buttons": BOTONES_RESPUESTA})
 
@@ -576,7 +647,8 @@ class WhatsAppService:
 
     def guardar_template_meta(self, nombre: str, texto: str, lang: str = "es",
                               category: str = "UTILITY",
-                              template_id_conocido: str | None = None) -> dict:
+                              template_id_conocido: str | None = None,
+                              media_id: str | None = None) -> dict:
         """Crea el template en Meta, o lo edita si ya existe.
 
         Si no se pasa un template_id_conocido, primero intenta encontrarlo en
@@ -584,8 +656,8 @@ class WhatsAppService:
         localmente). Si lo encuentra, edita; si no, crea uno nuevo."""
         tid = template_id_conocido or self.id_template_meta(nombre, lang)
         if tid:
-            return self.editar_template_meta(tid, texto, category)
-        return self.crear_template_meta(nombre, texto, lang, category)
+            return self.editar_template_meta(tid, texto, category, media_id)
+        return self.crear_template_meta(nombre, texto, lang, category, media_id)
 
     def estado_template_meta(self, nombre_template: str, lang: str) -> dict:
         """Consulta en Meta el estado actual de un template por nombre + idioma.
@@ -691,7 +763,8 @@ class WhatsAppService:
         return payload, "cta_url"
 
     def construir_payload_template(self, telefono: str, nombre: str, lang: str,
-                                   variables: list[str] | None = None, componentes: dict | None = None) -> tuple:
+                                   variables: list[str] | None = None,
+                                   componentes: list[dict] | None = None) -> tuple:
         """Payload para un template aprobado de Meta."""
         numero = telefono.lstrip("+")
         template: dict = {"name": nombre, "language": {"code": lang}}
@@ -714,15 +787,11 @@ class WhatsAppService:
     def extraer_orden_comodines(self, texto: str) -> list[str]:
         """Devuelve el orden de aparición de los comodines {nombre}/{apellido}
         en el texto, para construir los parámetros del template en el orden correcto."""
-        orden: list[str] = []
-        for m in re.finditer(r"\{([a-z_]+)\}", texto or ""):
-            clave = m.group(1)
-            if clave in ("nombre", "apellido") and clave not in orden:
-                orden.append(clave)
-        return orden
+        return [clave for clave in variables_del_cuerpo(texto)
+                if clave in ("nombre", "apellido")]
 
     async def enviar(self, telefono: str, mensaje: str, plantilla: dict | None = None,
-                     variables: dict | None = None) -> tuple:
+                     variables: dict | None = None, es_prueba: bool = False) -> tuple:
         """Envía un mensaje. Devuelve (ok, message_id, error, estado).
 
         Si la plantilla en el sistema tiene un template Meta configurado
@@ -737,11 +806,28 @@ class WhatsAppService:
         cta = msg.get("cta") if isinstance(msg, dict) else None
 
         if nombre_template:
+            if msg.get("encabezado_media_id") and not msg.get("encabezado_meta_registrado"):
+                return False, None, "El encabezado aún no se registró en Meta", "failed"
+            revision = presentar_plantilla(msg, variables or {})
+            if revision["errores"]:
+                return False, None, " ".join(revision["errores"]), "failed"
             orden = self.extraer_orden_comodines(msg.get("texto", "") or "")
             vdict = variables or {}
             valores = [vdict.get(clave, "") or "" for clave in orden]
+            componentes = []
+            if msg.get("encabezado_media_id"):
+                try:
+                    id_meta, tipo = await self._id_media_envio(msg["encabezado_media_id"])
+                except Exception as exc:
+                    log_error("subir encabezado de plantilla para envío", exc)
+                    return False, None, f"No se pudo preparar el encabezado: {exc}", "failed"
+                componentes.append({"type": "header", "parameters": [
+                    {"type": tipo, tipo: {"id": id_meta}}]})
+            if valores:
+                componentes.append({"type": "body", "parameters": [
+                    {"type": "text", "text": valor} for valor in valores]})
             payload_, _ = self.construir_payload_template(
-                telefono, nombre_template, idioma, variables=valores,
+                telefono, nombre_template, idioma, componentes=componentes or None,
             )
         elif cta and cta.get("url"):
             payload_, _ = self.construir_payload_cta_url(
@@ -755,7 +841,8 @@ class WhatsAppService:
         try:
             data = await self.cliente.enviar(payload_)
         except ErrorWhatsApp as e:
-            log_error(f"envío a {telefono} (template={nombre_template or 'texto libre'})", e)
+            destino_log = "número de prueba" if es_prueba else telefono
+            log_error(f"envío a {destino_log} (template={nombre_template or 'texto libre'})", e)
             return False, None, e.message, "failed" if e.tipo == "permanent" else "sent"
 
         msg_id = ""
