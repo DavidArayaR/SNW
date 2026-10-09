@@ -1,3 +1,4 @@
+import asyncio
 import sys
 import unittest
 from pathlib import Path
@@ -12,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 import main
 from plantilla_revision import componentes_para_vista, presentar_plantilla, variables_del_cuerpo
 from routes import plantillas as rutas_plantillas
+from whatsapp_service import WhatsAppApiClient
 
 
 PLANTILLA = {
@@ -75,6 +77,68 @@ class PresentacionPlantillaTests(unittest.TestCase):
         with self.assertRaises(HTTPException) as error:
             main._exigir_revision_valida({"texto": "Hola {nombre}"}, {"nombre": ""})
         self.assertEqual(error.exception.status_code, 400)
+
+
+class EstadoMetaPlantillaTests(unittest.TestCase):
+    def test_consultas_meta_solicitan_quality_score(self):
+        cliente = WhatsAppApiClient("token-test", "phone-test")
+        with patch.object(cliente, "_peticion", new_callable=AsyncMock,
+                          side_effect=[{"data": []}, {"data": []}]) as peticion:
+            asyncio.run(cliente.listar_templates("waba-test"))
+            asyncio.run(cliente.buscar_template("waba-test", "saludo"))
+
+        self.assertEqual(peticion.await_count, 2)
+        for llamada in peticion.await_args_list:
+            self.assertIn("quality_score", llamada.kwargs["params"]["fields"])
+
+    def test_paused_se_puede_editar_pero_no_programar(self):
+        pausada = {**PLANTILLA, "whatsapp_template_status": "PAUSED"}
+        self.assertIn("PAUSED", main.ESTADOS_TEMPLATE_EDITABLES)
+        with self.assertRaises(HTTPException) as error:
+            main._validar_plantilla_programable(pausada, None)
+        self.assertIn("Meta pausó", error.exception.detail)
+        self.assertIn("programar envíos", error.exception.detail)
+
+        deshabilitada = {**PLANTILLA, "whatsapp_template_status": "DISABLED"}
+        self.assertIn("DISABLED", main.ESTADOS_TEMPLATE_EDITABLES)
+        with self.assertRaises(HTTPException) as error:
+            main._validar_plantilla_programable(deshabilitada, None)
+        self.assertIn("Meta deshabilitó", error.exception.detail)
+
+    def test_rating_no_bloquea_envio_si_meta_mantiene_approved(self):
+        for score in ("GREEN", "YELLOW", "RED", "UNKNOWN"):
+            with self.subTest(score=score):
+                plantilla = {
+                    **PLANTILLA,
+                    "whatsapp_template_status": "APPROVED",
+                    "whatsapp_template_quality_score": {"score": score},
+                }
+                self.assertIs(main._validar_plantilla_programable(plantilla, None), plantilla)
+
+    def test_sondeo_detecta_paused_y_detiene_lote_activo(self):
+        plantilla = {
+            **PLANTILLA,
+            "whatsapp_template_id": "meta-7",
+            "whatsapp_template_quality_score": {"score": "GREEN"},
+        }
+        job = {"estado": "en_proceso", "plantilla": dict(plantilla)}
+        meta = {
+            "id": "meta-7", "name": "saludo", "language": "es",
+            "status": "PAUSED", "quality_score": {"score": "RED", "date": 1758754645},
+        }
+        with patch.object(main, "leer_plantillas", return_value=[plantilla]), \
+                patch.object(main, "escribir_plantillas") as escribir, \
+                patch.object(main.WhatsAppService, "listar_templates_meta",
+                             return_value={"ok": True, "templates": [meta]}), \
+                patch.object(main, "_programar_revision_plantillas"), \
+                patch.dict(main.JOBS, {"job-paused-test": job}):
+            main._revisar_plantillas_pendientes()
+
+        self.assertEqual(plantilla["whatsapp_template_status"], "PAUSED")
+        self.assertEqual(plantilla["whatsapp_template_quality_score"]["score"], "RED")
+        self.assertTrue(job["cancelado"])
+        self.assertIn("Meta pausó", job["cancelado_motivo"])
+        escribir.assert_called_once_with([plantilla])
 
 
 class EndpointPruebaPlantillaTests(unittest.TestCase):

@@ -560,6 +560,25 @@ body[data-pagina="mensajeria"] .layout { width: 100%; }
   border: 1px solid var(--warn-bd);
 }
 .tpl-item__estado--rechazada { background: var(--danger-bg); color: var(--danger-fg); border-color: var(--danger-bd); }
+.tpl-item__estado--pausada,
+.tpl-item__estado--deshabilitada,
+.tpl-item__estado--calidad-RED { background: var(--danger-bg); color: var(--danger-fg); border-color: var(--danger-bd); }
+.tpl-item__estado--calidad-GREEN { background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-bd); }
+.tpl-item__estado--calidad-YELLOW { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--warn-bd); }
+.tpl-item__estado--calidad-UNKNOWN {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  background: transparent;
+  color: #7b8490;
+  border-color: transparent;
+  width: 1.15rem;
+  height: 1.15rem;
+  padding: 0;
+  font-size: 1.05rem;
+  line-height: 1;
+}
 .tpl-item__estado--nueva,
 .estado-badge--nueva {
   background: var(--ok-bg);

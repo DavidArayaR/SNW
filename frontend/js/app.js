@@ -60,6 +60,7 @@ const inpArea = $("#inpArea");
 const hayTemplateMeta = !!inpTemplate && !!inpTemplateLang && !!inpTemplateCategoria;
 const bloqueEstadoMeta = $("#bloqueEstadoMeta");
 const badgeEstadoMeta = $("#badgeEstadoMeta");
+const badgeCalidadMeta = $("#badgeCalidadMeta");
 const badgeAprobadaReciente = $("#badgeAprobadaReciente");
 const motivoRechazoMeta = $("#motivoRechazoMeta");
 const btnRevisarTodos = $("#btnRevisarTodos");
@@ -102,22 +103,34 @@ const btnEnviarActual = $("#btnEnviarActual");
 const modalEl = $("#modalEliminar");
 const toastEl = $("#toast");
 
-// Estado del template en Meta. Solo una plantilla APPROVED se puede usar para
-// enviar mensajes. Editar, guardar y eliminar se permiten en APPROVED y
-// también en REJECTED (para poder corregirla y volver a mandarla a revisión,
-// o borrarla); mientras esté realmente pendiente de revisión (recién creada
-// o PENDING) queda de solo lectura. Ver también la validación del servidor
-// en /api/plantillas y /api/notificaciones/enviar.
+// Solo APPROVED se puede enviar. Meta permite editar una plantilla PAUSED;
+// al guardarla vuelve a revisión. La calidad es informativa y no autoriza ni
+// bloquea por sí sola el envío.
 const ETIQUETAS_ESTADO_META = {
   APPROVED: "Aprobada",
   PENDING: "Pendiente",
   REJECTED: "Rechazada",
+  PAUSED: "Pausada",
+  DISABLED: "Deshabilitada",
   DESCONOCIDO: "Sin consultar",
 };
+const ETIQUETAS_CALIDAD_META = {
+  GREEN: "Calidad alta",
+  YELLOW: "Calidad media",
+  RED: "Calidad baja",
+  UNKNOWN: "Calidad pendiente",
+};
 const etiquetaEstadoMeta = (status) => ETIQUETAS_ESTADO_META[status] || ETIQUETAS_ESTADO_META.DESCONOCIDO;
+const calidadMeta = (p) => {
+  const score = p?.whatsapp_template_quality_score;
+  return (typeof score === "string" ? score : score?.score || "").toUpperCase();
+};
+const etiquetaCalidadMeta = (p) => ETIQUETAS_CALIDAD_META[calidadMeta(p)] || "";
 // p == null (plantilla nueva, sin guardar todavía) no tiene restricción.
 const esPlantillaAprobada = (p) => !p || p.whatsapp_template_status === "APPROVED";
 const esPlantillaRechazada = (p) => !!p && p.whatsapp_template_status === "REJECTED";
+const esPlantillaPausada = (p) => !!p && p.whatsapp_template_status === "PAUSED";
+const esPlantillaDeshabilitada = (p) => !!p && p.whatsapp_template_status === "DISABLED";
 // Aprobación interna previa a Meta: el usuario normal crea en "pendiente" y
 // solo se registra en Meta cuando un admin/dev/supervisor la aprueba. Las
 // antiguas (sin campo) cuentan como "aprobada".
@@ -130,7 +143,8 @@ const esPlantillaEditable = (p) => {
   if (!p) return true;
   if (esPlantillaProtegida(p)) return false;
   if (aprobacionPlantilla(p) !== "aprobada") return true; // aún no existe en Meta
-  return esPlantillaAprobada(p) || esPlantillaRechazada(p);
+  return esPlantillaAprobada(p) || esPlantillaRechazada(p) || esPlantillaPausada(p) ||
+    esPlantillaDeshabilitada(p);
 };
 // Meta solo permite editar un template una vez cada 24h (ver actualizar_plantilla
 // en el backend, que es quien de verdad lo exige). No afecta a Eliminar.
@@ -351,8 +365,8 @@ async function cargar() {
 
 // El servidor ya revisa solo el estado en Meta (cron); esto solo hace que la
 // pantalla se entere sin que alguien tenga que recargar. Corre cada 30 s,
-// en silencio (sin tocar nada si falla), y avisa con un toast cuando detecta
-// que una plantilla pasó a estar aprobada.
+// en silencio (sin tocar nada si falla), y avisa al aprobar, rechazar, pausar
+// o deshabilitar.
 async function revisarPlantillasEnSegundoPlano() {
   try {
     const res = await fetch(API_URL, { headers: authHeaders(), cache: "no-store" });
@@ -367,6 +381,10 @@ async function revisarPlantillasEnSegundoPlano() {
       if (!previa) continue;
       if (!esPlantillaAprobada(previa) && esPlantillaAprobada(p)) {
         toast(`✨ «${p.nombre}» fue aprobada por Meta.`, "ok");
+      } else if (!esPlantillaPausada(previa) && esPlantillaPausada(p)) {
+        toast(`⏸ «${p.nombre}» fue pausada por Meta y no se puede enviar.`, "error");
+      } else if (!esPlantillaDeshabilitada(previa) && esPlantillaDeshabilitada(p)) {
+        toast(`«${p.nombre}» fue deshabilitada por Meta.`, "error");
       } else if (!esPlantillaRechazada(previa) && esPlantillaRechazada(p)) {
         toast(`⚠️ «${p.nombre}» fue rechazada por Meta.`, "error");
       }
@@ -457,8 +475,26 @@ function crearItemPlantilla(p) {
     // «Plantillas pendientes de aprobación por Meta», el badge era redundante.
     estadoTag = ` <span class="tpl-item__estado tpl-item__estado--rechazada">` +
       `${escaparHtml(etiquetaEstadoMeta(p.whatsapp_template_status))}</span>`;
+  } else if (esPlantillaPausada(p)) {
+    estadoTag = ` <span class="tpl-item__estado tpl-item__estado--pausada">⏸ ` +
+      `${escaparHtml(etiquetaEstadoMeta(p.whatsapp_template_status))}</span>`;
+  } else if (esPlantillaDeshabilitada(p)) {
+    estadoTag = ` <span class="tpl-item__estado tpl-item__estado--deshabilitada">` +
+      `${escaparHtml(etiquetaEstadoMeta(p.whatsapp_template_status))}</span>`;
   } else if (esRecienAprobada(p)) {
     estadoTag = ` <span class="tpl-item__estado tpl-item__estado--nueva">✨ Aprobada</span>`;
+  }
+  const calidad = calidadMeta(p);
+  if (ETIQUETAS_CALIDAD_META[calidad]) {
+    const etiquetaCalidad = etiquetaCalidadMeta(p);
+    const puntoPendiente = calidad === "UNKNOWN";
+    const textoCalidad = puntoPendiente ? "●" : etiquetaCalidad;
+    const ayudaCalidad = puntoPendiente
+      ? "Calidad de la plantilla pendiente"
+      : `Calidad de la plantilla: ${etiquetaCalidad}`;
+    estadoTag += ` <span class="tpl-item__estado tpl-item__estado--calidad-${calidad}" ` +
+      `title="${escaparHtml(ayudaCalidad)}" aria-label="${escaparHtml(ayudaCalidad)}">` +
+      `${escaparHtml(textoCalidad)}</span>`;
   }
   const ap = p.aprobacion_estado || "aprobada";
   if (ap === "pendiente") {
@@ -688,12 +724,15 @@ function renderLista(filtro = "") {
   // enviar la plantilla a Meta, por lo que ambas esperas deben distinguirse.
   const estaRechazada = (p) => esPlantillaRechazada(p) || aprobacionPlantilla(p) === "rechazada";
   const aprobadas = visibles.filter((p) => esPlantillaAprobada(p) && !estaRechazada(p));
+  const pausadas = visibles.filter((p) => esPlantillaPausada(p) && !estaRechazada(p));
+  const deshabilitadas = visibles.filter((p) => esPlantillaDeshabilitada(p) && !estaRechazada(p));
   const rechazadas = visibles.filter(estaRechazada);
   const pendientesInternas = visibles.filter(
     (p) => aprobacionPlantilla(p) === "pendiente" && !estaRechazada(p)
   );
   const pendientesMeta = visibles.filter(
-    (p) => aprobacionPlantilla(p) !== "pendiente" && !estaRechazada(p) && !esPlantillaAprobada(p)
+    (p) => aprobacionPlantilla(p) !== "pendiente" && !estaRechazada(p) &&
+      !esPlantillaAprobada(p) && !esPlantillaPausada(p) && !esPlantillaDeshabilitada(p)
   );
 
   const agregarGrupo = (titulo, lista, tono, icono) => {
@@ -706,6 +745,8 @@ function renderLista(filtro = "") {
   };
 
   agregarGrupo("Plantillas aprobadas por Meta", aprobadas, "ok", "fa-circle-check");
+  agregarGrupo("Plantillas pausadas por Meta", pausadas, "danger", "fa-circle-pause");
+  agregarGrupo("Plantillas deshabilitadas por Meta", deshabilitadas, "danger", "fa-ban");
   agregarGrupo("Plantillas rechazadas", rechazadas, "danger", "fa-circle-xmark");
   agregarGrupo("Plantillas pendientes de aprobación", pendientesInternas, "warn", "fa-clock");
   agregarGrupo("Plantillas pendientes de aprobación por Meta", pendientesMeta, "info", "fa-clock");
@@ -1000,12 +1041,38 @@ function renderEstadoMeta(p) {
   badgeEstadoMeta.className = "estado-badge estado-" + (ETIQUETAS_ESTADO_META[status] ? status : "DESCONOCIDO");
   if (badgeAprobadaReciente) badgeAprobadaReciente.hidden = !esRecienAprobada(p);
 
-  const motivo = p.whatsapp_template_rejected_reason || p.whatsapp_template_error;
+  const motivo = status === "PAUSED"
+    ? p.whatsapp_template_error
+    : p.whatsapp_template_rejected_reason || p.whatsapp_template_error;
   if (motivo && status !== "APPROVED") {
     motivoRechazoMeta.textContent = motivo;
     motivoRechazoMeta.hidden = false;
   } else {
     motivoRechazoMeta.hidden = true;
+  }
+  if (badgeCalidadMeta) {
+    const calidad = calidadMeta(p);
+    const etiqueta = etiquetaCalidadMeta(p);
+    badgeCalidadMeta.hidden = !etiqueta;
+    const pendiente = calidad === "UNKNOWN";
+    badgeCalidadMeta.textContent = pendiente ? "●" : etiqueta;
+    badgeCalidadMeta.setAttribute(
+      "aria-label", pendiente ? "Calidad de la plantilla pendiente" : `Calidad de la plantilla: ${etiqueta}`
+    );
+    badgeCalidadMeta.className = "estado-badge estado-calidad-" +
+      (ETIQUETAS_CALIDAD_META[calidad] ? calidad : "UNKNOWN");
+    badgeCalidadMeta.title = pendiente
+      ? "Calidad de la plantilla pendiente"
+      : calidad === "RED"
+        ? "Calidad baja: el template aún se puede enviar mientras su estado sea Aprobada; puede ser pausado o deshabilitado."
+      : calidad === "YELLOW"
+        ? "Calidad media: aún se puede enviar mientras su estado sea Aprobada."
+        : "La calificación de calidad no cambia el estado de aprobación.";
+    const fechaScore = Number(p.whatsapp_template_quality_score?.date);
+    if (Number.isFinite(fechaScore) && fechaScore > 0) {
+      const fechaMs = fechaScore > 1e12 ? fechaScore : fechaScore * 1000;
+      badgeCalidadMeta.title += ` Última actualización: ${new Date(fechaMs).toLocaleString("es-CL")}.`;
+    }
   }
 }
 
@@ -1024,6 +1091,8 @@ function sincronizarTemplateConNombre() {
 // - APPROVED: todo disponible, como siempre.
 // - REJECTED: se puede editar/guardar/eliminar (para corregirla y volver a
 //   mandarla a revisión, o descartarla), pero NO enviar.
+// - PAUSED/DISABLED: Meta permite editar/guardar/eliminar, pero no enviar;
+//   editarla la vuelve a mandar a revisión.
 // - pendiente de revisión (recién creada o PENDING): de solo lectura, sin
 //   ningún botón, aunque la cuenta tenga permiso de edición.
 let _timerEnfriamiento = null;
@@ -1084,7 +1153,8 @@ function actualizarBotonesSegunEstado(p) {
   if (avisoPendiente) {
     avisoPendiente.classList.toggle(
       "aviso-rechazo",
-      !!(p && (ap === "rechazada" || esPlantillaRechazada(p)))
+      !!(p && (ap === "rechazada" || esPlantillaRechazada(p) || esPlantillaPausada(p) ||
+        esPlantillaDeshabilitada(p)))
     );
     if (p && esPlantillaProtegida(p)) {
       pararCuentaRegresiva();
@@ -1111,6 +1181,21 @@ function actualizarBotonesSegunEstado(p) {
         : `Esta plantilla está ${etiquetaEstadoMeta(p.whatsapp_template_status).toLowerCase()} en Meta: ` +
           "no se puede editar, guardar, eliminar ni usar para enviar mensajes hasta que se resuelva.";
       avisoPendiente.hidden = false;
+    } else if (p && esPlantillaDeshabilitada(p)) {
+      pararCuentaRegresiva();
+      avisoPendiente.textContent =
+        "Meta deshabilitó esta plantilla: no se puede enviar ni programar. Puedes editarla y " +
+        "guardarla para reenviarla a revisión; volverá a estar disponible solo cuando Meta la apruebe.";
+      avisoPendiente.hidden = false;
+    } else if (p && esPlantillaPausada(p)) {
+      avisoPendiente.textContent =
+        "Meta pausó esta plantilla: no se puede enviar ni programar. Puedes editarla y guardarla " +
+        "para reenviarla a revisión; solo volverá a estar disponible cuando Meta la active. " +
+        "Si fue pausada por Template Pacing, debe reanudarse manualmente en WhatsApp Manager." +
+        (enEnfriamiento ? ` ${textoEnfriamiento(p)}` : "");
+      avisoPendiente.hidden = false;
+      if (enEnfriamiento) iniciarCuentaRegresiva(p);
+      else pararCuentaRegresiva();
     } else if (p && enEnfriamiento) {
       avisoPendiente.textContent = textoEnfriamiento(p);
       avisoPendiente.hidden = false;

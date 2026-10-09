@@ -148,13 +148,20 @@ async def sin_cache(request, call_next):
 
 MAX_TEXTO_PLANTILLA = MAX_CUERPO  # representación común de preview y envío
 CATEGORIAS_TEMPLATE = ("UTILITY", "MARKETING", "AUTHENTICATION")  # categorías válidas de Meta
-# Estados de plantilla en los que SÍ se puede editar/guardar/eliminar:
-# aprobada, o rechazada (para poder corregirla y volver a mandarla a revisión,
-# o borrarla). Mientras esté realmente pendiente de revisión (recién creada,
-# sin categoría todavía enviada, o en estado PENDING) queda de solo lectura,
-# para no tocar algo que Meta está evaluando en ese momento. Solo APPROVED se
-# puede usar para enviar mensajes (ver POST /api/notificaciones/enviar).
-ESTADOS_TEMPLATE_EDITABLES = ("APPROVED", "REJECTED")
+# Estados de plantilla en los que sí se puede editar/guardar/eliminar:
+# aprobada, rechazada, pausada o deshabilitada. Meta permite editar PAUSED y
+# DISABLED; al reenviarlas vuelven a revisión. PENDING queda de solo lectura.
+# Solo APPROVED se puede usar para enviar mensajes.
+ESTADOS_TEMPLATE_EDITABLES = ("APPROVED", "REJECTED", "PAUSED", "DISABLED")
+
+
+def _mensaje_estado_meta_no_enviable(estado: str | None, accion: str = "enviar") -> str:
+    if estado == "PAUSED":
+        return f"Meta pausó esta plantilla; no se puede {accion} hasta que vuelva a estar activa."
+    if estado == "DISABLED":
+        return (f"Meta deshabilitó esta plantilla; no se puede {accion}. "
+                "Puedes editarla y reenviarla a revisión.")
+    return f"Esta plantilla todavía no fue aprobada por Meta: no se puede {accion}."
 
 
 def _validar_categoria_template(valor: str | None) -> str:
@@ -2508,15 +2515,17 @@ def _actualizar_estado_meta(p: dict) -> dict:
     También registra `whatsapp_template_aprobada_en` (epoch ms) la primera vez
     que el estado pasa a APPROVED, para mostrar el aviso de «aprobada
     recientemente» un rato después de detectarlo (se limpia si deja de estar
-    aprobada)."""
+    aprobada), y conserva la calificación de calidad reportada por Meta."""
     if p.get("encabezado_media_id") and not p.get("encabezado_meta_registrado"):
         p["whatsapp_template_status"] = None
+        p["whatsapp_template_quality_score"] = None
         p["whatsapp_template_error"] = (p.get("whatsapp_template_error")
                                          or "El encabezado aún no se registró en Meta.")
         return p
     nombre_template = (p.get("whatsapp_template") or "").strip()
     if not nombre_template:
         p["whatsapp_template_status"] = None
+        p["whatsapp_template_quality_score"] = None
         p["whatsapp_template_error"] = "Esta plantilla no tiene un template de Meta configurado"
         p["whatsapp_template_rejected_reason"] = None
         p["whatsapp_template_aprobada_en"] = None
@@ -2530,16 +2539,91 @@ def _actualizar_estado_meta(p: dict) -> dict:
         p["whatsapp_template_error"] = resultado.get("error")
         return p
 
-    anterior = p.get("whatsapp_template_status")
-    nuevo = resultado.get("status")
-    p["whatsapp_template_status"] = nuevo
+    _guardar_estado_y_calidad_meta(
+        p, resultado.get("status"), resultado.get("rejected_reason"),
+        resultado.get("quality_score"),
+    )
     p["whatsapp_template_error"] = None
-    p["whatsapp_template_rejected_reason"] = resultado.get("rejected_reason")
-    if nuevo == "APPROVED" and anterior != "APPROVED":
-        p["whatsapp_template_aprobada_en"] = int(time.time() * 1000)
-    elif nuevo != "APPROVED":
-        p["whatsapp_template_aprobada_en"] = None
     return p
+
+
+def _detener_jobs_plantilla_no_aprobada(p: dict, estado: str | None) -> None:
+    """Detiene los lotes cuando Meta retira APPROVED de la plantilla."""
+    plantilla_id = p.get("id")
+    meta_id = p.get("whatsapp_template_id")
+    if plantilla_id is None and not meta_id:
+        return
+    with JOBS_LOCK:
+        for job in JOBS.values():
+            if job.get("estado") in ("completado", "cancelado", "error"):
+                continue
+            plantilla_job = job.get("plantilla") or {}
+            coincide = (
+                (plantilla_id is not None and plantilla_job.get("id") == plantilla_id)
+                or (meta_id and plantilla_job.get("whatsapp_template_id") == meta_id)
+            )
+            if coincide:
+                job["cancelado"] = True
+                if estado == "PAUSED":
+                    motivo = "Meta pausó esta plantilla."
+                elif estado == "DISABLED":
+                    motivo = "Meta deshabilitó esta plantilla."
+                else:
+                    motivo = f"Meta cambió la plantilla a {estado or 'un estado no aprobado'}."
+                job["cancelado_motivo"] = (
+                    f"{motivo} El envío se detuvo; inicia otro cuando vuelva a estar Aprobada."
+                )
+
+
+def _guardar_estado_y_calidad_meta(p: dict, estado: str | None,
+                                   motivo: str | None = None,
+                                   calidad: dict | str | None = None) -> bool:
+    """Actualiza estado/calidad de Meta y corta envíos al detectar una pausa."""
+    anterior = p.get("whatsapp_template_status")
+    calidad_anterior = p.get("whatsapp_template_quality_score")
+    p["whatsapp_template_status"] = estado
+    p["whatsapp_template_rejected_reason"] = motivo
+    p["whatsapp_template_quality_score"] = calidad
+    if estado == "APPROVED" and anterior != "APPROVED":
+        p["whatsapp_template_aprobada_en"] = int(time.time() * 1000)
+    elif estado != "APPROVED":
+        p["whatsapp_template_aprobada_en"] = None
+    if anterior == "APPROVED" and estado != "APPROVED":
+        _detener_jobs_plantilla_no_aprobada(p, estado)
+    return anterior != estado or calidad_anterior != calidad
+
+
+def _actualizar_estados_aprobados_meta(plantillas: list[dict]) -> bool:
+    """Sondea en una sola consulta las aprobadas para detectar PAUSED/calidad."""
+    aprobadas = [
+        p for p in plantillas
+        if not p.get("especial")
+        and p.get("whatsapp_template_status") == "APPROVED"
+        and (p.get("whatsapp_template") or "").strip()
+        and (not p.get("encabezado_media_id") or p.get("encabezado_meta_registrado"))
+    ]
+    if not aprobadas:
+        return False
+    resultado = WhatsAppService().listar_templates_meta()
+    if not resultado.get("ok"):
+        return False
+    templates_meta = resultado.get("templates") or []
+    cambio = False
+    for p in aprobadas:
+        nombre = (p.get("whatsapp_template") or "").strip()
+        idioma = (p.get("whatsapp_template_lang") or "").strip() or "es"
+        meta = next((t for t in templates_meta
+                     if t.get("name") == nombre and t.get("language") == idioma), None)
+        if not meta:
+            meta = next((t for t in templates_meta if t.get("name") == nombre), None)
+        if not meta:
+            continue
+        cambio = _guardar_estado_y_calidad_meta(
+            p, meta.get("status"),
+            meta.get("rejected_reason") or meta.get("reject_reason"),
+            meta.get("quality_score"),
+        ) or cambio
+    return cambio
 
 
 def estado_plantilla_meta(plantilla_id: int, sesion: dict = Depends(sesion_actual)):
@@ -2568,24 +2652,23 @@ def actualizar_todos_estados_meta(sesion: dict = Depends(sesion_actual)):
 
 # --- Revisión automática del estado en Meta (cron) --------------------------
 # Nadie tiene que apretar "Consultar estado": cada `plantillas_revision_minutos`
-# este barrido consulta en Meta las plantillas que todavía no están APPROVED
-# (incluye las PENDING y las ya REJECTED, por si se reenviaron a revisión o
-# Meta revierte un rechazo) y actualiza su estado solo. Así se detecta la
-# aprobación O el rechazo sin intervención manual; el aviso de «aprobada
-# recientemente» sale de acá (ver _actualizar_estado_meta). El frontend hace
-# su propio polling cada 30 s y avisa con un toast apenas ve el cambio.
+# este barrido consulta las plantillas que no están APPROVED y también sondea
+# las aprobadas en una sola llamada para detectar pausas y cambios de calidad.
+# Así se detectan aprobación, rechazo y PAUSED sin intervención manual; el
+# frontend hace su polling cada 30 s y avisa con un toast apenas ve cambios.
 def _revisar_plantillas_pendientes() -> None:
     try:
         plantillas = leer_plantillas()
-        pendientes = [
+        para_revisar = [
             p for p in plantillas
             if not p.get("especial")
             and (p.get("whatsapp_template") or "").strip()
             and p.get("whatsapp_template_status") != "APPROVED"
         ]
-        for p in pendientes:
+        cambio_aprobadas = _actualizar_estados_aprobados_meta(plantillas)
+        for p in para_revisar:
             _actualizar_estado_meta(p)
-        if pendientes:
+        if para_revisar or cambio_aprobadas:
             escribir_plantillas(plantillas)
     except Exception as e:
         log_error("_revisar_plantillas_pendientes", e)
@@ -2729,15 +2812,20 @@ def sincronizar_plantillas_meta(sesion: dict = Depends(exigir("mensajeria"))):
                 p.get("whatsapp_template_id") != match.get("id")
                 or p.get("whatsapp_template_status") != match.get("status")
                 or p.get("whatsapp_template_categoria") != match.get("category")
+                or p.get("whatsapp_template_quality_score") != match.get("quality_score")
                 or texto_nuevo != texto_actual
             )
             actualizadas += 1 if cambio else 0
             p["whatsapp_template_id"] = match.get("id")
-            p["whatsapp_template_status"] = (match.get("status") if not p.get("encabezado_media_id")
-                                              or p.get("encabezado_meta_registrado") else None)
+            estado_meta = (match.get("status") if not p.get("encabezado_media_id")
+                           or p.get("encabezado_meta_registrado") else None)
+            _guardar_estado_y_calidad_meta(
+                p, estado_meta,
+                match.get("rejected_reason") or match.get("reject_reason"),
+                match.get("quality_score"),
+            )
             p["whatsapp_template_categoria"] = match.get("category") or p.get("whatsapp_template_categoria")
             p["whatsapp_template_lang"] = match.get("language") or lang
-            p["whatsapp_template_rejected_reason"] = match.get("rejected_reason") or match.get("reject_reason")
             p["whatsapp_template_error"] = (None if not p.get("encabezado_media_id")
                                              or p.get("encabezado_meta_registrado")
                                              else p.get("whatsapp_template_error")
@@ -2746,6 +2834,7 @@ def sincronizar_plantillas_meta(sesion: dict = Depends(exigir("mensajeria"))):
             p.update(componentes_para_vista(match.get("components")))
         else:
             p["whatsapp_template_status"] = None
+            p["whatsapp_template_quality_score"] = None
             p["whatsapp_template_error"] = (
                 f"No se encontró el template '{nombre_tpl}' (idioma '{lang}') en Meta."
             )
@@ -2772,6 +2861,7 @@ def sincronizar_plantillas_meta(sesion: dict = Depends(exigir("mensajeria"))):
             "whatsapp_template_categoria": t.get("category"),
             "whatsapp_template_id": t.get("id"),
             "whatsapp_template_status": t.get("status"),
+            "whatsapp_template_quality_score": t.get("quality_score"),
             "whatsapp_template_rejected_reason": t.get("rejected_reason") or t.get("reject_reason"),
             "whatsapp_template_error": None,
             **componentes_para_vista(t.get("components")),
@@ -2859,9 +2949,12 @@ def previsualizar_plantilla(body: PlantillaPreviaIn,
     vista = presentar_plantilla(borrador, body.ejemplos)
     if not actual:
         vista["avisos"].append("Guarda la plantilla y espera la aprobación de Meta para enviar una prueba.")
-    elif _aprobacion_plantilla(actual) != "aprobada" or \
-            actual.get("whatsapp_template_status") != "APPROVED":
-        vista["avisos"].append("La prueba estará disponible cuando la plantilla esté aprobada.")
+    elif actual.get("whatsapp_template_status") != "APPROVED":
+        vista["avisos"].append(_mensaje_estado_meta_no_enviable(
+            actual.get("whatsapp_template_status"), "enviar una prueba",
+        ))
+    elif _aprobacion_plantilla(actual) != "aprobada":
+        vista["avisos"].append("La prueba estará disponible cuando la plantilla tenga aprobación interna.")
     elif (config_get("metodo_envio") or "").strip() != "api_oficial":
         vista["avisos"].append("Activa api_oficial para hacer una prueba real.")
     if actual and (body.texto != actual.get("texto") or
@@ -2891,8 +2984,13 @@ def enviar_prueba_plantilla(plantilla_id: int, body: PruebaPlantillaIn,
                       if p["id"] == plantilla_id), None)
     if plantilla is None:
         raise HTTPException(404, detail="Plantilla no encontrada.")
-    if plantilla.get("especial") or _aprobacion_plantilla(plantilla) != "aprobada" or \
-            plantilla.get("whatsapp_template_status") != "APPROVED":
+    if plantilla.get("especial"):
+        raise HTTPException(400, detail="La plantilla no está disponible para pruebas.")
+    if plantilla.get("whatsapp_template_status") != "APPROVED":
+        raise HTTPException(400, detail=_mensaje_estado_meta_no_enviable(
+            plantilla.get("whatsapp_template_status"), "enviar una prueba",
+        ))
+    if _aprobacion_plantilla(plantilla) != "aprobada":
         raise HTTPException(400, detail="Espera la aprobación interna y de Meta antes de enviar una prueba.")
     if plantilla.get("encabezado_media_id") and not plantilla.get("encabezado_meta_registrado"):
         raise HTTPException(400, detail="El encabezado aún no está registrado en Meta.")
@@ -4261,7 +4359,7 @@ def _procesar_job(job_id: str) -> None:
         if job.get("cancelado"):
             job["actual"] = ""
             job["estado"] = "cancelado"
-            job["detalle"] = "Cancelado por el usuario"
+            job["detalle"] = job.get("cancelado_motivo") or "Cancelado por el usuario"
             actualizar_envio_batch(envio_id, amb, enviados=job["enviados"], fallidos=job["fallidos"], estado="cancelado")
             break
         # Si está pausado, esperar (sin enviar) hasta reanudar o cancelar
@@ -4272,7 +4370,7 @@ def _procesar_job(job_id: str) -> None:
         if job.get("cancelado"):
             job["actual"] = ""
             job["estado"] = "cancelado"
-            job["detalle"] = "Cancelado por el usuario"
+            job["detalle"] = job.get("cancelado_motivo") or "Cancelado por el usuario"
             actualizar_envio_batch(envio_id, amb, enviados=job["enviados"], fallidos=job["fallidos"], estado="cancelado")
             break
         job["actual"] = d["nombre"]
@@ -4416,8 +4514,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
     if plantilla.get("whatsapp_template_status") != "APPROVED":
         raise HTTPException(
             400,
-            detail="Esta plantilla todavía no fue aprobada por Meta: no se puede usar para enviar "
-                   "hasta que se apruebe.",
+            detail=_mensaje_estado_meta_no_enviable(plantilla.get("whatsapp_template_status")),
         )
     # Aprobación interna previa a Meta: sin ella no sale ningún envío.
     if _aprobacion_plantilla(plantilla) == "pendiente":
@@ -5238,7 +5335,12 @@ def _validar_plantilla_programable(plantilla: dict | None, area_id: int | None) 
     if plantilla.get("especial"):
         raise HTTPException(400, detail="El mensaje de call center no se puede programar: se manda solo.")
     if plantilla.get("whatsapp_template_status") != "APPROVED":
-        raise HTTPException(400, detail="Esta plantilla todavía no fue aprobada por Meta.")
+        raise HTTPException(
+            400,
+            detail=_mensaje_estado_meta_no_enviable(
+                plantilla.get("whatsapp_template_status"), "programar envíos",
+            ),
+        )
     if _aprobacion_plantilla(plantilla) == "pendiente":
         raise HTTPException(400, detail="Esta plantilla está pendiente de aprobación interna.")
     if _aprobacion_plantilla(plantilla) == "rechazada":

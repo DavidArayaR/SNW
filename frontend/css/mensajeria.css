@@ -46,7 +46,20 @@
 #badgeEstadoMeta.estado-APPROVED { background: #e5f6ec; color: #1e7d4d; border: 1px solid #bfe5cf; }
 #badgeEstadoMeta.estado-PENDING { background: #fdf3e0; color: #a06b08; border: 1px solid #ecd9ac; }
 #badgeEstadoMeta.estado-REJECTED { background: #fdecec; color: #b23b37; border: 1px solid #eec2c1; }
+#badgeEstadoMeta.estado-PAUSED { background: #fff0e5; color: #a34712; border: 1px solid #f0c8a9; }
+#badgeEstadoMeta.estado-DISABLED { background: #fdecec; color: #b23b37; border: 1px solid #eec2c1; }
 #badgeEstadoMeta.estado-DESCONOCIDO { background: #eef1f4; color: #66757f; border: 1px solid #dde1e6; }
+#badgeCalidadMeta.estado-calidad-GREEN { background: #e5f6ec; color: #1e7d4d; border: 1px solid #bfe5cf; }
+#badgeCalidadMeta.estado-calidad-YELLOW { background: #fdf3e0; color: #a06b08; border: 1px solid #ecd9ac; }
+#badgeCalidadMeta.estado-calidad-RED { background: #fdecec; color: #b23b37; border: 1px solid #eec2c1; }
+#badgeCalidadMeta.estado-calidad-UNKNOWN {
+  background: transparent;
+  color: #7b8490;
+  border: 0;
+  padding: 0 2px;
+  font-size: 1rem;
+  line-height: 1;
+}
 
 .prog__nota { margin: 12px 18px 0; }
 .modal__texto-rechazo-programado { margin: 0 0 12px; font-size: .92rem; }

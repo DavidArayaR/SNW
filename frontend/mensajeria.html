@@ -7,10 +7,10 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
   <link rel="stylesheet" href="css/tema.css">
-  <link rel="stylesheet" href="css/styles.css?v=plantillas-tabs1">
+  <link rel="stylesheet" href="css/styles.css?v=plantillas-paused3">
   <link rel="stylesheet" href="css/componentes.css">
   <link rel="stylesheet" href="css/layout.css?v=sidebar25">
-  <link rel="stylesheet" href="css/mensajeria.css?v=plantillas-prueba3">
+  <link rel="stylesheet" href="css/mensajeria.css?v=plantillas-paused2">
   <link rel="stylesheet" href="css/calendario.css?v=base1">
   <link rel="stylesheet" href="css/calendario-programados.css?v=programados2">
   <script src="js/tema.js"></script>
@@ -158,12 +158,13 @@
         <input type="hidden" id="inpTemplateLang" value="es">
 
         <div class="field" id="bloqueEstadoMeta" hidden>
-          <label>Estado en Meta</label>
+          <label>Estado y calidad en Meta</label>
           <div class="estado-meta-fila">
             <span id="badgeEstadoMeta" class="estado-badge">—</span>
+            <span id="badgeCalidadMeta" class="estado-badge" hidden></span>
             <span id="badgeAprobadaReciente" class="estado-badge estado-badge--nueva" hidden>✨ Aprobada recientemente</span>
           </div>
-          <p class="field__hint">El estado se revisa solo cada pocos minutos; no hace falta consultarlo a mano.</p>
+          <p class="field__hint">Estado y calidad se actualizan automáticamente. El punto de color indica la calidad de la plantilla. La calidad es informativa: solo se puede enviar si el estado es Aprobada.</p>
           <p id="motivoRechazoMeta" class="field__hint" hidden></p>
         </div>
 
@@ -501,7 +502,7 @@
   <div id="toast" class="toast"></div>
   <script src="js/layout.js?v=tabs3-navcurve7"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/app.js?v=plantillas-prueba3"></script>
+  <script src="js/app.js?v=plantillas-paused2"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>

@@ -371,7 +371,7 @@ class WhatsAppApiClient:
         """Lista los templates de mensaje de la WABA, con paginación."""
         url = f"{graph_url()}/{waba_id}/message_templates"
         params: dict | None = {
-            "fields": "id,name,language,status,category,components,rejected_reason",
+            "fields": "id,name,language,status,category,components,rejected_reason,quality_score",
             "limit": 100,
         }
         templates: list = []
@@ -385,7 +385,11 @@ class WhatsAppApiClient:
     async def buscar_template(self, waba_id: str, nombre: str) -> dict:
         """Busca un template por nombre (puede devolver varias variantes de idioma)."""
         url = f"{graph_url()}/{waba_id}/message_templates"
-        return await self._peticion("GET", url, params={"name": nombre})
+        return await self._peticion(
+            "GET", url,
+            params={"name": nombre,
+                    "fields": "id,name,language,status,category,rejected_reason,quality_score"},
+        )
 
     async def eliminar_template(self, waba_id: str, nombre: str,
                                 template_id: str | None = None) -> dict:
@@ -662,11 +666,12 @@ class WhatsAppService:
     def estado_template_meta(self, nombre_template: str, lang: str) -> dict:
         """Consulta en Meta el estado actual de un template por nombre + idioma.
 
-        Devuelve {ok, status, category, rejected_reason, error}. No rompe el
-        flujo si Meta falla o si no encuentra el template: el error queda en
-        el campo 'error' para que el llamador decida qué mostrar."""
+        Devuelve {ok, status, category, rejected_reason, quality_score, error}.
+        No rompe el flujo si Meta falla o si no encuentra el template: el error
+        queda en 'error' para que el llamador decida qué mostrar."""
         if not self.waba_id or not self.token:
             return {"ok": False, "status": None, "category": None, "rejected_reason": None,
+                    "quality_score": None,
                     "error": "Falta la cuenta de WhatsApp Business o el token (configúralos en Configuración)"}
 
         try:
@@ -674,6 +679,7 @@ class WhatsAppService:
         except ErrorWhatsApp as e:
             log_error(f"estado_template_meta({nombre_template!r}, {lang!r})", e)
             return {"ok": False, "status": None, "category": None, "rejected_reason": None,
+                    "quality_score": None,
                     "error": e.message}
 
         for t in data.get("data", []):
@@ -683,10 +689,12 @@ class WhatsAppService:
                     "status": t.get("status"),
                     "category": t.get("category"),
                     "rejected_reason": t.get("rejected_reason") or t.get("reject_reason"),
+                    "quality_score": t.get("quality_score"),
                     "error": None,
                 }
 
         return {"ok": False, "status": None, "category": None, "rejected_reason": None,
+                "quality_score": None,
                 "error": f"No se encontró el template '{nombre_template}' en idioma '{lang}' en Meta"}
 
     def listar_templates_meta(self) -> dict:
