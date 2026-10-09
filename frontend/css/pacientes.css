@@ -23,6 +23,8 @@
 .campo-prueba { text-align: center; }
 .campo-prueba__cabecera { text-align: center; }
 .paciente-prueba__autorizar { white-space: nowrap; }
+.paciente-prueba__acciones { display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap; }
+.paciente-prueba__quitar { white-space: nowrap; }
 
 /* Card «Gestionar base de datos» (cargar CSV, eliminar registros, eliminar
    tabla). Las acciones se aplican sobre la base elegida en el panel de arriba.

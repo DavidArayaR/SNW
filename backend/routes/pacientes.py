@@ -4,6 +4,7 @@ RUTAS = (
     ("/api/pacientes", "GET", "listar_pacientes", None),
     ("/api/pacientes/prueba", "POST", "crear_paciente_prueba", None),
     ("/api/pacientes/prueba/{paciente_id}/autorizar", "POST", "autorizar_numero_paciente_prueba", None),
+    ("/api/pacientes/prueba/{paciente_id}/autorizar", "DELETE", "quitar_autorizacion_numero_paciente_prueba", None),
     ("/api/pacientes/estado-masivo", "PUT", "actualizar_estado_pacientes", None),
     ("/api/pacientes/respuesta-masiva", "PUT", "actualizar_respuesta_pacientes", None),
     ("/api/pacientes/{paciente_id}", "PUT", "actualizar_paciente", None),

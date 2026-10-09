@@ -33,7 +33,7 @@ from pydantic import BaseModel, Field
 from db import (
     conectar, entorno_valido, log_error, nombre_base, columnas_tabla, columna_existe,
     tabla_pacientes, asegurar_tabla_config, config_all, config_get, config_set,
-    agregar_numero_prueba_dev,
+    agregar_numero_prueba_ambos, quitar_numero_prueba_ambos,
     CONFIG_DEFAULTS,
     ROLES_USUARIO, PERMISOS_VALIDOS, PERMISOS_BASICOS, MAX_DESARROLLADORES,
     usuarios_listar, usuario_buscar, usuario_crear, usuario_actualizar, usuario_borrar,
@@ -1529,11 +1529,15 @@ def listar_pacientes(q: str | None = Query(None), ambiente: str = Query("producc
         filas = cur.fetchall()
 
     propios = _ids_csv_propios(t, [f["id"] for f in filas], sesion)
+    puede_ver_todos_dev = t == "pacientes_dev" and _es_privilegiado(sesion)
     numeros_editables = _numeros_prueba_editables("produccion" if _esp else ambiente)
+    numeros_prueba_prod = _numeros_prueba_editables("produccion") if t == "pacientes_dev" else set()
     for f in filas:
         f["editable"] = _es_numero_prueba_editable(f.get("telefono"), numeros_editables)
         f["autorizado_prueba"] = t == "pacientes_dev" and f["editable"]
-        f["datos_completos"] = f["id"] in propios
+        if t == "pacientes_dev":
+            f["autorizado_prueba_prod"] = _es_numero_prueba_editable(f.get("telefono"), numeros_prueba_prod)
+        f["datos_completos"] = puede_ver_todos_dev or f["id"] in propios
         if not f["datos_completos"]:
             _ocultar_datos_paciente(f)
         fecha = f.pop("fecha_actualizacion", None)
@@ -1593,7 +1597,7 @@ def crear_paciente_prueba(body: PacientePruebaIn, sesion: dict = Depends(solo_ad
 
 
 def autorizar_numero_paciente_prueba(paciente_id: int, sesion: dict = Depends(solo_admin)):
-    """Autoriza en Configuración el teléfono de un registro existente en desarrollo."""
+    """Autoriza en ambas listas el teléfono de un registro de desarrollo."""
     with conectar("desarrollo") as conn, conn.cursor() as cur:
         cur.execute("SELECT telefono FROM pacientes_dev WHERE id = %s", (paciente_id,))
         fila = cur.fetchone()
@@ -1604,11 +1608,33 @@ def autorizar_numero_paciente_prueba(paciente_id: int, sesion: dict = Depends(so
         raise HTTPException(422, detail="El paciente no tiene un celular válido.")
     if esta_suprimido(telefono):
         raise HTTPException(409, detail="Este número pidió ser eliminado y no puede autorizarse.")
-    agregado = agregar_numero_prueba_dev(telefono)
-    if agregado:
+    agregados = agregar_numero_prueba_ambos(telefono)
+    if any(agregados.values()):
         auditoria_registrar(sesion.get("usuario", ""), "numero_prueba_agregado",
-                            f"pacientes_dev:{paciente_id}", f"Celular terminado en {telefono[-4:]}")
-    return {"ok": True, "agregado": agregado}
+                            f"pacientes_dev:{paciente_id}",
+                            f"Celular terminado en {telefono[-4:]} · listas: "
+                            + ", ".join(a for a, nuevo in agregados.items() if nuevo))
+    return {"ok": True, "agregado": any(agregados.values()), "agregado_en": agregados}
+
+
+def quitar_autorizacion_numero_paciente_prueba(paciente_id: int,
+                                               sesion: dict = Depends(solo_admin)):
+    """Quita el celular de ambas listas de prueba; conserva el registro."""
+    with conectar("desarrollo") as conn, conn.cursor() as cur:
+        cur.execute("SELECT telefono FROM pacientes_dev WHERE id = %s", (paciente_id,))
+        fila = cur.fetchone()
+    if not fila:
+        raise HTTPException(404, detail="Paciente de prueba no encontrado.")
+    telefono = normalizar_telefono(fila.get("telefono") or "")
+    if telefono is None:
+        raise HTTPException(422, detail="El paciente no tiene un celular válido.")
+    quitados = quitar_numero_prueba_ambos(telefono)
+    if any(quitados.values()):
+        auditoria_registrar(sesion.get("usuario", ""), "numero_prueba_quitado",
+                            f"pacientes_dev:{paciente_id}",
+                            f"Celular terminado en {telefono[-4:]} · listas: "
+                            + ", ".join(a for a, quitado in quitados.items() if quitado))
+    return {"ok": True, "quitado": any(quitados.values()), "quitado_de": quitados}
 
 
 class EstadoPacienteIn(BaseModel):
@@ -1771,7 +1797,9 @@ def actualizar_paciente(paciente_id: int, body: EstadoPacienteIn,
         )
         fila = cur.fetchone()
         fila["editable"] = _es_numero_prueba_editable(fila.get("telefono"), numeros_editables)
-        fila["datos_completos"] = paciente_id in _ids_csv_propios(t, [paciente_id], sesion)
+        fila["datos_completos"] = (
+            t == "pacientes_dev" and _es_privilegiado(sesion)
+        ) or paciente_id in _ids_csv_propios(t, [paciente_id], sesion)
         if not fila["datos_completos"]:
             _ocultar_datos_paciente(fila)
         fecha = fila.pop("fecha_actualizacion", None)
@@ -1853,7 +1881,9 @@ def actualizar_respuesta_paciente(paciente_id: int, body: RespuestaIn,
     # La baja manual se replica solo donde este número también sea de prueba.
     if body.respuesta == "baja":
         fila["otras_bases"] = _propagar_baja_otras_bases(t, fila.get("telefono"), ambiente)
-    fila["datos_completos"] = paciente_id in _ids_csv_propios(t, [paciente_id], sesion)
+    fila["datos_completos"] = (
+        t == "pacientes_dev" and _es_privilegiado(sesion)
+    ) or paciente_id in _ids_csv_propios(t, [paciente_id], sesion)
     if not fila["datos_completos"]:
         _ocultar_datos_paciente(fila)
     return fila

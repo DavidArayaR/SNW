@@ -23,6 +23,31 @@ def log_error(contexto: str, exc: BaseException | None = None) -> None:
         traceback.print_exception(type(exc), exc, exc.__traceback__)
         sys.stderr.flush()
 
+
+def _migrar_numeros_prueba_a_produccion(cur) -> None:
+    """Copia autorizaciones antiguas de desarrollo una sola vez."""
+    marcador = "numeros_prueba_prod_sync_v1"
+    cur.execute("INSERT INTO configuracion (clave, valor) VALUES (%s, '0')"
+                " ON DUPLICATE KEY UPDATE valor = valor", (marcador,))
+    cur.execute("SELECT valor FROM configuracion WHERE clave = %s FOR UPDATE", (marcador,))
+    if (cur.fetchone() or {}).get("valor") == "1":
+        return
+    cur.execute("SELECT clave, valor FROM configuracion"
+                " WHERE clave IN ('numeros_prueba_dev', 'numeros_prueba_prod')"
+                " ORDER BY clave FOR UPDATE")
+    listas = {fila["clave"]: [n.strip() for n in (fila.get("valor") or "").split(",") if n.strip()]
+              for fila in cur.fetchall()}
+    produccion = listas.get("numeros_prueba_prod", [])
+    existentes = {normalizar_telefono(n) for n in produccion}
+    for valor in listas.get("numeros_prueba_dev", []):
+        numero = normalizar_telefono(valor)
+        if numero and numero not in existentes:
+            produccion.append(numero)
+            existentes.add(numero)
+    cur.execute("UPDATE configuracion SET valor = %s WHERE clave = 'numeros_prueba_prod'",
+                (",".join(produccion),))
+    cur.execute("UPDATE configuracion SET valor = '1' WHERE clave = %s", (marcador,))
+
 AMBIENTES = {"desarrollo", "produccion"}
 TABLAS_PACIENTES = {"desarrollo": "pacientes_dev", "produccion": "pacientes_prod"}
 
@@ -74,6 +99,7 @@ CONFIG_DEFAULTS = {
     "wa_token": "",
     "wa_phone_id": "",
     "wa_business_account_id": "",
+    "wa_app_id": "",
     "wa_verify_token": "",
     "wa_app_secret": "",
     "wa_template_nombre": "",
@@ -132,6 +158,7 @@ def asegurar_tabla_config() -> None:
                     "INSERT IGNORE INTO configuracion (clave, valor) VALUES (%s, %s)",
                     (clave, valor),
                 )
+            _migrar_numeros_prueba_a_produccion(cur)
             # Rate card de WhatsApp (tarifas por mensaje descargadas de Meta).
             cur.execute(
                 "CREATE TABLE IF NOT EXISTS tarifas_whatsapp ("
@@ -998,24 +1025,58 @@ def config_set(cambios: dict) -> None:
     _config_cache = None
 
 
-def agregar_numero_prueba_dev(numero: str) -> bool:
-    """Añade un número normalizado sin perder altas concurrentes; devuelve si era nuevo."""
+def agregar_numero_prueba_ambos(numero: str) -> dict[str, bool]:
+    """Autoriza el número en desarrollo y producción en una sola transacción."""
     global _config_cache
+    numero = normalizar_telefono(numero)
+    if numero is None:
+        raise ValueError("Número de prueba inválido")
+    agregados = {}
     with conectar() as conn, conn.cursor() as cur:
-        cur.execute("SELECT valor FROM configuracion WHERE clave = 'numeros_prueba_dev' FOR UPDATE")
-        fila = cur.fetchone()
-        numeros = [n.strip() for n in (fila.get("valor") or "").split(",") if n.strip()] if fila else []
-        if any(normalizar_telefono(n) == numero for n in numeros):
-            return False
-        numeros.append(numero)
-        cur.execute(
-            "INSERT INTO configuracion (clave, valor) VALUES ('numeros_prueba_dev', %s)"
-            " ON DUPLICATE KEY UPDATE valor = VALUES(valor)",
-            (",".join(numeros),),
-        )
+        for clave, ambiente in (("numeros_prueba_dev", "desarrollo"),
+                                ("numeros_prueba_prod", "produccion")):
+            cur.execute(
+                "INSERT INTO configuracion (clave, valor) VALUES (%s, '')"
+                " ON DUPLICATE KEY UPDATE valor = valor", (clave,))
+            cur.execute("SELECT valor FROM configuracion WHERE clave = %s FOR UPDATE", (clave,))
+            fila = cur.fetchone() or {}
+            numeros = [n.strip() for n in (fila.get("valor") or "").split(",") if n.strip()]
+            agregado = not any(normalizar_telefono(n) == numero for n in numeros)
+            if agregado:
+                numeros.append(numero)
+                cur.execute("UPDATE configuracion SET valor = %s WHERE clave = %s",
+                            (",".join(numeros), clave))
+            agregados[ambiente] = agregado
         conn.commit()
     _config_cache = None
-    return True
+    return agregados
+
+
+def quitar_numero_prueba_ambos(numero: str) -> dict[str, bool]:
+    """Retira el número de ambas listas sin eliminar el paciente."""
+    global _config_cache
+    numero = normalizar_telefono(numero)
+    if numero is None:
+        raise ValueError("Número de prueba inválido")
+    quitados = {}
+    with conectar() as conn, conn.cursor() as cur:
+        for clave, ambiente in (("numeros_prueba_dev", "desarrollo"),
+                                ("numeros_prueba_prod", "produccion")):
+            cur.execute(
+                "INSERT INTO configuracion (clave, valor) VALUES (%s, '')"
+                " ON DUPLICATE KEY UPDATE valor = valor", (clave,))
+            cur.execute("SELECT valor FROM configuracion WHERE clave = %s FOR UPDATE", (clave,))
+            fila = cur.fetchone() or {}
+            numeros = [n.strip() for n in (fila.get("valor") or "").split(",") if n.strip()]
+            restantes = [n for n in numeros if normalizar_telefono(n) != numero]
+            quitado = len(restantes) != len(numeros)
+            if quitado:
+                cur.execute("UPDATE configuracion SET valor = %s WHERE clave = %s",
+                            (",".join(restantes), clave))
+            quitados[ambiente] = quitado
+        conn.commit()
+    _config_cache = None
+    return quitados
 
 
 def entorno_valido(entorno: str | None = None) -> str:

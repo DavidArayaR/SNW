@@ -8,6 +8,7 @@ from fastapi import HTTPException
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
 import main
+import db
 
 
 class PacientesPruebaTests(unittest.TestCase):
@@ -73,12 +74,67 @@ class PacientesPruebaTests(unittest.TestCase):
         cursor.fetchone.return_value = {"telefono": "+56912345678"}
         with patch.object(main, "conectar", return_value=db), \
                 patch.object(main, "esta_suprimido", return_value=False), \
-                patch.object(main, "agregar_numero_prueba_dev", return_value=True) as agregar, \
+                patch.object(main, "agregar_numero_prueba_ambos",
+                             return_value={"desarrollo": True, "produccion": True}) as agregar, \
                 patch.object(main, "auditoria_registrar") as auditoria:
             resultado = main.autorizar_numero_paciente_prueba(27, sesion=self.admin)
         agregar.assert_called_once_with("+56912345678")
         self.assertTrue(resultado["agregado"])
+        self.assertEqual(resultado["agregado_en"], {"desarrollo": True, "produccion": True})
         auditoria.assert_called_once()
+
+    def test_autorizacion_completa_produccion_si_ya_estaba_en_desarrollo(self):
+        conexion = MagicMock()
+        cursor = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cursor.fetchone.side_effect = [
+            {"valor": "+56912345678"}, {"valor": "+56999998888"},
+        ]
+        with patch.object(db, "conectar", return_value=conexion):
+            agregados = db.agregar_numero_prueba_ambos("+56912345678")
+        self.assertEqual(agregados, {"desarrollo": False, "produccion": True})
+        actualizaciones = [call.args for call in cursor.execute.call_args_list
+                          if call.args[0].startswith("UPDATE configuracion SET valor")]
+        self.assertEqual(len(actualizaciones), 1)
+        self.assertEqual(actualizaciones[0][1][1], "numeros_prueba_prod")
+        self.assertIn("+56912345678", actualizaciones[0][1][0])
+        conexion.__enter__.return_value.commit.assert_called_once()
+
+    def test_autorizacion_nueva_actualiza_ambas_listas_en_una_transaccion(self):
+        conexion = MagicMock()
+        cursor = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cursor.fetchone.side_effect = [{"valor": ""}, {"valor": ""}]
+        with patch.object(db, "conectar", return_value=conexion):
+            agregados = db.agregar_numero_prueba_ambos("912345678")
+        self.assertEqual(agregados, {"desarrollo": True, "produccion": True})
+        actualizaciones = [call.args[1] for call in cursor.execute.call_args_list
+                          if call.args[0].startswith("UPDATE configuracion SET valor")]
+        self.assertEqual(actualizaciones, [
+            ("+56912345678", "numeros_prueba_dev"),
+            ("+56912345678", "numeros_prueba_prod"),
+        ])
+        conexion.__enter__.return_value.commit.assert_called_once()
+
+    def test_migracion_inicial_copia_solo_numeros_de_dev_que_faltan(self):
+        cursor = MagicMock()
+        cursor.fetchone.return_value = {"valor": "0"}
+        cursor.fetchall.return_value = [
+            {"clave": "numeros_prueba_dev", "valor": "912345678, +56999998888"},
+            {"clave": "numeros_prueba_prod", "valor": "+56999998888"},
+        ]
+        db._migrar_numeros_prueba_a_produccion(cursor)
+        actualizaciones = [call.args for call in cursor.execute.call_args_list
+                          if call.args[0].startswith("UPDATE configuracion")]
+        self.assertEqual(actualizaciones[0][1], (
+            "+56999998888,+56912345678",))
+        self.assertIn("numeros_prueba_prod_sync_v1", actualizaciones[1][1])
+
+    def test_migracion_no_repone_numeros_retirados_despues(self):
+        cursor = MagicMock()
+        cursor.fetchone.return_value = {"valor": "1"}
+        db._migrar_numeros_prueba_a_produccion(cursor)
+        cursor.fetchall.assert_not_called()
+        self.assertFalse(any(call.args[0].startswith("UPDATE configuracion")
+                             for call in cursor.execute.call_args_list))
 
     def test_programados_dev_no_visibles_para_otros_roles(self):
         fila = {"ambiente": "desarrollo", "area_id": None, "creador": "user@example.com"}

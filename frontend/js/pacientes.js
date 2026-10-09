@@ -381,9 +381,15 @@ function render() {
       `</td>` +
       `<td class="campo-fecha">${escaparHtml(p.actualizado)}</td>`;
     if (basePacActual() === "dev" && window.snwEsPrivilegiado) {
-      tr.innerHTML += `<td class="campo-prueba">${p.autorizado_prueba
+      const autorizadoAmbos = p.autorizado_prueba && p.autorizado_prueba_prod;
+      const etiquetaAutorizar = p.autorizado_prueba ? "Agregar a producción"
+        : p.autorizado_prueba_prod ? "Agregar a desarrollo" : "Agregar a lista de pruebas";
+      tr.innerHTML += `<td class="campo-prueba"><div class="paciente-prueba__acciones">${autorizadoAmbos
         ? `<span class="paciente-prueba__estado">Autorizado</span>`
-        : `<button type="button" class="btn btn--ghost paciente-prueba__autorizar" data-autorizar-id="${p.id}">Agregar a números de prueba</button>`}</td>`;
+        : `<button type="button" class="btn btn--ghost paciente-prueba__autorizar" data-autorizar-id="${p.id}">${etiquetaAutorizar}</button>`}
+        ${p.autorizado_prueba || p.autorizado_prueba_prod
+          ? `<button type="button" class="btn btn--ghost paciente-prueba__quitar" data-quitar-prueba-id="${p.id}" title="Quitar el número de las listas de prueba de desarrollo y producción, sin borrar al paciente">Quitar de números de prueba</button>`
+          : ""}</div></td>`;
     }
     const chk = tr.querySelector('input[type="checkbox"]');
     if (chk) chk.addEventListener("change", (e) => {
@@ -920,10 +926,29 @@ tbodyEl.addEventListener("click", async (e) => {
     });
     if (res.status === 401) { window.snwSesionExpirada(); return; }
     if (!res.ok) throw new Error(await errorApiPrueba(res));
-    toast("Número agregado a los números de prueba de desarrollo.");
+    toast("Número autorizado para pruebas en desarrollo y producción.");
     await cargar();
   } catch (err) {
     toast(err.message || "No se pudo autorizar el número.", "error");
+    boton.disabled = false;
+  }
+});
+
+tbodyEl.addEventListener("click", async (e) => {
+  const boton = e.target.closest("[data-quitar-prueba-id]");
+  if (!boton || !tbodyEl.contains(boton) || !window.snwEsPrivilegiado || basePacActual() !== "dev") return;
+  if (!confirm("¿Quitar este número de las listas de prueba de desarrollo y producción? El paciente permanecerá en la base de desarrollo.")) return;
+  boton.disabled = true;
+  try {
+    const res = await fetch(`api/pacientes/prueba/${boton.dataset.quitarPruebaId}/autorizar`, {
+      method: "DELETE", headers: authHeaders(),
+    });
+    if (res.status === 401) { window.snwSesionExpirada(); return; }
+    if (!res.ok) throw new Error(await errorApiPrueba(res));
+    toast("Número quitado de las listas de prueba. El paciente permanece en desarrollo.");
+    await cargar();
+  } catch (err) {
+    toast(err.message || "No se pudo quitar el número de prueba.", "error");
     boton.disabled = false;
   }
 });

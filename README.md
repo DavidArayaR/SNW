@@ -345,7 +345,8 @@ contraseña?» en el login (`/api/auth/olvide`) — mismo mecanismo, pero autose
 |---|---|---|
 | GET | `/api/pacientes?q=&ambiente=&area=` | Lista con respuesta y error del último `log_envios`. Con `area` lee la tabla `pacientes_<slug>` (403 si no está asignada) |
 | POST | `/api/pacientes/prueba` | (admin/dev) Agrega nombre, apellido y celular solo a `pacientes_dev`, sin autorizar automáticamente envíos. Rechaza duplicados y teléfonos suprimidos. El alta queda auditada y la cuenta creadora conserva acceso a los datos completos de esa fila |
-| POST | `/api/pacientes/prueba/{id}/autorizar` | (admin/dev) Botón de la tabla para añadir el celular existente a `numeros_prueba_dev` en Configuración. Es idempotente y queda auditado |
+| POST | `/api/pacientes/prueba/{id}/autorizar` | (admin/dev) Botón de la tabla para añadir el celular existente a `numeros_prueba_dev` y `numeros_prueba_prod` en una transacción. Es idempotente, completa cualquiera de las listas que falte y queda auditado. Al primer arranque con esta versión, los números que ya estaban en desarrollo se copian una sola vez a la lista de producción; no se vuelven a añadir si después se retiran deliberadamente |
+| DELETE | `/api/pacientes/prueba/{id}/autorizar` | (admin/dev) Quita el celular de ambas listas de prueba de forma idempotente y auditada; conserva el registro del paciente en desarrollo |
 | PUT | `/api/pacientes/{id}?ambiente=&area=` | Cambiar `estado` (`pendiente`/`enviado`/`error`) de **un** paciente |
 | PUT | `/api/pacientes/estado-masivo?ambiente=` | `{pacientes: [ids], estado}` — igual que arriba pero para **varios** pacientes a la vez (selección en la pestaña Pacientes) |
 | PUT | `/api/pacientes/{id}/respuesta?ambiente=` | Ajuste manual de la respuesta (`pendiente`/`respondio`/`baja`) de **un** paciente; `baja` activa el opt-out. 409 si el paciente pidió la baja explícitamente por WhatsApp y se intenta poner algo distinto de `baja` (ver `opt_out_explicito`) |
