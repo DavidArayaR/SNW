@@ -706,6 +706,11 @@ def nombre_de_tabla(tabla: str) -> str:
     return esp["nombre_visible"] if esp else tabla
 
 
+def _limpiar_celda_csv(valor: str | None) -> str:
+    """Quita espacios y separadores sobrantes al borde de una celda CSV."""
+    return (valor or "").strip(" ;\t")
+
+
 def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int) -> dict:
     """Valida un CSV y lo carga en la tabla de la especialidad.
 
@@ -734,13 +739,13 @@ def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int) -> dict:
     lector = _csv.DictReader(_io.StringIO(texto))
     if not lector.fieldnames:
         raise ValueError("csv_vacio")
-    cols = {(c or "").strip().lower(): c for c in lector.fieldnames}
+    cols = {_limpiar_celda_csv(c).lower(): c for c in lector.fieldnames}
     faltan = [c for c in ("nombre", "apellido", "telefono") if c not in cols]
     if faltan:
         raise ValueError("columnas:" + ",".join(faltan))
-    col_respuesta = next((c for c in ("respuesta", "respuesta_paciente", "estado_respuesta")
+    col_respuesta = next((cols[c] for c in ("respuesta", "respuesta_paciente", "estado_respuesta")
                           if c in cols), None)
-    col_estado = next((c for c in ("estado", "estado_paciente", "estado_envio")
+    col_estado = next((cols[c] for c in ("estado", "estado_paciente", "estado_envio")
                        if c in cols), None)
 
     from supresion import huella_telefono
@@ -763,9 +768,9 @@ def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int) -> dict:
         bases: dict[str, int] = {}
         vistos_archivo: set[str] = set()
         for nro, fila in enumerate(lector, start=2):
-            nombre = normalizar_texto(fila.get(cols["nombre"]))
-            apellido = normalizar_texto(fila.get(cols["apellido"]))
-            telefono_crudo = (fila.get(cols["telefono"]) or "").strip()
+            nombre = normalizar_texto(_limpiar_celda_csv(fila.get(cols["nombre"])))
+            apellido = normalizar_texto(_limpiar_celda_csv(fila.get(cols["apellido"])))
+            telefono_crudo = _limpiar_celda_csv(fila.get(cols["telefono"]))
             if not nombre and not apellido and not telefono_crudo:
                 continue
             procesados += 1
@@ -792,7 +797,7 @@ def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int) -> dict:
             # toca nada: el import es solo una carga de pacientes.
             respuesta = estado = None
             if col_respuesta:
-                texto = (fila.get(col_respuesta) or "").strip()
+                texto = _limpiar_celda_csv(fila.get(col_respuesta))
                 if texto:
                     respuesta = normalizar_respuesta_csv(texto)
                     if respuesta is None:
@@ -801,7 +806,7 @@ def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int) -> dict:
                                         f"Respondió o Sin respuesta"})
                         continue
             if col_estado:
-                texto = (fila.get(col_estado) or "").strip()
+                texto = _limpiar_celda_csv(fila.get(col_estado))
                 if texto:
                     estado = normalizar_estado_csv(texto)
                     if estado is None:
