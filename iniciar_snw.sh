@@ -141,7 +141,7 @@ fi
 
 # --- 3/4 Dependencias de Python -------------------------------------
 echo " [3/4] Verificando dependencias de Python ..."
-if "$PYTHON" -c "import fastapi, uvicorn, pymysql, dotenv" >/dev/null 2>&1; then
+if "$PYTHON" -c "import fastapi, uvicorn, pymysql, dotenv, PIL, imageio_ffmpeg" >/dev/null 2>&1; then
   echo " [OK] Dependencias listas."
 else
   echo "      Instalando dependencias..."

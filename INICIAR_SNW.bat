@@ -141,7 +141,7 @@ echo  [!!] Error al ejecutar los scripts SQL. Intenta iniciar MySQL en XAMPP y v
 
 :CHECKEAR_DEPS
 echo  [3/4] Verificando dependencias de Python ...
-python -c "import fastapi, uvicorn, pymysql, dotenv" >nul 2>nul
+python -c "import fastapi, uvicorn, pymysql, dotenv, PIL, imageio_ffmpeg" >nul 2>nul
 if errorlevel 1 goto INSTALAR_DEPS
 echo  [OK] Dependencias listas.
 goto INICIAR

@@ -41,6 +41,17 @@ class PlantillaMediaTests(unittest.TestCase):
         with self.assertRaises(HTTPException):
             plantilla_media.obtener_media("../archivo")
 
+    def test_descarga_encabezado_devuelve_archivo(self):
+        buffer = io.BytesIO()
+        Image.new("RGB", (4, 4), "green").save(buffer, format="PNG")
+        media = plantilla_media.guardar_media(buffer.getvalue(), "David")
+        with patch.object(main, "leer_plantillas", return_value=[]):
+            respuesta = main.ver_encabezado_plantilla(
+                media["id"], sesion={"usuario": "david", "rol": "administrador"})
+        self.assertEqual(Path(respuesta.path), plantilla_media.ruta_media(media, vista=True))
+        self.assertEqual(respuesta.media_type, "image/png")
+        self.assertEqual(respuesta.headers["x-content-type-options"], "nosniff")
+
     def test_gif_se_convierte_a_video_para_meta(self):
         buffer = io.BytesIO()
         Image.new("RGB", (4, 4), "green").save(buffer, format="GIF")
