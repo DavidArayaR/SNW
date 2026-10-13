@@ -16,7 +16,27 @@
     "whatsapp_template_quality_score": {
       "score": "UNKNOWN",
       "date": 1788793537
-    }
+    },
+    "botones": [
+      {
+        "tipo": "respuesta",
+        "texto": "Me interesa",
+        "url": null
+      },
+      {
+        "tipo": "respuesta",
+        "texto": "No me interesa",
+        "url": null
+      },
+      {
+        "tipo": "respuesta",
+        "texto": "Dar de baja",
+        "url": null
+      }
+    ],
+    "encabezado_texto": null,
+    "pie_texto": null,
+    "whatsapp_header_format": null
   },
   {
     "id": 3,
@@ -30,16 +50,36 @@
     "whatsapp_template_status": "APPROVED",
     "whatsapp_template_rejected_reason": "NONE",
     "whatsapp_template_error": null,
-    "actualizada": 1791488974951,
-    "ultima_edicion": 1791488974951,
-    "whatsapp_template_aprobada_en": 1791489129400,
+    "actualizada": 1791895208110,
+    "ultima_edicion": 1791895208110,
+    "whatsapp_template_aprobada_en": 1791895387976,
     "area_id": null,
-    "encabezado_media_id": "acda5c4ff087492fa73dc16b3d48c30d",
-    "encabezado_meta_registrado": true,
+    "encabezado_media_id": null,
+    "encabezado_meta_registrado": null,
     "whatsapp_template_quality_score": {
       "score": "UNKNOWN",
       "date": 1788793570
-    }
+    },
+    "botones": [
+      {
+        "tipo": "respuesta",
+        "texto": "Me interesa",
+        "url": null
+      },
+      {
+        "tipo": "respuesta",
+        "texto": "No me interesa",
+        "url": null
+      },
+      {
+        "tipo": "respuesta",
+        "texto": "Dar de baja",
+        "url": null
+      }
+    ],
+    "encabezado_texto": null,
+    "pie_texto": null,
+    "whatsapp_header_format": null
   },
   {
     "id": 4,
@@ -60,37 +100,23 @@
     "whatsapp_template_quality_score": {
       "score": "UNKNOWN",
       "date": 1788551720
-    }
-  },
-  {
-    "id": 6,
-    "clave": "plantillapsicologia",
-    "nombre": "Plantillapsicologia",
-    "texto": "Hola {nombre}! Esta semana en Salud Mental Para Todos, aprovecha un 20% de descuento en tus atenciones!",
-    "whatsapp_template": "plantillapsicologia",
-    "whatsapp_template_lang": "es",
-    "whatsapp_template_categoria": "MARKETING",
-    "whatsapp_template_id": "1078069998347221",
-    "whatsapp_template_status": "APPROVED",
-    "whatsapp_template_rejected_reason": "NONE",
-    "whatsapp_template_error": null,
-    "actualizada": 1790871513451,
-    "whatsapp_template_quality_score": {
-      "score": "UNKNOWN",
-      "date": 1791491704
-    }
+    },
+    "botones": null,
+    "encabezado_texto": "Hello World",
+    "pie_texto": "WhatsApp Business Platform sample message",
+    "whatsapp_header_format": "TEXT"
   },
   {
     "id": 7,
     "clave": "testimagen",
     "nombre": "testimagen",
-    "texto": "hola {nombre}, responde si te interesa!",
-    "area_id": 6,
+    "texto": "Hola {nombre},\n\nEn esta semana queremos acompañarte en tu bienestar con un 20% de descuento en Salud Mental Para Todos. \nCuidar de ti es el primer paso para sentirte mejor y estamos aquí para apoyarte. 🧠💚\nContáctanos para agendar tu cita. 🌿✨",
+    "area_id": 1,
     "encabezado_media_id": "1c16ab3a2a034ab4a69519e947efaa71",
     "whatsapp_template": "testimagen",
     "whatsapp_template_lang": "es",
     "whatsapp_template_categoria": "MARKETING",
-    "actualizada": 1791555016772,
+    "actualizada": 1791906320883,
     "creado_por": "dav.araya@duocuc.cl",
     "creada_en": 1791555016772,
     "aprobacion_estado": "aprobada",
@@ -118,24 +144,25 @@
     "pie_texto": null,
     "encabezado_texto": null,
     "whatsapp_header_format": "VIDEO",
-    "whatsapp_template_aprobada_en": 1791555221526,
+    "whatsapp_template_aprobada_en": 1791906537620,
     "whatsapp_template_rejected_reason": "NONE",
     "whatsapp_template_quality_score": {
       "score": "UNKNOWN",
       "date": 1791555258
-    }
+    },
+    "ultima_edicion": 1791906320883
   },
   {
     "id": 8,
     "clave": "test_estimagen",
     "nombre": "test_estimagen",
     "texto": "Hola, te invitamos a agendar con un 20% de descuento!",
-    "area_id": 11,
+    "area_id": 1,
     "encabezado_media_id": "7cde51351e6447a3bdd990dd47efeff6",
     "whatsapp_template": "test_estimagen",
     "whatsapp_template_lang": "es",
     "whatsapp_template_categoria": "MARKETING",
-    "actualizada": 1791560230238,
+    "actualizada": 1791895777155,
     "creado_por": "dav.araya@duocuc.cl",
     "creada_en": 1791560230238,
     "aprobacion_estado": "aprobada",
@@ -149,15 +176,18 @@
     "botones": [
       {
         "tipo": "respuesta",
-        "texto": "Me interesa"
+        "texto": "Me interesa",
+        "url": null
       },
       {
         "tipo": "respuesta",
-        "texto": "No me interesa"
+        "texto": "No me interesa",
+        "url": null
       },
       {
         "tipo": "respuesta",
-        "texto": "Dar de baja"
+        "texto": "Dar de baja",
+        "url": null
       }
     ],
     "pie_texto": null,
