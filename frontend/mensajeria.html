@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="css/styles.css?v=plantillas-sync-individual1">
   <link rel="stylesheet" href="css/componentes.css">
   <link rel="stylesheet" href="css/layout.css?v=scrollbar1">
-  <link rel="stylesheet" href="css/mensajeria.css?v=gemini-ia2">
+  <link rel="stylesheet" href="css/mensajeria.css?v=gemini-ia3">
   <link rel="stylesheet" href="css/calendario.css?v=base1">
   <link rel="stylesheet" href="css/calendario-programados.css?v=programados2">
   <link rel="stylesheet" href="css/refinamiento.css?v=frontend4">
@@ -94,6 +94,24 @@
             <button type="button" id="btnAbrirIA" class="tpl-ia__abrir" aria-label="Generar mensaje con IA" title="Generar mensaje con IA" aria-controls="panelIA" aria-expanded="false" hidden>
               <i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i>
             </button>
+            <div id="panelIA" class="tpl-ia" role="dialog" aria-label="Generar mensaje con IA" aria-hidden="true" inert hidden>
+              <label for="inpInstruccionIA">Instrucción para el borrador</label>
+              <textarea id="inpInstruccionIA" rows="3" maxlength="400" placeholder="Ej.: Promociona nuestros servicios con tono cercano e invita a responder"></textarea>
+              <p class="field__hint">No ingreses nombres, teléfonos ni información clínica de pacientes. Utiliza únicamente instrucciones generales. El filtro automático no detecta todos los datos sensibles.</p>
+              <div class="tpl-ia__acciones">
+                <button type="button" id="btnGenerarIA" class="btn btn--primary">Generar borrador</button>
+                <span id="estadoIA" role="status" aria-live="polite"></span>
+              </div>
+              <div id="resultadoIA" class="tpl-ia__resultado" hidden>
+                <p>Borrador para revisar:</p>
+                <p id="borradorIA" class="tpl-ia__borrador"></p>
+                <div class="tpl-ia__acciones">
+                  <button type="button" id="btnAceptarIA" class="btn btn--primary">Usar en el editor</button>
+                  <button type="button" id="btnDescartarIA" class="btn btn--ghost">Descartar</button>
+                </div>
+                <p class="field__hint">Puedes editar el mensaje antes de guardarlo. La aprobación de Meta sigue siendo independiente.</p>
+              </div>
+            </div>
           </div>
           <div class="wildcards" role="group" aria-label="Datos automáticos">
             <span class="wildcards__label">Insertar dato automático:</span>
@@ -104,24 +122,6 @@
           <div class="field__foot">
             <p class="field__hint">Usa los botones verdes para insertar datos automáticos en el texto.</p>
             <span id="contador" class="char-count">0 / 1024</span>
-          </div>
-          <div id="panelIA" class="tpl-ia" hidden>
-            <label for="inpInstruccionIA">Instrucción para el borrador</label>
-            <textarea id="inpInstruccionIA" rows="3" maxlength="400" placeholder="Ej.: Promociona nuestros servicios con tono cercano e invita a responder"></textarea>
-            <p class="field__hint">No ingreses nombres, teléfonos ni información clínica de pacientes. Utiliza únicamente instrucciones generales. El filtro automático no detecta todos los datos sensibles.</p>
-            <div class="tpl-ia__acciones">
-              <button type="button" id="btnGenerarIA" class="btn btn--primary">Generar borrador</button>
-              <span id="estadoIA" role="status" aria-live="polite"></span>
-            </div>
-            <div id="resultadoIA" class="tpl-ia__resultado" hidden>
-              <p>Borrador para revisar:</p>
-              <p id="borradorIA" class="tpl-ia__borrador"></p>
-              <div class="tpl-ia__acciones">
-                <button type="button" id="btnAceptarIA" class="btn btn--primary">Usar en el editor</button>
-                <button type="button" id="btnDescartarIA" class="btn btn--ghost">Descartar</button>
-              </div>
-              <p class="field__hint">Puedes editar el mensaje antes de guardarlo. La aprobación de Meta sigue siendo independiente.</p>
-            </div>
           </div>
         </div>
 
@@ -537,7 +537,7 @@
   <script src="js/layout.js?v=tabs3-navcurve7"></script>
   <script src="js/pass-toggle.js"></script>
   <script src="js/plantilla-ia.js?v=gemini-ia1"></script>
-  <script src="js/app.js?v=gemini-ia2"></script>
+  <script src="js/app.js?v=gemini-ia3"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>

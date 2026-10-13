@@ -59,6 +59,7 @@ const borradorIA = $("#borradorIA");
 const btnAceptarIA = $("#btnAceptarIA");
 const btnDescartarIA = $("#btnDescartarIA");
 let solicitudIA = null;
+let cierrePanelIATimer = null;
 const inpEncabezadoMedia = $("#inpEncabezadoMedia");
 const btnQuitarEncabezado = $("#btnQuitarEncabezado");
 const estadoEncabezado = $("#estadoEncabezado");
@@ -1265,8 +1266,7 @@ function actualizarBloqueoCampos() {
     selNumeroPrueba.disabled = false;
     btnQuitarEncabezado.disabled = true;
     btnAbrirIA.hidden = true;
-    panelIA.hidden = true;
-    btnAbrirIA.setAttribute("aria-expanded", "false");
+    cerrarPanelIA(true);
     if (p && PUEDE_EDITAR_PLANTILLAS && puedeEditarEsta(p) &&
         esPlantillaEditable(p) && !esPlantillaProtegida(p)) {
       refrescarAvisoSinArea();
@@ -1432,14 +1432,50 @@ function limpiarAsistenteIA() {
   borradorIA.textContent = "";
   estadoIA.textContent = "";
   resultadoIA.hidden = true;
-  panelIA.hidden = true;
+  cerrarPanelIA(true);
+}
+
+function cerrarPanelIA(inmediato = false, devolverFoco = false) {
+  clearTimeout(cierrePanelIATimer);
+  cierrePanelIATimer = null;
+  if (devolverFoco && panelIA.contains(document.activeElement)) btnAbrirIA.focus();
+  panelIA.classList.remove("tpl-ia--visible");
+  panelIA.inert = true;
+  panelIA.setAttribute("aria-hidden", "true");
   btnAbrirIA.setAttribute("aria-expanded", "false");
+  if (inmediato || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    panelIA.hidden = true;
+  } else {
+    cierrePanelIATimer = setTimeout(() => { panelIA.hidden = true; cierrePanelIATimer = null; }, 200);
+  }
+}
+
+function abrirPanelIA() {
+  clearTimeout(cierrePanelIATimer);
+  cierrePanelIATimer = null;
+  panelIA.hidden = false;
+  panelIA.inert = false;
+  panelIA.setAttribute("aria-hidden", "false");
+  // Fuerza el estado inicial antes de animar la entrada del panel flotante.
+  void panelIA.offsetWidth;
+  panelIA.classList.add("tpl-ia--visible");
+  btnAbrirIA.setAttribute("aria-expanded", "true");
+  inpInstruccionIA.focus();
 }
 
 btnAbrirIA.addEventListener("click", () => {
-  panelIA.hidden = !panelIA.hidden;
-  btnAbrirIA.setAttribute("aria-expanded", String(!panelIA.hidden));
-  if (!panelIA.hidden) inpInstruccionIA.focus();
+  if (btnAbrirIA.getAttribute("aria-expanded") === "true") cerrarPanelIA(false, true);
+  else abrirPanelIA();
+});
+
+document.addEventListener("click", (evento) => {
+  if (btnAbrirIA.getAttribute("aria-expanded") !== "true") return;
+  if (!panelIA.contains(evento.target) && !btnAbrirIA.contains(evento.target)) cerrarPanelIA();
+});
+document.addEventListener("keydown", (evento) => {
+  if (evento.key === "Escape" && btnAbrirIA.getAttribute("aria-expanded") === "true") {
+    cerrarPanelIA(false, true);
+  }
 });
 
 btnGenerarIA.addEventListener("click", async () => {
