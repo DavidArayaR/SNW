@@ -1,4 +1,4 @@
-"""Borradores de plantillas con Gemini, sin datos de pacientes ni secretos en HTTP."""
+"""Borradores de plantillas con Groq, sin datos de pacientes ni secretos en HTTP."""
 
 import hashlib
 import logging
@@ -12,11 +12,12 @@ from db import config_get, conectar
 from plantilla_revision import MAX_CUERPO, presentar_plantilla
 
 
-MODELO = "gemini-3.8-flash"
-MODELO_RESPALDO = "gemini-3.5-flash"
-TIMEOUT_SEGUNDOS = 12
+MODELO = "openai/gpt-oss-120b"
+MODELO_RESPALDO = "openai/gpt-oss-20b"
+URL_GROQ = "https://api.groq.com/openai/v1/chat/completions"
+TIMEOUT_SEGUNDOS = 20
 MAX_INSTRUCCION = 400
-MAX_SALIDA_TOKENS = 1024
+MAX_SALIDA_TOKENS = 1536
 _LOG = logging.getLogger(__name__)
 
 _CORREO = re.compile(r"\b[^\s@]+@[^\s@]+\.[^\s@]+\b")
@@ -72,35 +73,35 @@ def validar_borrador(valor: str) -> str:
 
 
 def leer_clave() -> str:
-    valor = (config_get("gemini_api_key") or "").strip()
+    valor = (config_get("groq_api_key") or "").strip()
     if not valor:
-        raise HTTPException(503, detail="Gemini todavía no está configurado. Contacta a un desarrollador.")
+        raise HTTPException(503, detail="Groq todavía no está configurado. Contacta a un desarrollador.")
     if valor.startswith(("dpapi:", "fernet-v1:")):
-        raise HTTPException(503, detail="Vuelve a ingresar la clave de Gemini en Configuración.")
+        raise HTTPException(503, detail="Vuelve a ingresar la clave de Groq en Configuración.")
     return valor
 
 
 def consumir_cuota(usuario: str) -> None:
     """Cuota por cuenta, atómica y compartida por todos los procesos con la BD."""
     try:
-        limite = max(1, min(100, int(config_get("gemini_limite_hora") or "12")))
+        limite = max(1, min(100, int(config_get("groq_limite_hora") or "12")))
     except ValueError:
         limite = 12
     identificador = hashlib.sha256(usuario.strip().lower().encode("utf-8")).hexdigest()
     ventana = int(time.time() // 3600)
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO gemini_cuotas (usuario_hash, ventana_hora, solicitudes) "
+            "INSERT INTO groq_cuotas (usuario_hash, ventana_hora, solicitudes) "
             "VALUES (%s, %s, 1) ON DUPLICATE KEY UPDATE solicitudes = solicitudes + 1",
             (identificador, ventana),
         )
         cur.execute(
-            "SELECT solicitudes FROM gemini_cuotas WHERE usuario_hash = %s AND ventana_hora = %s",
+            "SELECT solicitudes FROM groq_cuotas WHERE usuario_hash = %s AND ventana_hora = %s",
             (identificador, ventana),
         )
         total = int((cur.fetchone() or {}).get("solicitudes") or 0)
         if ventana % 24 == 0:
-            cur.execute("DELETE FROM gemini_cuotas WHERE ventana_hora < %s", (ventana - 48,))
+            cur.execute("DELETE FROM groq_cuotas WHERE ventana_hora < %s", (ventana - 48,))
         conn.commit()
     if total > limite:
         raise HTTPException(429, detail="Llegaste al límite de borradores de esta hora. Inténtalo más tarde.")
@@ -120,52 +121,45 @@ async def generar_borrador(instruccion: str) -> str:
         "No añadas encabezados, explicaciones, comillas ni formato Markdown."
     )
     payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "maxOutputTokens": MAX_SALIDA_TOKENS,
-            "thinkingConfig": {"thinkingLevel": "low"},
-        },
+        "model": MODELO,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_completion_tokens": MAX_SALIDA_TOKENS,
+        "reasoning_effort": "low",
+        "reasoning_format": "hidden",
     }
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT_SEGUNDOS) as cliente:
             respuesta = await cliente.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/{MODELO}:generateContent",
-                headers={"x-goog-api-key": clave}, json=payload)
+                URL_GROQ,
+                headers={"Authorization": f"Bearer {clave}"}, json=payload)
             if respuesta.status_code == 503:
-                _LOG.warning("Gemini %s saturado (HTTP 503); probando %s", MODELO, MODELO_RESPALDO)
-                payload_respaldo = {
-                    **payload,
-                    "generationConfig": {
-                        **payload["generationConfig"],
-                        "thinkingConfig": {"thinkingLevel": "minimal"},
-                    },
-                }
+                _LOG.warning("Groq %s saturado (HTTP 503); probando %s", MODELO, MODELO_RESPALDO)
                 respuesta = await cliente.post(
-                    f"https://generativelanguage.googleapis.com/v1beta/models/{MODELO_RESPALDO}:generateContent",
-                    headers={"x-goog-api-key": clave}, json=payload_respaldo)
+                    URL_GROQ,
+                    headers={"Authorization": f"Bearer {clave}"},
+                    json={**payload, "model": MODELO_RESPALDO})
     except httpx.TimeoutException:
-        raise HTTPException(504, detail="Gemini tardó demasiado. Inténtalo de nuevo.")
+        raise HTTPException(504, detail="Groq tardó demasiado. Inténtalo de nuevo.")
     except httpx.RequestError:
-        raise HTTPException(503, detail="No se pudo conectar con Gemini. Inténtalo más tarde.")
+        raise HTTPException(503, detail="No se pudo conectar con Groq. Inténtalo más tarde.")
     if respuesta.status_code == 429:
-        raise HTTPException(429, detail="Gemini alcanzó su cuota. Inténtalo más tarde.")
+        raise HTTPException(429, detail="Groq alcanzó su cuota. Inténtalo más tarde.")
     if respuesta.status_code in (401, 403):
-        _LOG.warning("Gemini rechazó la clave (HTTP %s)", respuesta.status_code)
-        raise HTTPException(503, detail="La clave de Gemini no tiene acceso. Pide a un desarrollador que revise su configuración.")
+        _LOG.warning("Groq rechazó la clave (HTTP %s)", respuesta.status_code)
+        raise HTTPException(503, detail="La clave de Groq no tiene acceso. Pide a un desarrollador que revise su configuración.")
     if respuesta.status_code == 404:
-        _LOG.warning("Modelo de Gemini no disponible (HTTP 404)")
-        raise HTTPException(503, detail="El modelo de Gemini no está disponible para esta clave. Contacta a un desarrollador.")
+        _LOG.warning("Modelo de Groq no disponible (HTTP 404)")
+        raise HTTPException(503, detail="El modelo de Groq no está disponible para esta clave. Contacta a un desarrollador.")
     if respuesta.status_code == 503:
-        raise HTTPException(503, detail="Gemini está temporalmente saturado. Espera un momento e inténtalo de nuevo.")
+        raise HTTPException(503, detail="Groq está temporalmente saturado. Espera un momento e inténtalo de nuevo.")
     if respuesta.status_code >= 400:
-        _LOG.warning("Gemini devolvió HTTP %s", respuesta.status_code)
-        raise HTTPException(503, detail="Gemini no está disponible. Revisa su configuración o inténtalo más tarde.")
+        _LOG.warning("Groq devolvió HTTP %s", respuesta.status_code)
+        raise HTTPException(503, detail="Groq no está disponible. Revisa su configuración o inténtalo más tarde.")
     try:
-        candidato = respuesta.json()["candidates"][0]
-        if candidato.get("finishReason") == "MAX_TOKENS":
-            raise HTTPException(502, detail="Gemini no terminó el mensaje. Inténtalo de nuevo.")
-        partes = candidato["content"]["parts"]
-        texto = "".join(p.get("text", "") for p in partes if isinstance(p, dict))
+        candidato = respuesta.json()["choices"][0]
+        if candidato.get("finish_reason") == "length":
+            raise HTTPException(502, detail="Groq no terminó el mensaje. Inténtalo de nuevo.")
+        texto = candidato["message"]["content"]
     except (ValueError, KeyError, IndexError, TypeError):
         texto = ""
     return validar_borrador(texto)

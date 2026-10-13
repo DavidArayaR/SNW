@@ -1532,7 +1532,7 @@ btnGenerarIA.addEventListener("click", async () => {
     panelIA.scrollTop = panelIA.scrollHeight;
   } catch (err) {
     if (err.name !== "AbortError" && version === versionEditor) {
-      estadoIA.textContent = err.message || "Gemini no está disponible. Inténtalo más tarde.";
+      estadoIA.textContent = err.message || "Groq no está disponible. Inténtalo más tarde.";
     }
   } finally {
     if (solicitudIA === control) {

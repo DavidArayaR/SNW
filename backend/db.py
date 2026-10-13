@@ -108,9 +108,12 @@ CONFIG_DEFAULTS = {
     "wa_webhook_path": "/api/whatsapp/webhook",
     "wa_graph_version": "v26.0",
     "wa_moneda": "USD",
-    # Clave de Gemini almacenada en esta tabla, igual que las otras credenciales.
+    # La clave de Groq vive en configuracion. Conservamos las claves antiguas de
+    # Gemini para no borrar credenciales ni preferencias durante la migración.
     "gemini_api_key": "",
     "gemini_limite_hora": "12",
+    "groq_api_key": "",
+    "groq_limite_hora": "12",
     # Cada tantos minutos se revisa en Meta el estado de las plantillas que
     # todavía no están aprobadas (para detectar la aprobación/el rechazo
     # solas, sin que alguien tenga que consultarlo a mano). Al arrancar el
@@ -164,6 +167,14 @@ def asegurar_tabla_config() -> None:
                 )
             cur.execute(
                 "CREATE TABLE IF NOT EXISTS gemini_cuotas ("
+                "  usuario_hash CHAR(64) NOT NULL,"
+                "  ventana_hora BIGINT NOT NULL,"
+                "  solicitudes INT NOT NULL DEFAULT 0,"
+                "  PRIMARY KEY (usuario_hash, ventana_hora)"
+                ") CHARACTER SET utf8mb4"
+            )
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS groq_cuotas ("
                 "  usuario_hash CHAR(64) NOT NULL,"
                 "  ventana_hora BIGINT NOT NULL,"
                 "  solicitudes INT NOT NULL DEFAULT 0,"

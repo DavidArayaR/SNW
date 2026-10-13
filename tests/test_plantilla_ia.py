@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
-import gemini_service as ia
+import groq_service as ia
 import main
 from routes import plantillas as rutas_plantillas
 
@@ -72,6 +72,7 @@ class ValidacionIATests(unittest.TestCase):
                 ia.consumir_cuota("admin@example.com")
         self.assertEqual(error.exception.status_code, 429)
         self.assertEqual(cursor.execute.call_count, 6)
+        self.assertTrue(all("groq_cuotas" in c.args[0] for c in cursor.execute.call_args_list))
 
     def test_cuota_distingue_usuario_y_ventana(self):
         cursor = MagicMock()
@@ -108,17 +109,19 @@ class ProveedorIATests(unittest.IsolatedAsyncioTestCase):
 
     async def test_exito_no_expone_clave_ni_envia_pacientes(self):
         respuesta = MagicMock(status_code=200)
-        respuesta.json.return_value = {"candidates": [{"content": {"parts": [
-            {"text": "Hola {nombre} {apellido}, te recordamos tu cita."}]}}]}
+        respuesta.json.return_value = {"choices": [{"message": {
+            "content": "Hola {nombre} {apellido}, te recordamos tu cita."}, "finish_reason": "stop"}]}
         borrador, cliente = await self._llamar(respuesta)
         self.assertIn("{nombre}", borrador)
         argumentos = cliente.post.call_args
-        self.assertEqual(argumentos.kwargs["headers"]["x-goog-api-key"], "clave-falsa")
+        self.assertEqual(argumentos.args[0], ia.URL_GROQ)
+        self.assertEqual(argumentos.kwargs["headers"]["Authorization"], "Bearer clave-falsa")
         self.assertNotIn("clave-falsa", str(argumentos.kwargs["json"]))
         self.assertNotIn("David", str(argumentos.kwargs["json"]))
-        self.assertIn("emojis", argumentos.kwargs["json"]["contents"][0]["parts"][0]["text"])
-        self.assertEqual(argumentos.kwargs["json"]["generationConfig"]["maxOutputTokens"], 1024)
-        self.assertEqual(argumentos.kwargs["json"]["generationConfig"]["thinkingConfig"]["thinkingLevel"], "low")
+        self.assertIn("emojis", argumentos.kwargs["json"]["messages"][0]["content"])
+        self.assertEqual(argumentos.kwargs["json"]["model"], ia.MODELO)
+        self.assertEqual(argumentos.kwargs["json"]["max_completion_tokens"], 1536)
+        self.assertEqual(argumentos.kwargs["json"]["reasoning_effort"], "low")
 
     async def test_timeout_y_cuota(self):
         with self.assertRaises(HTTPException) as error:
@@ -128,11 +131,19 @@ class ProveedorIATests(unittest.IsolatedAsyncioTestCase):
             await self._llamar(MagicMock(status_code=429))
         self.assertEqual(error.exception.status_code, 429)
 
+    async def test_clave_y_modelo_invalidos_no_exponen_el_secreto(self):
+        for estado, fragmento in ((401, "clave"), (403, "clave"), (404, "modelo")):
+            with self.subTest(estado=estado), self.assertRaises(HTTPException) as error:
+                await self._llamar(MagicMock(status_code=estado))
+            self.assertEqual(error.exception.status_code, 503)
+            self.assertIn(fragmento, error.exception.detail.lower())
+            self.assertNotIn("clave-falsa", error.exception.detail)
+
     async def test_modelo_saturado_usa_respaldo(self):
         saturado = MagicMock(status_code=503)
         respaldo = MagicMock(status_code=200)
-        respaldo.json.return_value = {"candidates": [{"content": {"parts": [
-            {"text": "Hola {nombre}, tenemos una promoción para ti."}]}}]}
+        respaldo.json.return_value = {"choices": [{"message": {
+            "content": "Hola {nombre}, tenemos una promoción para ti."}, "finish_reason": "stop"}]}
         cliente = AsyncMock()
         cliente.post.side_effect = [saturado, respaldo]
         contexto = MagicMock()
@@ -143,15 +154,14 @@ class ProveedorIATests(unittest.IsolatedAsyncioTestCase):
             borrador = await ia.generar_borrador("Promoción general")
         self.assertIn("promoción", borrador)
         self.assertEqual(cliente.post.await_count, 2)
-        self.assertIn(ia.MODELO, cliente.post.await_args_list[0].args[0])
-        self.assertIn(ia.MODELO_RESPALDO, cliente.post.await_args_list[1].args[0])
-        self.assertEqual(cliente.post.await_args_list[1].kwargs["json"]["generationConfig"]["thinkingConfig"]["thinkingLevel"], "minimal")
+        self.assertEqual(cliente.post.await_args_list[0].kwargs["json"]["model"], ia.MODELO)
+        self.assertEqual(cliente.post.await_args_list[1].kwargs["json"]["model"], ia.MODELO_RESPALDO)
 
     async def test_no_muestra_respuesta_cortada_por_tokens(self):
         respuesta = MagicMock(status_code=200)
-        respuesta.json.return_value = {"candidates": [{
-            "finishReason": "MAX_TOKENS",
-            "content": {"parts": [{"text": "Hola {nombre},\n\nCuidar de tu bienestar emocional"}]},
+        respuesta.json.return_value = {"choices": [{
+            "finish_reason": "length",
+            "message": {"content": "Hola {nombre},\n\nCuidar de tu bienestar emocional"},
         }]}
         with self.assertRaises(HTTPException) as error:
             await self._llamar(respuesta)
@@ -173,7 +183,7 @@ class ProveedorIATests(unittest.IsolatedAsyncioTestCase):
 
     async def test_respuesta_invalida(self):
         respuesta = MagicMock(status_code=200)
-        respuesta.json.return_value = {"candidates": []}
+        respuesta.json.return_value = {"choices": []}
         with self.assertRaises(HTTPException) as error:
             await self._llamar(respuesta)
         self.assertEqual(error.exception.status_code, 502)
@@ -217,24 +227,25 @@ class EndpointIATests(unittest.TestCase):
 
     def test_configuracion_guarda_y_muestra_la_clave(self):
         with patch.object(main, "config_set") as guardar, \
-             patch.object(main, "config_all", return_value={"gemini_api_key": "clave-de-prueba"}), \
+             patch.object(main, "config_all", return_value={"groq_api_key": "clave-de-prueba"}), \
              patch.object(main, "config_get", return_value="clave-de-prueba"):
             respuesta = main.actualizar_configuracion_completa(
-                main.ConfigTodoIn(cambios={"gemini_api_key": "clave-de-prueba"}),
+                main.ConfigTodoIn(cambios={"groq_api_key": "clave-de-prueba"}),
                 sesion={"rol": "desarrollador"})
-        self.assertEqual(guardar.call_args.args[0]["gemini_api_key"], "clave-de-prueba")
-        self.assertEqual(respuesta["valores"]["gemini_api_key"], "clave-de-prueba")
-        self.assertTrue(respuesta["gemini_api_key_configurada"])
+        self.assertEqual(guardar.call_args.args[0]["groq_api_key"], "clave-de-prueba")
+        self.assertEqual(respuesta["valores"]["groq_api_key"], "clave-de-prueba")
+        self.assertTrue(respuesta["groq_api_key_configurada"])
+        self.assertEqual(main.CONFIG_DEFAULTS["groq_limite_hora"], "12")
 
     def test_configuracion_muestra_credenciales_a_desarrolladores(self):
         with patch.object(main, "config_all", return_value={
             "wa_token": "meta-prueba", "wa_verify_token": "verify-prueba",
             "wa_app_secret": "app-prueba", "smtp_pass": "correo-prueba",
-            "gemini_api_key": "gemini-prueba",
+            "groq_api_key": "groq-prueba",
         }):
             values = main._config_valores()
         self.assertEqual(values["wa_token"], "meta-prueba")
-        self.assertEqual(values["gemini_api_key"], "gemini-prueba")
+        self.assertEqual(values["groq_api_key"], "groq-prueba")
 
 
 if __name__ == "__main__":

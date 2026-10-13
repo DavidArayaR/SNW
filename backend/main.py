@@ -48,7 +48,7 @@ import whatsapp_service
 from plantilla_media import (MAX_MEDIA_BYTES, descargar_media_meta, guardar_media,
                             guardar_media_importada, obtener_media, ruta_media)
 from plantilla_revision import MAX_CUERPO, presentar_plantilla, componentes_para_vista
-from gemini_service import consumir_cuota, generar_borrador, validar_instruccion
+from groq_service import consumir_cuota, generar_borrador, validar_instruccion
 from wa_rate_limit import gobernador as wa_gobernador
 from whatsapp_service import WhatsAppService, es_mensaje_interes
 from whatsapp_webhook import router as whatsapp_router
@@ -3736,12 +3736,12 @@ _CONFIG_SECCIONES = [
         ],
     },
     {
-        "id": "ia", "titulo": "Asistente de plantillas · Gemini", "icono": "fa-wand-magic-sparkles",
+        "id": "ia", "titulo": "Asistente de plantillas · Groq", "icono": "fa-wand-magic-sparkles",
         "campos": [
-            {"clave": "gemini_api_key", "etiqueta": "Clave API de Gemini", "tipo": "password",
+            {"clave": "groq_api_key", "etiqueta": "Clave API de Groq", "tipo": "password",
              "ayuda": "Solo desarrolladores. Se guarda en la tabla configuracion y puede editarse aquí."},
-            {"clave": "gemini_limite_hora", "etiqueta": "Borradores por usuario y hora", "tipo": "number",
-             "ayuda": "Máximo por cuenta para controlar el uso de Gemini (1 a 100)."},
+            {"clave": "groq_limite_hora", "etiqueta": "Borradores por usuario y hora", "tipo": "number",
+             "ayuda": "Máximo por cuenta para controlar el uso de Groq (1 a 100)."},
         ],
     },
     {
@@ -3780,7 +3780,7 @@ def _config_valores() -> dict:
 def obtener_configuracion_completa(sesion: dict = Depends(solo_dev)):
     """Configuración completa, disponible solo para desarrolladores."""
     return {"secciones": _CONFIG_SECCIONES, "valores": _config_valores(),
-            "gemini_api_key_configurada": bool(config_get("gemini_api_key")),
+            "groq_api_key_configurada": bool(config_get("groq_api_key")),
             "supresion": resumen_supresion()}
 
 
@@ -3792,7 +3792,7 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
         v = "" if valor is None else str(valor).strip()
         if clave in _CONFIG_ENUM and v not in _CONFIG_ENUM[clave]:
             raise HTTPException(400, detail=f"«{clave}»: usa uno de {', '.join(_CONFIG_ENUM[clave])}")
-        if clave in ("intervalo_ms", "smtp_port", "gemini_limite_hora",
+        if clave in ("intervalo_ms", "smtp_port", "groq_limite_hora",
                      "wa_rate_limit_umbral_pct", "wa_rate_limit_pausa_max_s",
                      "wa_rate_limit_espera_defecto_s", "wa_rate_limit_reintentos",
                      "wa_throughput_mps", "wa_messaging_limit_24h", "sesion_expira_horas",
@@ -3804,7 +3804,7 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
             minimo = 1 if clave == "smtp_port" else 0
             if clave == "wa_rate_limit_umbral_pct":
                 n = min(100, n)
-            if clave == "gemini_limite_hora":
+            if clave == "groq_limite_hora":
                 n = min(100, max(1, n))
             v = str(max(minimo, n))
         if clave == "call_center_numeros":
@@ -3812,15 +3812,15 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
             v = ", ".join(dict.fromkeys(p for p in partes if p))
         if clave in ("smtp_tls", "wa_rate_limit_activo", "anti_flip_flop_dev"):
             v = "true" if v.lower() in ("true", "1", "on", "si", "sí") else "false"
-        if clave == "gemini_api_key":
+        if clave == "groq_api_key":
             if len(v) > 512:
-                raise HTTPException(422, detail="La clave de Gemini es demasiado extensa.")
+                raise HTTPException(422, detail="La clave de Groq es demasiado extensa.")
         cambios[clave] = v
 
     if cambios:
         config_set(cambios)
     return {"valores": _config_valores(),
-            "gemini_api_key_configurada": bool(config_get("gemini_api_key"))}
+            "groq_api_key_configurada": bool(config_get("groq_api_key"))}
 
 
 def probar_api_wa(body: PruebaWAIn, sesion: dict = Depends(solo_dev)):

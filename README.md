@@ -121,11 +121,10 @@ vive el resto.
 **Todo lo demás vive en la tabla `configuracion`** (clave/valor). El backend la crea y la
 siembra con los valores por defecto en el primer arranque. Se edita desde
 la pestaña **Configuración** de `administracion.html` (**solo rol desarrollador**) — que muestra TODAS las claves
-por secciones (Aplicación, URL pública, Correo/SMTP, WhatsApp, Gemini) — o con `UPDATE configuracion`
+por secciones (Aplicación, URL pública, Correo/SMTP, WhatsApp, Groq) — o con `UPDATE configuracion`
 (requiere reiniciar por la caché). Los cambios de la página se aplican sin reiniciar (salvo
-el `entorno` activo, que las demás pantallas leen al cargar). La clave de Gemini debe
-configurarse desde la página: allí se cifra antes de guardarse, por lo que no debe escribirse
-en claro mediante SQL.
+el `entorno` activo, que las demás pantallas leen al cargar). La clave de Groq se
+configura desde la página y queda legible en la base de datos para quien tenga acceso a ella.
 
 | Grupo | Claves |
 |---|---|
@@ -133,19 +132,20 @@ en claro mediante SQL.
 | Call center | `call_center_url` (servicio que devuelve un número de call center; se consulta en cada respuesta y ese servicio reparte la carga), `call_center_numeros` (respaldo manual, uno o varios separados por coma, solo si la URL no responde), `call_center_boton_mensaje` / `call_center_boton_mensaje_oferta` (texto que autocompleta el botón; el de oferta se usa si la última plantilla enviada mencionaba un descuento o precio especial). El mensaje de call center y su espera (1s fija) no son configurables, ver [Mensaje de call center](#mensaje-de-call-center) |
 | Correo | `smtp_host`, `smtp_port`, `smtp_user`, `smtp_pass`, `smtp_tls`, `correo_emisor`, `correo_destino` |
 | WhatsApp / Meta | `wa_token`, `wa_phone_id`, `wa_business_account_id`, `wa_app_id` (necesario para encabezados multimedia), `wa_verify_token`, `wa_template_nombre`, `wa_template_lang`, `wa_webhook_path`, `wa_graph_version` (por defecto `v26.0`), `wa_moneda` (moneda de facturación de la cuenta, se autodetecta desde Meta al actualizar tarifas — por defecto `USD`), `plantillas_revision_minutos` (cada cuántos minutos se revisa sola en Meta el estado de las plantillas pendientes; 0 = desactivado; por defecto 2), `plantillas_badge_aprobada_minutos` (cuánto se muestra el aviso «Aprobada recientemente»; 0 = nunca; por defecto 10) |
-| Gemini | `gemini_api_key` (solo desarrollador; guardada en `configuracion`), `gemini_limite_hora` (borradores por cuenta y hora, por defecto 12) |
+| Groq | `groq_api_key` (solo desarrollador; guardada en `configuracion`), `groq_limite_hora` (borradores por cuenta y hora, por defecto 12) |
 | Límites de envío Meta | `wa_rate_limit_activo` (frenado proactivo on/off), `wa_rate_limit_umbral_pct` (% de cuota a partir del cual se espera, 80), `wa_rate_limit_pausa_max_s` (espera entre mensajes al 100 % de cuota, 30), `wa_rate_limit_espera_defecto_s` (espera tras un 429 sin dato, 60), `wa_rate_limit_reintentos` (reintentos de una llamada tras un 429, 3), `wa_throughput_mps` (ritmo máximo de salida hacia Meta, msg/s; 0 = sin límite; 10), `wa_messaging_limit_24h` (usuarios únicos que se pueden contactar en 24 h antes de bloquear el envío masivo; 0 = ilimitado; 2000) |
 
 Las plantillas admiten opcionalmente un encabezado JPG, PNG o GIF de hasta **3,5 MB**. El GIF se conserva animado en la vista previa y se convierte a MP4 para Meta; el video convertido también debe caber en 3,5 MB. Instala las dependencias actualizadas con `pip install -r requirements.txt` y configura `wa_app_id` (App ID de Meta) junto al token y la WABA para poder subir la muestra que Meta exige al revisar una plantilla con encabezado. Los archivos quedan en `data/plantillas_media/` (ignorado por Git): inclúyelos en las copias de seguridad junto a las plantillas. Si quitas o cambias el encabezado de una plantilla aprobada, Meta debe volver a revisarla.
 
 En Mensajería → Plantillas, “Generar mensaje con IA” acepta instrucciones genéricas de hasta
 400 caracteres y devuelve un borrador para revisar. Se puede aceptar, editar o descartar;
-no se guarda ni se envía automáticamente. El backend usa `gemini-3.8-flash` y limita la
-salida a 300 tokens. El filtro rechaza patrones evidentes de datos personales o clínicos,
+no se guarda ni se envía automáticamente. El backend usa Groq con `openai/gpt-oss-120b`
+(respaldo `openai/gpt-oss-20b` ante saturación) y limita la salida a 1536 tokens. El filtro rechaza patrones evidentes de datos personales o clínicos,
 pero no garantiza detectarlos todos: nunca incluyas información real de pacientes en la
-instrucción. Para activar la función, crea una clave en Google AI Studio y guárdala en
-Configuración → Asistente de plantillas · Gemini. Las credenciales `smtp_pass`,
-`wa_token`, `wa_verify_token`, `wa_app_secret` y `gemini_api_key` se guardan
+instrucción. Para activar la función, crea una clave en [Groq Console](https://console.groq.com/keys) y guárdala en
+Configuración → Asistente de plantillas · Groq. No reutilices la clave antigua de Gemini;
+esta permanece en la base de datos sin usarse. Las credenciales `smtp_pass`,
+`wa_token`, `wa_verify_token`, `wa_app_secret` y `groq_api_key` se guardan
 únicamente en la tabla `configuracion` y se editan en campos enmascarados de la página de Configuración,
 que conserva su acceso restringido a desarrolladores. No se necesita un archivo
 de clave adicional ni una variable nueva en `.env`. **Estos valores quedan legibles
