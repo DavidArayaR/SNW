@@ -41,6 +41,17 @@ class PlantillaMediaTests(unittest.TestCase):
         with self.assertRaises(HTTPException):
             plantilla_media.obtener_media("../archivo")
 
+    def test_importa_video_mp4_y_rechaza_origen_no_confiable(self):
+        datos = b"\x00\x00\x00\x18ftypisom" + b"\x00" * 24
+        media = plantilla_media.guardar_media_importada(datos, "VIDEO")
+        self.assertEqual(media["mime_envio"], "video/mp4")
+        self.assertEqual(plantilla_media.ruta_media(media).read_bytes(), datos)
+        with patch.object(plantilla_media.httpx, "stream") as solicitar, \
+             self.assertRaises(HTTPException) as error:
+            plantilla_media.descargar_media_meta("https://ejemplo.com/archivo.png")
+        self.assertEqual(error.exception.status_code, 502)
+        solicitar.assert_not_called()
+
     def test_descarga_encabezado_devuelve_archivo(self):
         buffer = io.BytesIO()
         Image.new("RGB", (4, 4), "green").save(buffer, format="PNG")

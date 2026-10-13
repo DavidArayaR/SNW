@@ -64,6 +64,7 @@ const inpEncabezadoMedia = $("#inpEncabezadoMedia");
 const btnQuitarEncabezado = $("#btnQuitarEncabezado");
 const estadoEncabezado = $("#estadoEncabezado");
 const previewMedia = $("#previewMedia");
+const previewVideo = $("#previewVideo");
 const inpTemplate = $("#inpTemplate");
 const inpTemplateLang = $("#inpTemplateLang");
 const inpTemplateCategoria = $("#inpTemplateCategoria");
@@ -914,6 +915,10 @@ function limpiarVistaEncabezado() {
   urlPreviewMedia = null;
   previewMedia.removeAttribute("src");
   previewMedia.hidden = true;
+  previewVideo.pause();
+  previewVideo.removeAttribute("src");
+  previewVideo.load();
+  previewVideo.hidden = true;
 }
 
 async function mostrarEncabezadoGuardado(mediaId) {
@@ -926,8 +931,9 @@ async function mostrarEncabezadoGuardado(mediaId) {
     const blob = await res.blob();
     if (version !== versionPreviewMedia || encabezadoMediaId !== mediaId) return;
     urlPreviewMedia = URL.createObjectURL(blob);
-    previewMedia.src = urlPreviewMedia;
-    previewMedia.hidden = false;
+    const vista = blob.type === "video/mp4" ? previewVideo : previewMedia;
+    vista.src = urlPreviewMedia;
+    vista.hidden = false;
   } catch { /* El editor sigue disponible aunque falle la vista previa. */ }
 }
 

@@ -548,6 +548,12 @@ leyendo los templates existentes en Meta (solo `GET`, nunca crea/edita) y:
   posición que no se pueda identificar queda como `{variable}` (`_texto_desde_componentes`
   en `main.py`).
 
+La sincronización también descarga el ejemplo de encabezado `IMAGE` o `VIDEO` que
+Meta devuelve para cada plantilla, lo guarda en `data/plantillas_media/` y lo
+asocia a la vista previa y a los envíos. Si el archivo no cambió, conserva el
+identificador local. La descarga exige un enlace HTTPS de Meta y el límite
+local de 3,5 MB; si falla, no se guarda una sincronización incompleta.
+
 ### Límites de envío de Meta
 
 `backend/wa_rate_limit.py` es un gobernador en memoria que cubre las tres capas de límites

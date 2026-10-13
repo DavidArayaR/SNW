@@ -45,7 +45,8 @@ from db import (
 )
 from motor_envio import obtener_canal
 import whatsapp_service
-from plantilla_media import MAX_MEDIA_BYTES, guardar_media, obtener_media, ruta_media
+from plantilla_media import (MAX_MEDIA_BYTES, descargar_media_meta, guardar_media,
+                            guardar_media_importada, obtener_media, ruta_media)
 from plantilla_revision import MAX_CUERPO, presentar_plantilla, componentes_para_vista
 from gemini_service import cifrar_clave, consumir_cuota, generar_borrador, validar_instruccion
 from wa_rate_limit import gobernador as wa_gobernador
@@ -2785,6 +2786,27 @@ def _consultar_templates_meta() -> list:
     return resultado["templates"]
 
 
+def _descargar_encabezado_template_meta(template: dict, media_actual: str | None = None) -> str | None:
+    encabezado = next((c for c in template.get("components") or []
+                       if (c.get("type") or "").upper() == "HEADER"), None)
+    formato = (encabezado or {}).get("format", "").upper()
+    if formato not in ("IMAGE", "VIDEO"):
+        return None
+    referencias = ((encabezado.get("example") or {}).get("header_handle") or [])
+    url = referencias[0] if isinstance(referencias, list) and referencias else ""
+    if not isinstance(url, str) or not url:
+        raise HTTPException(502, detail="Meta no entregó el archivo del encabezado multimedia.")
+    datos = descargar_media_meta(url)
+    if media_actual:
+        try:
+            media = obtener_media(media_actual)
+            if media["formato_meta"] == formato and ruta_media(media).read_bytes() == datos:
+                return media_actual
+        except (HTTPException, OSError):
+            pass
+    return guardar_media_importada(datos, formato)["id"]
+
+
 def preparar_sincronizacion_plantillas(sesion: dict = Depends(exigir("mensajeria"))):
     """Consulta sin guardar para elegir un área por cada plantilla nueva."""
     templates = _consultar_templates_meta()
@@ -2814,13 +2836,22 @@ def sincronizar_plantillas_meta(body: SincronizarPlantillasIn,
     # Validar todas las asignaciones antes de modificar registros. Una plantilla
     # llegada desde la previsualización obliga a elegir su área, nunca se importa
     # global por omisión. Las existentes conservan su asociación.
-    existentes = {match.get("id") for p in plantillas
-                  if (match := _coincidencia_template_meta(p, templates_meta))}
+    locales_por_id = {match.get("id"): p for p in plantillas
+                     if (match := _coincidencia_template_meta(p, templates_meta))}
+    existentes = set(locales_por_id)
     nuevas = [t for t in templates_meta if t.get("id") not in existentes]
     if any(str(t["id"]) not in body.asignaciones for t in nuevas):
         raise HTTPException(409, detail="Elige un área para cada plantilla nueva. Vuelve a abrir Sincronizar para actualizar la lista.")
     areas_importacion = {str(t["id"]): _validar_plantilla_area(
         sesion, body.asignaciones[str(t["id"])]) for t in nuevas}
+
+    # Descargar antes de modificar el listado: si Meta falla, no se guarda una
+    # sincronización con encabezados incompletos.
+    medios_meta = {}
+    for template in templates_meta:
+        local = locales_por_id.get(template["id"])
+        medios_meta[template["id"]] = _descargar_encabezado_template_meta(
+            template, (local or {}).get("encabezado_media_id"))
 
     usados_id = set()
     actualizadas = 0
@@ -2833,6 +2864,7 @@ def sincronizar_plantillas_meta(body: SincronizarPlantillasIn,
 
         if match:
             usados_id.add(match.get("id"))
+            media_importada = medios_meta.get(match.get("id"))
 
             # Meta es la fuente de verdad: el texto que realmente se envía es
             # el que está aprobado allá, no esta copia local. Por eso el
@@ -2854,9 +2886,15 @@ def sincronizar_plantillas_meta(body: SincronizarPlantillasIn,
                 or p.get("whatsapp_template_categoria") != match.get("category")
                 or p.get("whatsapp_template_quality_score") != match.get("quality_score")
                 or texto_nuevo != texto_actual
+                or (media_importada is not None and
+                    (p.get("encabezado_media_id") != media_importada
+                     or not p.get("encabezado_meta_registrado")))
             )
             actualizadas += 1 if cambio else 0
             p["whatsapp_template_id"] = match.get("id")
+            if media_importada is not None:
+                p["encabezado_media_id"] = media_importada
+                p["encabezado_meta_registrado"] = True
             estado_meta = (match.get("status") if not p.get("encabezado_media_id")
                            or p.get("encabezado_meta_registrado") else None)
             _guardar_estado_y_calidad_meta(
@@ -2905,6 +2943,8 @@ def sincronizar_plantillas_meta(body: SincronizarPlantillasIn,
             "whatsapp_template_quality_score": t.get("quality_score"),
             "whatsapp_template_rejected_reason": t.get("rejected_reason") or t.get("reject_reason"),
             "whatsapp_template_error": None,
+            "encabezado_media_id": medios_meta.get(t["id"]),
+            "encabezado_meta_registrado": bool(medios_meta.get(t["id"])),
             **componentes_para_vista(t.get("components")),
             "actualizada": int(time.time() * 1000),
         })

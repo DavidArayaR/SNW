@@ -1,5 +1,7 @@
 import asyncio
+import io
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -7,10 +9,12 @@ from unittest.mock import AsyncMock, patch
 from fastapi import FastAPI
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
 import main
+import plantilla_media
 from plantilla_revision import componentes_para_vista, presentar_plantilla, variables_del_cuerpo
 from routes import plantillas as rutas_plantillas
 from whatsapp_service import WhatsAppApiClient
@@ -179,6 +183,85 @@ class SincronizarAreaTests(unittest.TestCase):
             self.assertEqual(almacen[1]["area_id"], 9)
             self.assertEqual(self.cliente.get("/api/plantillas/sincronizar-meta").json()["nuevas"], [])
             self.assertEqual(guardar.call_count, 2)
+
+    def test_sincronizacion_descarga_imagen_y_video_y_reutiliza_archivos(self):
+        imagen = io.BytesIO()
+        Image.new("RGB", (4, 4), "green").save(imagen, format="PNG")
+        video = b"\x00\x00\x00\x18ftypisom" + b"\x00" * 24
+        plantillas_meta = [
+            {"id": "img", "name": "imagen", "language": "es", "status": "APPROVED",
+             "components": [{"type": "HEADER", "format": "IMAGE",
+                             "example": {"header_handle": ["https://scontent.whatsapp.net/imagen"]}},
+                            {"type": "BODY", "text": "Hola"}]},
+            {"id": "vid", "name": "video", "language": "es", "status": "APPROVED",
+             "components": [{"type": "HEADER", "format": "VIDEO",
+                             "example": {"header_handle": ["https://scontent.whatsapp.net/video"]}},
+                            {"type": "BODY", "text": "Hola"}]},
+        ]
+        almacen = []
+        with tempfile.TemporaryDirectory() as temporal, \
+             patch.object(plantilla_media, "MEDIA_DIR", Path(temporal)), \
+             patch.object(main, "leer_plantillas", return_value=almacen), \
+             patch.object(main, "escribir_plantillas"), \
+             patch.object(main, "_exigir_area", side_effect=lambda s, area: {"id": area}), \
+             patch.object(main, "descargar_media_meta", side_effect=lambda url: (
+                 imagen.getvalue() if url.endswith("imagen") else video)), \
+             patch.object(main.WhatsAppService, "listar_templates_meta", return_value={
+                 "ok": True, "templates": plantillas_meta}):
+            respuesta = self.cliente.post("/api/plantillas/sincronizar-meta", json={
+                "asignaciones": {"img": 8, "vid": 9}})
+            self.assertEqual(respuesta.status_code, 200)
+            self.assertEqual(respuesta.json()["creadas"], 2)
+            ids = [p["encabezado_media_id"] for p in almacen]
+            self.assertTrue(all(ids))
+            self.assertTrue(all(p["encabezado_meta_registrado"] for p in almacen))
+            self.assertEqual(plantilla_media.obtener_media(ids[0])["formato_meta"], "IMAGE")
+            self.assertEqual(plantilla_media.obtener_media(ids[1])["formato_meta"], "VIDEO")
+            segunda = self.cliente.post("/api/plantillas/sincronizar-meta", json={
+                "asignaciones": {}})
+            self.assertEqual(segunda.status_code, 200)
+            self.assertEqual([p["encabezado_media_id"] for p in almacen], ids)
+
+    def test_fallo_de_descarga_no_guarda_sincronizacion(self):
+        meta = {"id": "img", "name": "imagen", "language": "es", "status": "APPROVED",
+                "components": [{"type": "HEADER", "format": "IMAGE",
+                                "example": {"header_handle": ["https://scontent.whatsapp.net/imagen"]}}]}
+        almacen = []
+        with patch.object(main, "leer_plantillas", return_value=almacen), \
+             patch.object(main, "escribir_plantillas") as guardar, \
+             patch.object(main, "_exigir_area", side_effect=lambda s, area: {"id": area}), \
+             patch.object(main, "descargar_media_meta", side_effect=HTTPException(502, "Fallo de Meta")), \
+             patch.object(main.WhatsAppService, "listar_templates_meta", return_value={
+                 "ok": True, "templates": [meta]}):
+            respuesta = self.cliente.post("/api/plantillas/sincronizar-meta", json={
+                "asignaciones": {"img": 8}})
+        self.assertEqual(respuesta.status_code, 502)
+        self.assertEqual(almacen, [])
+        guardar.assert_not_called()
+
+    def test_sincronizacion_recupera_encabezado_de_plantilla_existente(self):
+        imagen = io.BytesIO()
+        Image.new("RGB", (4, 4), "green").save(imagen, format="PNG")
+        meta = {"id": "meta-7", "name": "saludo", "language": "es", "status": "APPROVED",
+                "components": [{"type": "HEADER", "format": "IMAGE",
+                                "example": {"header_handle": ["https://scontent.whatsapp.net/imagen"]}},
+                               {"type": "BODY", "text": "Hola"}]}
+        almacen = [{**PLANTILLA, "whatsapp_template_lang": "es"}]
+        with tempfile.TemporaryDirectory() as temporal, \
+             patch.object(plantilla_media, "MEDIA_DIR", Path(temporal)), \
+             patch.object(main, "leer_plantillas", return_value=almacen), \
+             patch.object(main, "escribir_plantillas"), \
+             patch.object(main, "descargar_media_meta", return_value=imagen.getvalue()), \
+             patch.object(main.WhatsAppService, "listar_templates_meta", return_value={
+                 "ok": True, "templates": [meta]}):
+            respuesta = self.cliente.post("/api/plantillas/sincronizar-meta", json={
+                "asignaciones": {}})
+            self.assertEqual(respuesta.status_code, 200)
+            self.assertEqual(respuesta.json()["creadas"], 0)
+            self.assertEqual(respuesta.json()["actualizadas"], 1)
+            self.assertTrue(almacen[0]["encabezado_meta_registrado"])
+            self.assertEqual(plantilla_media.obtener_media(
+                almacen[0]["encabezado_media_id"])["formato_meta"], "IMAGE")
 
     def test_usuario_no_puede_importar_en_area_ajena(self):
         self.sesion.update(rol="usuario", permisos=["mensajeria"], area_ids=[8])
