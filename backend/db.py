@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pymysql
 from dotenv import load_dotenv
+from legacy_config_secrets import leer_credencial_antigua
 from telefono import normalizar_telefono
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -107,7 +108,7 @@ CONFIG_DEFAULTS = {
     "wa_webhook_path": "/api/whatsapp/webhook",
     "wa_graph_version": "v26.0",
     "wa_moneda": "USD",
-    # Clave Gemini cifrada con DPAPI de la cuenta Windows del backend.
+    # Clave de Gemini almacenada en esta tabla, igual que las otras credenciales.
     "gemini_api_key": "",
     "gemini_limite_hora": "12",
     # Cada tantos minutos se revisa en Meta el estado de las plantillas que
@@ -996,8 +997,26 @@ def _cargar_config() -> tuple[dict, bool]:
     try:
         with conectar() as conn, conn.cursor() as cur:
             cur.execute("SELECT clave, valor FROM configuracion")
+            migrados = False
             for row in cur.fetchall():
-                valores[row["clave"]] = "" if row["valor"] is None else row["valor"]
+                clave = row["clave"]
+                valor = "" if row["valor"] is None else row["valor"]
+                if clave in ("smtp_pass", "wa_token", "wa_verify_token", "wa_app_secret", "gemini_api_key") \
+                        and valor.startswith(("dpapi:", "fernet-v1:")):
+                    try:
+                        descifrado = leer_credencial_antigua(valor)
+                    except Exception:
+                        # Nunca enviar el texto cifrado como credencial literal.
+                        log_error(f"_cargar_config: vuelve a ingresar {clave} desde Configuración")
+                        valor = ""
+                    else:
+                        cur.execute("UPDATE configuracion SET valor = %s WHERE clave = %s AND valor = %s",
+                                    (descifrado, clave, valor))
+                        valor = descifrado
+                        migrados = True
+                valores[clave] = valor
+            if migrados:
+                conn.commit()
         return valores, True
     except Exception as e:
         # 1146 = la tabla no existe todavía (primer arranque): se usan los

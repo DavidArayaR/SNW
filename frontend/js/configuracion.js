@@ -22,7 +22,6 @@ toastEl.addEventListener("click", () => toastEl.classList.remove("visible"));
 
 const cont = $("#secciones");
 let valores = {};          // valor guardado (servidor)
-let geminiConfigurada = false;
 let estadoSupresion = {};  // solo conteos; nunca teléfonos ni huellas
 let campos = {};           // clave -> { def, input }
 let derivados = [];        // campos calculados (ej. URL del webhook)
@@ -42,6 +41,10 @@ function escaparHtml(t) {
   return d.innerHTML;
 }
 
+function escaparAtributo(t) {
+  return escaparHtml(t).replace(/"/g, "&quot;");
+}
+
 async function cargar() {
   try {
     const res = await fetch("api/configuracion/todo", { headers: authHeaders(), cache: "no-store" });
@@ -50,7 +53,6 @@ async function cargar() {
     if (!res.ok) throw new Error();
     const d = await res.json();
     valores = d.valores || {};
-    geminiConfigurada = !!d.gemini_api_key_configurada;
     estadoSupresion = d.supresion || {};
     render(d.secciones || []);
   } catch {
@@ -147,22 +149,15 @@ function render(secciones) {
         control =
           `<label class="config-switch"><input type="checkbox" id="${id}" data-clave="${c.clave}"${on ? " checked" : ""}>` +
           `<span>Activado</span></label>`;
-      } else if (c.tipo === "password") {
-        control =
-          `<div class="config-secreto">` +
-          `<input type="password" id="${id}" data-clave="${c.clave}" value="${escaparHtml(val)}" autocomplete="off" spellcheck="false">` +
-          `<button type="button" class="config-ojo" aria-label="Mostrar u ocultar"><i class="fa-solid fa-eye"></i></button>` +
-          `</div>`;
       } else {
-        const t = c.tipo === "number" ? "number" : "text";
-        control = `<input type="${t}" id="${id}" data-clave="${c.clave}" value="${escaparHtml(val)}" autocomplete="off" spellcheck="false">`;
+        const t = c.tipo === "number" ? "number" : c.tipo === "password" ? "password" : "text";
+        control = `<input type="${t}" id="${id}" data-clave="${c.clave}" value="${escaparAtributo(val)}" autocomplete="off" spellcheck="false">`;
       }
 
       wrap.innerHTML =
         `<label for="${id}">${escaparHtml(c.etiqueta)} <span class="config-clave">${c.clave}</span></label>` +
         control +
-        (c.ayuda ? `<p class="field__hint">${escaparHtml(c.ayuda)}</p>` : "") +
-        (c.clave === "gemini_api_key" ? `<p class="field__hint" id="estadoClaveGemini">${geminiConfigurada ? "Clave configurada" : "Clave pendiente de configurar"}</p>` : "");
+        (c.ayuda ? `<p class="field__hint">${escaparHtml(c.ayuda)}</p>` : "");
       grid.appendChild(wrap);
 
       const input = wrap.querySelector("[data-clave]");
@@ -170,14 +165,6 @@ function render(secciones) {
       input.addEventListener("input", marcarCambios);
       input.addEventListener("change", marcarCambios);
 
-      const ojo = wrap.querySelector(".config-ojo");
-      if (ojo) {
-        ojo.addEventListener("click", () => {
-          const esPwd = input.type === "password";
-          input.type = esPwd ? "text" : "password";
-          ojo.querySelector("i").className = esPwd ? "fa-solid fa-eye-slash" : "fa-solid fa-eye";
-        });
-      }
     }
     cont.appendChild(panel);
   }
@@ -233,9 +220,6 @@ async function guardar() {
     if (res.status === 401) { window.snwSesionExpirada(); return; }
     if (!res.ok) throw new Error(d.detail || "No se pudo guardar");
     valores = d.valores || valores;
-    geminiConfigurada = !!d.gemini_api_key_configurada;
-    if ($("#estadoClaveGemini")) $("#estadoClaveGemini").textContent =
-      geminiConfigurada ? "Clave configurada" : "Clave pendiente de configurar";
 
     // Reflejar los valores normalizados por el servidor.
     for (const clave of Object.keys(campos)) {

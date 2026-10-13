@@ -1,13 +1,9 @@
 """Borradores de plantillas con Gemini, sin datos de pacientes ni secretos en HTTP."""
 
-import base64
-import ctypes
 import hashlib
 import logging
 import re
-import sys
 import time
-from ctypes import wintypes
 
 import httpx
 from fastapi import HTTPException
@@ -21,7 +17,6 @@ MODELO_RESPALDO = "gemini-3.5-flash"
 TIMEOUT_SEGUNDOS = 12
 MAX_INSTRUCCION = 400
 MAX_SALIDA_TOKENS = 1024
-PREFIJO_CIFRADO = "dpapi:"
 _LOG = logging.getLogger(__name__)
 
 _CORREO = re.compile(r"\b[^\s@]+@[^\s@]+\.[^\s@]+\b")
@@ -76,53 +71,13 @@ def validar_borrador(valor: str) -> str:
     return texto
 
 
-class _Blob(ctypes.Structure):
-    _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_ubyte))]
-
-
-def _dpapi(datos: bytes, *, descifrar: bool) -> bytes:
-    """Windows DPAPI: solo la cuenta del proceso en esta máquina puede leerlo."""
-    if sys.platform != "win32":
-        raise RuntimeError("El cifrado de la clave Gemini requiere Windows DPAPI.")
-    entrada = ctypes.create_string_buffer(datos)
-    blob_entrada = _Blob(len(datos), ctypes.cast(entrada, ctypes.POINTER(ctypes.c_ubyte)))
-    blob_salida = _Blob()
-    crypt32 = ctypes.windll.crypt32
-    kernel32 = ctypes.windll.kernel32
-    if descifrar:
-        funcion = crypt32.CryptUnprotectData
-        funcion.argtypes = [ctypes.POINTER(_Blob), ctypes.c_void_p, ctypes.c_void_p,
-                            ctypes.c_void_p, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(_Blob)]
-    else:
-        funcion = crypt32.CryptProtectData
-        funcion.argtypes = [ctypes.POINTER(_Blob), ctypes.c_wchar_p, ctypes.c_void_p,
-                            ctypes.c_void_p, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(_Blob)]
-    funcion.restype = wintypes.BOOL
-    ok = funcion(ctypes.byref(blob_entrada), None, None, None, None, 0, ctypes.byref(blob_salida))
-    if not ok:
-        raise OSError("No se pudo procesar la clave cifrada de Gemini con esta cuenta de Windows.")
-    try:
-        return ctypes.string_at(blob_salida.pbData, blob_salida.cbData)
-    finally:
-        kernel32.LocalFree.argtypes = [ctypes.c_void_p]
-        kernel32.LocalFree.restype = ctypes.c_void_p
-        kernel32.LocalFree(ctypes.cast(blob_salida.pbData, ctypes.c_void_p))
-
-
-def cifrar_clave(clave: str) -> str:
-    return PREFIJO_CIFRADO + base64.b64encode(_dpapi(clave.encode("utf-8"), descifrar=False)).decode("ascii")
-
-
 def leer_clave() -> str:
     valor = (config_get("gemini_api_key") or "").strip()
     if not valor:
         raise HTTPException(503, detail="Gemini todavía no está configurado. Contacta a un desarrollador.")
-    if not valor.startswith(PREFIJO_CIFRADO):
-        raise HTTPException(503, detail="La clave de Gemini debe volver a configurarse de forma segura.")
-    try:
-        return _dpapi(base64.b64decode(valor[len(PREFIJO_CIFRADO):], validate=True), descifrar=True).decode("utf-8")
-    except (ValueError, OSError, UnicodeError):
-        raise HTTPException(503, detail="La clave de Gemini no está disponible en este servidor.")
+    if valor.startswith(("dpapi:", "fernet-v1:")):
+        raise HTTPException(503, detail="Vuelve a ingresar la clave de Gemini en Configuración.")
+    return valor
 
 
 def consumir_cuota(usuario: str) -> None:

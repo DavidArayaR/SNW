@@ -48,7 +48,7 @@ import whatsapp_service
 from plantilla_media import (MAX_MEDIA_BYTES, descargar_media_meta, guardar_media,
                             guardar_media_importada, obtener_media, ruta_media)
 from plantilla_revision import MAX_CUERPO, presentar_plantilla, componentes_para_vista
-from gemini_service import cifrar_clave, consumir_cuota, generar_borrador, validar_instruccion
+from gemini_service import consumir_cuota, generar_borrador, validar_instruccion
 from wa_rate_limit import gobernador as wa_gobernador
 from whatsapp_service import WhatsAppService, es_mensaje_interes
 from whatsapp_webhook import router as whatsapp_router
@@ -3672,7 +3672,7 @@ _CONFIG_SECCIONES = [
             {"clave": "smtp_host", "etiqueta": "Servidor SMTP", "tipo": "text"},
             {"clave": "smtp_port", "etiqueta": "Puerto", "tipo": "number"},
             {"clave": "smtp_user", "etiqueta": "Usuario", "tipo": "text"},
-            {"clave": "smtp_pass", "etiqueta": "Contraseña", "tipo": "password", "secreto": True},
+            {"clave": "smtp_pass", "etiqueta": "Contraseña", "tipo": "password"},
             {"clave": "smtp_tls", "etiqueta": "Usar TLS / STARTTLS", "tipo": "bool"},
             {"clave": "correo_emisor", "etiqueta": "Correo emisor (From)", "tipo": "text"},
             {"clave": "correo_destino", "etiqueta": "Correo del supervisor (confirmaciones)", "tipo": "text"},
@@ -3681,13 +3681,13 @@ _CONFIG_SECCIONES = [
     {
         "id": "whatsapp", "titulo": "WhatsApp · Meta Cloud API", "icono": "fa-whatsapp", "marca": True,
         "campos": [
-            {"clave": "wa_token", "etiqueta": "Access token", "tipo": "password", "secreto": True},
+            {"clave": "wa_token", "etiqueta": "Access token", "tipo": "password"},
             {"clave": "wa_phone_id", "etiqueta": "Phone number ID", "tipo": "text"},
             {"clave": "wa_business_account_id", "etiqueta": "WhatsApp Business Account ID (WABA)", "tipo": "text"},
             {"clave": "wa_app_id", "etiqueta": "App ID de Meta", "tipo": "text",
              "ayuda": "Necesario para registrar plantillas con imagen o GIF de encabezado."},
-            {"clave": "wa_verify_token", "etiqueta": "Verify token del webhook", "tipo": "password", "secreto": True},
-            {"clave": "wa_app_secret", "etiqueta": "App Secret de Meta", "tipo": "password", "secreto": True,
+            {"clave": "wa_verify_token", "etiqueta": "Verify token del webhook", "tipo": "password"},
+            {"clave": "wa_app_secret", "etiqueta": "App Secret de Meta", "tipo": "password",
              "ayuda": "Se usa para verificar la firma de los webhook POST. Es distinto del Verify token y del Access token."},
             {"clave": "wa_webhook_path", "etiqueta": "Ruta del webhook", "tipo": "text",
              "ayuda": "Se concatena a la URL base. Debe empezar con «/». Ej: /api/whatsapp/webhook"},
@@ -3738,8 +3738,8 @@ _CONFIG_SECCIONES = [
     {
         "id": "ia", "titulo": "Asistente de plantillas · Gemini", "icono": "fa-wand-magic-sparkles",
         "campos": [
-            {"clave": "gemini_api_key", "etiqueta": "Clave API de Gemini", "tipo": "password", "secreto": True,
-             "ayuda": "Solo desarrolladores. Se cifra con la cuenta Windows del servidor y nunca se devuelve al navegador. Deja vacío para conservar la actual."},
+            {"clave": "gemini_api_key", "etiqueta": "Clave API de Gemini", "tipo": "password",
+             "ayuda": "Solo desarrolladores. Se guarda en la tabla configuracion y puede editarse aquí."},
             {"clave": "gemini_limite_hora", "etiqueta": "Borradores por usuario y hora", "tipo": "number",
              "ayuda": "Máximo por cuenta para controlar el uso de Gemini (1 a 100)."},
         ],
@@ -3773,12 +3773,12 @@ _CONFIG_ENUM = {
 
 def _config_valores() -> dict:
     cfg = config_all()
-    return {c: ("" if c == "gemini_api_key" or cfg.get(c) is None else str(cfg.get(c)))
+    return {c: ("" if cfg.get(c) is None else str(cfg.get(c)))
             for c in CONFIG_DEFAULTS}
 
 
 def obtener_configuracion_completa(sesion: dict = Depends(solo_dev)):
-    """Configuración para desarrolladores; la clave Gemini nunca se devuelve."""
+    """Configuración completa, disponible solo para desarrolladores."""
     return {"secciones": _CONFIG_SECCIONES, "valores": _config_valores(),
             "gemini_api_key_configurada": bool(config_get("gemini_api_key")),
             "supresion": resumen_supresion()}
@@ -3815,10 +3815,6 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
         if clave == "gemini_api_key":
             if len(v) > 512:
                 raise HTTPException(422, detail="La clave de Gemini es demasiado extensa.")
-            try:
-                v = cifrar_clave(v) if v else ""
-            except (OSError, RuntimeError):
-                raise HTTPException(503, detail="Este servidor no pudo proteger la clave de Gemini.")
         cambios[clave] = v
 
     if cambios:

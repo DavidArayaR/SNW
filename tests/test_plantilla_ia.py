@@ -45,21 +45,17 @@ class ValidacionIATests(unittest.TestCase):
                 ia.validar_borrador(texto)
             self.assertEqual(error.exception.status_code, 502)
 
-    def test_clave_ausente_y_no_cifrada(self):
-        for valor in ("", "clave-en-plano"):
-            with patch.object(ia, "config_get", return_value=valor), self.assertRaises(HTTPException) as error:
+    def test_clave_en_bd_y_valores_heredados(self):
+        with patch.object(ia, "config_get", return_value=""):
+            with self.assertRaises(HTTPException) as error:
                 ia.leer_clave()
             self.assertEqual(error.exception.status_code, 503)
-            if valor:
-                self.assertNotIn(valor, error.exception.detail)
-
-    @unittest.skipUnless(sys.platform == "win32", "DPAPI solo está disponible en Windows")
-    def test_clave_cifrada_con_cuenta_windows(self):
-        cifrada = ia.cifrar_clave("clave-de-prueba")
-        self.assertTrue(cifrada.startswith("dpapi:"))
-        self.assertNotIn("clave-de-prueba", cifrada)
-        with patch.object(ia, "config_get", return_value=cifrada):
+        with patch.object(ia, "config_get", return_value="clave-de-prueba"):
             self.assertEqual(ia.leer_clave(), "clave-de-prueba")
+        with patch.object(ia, "config_get", return_value="dpapi:cifrada"):
+            with self.assertRaises(HTTPException) as error:
+                ia.leer_clave()
+            self.assertEqual(error.exception.status_code, 503)
 
     def test_cuota_compartida_por_bd(self):
         cursor = MagicMock()
@@ -219,19 +215,26 @@ class EndpointIATests(unittest.TestCase):
         guardar.assert_not_called()
         meta.assert_not_called()
 
-    @unittest.skipUnless(sys.platform == "win32", "DPAPI solo está disponible en Windows")
-    def test_configuracion_cifra_y_oculta_la_clave(self):
+    def test_configuracion_guarda_y_muestra_la_clave(self):
         with patch.object(main, "config_set") as guardar, \
-             patch.object(main, "config_all", return_value={"gemini_api_key": "dpapi:cifrada"}), \
-             patch.object(main, "config_get", return_value="dpapi:cifrada"):
+             patch.object(main, "config_all", return_value={"gemini_api_key": "clave-de-prueba"}), \
+             patch.object(main, "config_get", return_value="clave-de-prueba"):
             respuesta = main.actualizar_configuracion_completa(
                 main.ConfigTodoIn(cambios={"gemini_api_key": "clave-de-prueba"}),
                 sesion={"rol": "desarrollador"})
-        cifrada = guardar.call_args.args[0]["gemini_api_key"]
-        self.assertTrue(cifrada.startswith("dpapi:"))
-        self.assertNotIn("clave-de-prueba", cifrada)
-        self.assertEqual(respuesta["valores"]["gemini_api_key"], "")
+        self.assertEqual(guardar.call_args.args[0]["gemini_api_key"], "clave-de-prueba")
+        self.assertEqual(respuesta["valores"]["gemini_api_key"], "clave-de-prueba")
         self.assertTrue(respuesta["gemini_api_key_configurada"])
+
+    def test_configuracion_muestra_credenciales_a_desarrolladores(self):
+        with patch.object(main, "config_all", return_value={
+            "wa_token": "meta-prueba", "wa_verify_token": "verify-prueba",
+            "wa_app_secret": "app-prueba", "smtp_pass": "correo-prueba",
+            "gemini_api_key": "gemini-prueba",
+        }):
+            values = main._config_valores()
+        self.assertEqual(values["wa_token"], "meta-prueba")
+        self.assertEqual(values["gemini_api_key"], "gemini-prueba")
 
 
 if __name__ == "__main__":
