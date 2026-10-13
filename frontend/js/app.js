@@ -1016,6 +1016,13 @@ function hayCambios() {
   return snapshot !== null && snapshot !== estadoActualEditor();
 }
 
+function soloCambioArea() {
+  if (!activaId || snapshot === null || !hayCambios()) return false;
+  const antes = JSON.parse(snapshot);
+  const ahora = JSON.parse(estadoActualEditor());
+  return antes[5] !== ahora[5] && antes.every((valor, i) => i === 5 || valor === ahora[i]);
+}
+
 // El botón «Guardar» solo se habilita si hubo algún cambio desde que se abrió
 // la plantilla (o desde el último guardado) Y están completos nombre, mensaje
 // y área (al usuario normal se le exige área: no puede usar
@@ -1025,7 +1032,7 @@ function actualizarEstadoBotonGuardar() {
   const incompleto = !inpNombre.value.trim() || !inpMensaje.value.trim() ||
     ((window.snwRol || "") === "usuario" && !(inpArea && inpArea.value));
   btnGuardar.disabled = !hayCambios() || incompleto || subiendoEncabezado ||
-    (!!encabezadoMediaId && appIdMetaConfigurada === false) || validandoPreview || !!erroresPreview.length;
+    (!soloCambioArea() && ((!!encabezadoMediaId && appIdMetaConfigurada === false) || validandoPreview || !!erroresPreview.length));
   actualizarEstadoBotonPrueba();
 }
 
@@ -1102,8 +1109,8 @@ function pararCuentaRegresiva() {
 }
 
 function textoEnfriamiento(p) {
-  return `Esta plantilla no se puede editar todavía: faltan ${cuentaRegresivaEditable(p)} para que vuelva ` +
-    "a estar disponible (Meta solo permite editar un template una vez al día). Sí se puede eliminar.";
+  return `El contenido se podrá editar en ${cuentaRegresivaEditable(p)} (Meta permite una edición al día). ` +
+    "Puedes cambiar el área o eliminar la plantilla mientras tanto.";
 }
 
 // Actualiza el aviso cada 30s mientras dure el enfriamiento; al llegar a
@@ -1135,7 +1142,9 @@ function actualizarBotonesSegunEstado(p) {
   const puedeEliminar = PUEDE_EDITAR_PLANTILLAS && puedeEditarEsta(p) && editable && !esPlantillaProtegida(p);
   const puedeRevisar = p && ap === "pendiente" && puedeAprobarPlantillas();
   document.querySelectorAll(".wildcards").forEach((el) => { el.hidden = !puedeGuardar; });
-  btnGuardar.hidden = !puedeGuardar;
+  const puedeGuardarArea = p && PUEDE_EDITAR_PLANTILLAS && puedeEditarEsta(p) &&
+    editable && !esPlantillaProtegida(p);
+  btnGuardar.hidden = !(puedeGuardar || puedeGuardarArea);
   const btnAprobar = $("#btnAprobar");
   const btnRechazar = $("#btnRechazar");
   if (btnAprobar) btnAprobar.hidden = !puedeRevisar;
@@ -1223,10 +1232,8 @@ function actualizarBotonesSegunEstado(p) {
 // en Meta, quedan bloqueados. Las plantillas antiguas sin template todavía
 // pueden completarlos. El nombre del template está SIEMPRE bloqueado.
 //
-// Si la plantilla está pendiente de revisión, o fue editada hace menos de
-// 24h (no es editable, ver esPlantillaEditable / editadaRecientemente), TODO
-// el formulario queda deshabilitado (misma rama que la de "sin permiso de
-// edición") — ver actualizarBotonesSegunEstado.
+// Durante el enfriamiento se bloquea el contenido, pero el área local sigue
+// disponible para las cuentas que pueden editar esta plantilla.
 function actualizarBloqueoCampos() {
   const p = activaId ? plantillas.find((x) => x.id === activaId) : null;
   // El aviso de "nombre permanente" y su texto de ayuda dependen solo de
@@ -1247,6 +1254,10 @@ function actualizarBloqueoCampos() {
     inpEjemploApellido.disabled = false;
     selNumeroPrueba.disabled = false;
     btnQuitarEncabezado.disabled = true;
+    if (p && PUEDE_EDITAR_PLANTILLAS && puedeEditarEsta(p) &&
+        esPlantillaEditable(p) && !esPlantillaProtegida(p)) {
+      refrescarAvisoSinArea();
+    }
     return;
   }
   // El mensaje se deja sin disabled explícito acá arriba: solo se pone
@@ -1425,17 +1436,15 @@ function cancelarEdicion() {
 formEl.addEventListener("submit", async (e) => {
   e.preventDefault();
   if (subiendoEncabezado) return toast("Espera a que termine la carga del encabezado.", "error");
-  if (encabezadoMediaId && appIdMetaConfigurada === false) {
+  if (!soloCambioArea() && encabezadoMediaId && appIdMetaConfigurada === false) {
     return toast("Configura el App ID de Meta antes de guardar esta plantilla.", "error");
   }
   if (!PUEDE_EDITAR_PLANTILLAS) return;
-  // Blindaje: aunque el botón esté oculto, el formulario no debe guardarse
-  // si la plantilla activa todavía está pendiente de revisión en Meta, o se
-  // editó hace menos de 24h (Ctrl+S, Enter...); aprobada o rechazada, y fuera
-  // del enfriamiento de 24h, sí se puede guardar.
+  // El enfriamiento de Meta bloquea cambios de contenido, incluso mediante
+  // Ctrl+S/Enter. Un cambio exclusivo de área se guarda localmente.
   if (activaId) {
     const activa = plantillas.find((x) => x.id === activaId);
-    if (!esPlantillaEditable(activa) || editadaRecientemente(activa)) return;
+    if (!esPlantillaEditable(activa) || (editadaRecientemente(activa) && !soloCambioArea())) return;
     if (!puedeEditarEsta(activa)) return toast("Solo puedes editar las plantillas que tú creaste.", "error");
   }
 
@@ -1492,9 +1501,11 @@ formEl.addEventListener("submit", async (e) => {
     );
   }
 
-  const vistaPrevia = await consultarPreview(++previewSolicitud);
-  if (!vistaPrevia || vistaPrevia.errores?.length) {
-    return toast("Corrige los errores de la vista previa antes de guardar.", "error");
+  if (!soloCambioArea()) {
+    const vistaPrevia = await consultarPreview(++previewSolicitud);
+    if (!vistaPrevia || vistaPrevia.errores?.length) {
+      return toast("Corrige los errores de la vista previa antes de guardar.", "error");
+    }
   }
 
   setGuardando(true);
@@ -2525,12 +2536,75 @@ if (btnRevisarTodos) {
 // crearlos/editarlos por API): trae el estado real de los que ya se conocen
 // e importa como plantilla nueva los que existan en Meta y falten aquí.
 if (btnSincronizarMeta) {
+  const modalSync = $("#modalSincronizar");
+  const areasSync = $("#areasSincronizar");
+  const confirmarSync = $("#confirmarSincronizar");
+  let sincronizando = false;
   btnSincronizarMeta.addEventListener("click", async () => {
+    if (sincronizando) return;
+    sincronizando = true;
+    setConsultandoEstado(true, btnSincronizarMeta, "Consultando...");
+    try {
+      const res = await fetch(`${API_URL}/sincronizar-meta`, { headers: authHeaders(), cache: "no-store" });
+      if (res.status === 401) { window.snwSesionExpirada(); return; }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail ?? `Error ${res.status}`);
+      const esUsuario = (window.snwRol || "") === "usuario";
+      const opciones = '<option value="">— Seleccione área —</option>' +
+        (esUsuario ? "" : '<option value="global">Global (todas las bases)</option>') +
+        misAreas.map((area) => `<option value="${area.id}">${escaparHtml(area.nombre_visible)}</option>`).join("");
+      areasSync.replaceChildren();
+      data.nuevas.forEach((plantilla, indice) => {
+        const campo = document.createElement("div");
+        campo.className = "field";
+        const etiqueta = document.createElement("label");
+        etiqueta.htmlFor = `areaSync${indice}`;
+        etiqueta.textContent = `${plantilla.nombre} (${plantilla.idioma})`;
+        const selector = document.createElement("select");
+        selector.id = etiqueta.htmlFor;
+        selector.dataset.metaId = plantilla.id;
+        selector.innerHTML = opciones;
+        campo.append(etiqueta, selector);
+        areasSync.append(campo);
+      });
+      if (!data.nuevas.length) {
+        const aviso = document.createElement("p");
+        aviso.className = "field__hint";
+        aviso.textContent = "No hay plantillas nuevas. Se actualizarán los estados y el contenido de las existentes.";
+        areasSync.append(aviso);
+      }
+      confirmarSync.disabled = data.nuevas.length > 0;
+      modalSync.hidden = false;
+      (areasSync.querySelector("select") || confirmarSync).focus();
+    } catch (err) {
+      console.error("[app.js preparar sincronización]", err);
+      toast(`No se pudo consultar Meta: ${err.message}`, "error");
+    } finally {
+      sincronizando = false;
+      setConsultandoEstado(false, btnSincronizarMeta);
+    }
+  });
+  areasSync.addEventListener("change", () => {
+    confirmarSync.disabled = [...areasSync.querySelectorAll("select")].some((selector) => !selector.value);
+  });
+  $("#cancelarSincronizar").addEventListener("click", () => { modalSync.hidden = true; });
+  modalSync.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") modalSync.hidden = true;
+  });
+  confirmarSync.addEventListener("click", async () => {
+    const selectores = [...areasSync.querySelectorAll("select")];
+    if (sincronizando || selectores.some((selector) => !selector.value)) return;
+    sincronizando = true;
+    const asignaciones = Object.fromEntries(selectores.map((selector) => [
+      selector.dataset.metaId, selector.value === "global" ? null : Number(selector.value),
+    ]));
+    modalSync.hidden = true;
     setConsultandoEstado(true, btnSincronizarMeta, "Sincronizando...");
     try {
       const res = await fetch(`${API_URL}/sincronizar-meta`, {
         method: "POST",
-        headers: authHeaders(),
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ asignaciones }),
       });
       if (res.status === 401) { window.snwSesionExpirada(); return; }
       const data = await res.json().catch(() => ({}));
@@ -2551,6 +2625,7 @@ if (btnSincronizarMeta) {
       console.error("[app.js refrescarVistaPlantillaActiva()]", err);
       toast(`No se pudo sincronizar con Meta: ${err.message}`, "error");
     } finally {
+      sincronizando = false;
       setConsultandoEstado(false, btnSincronizarMeta);
       window.snwCooldownBoton(btnSincronizarMeta);
     }

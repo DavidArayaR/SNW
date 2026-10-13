@@ -141,6 +141,142 @@ class EstadoMetaPlantillaTests(unittest.TestCase):
         escribir.assert_called_once_with([plantilla])
 
 
+class SincronizarAreaTests(unittest.TestCase):
+    def setUp(self):
+        app = FastAPI()
+        app.include_router(rutas_plantillas.registrar(vars(main)))
+        self.sesion = dict(SESION)
+        app.dependency_overrides[main.sesion_actual] = lambda: self.sesion
+        self.cliente = TestClient(app)
+
+    def test_importacion_asigna_area_y_repeticion_conserva_la_existente(self):
+        meta = {"id": "meta-sync", "name": "saludo_area", "language": "es",
+                "status": "APPROVED", "category": "UTILITY",
+                "components": [{"type": "BODY", "text": "Hola"}]}
+        otra = {**meta, "id": "meta-otra", "name": "otra_area"}
+        almacen = []
+        with patch.object(main, "leer_plantillas", return_value=almacen), \
+                patch.object(main, "escribir_plantillas") as guardar, \
+                patch.object(main, "_exigir_area", side_effect=lambda s, area: {"id": area}), \
+                patch.object(main.WhatsAppService, "listar_templates_meta",
+                             return_value={"ok": True, "templates": [meta, otra]}):
+            previa = self.cliente.get("/api/plantillas/sincronizar-meta")
+            self.assertEqual(previa.status_code, 200)
+            self.assertEqual(len(previa.json()["nuevas"]), 2)
+            guardar.assert_not_called()
+            self.assertEqual(almacen, [])
+            primera = self.cliente.post("/api/plantillas/sincronizar-meta", json={
+                "asignaciones": {"meta-sync": 8, "meta-otra": 9}})
+            self.assertEqual(primera.status_code, 200)
+            self.assertEqual(primera.json()["creadas"], 2)
+            self.assertEqual(almacen[0]["area_id"], 8)
+            self.assertEqual(almacen[1]["area_id"], 9)
+            segunda = self.cliente.post("/api/plantillas/sincronizar-meta", json={
+                "asignaciones": {"meta-sync": 9, "meta-otra": 8}})
+            self.assertEqual(segunda.status_code, 200)
+            self.assertEqual(segunda.json()["creadas"], 0)
+            self.assertEqual(almacen[0]["area_id"], 8)
+            self.assertEqual(almacen[1]["area_id"], 9)
+            self.assertEqual(self.cliente.get("/api/plantillas/sincronizar-meta").json()["nuevas"], [])
+            self.assertEqual(guardar.call_count, 2)
+
+    def test_usuario_no_puede_importar_en_area_ajena(self):
+        self.sesion.update(rol="usuario", permisos=["mensajeria"], area_ids=[8])
+        with patch.object(main, "leer_plantillas", return_value=[]), \
+                patch.object(main.servicio_areas, "obtener_area", return_value={"id": 9}), \
+                patch.object(main.WhatsAppService, "listar_templates_meta", return_value={
+                    "ok": True, "templates": [{"id": "meta-sync", "name": "nueva"}]}), \
+                patch.object(main, "escribir_plantillas") as guardar:
+            respuesta = self.cliente.post("/api/plantillas/sincronizar-meta", json={
+                "asignaciones": {"meta-sync": 9}})
+        self.assertEqual(respuesta.status_code, 403)
+        guardar.assert_not_called()
+
+    def test_usuario_debe_elegir_area(self):
+        self.sesion.update(rol="usuario", permisos=["mensajeria"], area_ids=[8])
+        with patch.object(main.WhatsAppService, "listar_templates_meta") as consultar:
+            respuesta = self.cliente.post("/api/plantillas/sincronizar-meta")
+        self.assertEqual(respuesta.status_code, 422)
+        consultar.assert_not_called()
+
+    def test_asignacion_faltante_no_importa_ni_actualiza(self):
+        almacen = [{**PLANTILLA, "whatsapp_template_status": "PAUSED"}]
+        with patch.object(main, "leer_plantillas", return_value=almacen), \
+                patch.object(main.WhatsAppService, "listar_templates_meta", return_value={
+                    "ok": True, "templates": [
+                        {"id": "existente", "name": "saludo", "language": "es", "status": "APPROVED"},
+                        {"id": "nueva", "name": "otra", "language": "es"}]}), \
+                patch.object(main, "escribir_plantillas") as guardar:
+            respuesta = self.cliente.post("/api/plantillas/sincronizar-meta", json={"asignaciones": {}})
+        self.assertEqual(respuesta.status_code, 409)
+        self.assertEqual(almacen[0]["whatsapp_template_status"], "PAUSED")
+        guardar.assert_not_called()
+
+    def test_global_explicito_solo_para_roles_autorizados(self):
+        with patch.object(main, "leer_plantillas", side_effect=lambda: []), \
+                patch.object(main.WhatsAppService, "listar_templates_meta", return_value={
+                    "ok": True, "templates": [{"id": "nueva", "name": "otra", "language": "es"}]}), \
+                patch.object(main, "escribir_plantillas") as guardar:
+            respuesta = self.cliente.post("/api/plantillas/sincronizar-meta", json={
+                "asignaciones": {"nueva": None}})
+            self.assertEqual(respuesta.status_code, 200)
+            self.assertIsNone(respuesta.json()["plantillas"][0]["area_id"])
+            guardar.reset_mock()
+            self.sesion.update(rol="usuario", permisos=["mensajeria"], area_ids=[8])
+            respuesta = self.cliente.post("/api/plantillas/sincronizar-meta", json={
+                "asignaciones": {"nueva": None}})
+            self.assertEqual(respuesta.status_code, 422)
+            guardar.assert_not_called()
+
+
+class AreaDuranteCooldownTests(unittest.TestCase):
+    def setUp(self):
+        app = FastAPI()
+        app.include_router(rutas_plantillas.registrar(vars(main)))
+        app.dependency_overrides[main.sesion_actual] = lambda: SESION
+        self.cliente = TestClient(app)
+        self.plantilla = {**PLANTILLA, "whatsapp_template_lang": "es",
+                          "whatsapp_template_categoria": "UTILITY",
+                          "ultima_edicion": int(main.time.time() * 1000)}
+        self.body = {"nombre": self.plantilla["nombre"], "texto": self.plantilla["texto"],
+                     "whatsapp_template_lang": "es", "whatsapp_template_categoria": "UTILITY",
+                     "area_id": 8, "ejemplos": {"nombre": "Ana"}}
+
+    def test_area_se_guarda_sin_meta_ni_reiniciar_cooldown(self):
+        ultima_edicion = self.plantilla["ultima_edicion"]
+        with patch.object(main, "leer_plantillas", return_value=[self.plantilla]), \
+                patch.object(main, "escribir_plantillas") as guardar, \
+                patch.object(main, "_exigir_area", return_value={"id": 8}), \
+                patch.object(main, "_registrar_template_meta") as registrar:
+            respuesta = self.cliente.put("/api/plantillas/7", json=self.body)
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(respuesta.json()["area_id"], 8)
+        self.assertEqual(respuesta.json()["ultima_edicion"], ultima_edicion)
+        self.assertEqual(respuesta.json()["whatsapp_template_status"], "APPROVED")
+        guardar.assert_called_once()
+        registrar.assert_not_called()
+
+    def test_cambiar_area_y_contenido_no_elude_cooldown(self):
+        self.body["texto"] = "Otro texto"
+        with patch.object(main, "leer_plantillas", return_value=[self.plantilla]), \
+                patch.object(main, "escribir_plantillas") as guardar, \
+                patch.object(main, "_registrar_template_meta") as registrar:
+            respuesta = self.cliente.put("/api/plantillas/7", json=self.body)
+        self.assertEqual(respuesta.status_code, 400)
+        self.assertIn("24 horas", respuesta.json()["detail"])
+        self.assertIsNone(self.plantilla["area_id"])
+        guardar.assert_not_called()
+        registrar.assert_not_called()
+
+    def test_area_inexistente_no_se_guarda(self):
+        with patch.object(main, "leer_plantillas", return_value=[self.plantilla]), \
+                patch.object(main.servicio_areas, "obtener_area", return_value=None), \
+                patch.object(main, "escribir_plantillas") as guardar:
+            respuesta = self.cliente.put("/api/plantillas/7", json=self.body)
+        self.assertEqual(respuesta.status_code, 404)
+        guardar.assert_not_called()
+
+
 class EndpointPruebaPlantillaTests(unittest.TestCase):
     def setUp(self):
         app = FastAPI()

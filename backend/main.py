@@ -59,7 +59,7 @@ from schemas import (
     ActivarCuentaIn, ClavePropiaIn, ConfigIn, ConfigTodoIn,
     CorreoRecuperacionIn, EnvioIn, AreaIn, AreaRenombrarIn,
     InvitarIn, LoginIn, OlvideIn,
-    PlantillaIn, PruebaWAIn, ResetIn, RolAreaIn, UsuarioUpdIn,
+    PlantillaIn, SincronizarPlantillasIn, PruebaWAIn, ResetIn, RolAreaIn, UsuarioUpdIn,
     RechazoPlantillaIn, PlantillaPreviaIn, PruebaPlantillaIn,
 )
 from telefono import normalizar_telefono
@@ -2759,7 +2759,35 @@ def _clave_libre(base: str, ocupadas: set) -> str:
     return clave
 
 
-def sincronizar_plantillas_meta(sesion: dict = Depends(exigir("mensajeria"))):
+def _coincidencia_template_meta(plantilla: dict, templates: list) -> dict | None:
+    nombre = (plantilla.get("whatsapp_template") or "").strip()
+    if not nombre:
+        return None
+    idioma = (plantilla.get("whatsapp_template_lang") or "").strip() or "es"
+    return (next((t for t in templates if t.get("name") == nombre
+                  and t.get("language") == idioma), None)
+            or next((t for t in templates if t.get("name") == nombre), None))
+
+
+def _consultar_templates_meta() -> list:
+    resultado = WhatsAppService().listar_templates_meta()
+    if not resultado["ok"]:
+        raise HTTPException(502, detail=f"No se pudo consultar los templates en Meta: {resultado['error']}")
+    return resultado["templates"]
+
+
+def preparar_sincronizacion_plantillas(sesion: dict = Depends(exigir("mensajeria"))):
+    """Consulta sin guardar para elegir un área por cada plantilla nueva."""
+    templates = _consultar_templates_meta()
+    existentes = {_match.get("id") for p in leer_plantillas()
+                  if (_match := _coincidencia_template_meta(p, templates))}
+    return {"nuevas": [{"id": str(t["id"]), "nombre": t.get("name"),
+                        "idioma": t.get("language")}
+                       for t in templates if t.get("id") not in existentes]}
+
+
+def sincronizar_plantillas_meta(body: SincronizarPlantillasIn,
+                               sesion: dict = Depends(exigir("mensajeria"))):
     """Solo lee de Meta (no crea ni edita nada allá), así que no hace falta
     el permiso de edición de plantillas: alcanza con poder ver Mensajería.
 
@@ -2771,13 +2799,19 @@ def sincronizar_plantillas_meta(sesion: dict = Depends(exigir("mensajeria"))):
       - Importa como plantillas nuevas los templates que existen en Meta y
         todavía no tienen una plantilla local asociada.
     No crea ni edita nada en Meta, solo lee."""
-    servicio = WhatsAppService()
-    resultado = servicio.listar_templates_meta()
-    if not resultado["ok"]:
-        raise HTTPException(502, detail=f"No se pudo consultar los templates en Meta: {resultado['error']}")
-
-    templates_meta = resultado["templates"]
+    templates_meta = _consultar_templates_meta()
     plantillas = leer_plantillas()
+
+    # Validar todas las asignaciones antes de modificar registros. Una plantilla
+    # llegada desde la previsualización obliga a elegir su área, nunca se importa
+    # global por omisión. Las existentes conservan su asociación.
+    existentes = {match.get("id") for p in plantillas
+                  if (match := _coincidencia_template_meta(p, templates_meta))}
+    nuevas = [t for t in templates_meta if t.get("id") not in existentes]
+    if any(str(t["id"]) not in body.asignaciones for t in nuevas):
+        raise HTTPException(409, detail="Elige un área para cada plantilla nueva. Vuelve a abrir Sincronizar para actualizar la lista.")
+    areas_importacion = {str(t["id"]): _validar_plantilla_area(
+        sesion, body.asignaciones[str(t["id"])]) for t in nuevas}
 
     usados_id = set()
     actualizadas = 0
@@ -2786,10 +2820,7 @@ def sincronizar_plantillas_meta(sesion: dict = Depends(exigir("mensajeria"))):
         if not nombre_tpl:
             continue
         lang = (p.get("whatsapp_template_lang") or "").strip() or "es"
-        match = next((t for t in templates_meta
-                      if t.get("name") == nombre_tpl and t.get("language") == lang), None)
-        if not match:
-            match = next((t for t in templates_meta if t.get("name") == nombre_tpl), None)
+        match = _coincidencia_template_meta(p, templates_meta)
 
         if match:
             usados_id.add(match.get("id"))
@@ -2855,6 +2886,7 @@ def sincronizar_plantillas_meta(sesion: dict = Depends(exigir("mensajeria"))):
             "id": siguiente_id,
             "clave": clave,
             "nombre": nombre,
+            "area_id": areas_importacion[str(t["id"])],
             "texto": _texto_desde_componentes(t.get("components")),
             "whatsapp_template": t.get("name"),
             "whatsapp_template_lang": t.get("language"),
@@ -3158,6 +3190,26 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
                     detail="Solo puedes editar las plantillas que tú creaste.",
                 )
             _exigir_plantilla_en_alcance(sesion, p)
+            # El área solo organiza la copia local. Cambiarla durante el
+            # enfriamiento no requiere validar ni reenviar contenido a Meta.
+            solo_area = (
+                _aprobacion_plantilla(p) == "aprobada"
+                and p.get("whatsapp_template_status") in ESTADOS_TEMPLATE_EDITABLES
+                and body.nombre.strip() == p.get("nombre", "")
+                and body.texto == (p.get("texto") or "")
+                and ((body.whatsapp_template_lang or "").strip() or None)
+                    == p.get("whatsapp_template_lang")
+                and body.whatsapp_template_categoria == p.get("whatsapp_template_categoria")
+                and (body.encabezado_media_id if "encabezado_media_id" in body.model_fields_set
+                     else p.get("encabezado_media_id")) == p.get("encabezado_media_id")
+                and "area_id" in body.model_fields_set
+                and body.area_id != p.get("area_id")
+            )
+            if solo_area:
+                p["area_id"] = _validar_plantilla_area(sesion, body.area_id)
+                p["actualizada"] = int(time.time() * 1000)
+                escribir_plantillas(plantillas)
+                return p
             media_solicitada = (body.encabezado_media_id
                                if "encabezado_media_id" in body.model_fields_set
                                else p.get("encabezado_media_id"))

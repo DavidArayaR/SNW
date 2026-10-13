@@ -18,6 +18,11 @@ class PlantillaIn(BaseModel):
     ejemplos: dict[str, str] | None = None
 
 
+class SincronizarPlantillasIn(BaseModel):
+    # Clave: identificador de la plantilla en Meta. None es global explícito.
+    asignaciones: dict[str, int | None]
+
+
 class PlantillaPreviaIn(BaseModel):
     plantilla_id: int | None = None
     texto: str
