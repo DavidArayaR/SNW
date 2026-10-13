@@ -1,6 +1,7 @@
 from ._registry import crear_router
 
 RUTAS = (
+    ("/api/plantillas/generar-con-ia", "POST", "generar_plantilla_ia", None),
     ("/api/plantillas/previsualizar", "POST", "previsualizar_plantilla", None),
     ("/api/plantillas/prueba/destinatarios", "GET", "destinatarios_prueba_plantilla", None),
     ("/api/plantillas/{plantilla_id}/prueba", "POST", "enviar_prueba_plantilla", None),

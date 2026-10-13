@@ -30,6 +30,10 @@ class PlantillaPreviaIn(BaseModel):
     ejemplos: dict[str, str] | None = None
 
 
+class GenerarPlantillaIAIn(BaseModel):
+    instruccion: str
+
+
 class PruebaPlantillaIn(BaseModel):
     telefono: str
     ejemplos: dict[str, str] | None = None

@@ -49,6 +49,16 @@ let filtroArea = localStorage.getItem("snw_filtro_tpl") || "todas";
 const formEl = $("#formPlantilla");
 const inpNombre = $("#inpNombre");
 const inpMensaje = $("#inpMensaje");
+const btnAbrirIA = $("#btnAbrirIA");
+const panelIA = $("#panelIA");
+const inpInstruccionIA = $("#inpInstruccionIA");
+const btnGenerarIA = $("#btnGenerarIA");
+const estadoIA = $("#estadoIA");
+const resultadoIA = $("#resultadoIA");
+const borradorIA = $("#borradorIA");
+const btnAceptarIA = $("#btnAceptarIA");
+const btnDescartarIA = $("#btnDescartarIA");
+let solicitudIA = null;
 const inpEncabezadoMedia = $("#inpEncabezadoMedia");
 const btnQuitarEncabezado = $("#btnQuitarEncabezado");
 const estadoEncabezado = $("#estadoEncabezado");
@@ -1254,6 +1264,9 @@ function actualizarBloqueoCampos() {
     inpEjemploApellido.disabled = false;
     selNumeroPrueba.disabled = false;
     btnQuitarEncabezado.disabled = true;
+    btnAbrirIA.hidden = true;
+    panelIA.hidden = true;
+    btnAbrirIA.setAttribute("aria-expanded", "false");
     if (p && PUEDE_EDITAR_PLANTILLAS && puedeEditarEsta(p) &&
         esPlantillaEditable(p) && !esPlantillaProtegida(p)) {
       refrescarAvisoSinArea();
@@ -1265,6 +1278,8 @@ function actualizarBloqueoCampos() {
   // false al pasar a una plantilla sí editable — quedaba pegado en
   // disabled para siempre después de abrir la primera no editable.
   inpMensaje.disabled = false;
+  btnAbrirIA.hidden = false;
+  inpInstruccionIA.disabled = false;
   inpEjemploNombre.disabled = false;
   inpEjemploApellido.disabled = false;
   selNumeroPrueba.disabled = false;
@@ -1303,6 +1318,7 @@ function abrir(id) {
   const p = plantillas.find((x) => x.id === id);
   if (!p) return;
   versionEditor++;
+  limpiarAsistenteIA();
   activaId = id;
   tplSelId = id;
   guardarSelTpl();
@@ -1360,6 +1376,7 @@ function actualizarInfoCreacion(p) {
 
 function modoNueva() {
   versionEditor++;
+  limpiarAsistenteIA();
   activaId = null;
   estadoVacio.style.display = "none";
   formEl.style.display = "";
@@ -1390,6 +1407,7 @@ function modoNueva() {
 
 function modoVacia() {
   versionEditor++;
+  limpiarAsistenteIA();
   activaId = null;
   tplSelId = null;
   snapshot = null;
@@ -1405,6 +1423,82 @@ function modoVacia() {
   actualizarBotonesSegunEstado(null);
   renderLista(buscadorEl.value);
 }
+
+function limpiarAsistenteIA() {
+  if (solicitudIA) solicitudIA.abort();
+  solicitudIA = null;
+  btnGenerarIA.disabled = false;
+  inpInstruccionIA.value = "";
+  borradorIA.textContent = "";
+  estadoIA.textContent = "";
+  resultadoIA.hidden = true;
+  panelIA.hidden = true;
+  btnAbrirIA.setAttribute("aria-expanded", "false");
+}
+
+btnAbrirIA.addEventListener("click", () => {
+  panelIA.hidden = !panelIA.hidden;
+  btnAbrirIA.setAttribute("aria-expanded", String(!panelIA.hidden));
+  if (!panelIA.hidden) inpInstruccionIA.focus();
+});
+
+btnGenerarIA.addEventListener("click", async () => {
+  const instruccion = inpInstruccionIA.value.trim();
+  if (!instruccion) {
+    estadoIA.textContent = "Escribe una instrucción general.";
+    inpInstruccionIA.focus();
+    return;
+  }
+  if (solicitudIA) solicitudIA.abort();
+  const control = new AbortController();
+  solicitudIA = control;
+  const version = versionEditor;
+  btnGenerarIA.disabled = true;
+  estadoIA.textContent = "Generando borrador…";
+  resultadoIA.hidden = true;
+  try {
+    const res = await fetch("api/plantillas/generar-con-ia", {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ instruccion }),
+      signal: control.signal,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) { window.snwSesionExpirada(); return; }
+    if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : "No se pudo generar el borrador.");
+    if (control.signal.aborted || version !== versionEditor) return;
+    borradorIA.textContent = data.borrador || "";
+    resultadoIA.hidden = false;
+    estadoIA.textContent = "Borrador listo para revisar.";
+  } catch (err) {
+    if (err.name !== "AbortError" && version === versionEditor) {
+      estadoIA.textContent = err.message || "Gemini no está disponible. Inténtalo más tarde.";
+    }
+  } finally {
+    if (solicitudIA === control) {
+      solicitudIA = null;
+      btnGenerarIA.disabled = false;
+    }
+  }
+});
+
+btnAceptarIA.addEventListener("click", () => {
+  const borrador = borradorIA.textContent.trim();
+  if (inpMensaje.disabled) return;
+  const elegido = window.snwElegirBorradorIA(inpMensaje.value, borrador, confirm);
+  if (elegido === null) return;
+  inpMensaje.value = elegido;
+  inpMensaje.dispatchEvent(new Event("input", { bubbles: true }));
+  resultadoIA.hidden = true;
+  estadoIA.textContent = "Borrador copiado. Revísalo y edítalo antes de guardar.";
+  inpMensaje.focus();
+});
+
+btnDescartarIA.addEventListener("click", () => {
+  borradorIA.textContent = "";
+  resultadoIA.hidden = true;
+  estadoIA.textContent = "Borrador descartado.";
+});
 
 function intentarAbrir(id) {
   if (id === activaId) return true;

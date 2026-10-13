@@ -47,6 +47,7 @@ from motor_envio import obtener_canal
 import whatsapp_service
 from plantilla_media import MAX_MEDIA_BYTES, guardar_media, obtener_media, ruta_media
 from plantilla_revision import MAX_CUERPO, presentar_plantilla, componentes_para_vista
+from gemini_service import cifrar_clave, consumir_cuota, generar_borrador, validar_instruccion
 from wa_rate_limit import gobernador as wa_gobernador
 from whatsapp_service import WhatsAppService, es_mensaje_interes
 from whatsapp_webhook import router as whatsapp_router
@@ -59,7 +60,7 @@ from schemas import (
     ActivarCuentaIn, ClavePropiaIn, ConfigIn, ConfigTodoIn,
     CorreoRecuperacionIn, EnvioIn, AreaIn, AreaRenombrarIn,
     InvitarIn, LoginIn, OlvideIn,
-    PlantillaIn, SincronizarPlantillasIn, PruebaWAIn, ResetIn, RolAreaIn, UsuarioUpdIn,
+    PlantillaIn, SincronizarPlantillasIn, GenerarPlantillaIAIn, PruebaWAIn, ResetIn, RolAreaIn, UsuarioUpdIn,
     RechazoPlantillaIn, PlantillaPreviaIn, PruebaPlantillaIn,
 )
 from telefono import normalizar_telefono
@@ -2503,6 +2504,14 @@ def listar_plantillas(sesion: dict = Depends(sesion_actual)):
     return sorted(plantillas, key=lambda p: p.get("actualizada", 0), reverse=True)
 
 
+async def generar_plantilla_ia(body: GenerarPlantillaIAIn,
+                              sesion: dict = Depends(exigir("plantillas_editar"))):
+    """Devuelve una sugerencia; no crea plantilla ni altera estados de Meta."""
+    instruccion = validar_instruccion(body.instruccion)
+    consumir_cuota(str(sesion.get("usuario") or ""))
+    return {"borrador": await generar_borrador(instruccion)}
+
+
 def _actualizar_estado_meta(p: dict) -> dict:
     """Consulta el estado real en Meta de una plantilla y actualiza sus campos.
 
@@ -3687,6 +3696,15 @@ _CONFIG_SECCIONES = [
         ],
     },
     {
+        "id": "ia", "titulo": "Asistente de plantillas · Gemini", "icono": "fa-wand-magic-sparkles",
+        "campos": [
+            {"clave": "gemini_api_key", "etiqueta": "Clave API de Gemini", "tipo": "password", "secreto": True,
+             "ayuda": "Solo desarrolladores. Se cifra con la cuenta Windows del servidor y nunca se devuelve al navegador. Deja vacío para conservar la actual."},
+            {"clave": "gemini_limite_hora", "etiqueta": "Borradores por usuario y hora", "tipo": "number",
+             "ayuda": "Máximo por cuenta para controlar el uso de Gemini (1 a 100)."},
+        ],
+    },
+    {
         "id": "call_center", "titulo": "Call center", "icono": "fa-headset",
         "campos": [
             {"clave": "call_center_url", "etiqueta": "URL de teléfonos del call center", "tipo": "text",
@@ -3715,12 +3733,14 @@ _CONFIG_ENUM = {
 
 def _config_valores() -> dict:
     cfg = config_all()
-    return {c: ("" if cfg.get(c) is None else str(cfg.get(c))) for c in CONFIG_DEFAULTS}
+    return {c: ("" if c == "gemini_api_key" or cfg.get(c) is None else str(cfg.get(c)))
+            for c in CONFIG_DEFAULTS}
 
 
 def obtener_configuracion_completa(sesion: dict = Depends(solo_dev)):
-    """Todas las claves de configuración con su valor real (incluye secretos)."""
+    """Configuración para desarrolladores; la clave Gemini nunca se devuelve."""
     return {"secciones": _CONFIG_SECCIONES, "valores": _config_valores(),
+            "gemini_api_key_configurada": bool(config_get("gemini_api_key")),
             "supresion": resumen_supresion()}
 
 
@@ -3732,7 +3752,7 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
         v = "" if valor is None else str(valor).strip()
         if clave in _CONFIG_ENUM and v not in _CONFIG_ENUM[clave]:
             raise HTTPException(400, detail=f"«{clave}»: usa uno de {', '.join(_CONFIG_ENUM[clave])}")
-        if clave in ("intervalo_ms", "smtp_port",
+        if clave in ("intervalo_ms", "smtp_port", "gemini_limite_hora",
                      "wa_rate_limit_umbral_pct", "wa_rate_limit_pausa_max_s",
                      "wa_rate_limit_espera_defecto_s", "wa_rate_limit_reintentos",
                      "wa_throughput_mps", "wa_messaging_limit_24h", "sesion_expira_horas",
@@ -3744,17 +3764,27 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
             minimo = 1 if clave == "smtp_port" else 0
             if clave == "wa_rate_limit_umbral_pct":
                 n = min(100, n)
+            if clave == "gemini_limite_hora":
+                n = min(100, max(1, n))
             v = str(max(minimo, n))
         if clave == "call_center_numeros":
             partes = [re.sub(r"\D", "", p) for p in v.split(",")]
             v = ", ".join(dict.fromkeys(p for p in partes if p))
         if clave in ("smtp_tls", "wa_rate_limit_activo", "anti_flip_flop_dev"):
             v = "true" if v.lower() in ("true", "1", "on", "si", "sí") else "false"
+        if clave == "gemini_api_key":
+            if len(v) > 512:
+                raise HTTPException(422, detail="La clave de Gemini es demasiado extensa.")
+            try:
+                v = cifrar_clave(v) if v else ""
+            except (OSError, RuntimeError):
+                raise HTTPException(503, detail="Este servidor no pudo proteger la clave de Gemini.")
         cambios[clave] = v
 
     if cambios:
         config_set(cambios)
-    return {"valores": _config_valores()}
+    return {"valores": _config_valores(),
+            "gemini_api_key_configurada": bool(config_get("gemini_api_key"))}
 
 
 def probar_api_wa(body: PruebaWAIn, sesion: dict = Depends(solo_dev)):

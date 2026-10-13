@@ -107,6 +107,9 @@ CONFIG_DEFAULTS = {
     "wa_webhook_path": "/api/whatsapp/webhook",
     "wa_graph_version": "v26.0",
     "wa_moneda": "USD",
+    # Clave Gemini cifrada con DPAPI de la cuenta Windows del backend.
+    "gemini_api_key": "",
+    "gemini_limite_hora": "12",
     # Cada tantos minutos se revisa en Meta el estado de las plantillas que
     # todavía no están aprobadas (para detectar la aprobación/el rechazo
     # solas, sin que alguien tenga que consultarlo a mano). Al arrancar el
@@ -158,6 +161,14 @@ def asegurar_tabla_config() -> None:
                     "INSERT IGNORE INTO configuracion (clave, valor) VALUES (%s, %s)",
                     (clave, valor),
                 )
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS gemini_cuotas ("
+                "  usuario_hash CHAR(64) NOT NULL,"
+                "  ventana_hora BIGINT NOT NULL,"
+                "  solicitudes INT NOT NULL DEFAULT 0,"
+                "  PRIMARY KEY (usuario_hash, ventana_hora)"
+                ") CHARACTER SET utf8mb4"
+            )
             _migrar_numeros_prueba_a_produccion(cur)
             # Rate card de WhatsApp (tarifas por mensaje descargadas de Meta).
             cur.execute(
