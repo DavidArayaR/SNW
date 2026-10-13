@@ -1,0 +1,183 @@
+/* Rediseño conservador de SNW sobre Bootstrap 5.3 y los componentes existentes.
+   Paleta: tema.css. Radios: tarjetas 14 px, controles 10 px, tabs pastilla.
+   La geometría de sidebar/topbar y los estados de negocio se conservan. */
+:root {
+  --ui-muted: #586c62;
+  --ui-focus: var(--verde-oscuro);
+  --ui-shadow: 0 2px 4px rgb(15 50 43 / .035), 0 12px 30px rgb(15 50 43 / .055);
+}
+:root[data-tema="oscuro"] {
+  --ui-muted: #b0c1b9;
+  --ui-shadow: 0 2px 4px rgb(8 22 17 / .14), 0 12px 30px rgb(8 22 17 / .18);
+}
+
+body {
+  font-family: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+  font-size: .9375rem;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+button, input, textarea, select { font-family: inherit; }
+:where(h1, h2, h3) { text-wrap: balance; }
+:where(p, label, .field__hint) { overflow-wrap: break-word; }
+
+/* Jerarquía estable entre las pantallas de trabajo. Se conservan los bordes
+   superior/inferior que identifican las cards del sistema. */
+.panel { border-radius: 14px; box-shadow: var(--ui-shadow); }
+.panel__head { padding: 18px 22px; gap: 12px; }
+.panel__head h2 { font-size: 1.0625rem; font-weight: 650; line-height: 1.4; }
+.panel__actions { gap: 8px; }
+.panel--editor form { padding: 24px; }
+.field { margin-bottom: 20px; }
+.field label { margin-bottom: 8px; font-size: .875rem; line-height: 1.45; }
+.field__hint, .panel__actions label,
+.toolbar-pacientes label:not(.pag-label):not(.btn) {
+  color: var(--ui-muted);
+  line-height: 1.6;
+}
+.field__hint { font-size: .8125rem; }
+.field input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="hidden"]),
+.field select { min-height: 44px; border-radius: 10px; }
+.field textarea { border-radius: 10px; line-height: 1.65; }
+.field input::placeholder, .field textarea::placeholder,
+.searchbox input::placeholder { color: var(--ui-muted); opacity: 1; }
+.searchbox { padding: 6px 10px; }
+.searchbox input { min-height: 36px; }
+.searchbox:focus-within { outline: 2px solid var(--ui-focus); outline-offset: 2px; }
+
+/* Contorno exterior sin desplazar el contenido ni modificar el relleno. */
+.btn:hover:not(:focus-visible), button:hover:not(:focus-visible) { outline: none; }
+.btn:not(:disabled):not(.disabled):not(.is-disabled):hover,
+.pagina-auth form > button[type="submit"]:not(:disabled):hover {
+  outline: 2px solid var(--ui-button-outline, var(--ui-focus));
+  outline-offset: 2px;
+}
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--ui-focus);
+  outline-offset: 3px;
+}
+.field input:focus-visible, .field textarea:focus-visible, .field select:focus-visible {
+  outline: 2px solid var(--ui-focus);
+  outline-offset: 2px;
+}
+.btn { min-height: 40px; border-radius: 10px; line-height: 1.35; white-space: nowrap; }
+.btn:disabled { opacity: .6; }
+/* Bootstrap también consume estas variables en hover, foco, active y disabled.
+   Definir solo el fondo base deja que sus pseudoclases lo vuelvan transparente. */
+.btn--primary {
+  --ui-button-outline: var(--btn-primary-bg);
+  --bs-btn-bg: var(--btn-primary-bg);
+  --bs-btn-hover-bg: var(--btn-primary-bg);
+  --bs-btn-active-bg: var(--btn-primary-bg);
+  --bs-btn-disabled-bg: var(--btn-primary-bg);
+  --bs-btn-color: var(--btn-primary-fg);
+  --bs-btn-hover-color: var(--btn-primary-fg);
+  --bs-btn-active-color: var(--btn-primary-fg);
+  --bs-btn-disabled-color: var(--btn-primary-fg);
+}
+.btn--danger {
+  --ui-button-outline: var(--btn-danger-bg);
+  --bs-btn-bg: var(--btn-danger-bg);
+  --bs-btn-hover-bg: var(--btn-danger-bg);
+  --bs-btn-active-bg: var(--btn-danger-bg);
+  --bs-btn-disabled-bg: var(--btn-danger-bg);
+  --bs-btn-color: var(--btn-danger-fg);
+  --bs-btn-hover-color: var(--btn-danger-fg);
+  --bs-btn-active-color: var(--btn-danger-fg);
+  --bs-btn-disabled-color: var(--btn-danger-fg);
+}
+.btn--ghost {
+  --ui-button-outline: var(--verde-oscuro);
+  --bs-btn-hover-color: var(--btn-ghost-fg);
+  --bs-btn-active-color: var(--btn-ghost-fg);
+  --bs-btn-active-bg: var(--hover);
+}
+.btn--danger-ghost {
+  --ui-button-outline: var(--danger-fg);
+  --bs-btn-hover-color: var(--danger-fg);
+  --bs-btn-active-color: var(--danger-fg);
+  --bs-btn-active-bg: var(--danger-bg);
+}
+.btn--confirmar-cancelacion {
+  --ui-button-outline: #b23b37;
+  --bs-btn-bg: #b23b37;
+  --bs-btn-hover-bg: #b23b37;
+  --bs-btn-active-bg: #b23b37;
+  --bs-btn-disabled-bg: #b23b37;
+  --bs-btn-color: #fff;
+  --bs-btn-hover-color: #fff;
+  --bs-btn-active-color: #fff;
+  --bs-btn-disabled-color: #fff;
+  color: #fff;
+}
+.btn--login, .btn--registro { --ui-button-outline: #fff; }
+
+/* Más aire para leer filas sin alterar alineaciones, filtros ni columnas. */
+.tabla-wrap table { font-variant-numeric: tabular-nums; }
+.tabla-wrap thead th { padding: 14px 18px; font-size: .75rem; line-height: 1.4; }
+.tabla-wrap tbody td { padding: 14px 18px; line-height: 1.5; }
+.tabla-vacia { padding-block: 44px; color: var(--ui-muted); line-height: 1.65; }
+.empty-state { padding: 36px 24px; line-height: 1.65; }
+.empty-state h3 { font-size: 1.0625rem; font-weight: 650; }
+.empty-state p { max-width: 44ch; margin-inline: auto; color: var(--ui-muted); }
+.modal__card { border-radius: 14px; max-height: calc(100dvh - 40px); overflow-y: auto; }
+.modal__card h3 { font-size: 1.1875rem; font-weight: 650; line-height: 1.4; }
+.modal__actions { gap: 10px; margin-top: 24px; }
+.tpl-sync-areas .field { margin-bottom: 22px; }
+
+/* Inicio funciona como guía del producto, sin cifras ni imágenes ficticias. */
+body[data-pagina="inicio"] .hero { padding: 56px max(24px, calc((100% - 1060px) / 2)) 66px; text-align: left; }
+body[data-pagina="inicio"] .hero h1 { max-width: 25ch; font-size: clamp(1.8rem, 3vw, 2.65rem); line-height: 1.14; font-weight: 650; letter-spacing: -.035em; }
+body[data-pagina="inicio"] .hero p { max-width: 65ch; margin: 18px 0 0; font-size: 1rem; line-height: 1.7; }
+body[data-pagina="inicio"] .hero__acciones { align-items: flex-start; margin-top: 24px; }
+body[data-pagina="inicio"] main { max-width: 1100px; margin-top: 24px; }
+body[data-pagina="inicio"] section.info { padding: 28px 32px; box-shadow: var(--ui-shadow); }
+body[data-pagina="inicio"] section.info h2 { font-size: 1.125rem; font-weight: 650; margin-bottom: 16px; }
+body[data-pagina="inicio"] section.info p { max-width: 85ch; line-height: 1.8; }
+body[data-pagina="inicio"] .info-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; margin-top: 24px; }
+body[data-pagina="inicio"] .info-card { padding: 26px; box-shadow: var(--ui-shadow); }
+body[data-pagina="inicio"] .info-card p { color: var(--ui-muted); line-height: 1.75; }
+body[data-pagina="inicio"] .pasos li { padding-bottom: 24px; }
+body[data-pagina="inicio"] footer { padding-block: 24px 36px; }
+
+/* Acceso, invitaciones y recuperación comparten medidas y estados. */
+body.pagina-auth {
+  min-height: 100dvh;
+  padding: 32px 20px;
+  background: linear-gradient(rgba(7, 94, 84, .82), rgba(18, 140, 126, .88)), var(--fondo);
+}
+:root[data-tema="oscuro"] body.pagina-auth {
+  background: linear-gradient(rgba(10, 22, 20, .9), rgba(16, 30, 27, .94)), var(--fondo);
+}
+.pagina-auth .card { max-width: 440px; padding: 40px; border-radius: 14px; box-shadow: var(--ui-shadow); }
+.pagina-auth h1 { font-size: 1.375rem; font-weight: 650; line-height: 1.3; letter-spacing: -.025em; }
+.pagina-auth .sub { color: var(--ui-muted); line-height: 1.65; margin-bottom: 28px; }
+.pagina-auth label { font-size: .875rem; margin-bottom: 8px; }
+.pagina-auth input { min-height: 46px; line-height: 1.4; }
+.pagina-auth input::placeholder { color: var(--ui-muted); opacity: 1; }
+.pagina-auth input:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 2px; }
+.pagina-auth form > button[type="submit"] { min-height: 46px; line-height: 1.4; }
+.pagina-auth form > button[type="submit"] { --ui-button-outline: var(--btn-primary-bg); }
+.pagina-auth a { color: var(--verde-oscuro); text-underline-offset: 3px; }
+.pagina-auth .nota { font-size: .8125rem; color: var(--ui-muted); margin-top: 24px; }
+.pagina-auth .link-olvide { font-size: .8125rem; margin-bottom: 22px; }
+
+@media (max-width: 760px) {
+  .panel__head { padding: 16px; }
+  .panel--editor form { padding: 20px 16px; }
+  .panel__actions { max-width: 100%; }
+  .btn { min-height: 44px; }
+  .tabla-wrap thead th, .tabla-wrap tbody td { padding: 12px 14px; }
+  .modal__card { max-height: calc(100dvh - 24px); padding: 22px 18px; }
+  body[data-pagina="inicio"] .hero { padding: 36px 20px 40px; }
+  body[data-pagina="inicio"] main { padding-inline: 16px; margin-top: 20px; }
+  body[data-pagina="inicio"] section.info { padding: 22px 20px; }
+  body[data-pagina="inicio"] .info-cards { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  body[data-pagina="inicio"] .info-card { padding: 22px 20px; }
+  .pagina-auth .card { padding: 30px 24px; }
+  .pagina-auth h1 { font-size: 1.25rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+}
