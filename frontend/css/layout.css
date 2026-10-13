@@ -73,10 +73,8 @@ body[data-pagina="inicio"].inicio-hero-superado { --nav-activo-fondo: var(--fond
   z-index: 1040;
   overflow-y: auto;
   overflow-x: hidden;
-  scrollbar-width: none;
   transition: width .2s ease, transform .25s ease;
 }
-.sidebar::-webkit-scrollbar { display: none; }
 .sidebar::after {
   content: "";
   position: absolute;
@@ -111,9 +109,7 @@ body[data-pagina="inicio"].inicio-hero-superado { --nav-activo-fondo: var(--fond
   padding-block: 16px;
   overflow-y: auto;
   overflow-x: hidden;
-  scrollbar-width: none;
 }
-.sidebar__nav::-webkit-scrollbar { display: none; }
 
 /* Acciones de cuenta ancladas al pie de la sidebar. */
 .sidebar__cuenta {

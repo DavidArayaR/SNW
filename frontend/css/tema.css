@@ -4,6 +4,27 @@
    el atributo data-tema="oscuro" en <html> (ver js/tema.js).
    ============================================================ */
 
+/* Scrollbars compartidas por páginas, tablas, paneles y modales. */
+* {
+  --scroll-thumb: var(--brand-tint-fg);
+  --scroll-track: var(--panel-2);
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) var(--scroll-track);
+}
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: var(--scroll-track); border-radius: 999px; }
+*::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border: 2px solid var(--scroll-track);
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-corner { background: transparent; }
+
+@media (max-width: 760px), (hover: none) and (pointer: coarse) {
+  * { --scroll-thumb: transparent; --scroll-track: transparent; }
+  .scroll-activo { --scroll-thumb: var(--brand-tint-fg); }
+}
+
 :root {
   color-scheme: light;
 

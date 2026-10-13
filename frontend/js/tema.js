@@ -1,6 +1,21 @@
 /* Modo claro / oscuro. Se carga en el <head> de todas las páginas para
    aplicar el tema guardado antes del primer render (sin parpadeo). */
 (function () {
+  // Los eventos scroll no burbujean: captura incluye tablas y modales.
+  var scrollTimers = new WeakMap();
+  var scrollMovil = window.matchMedia("(max-width: 760px), (hover: none) and (pointer: coarse)");
+  document.addEventListener("scroll", function (event) {
+    if (!scrollMovil.matches) return;
+    var elemento = event.target === document ? document.documentElement : event.target;
+    if (!(elemento instanceof Element)) return;
+    clearTimeout(scrollTimers.get(elemento));
+    elemento.classList.add("scroll-activo");
+    scrollTimers.set(elemento, window.setTimeout(function () {
+      elemento.classList.remove("scroll-activo");
+      scrollTimers.delete(elemento);
+    }, 800));
+  }, { capture: true, passive: true });
+
   var KEY = "snw_tema";
   try {
     if (localStorage.getItem(KEY) === "oscuro") {
