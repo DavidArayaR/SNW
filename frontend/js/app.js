@@ -1545,7 +1545,7 @@ btnGenerarIA.addEventListener("click", async () => {
 btnAceptarIA.addEventListener("click", () => {
   const borrador = borradorIA.textContent.trim();
   if (inpMensaje.disabled) return;
-  const elegido = window.snwElegirBorradorIA(inpMensaje.value, borrador, confirm);
+  const elegido = window.snwElegirBorradorIA(borrador);
   if (elegido === null) return;
   inpMensaje.value = elegido;
   inpMensaje.dispatchEvent(new Event("input", { bubbles: true }));
