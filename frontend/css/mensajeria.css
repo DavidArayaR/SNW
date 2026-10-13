@@ -33,18 +33,19 @@
   top: 56px;
   right: 10px;
   width: min(420px, calc(100% - 20px));
-  max-height: min(65vh, 560px);
+  max-height: min(80dvh, 700px);
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 16px;
   border: 1px solid var(--borde);
   border-top: 3px solid var(--verde);
   border-radius: 14px;
   background: var(--panel);
-  background: color-mix(in srgb, var(--panel) 86%, transparent);
+  background: color-mix(in srgb, var(--panel-2) 64%, transparent);
   color: var(--texto);
   box-shadow: var(--sombra);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   opacity: 0;
   visibility: hidden;
   transform: translateY(-7px);
@@ -62,7 +63,7 @@
 .tpl-ia textarea { width: 100%; min-height: 78px; resize: vertical; }
 .tpl-ia .field__hint { margin: 8px 0 12px; }
 .tpl-ia__acciones { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.tpl-ia__resultado { margin-top: 14px; padding: 14px; border: 1px solid var(--brand-tint-bd); border-radius: 10px; background: var(--panel-2); }
+.tpl-ia__resultado { margin-top: 14px; padding: 14px; border: 1px solid var(--brand-tint-bd); border-radius: 10px; background: color-mix(in srgb, var(--panel-2) 72%, transparent); }
 .tpl-ia__resultado[hidden], .tpl-ia[hidden] { display: none; }
 .tpl-ia__borrador { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0 0 14px; }
 #estadoIA { color: var(--texto-suave); font-size: .88rem; }

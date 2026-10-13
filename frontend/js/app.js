@@ -1450,18 +1450,34 @@ function cerrarPanelIA(inmediato = false, devolverFoco = false) {
   }
 }
 
+function ajustarPanelIA() {
+  const campo = panelIA.parentElement.getBoundingClientRect();
+  const boton = btnAbrirIA.getBoundingClientRect();
+  const espacioAbajo = Math.max(0, window.innerHeight - boton.bottom - 20);
+  const espacioArriba = Math.max(0, boton.top - 20);
+  const arriba = espacioAbajo < Math.min(panelIA.scrollHeight, 300) && espacioArriba > espacioAbajo;
+  panelIA.style.top = arriba ? "auto" : `${boton.bottom - campo.top + 8}px`;
+  panelIA.style.bottom = arriba ? `${campo.bottom - boton.top + 8}px` : "auto";
+  panelIA.style.maxHeight = `${Math.max(120, Math.min(700, arriba ? espacioArriba : espacioAbajo))}px`;
+}
+
 function abrirPanelIA() {
   clearTimeout(cierrePanelIATimer);
   cierrePanelIATimer = null;
   panelIA.hidden = false;
   panelIA.inert = false;
   panelIA.setAttribute("aria-hidden", "false");
+  ajustarPanelIA();
   // Fuerza el estado inicial antes de animar la entrada del panel flotante.
   void panelIA.offsetWidth;
   panelIA.classList.add("tpl-ia--visible");
   btnAbrirIA.setAttribute("aria-expanded", "true");
   inpInstruccionIA.focus();
 }
+
+window.addEventListener("resize", () => {
+  if (btnAbrirIA.getAttribute("aria-expanded") === "true") ajustarPanelIA();
+});
 
 btnAbrirIA.addEventListener("click", () => {
   if (btnAbrirIA.getAttribute("aria-expanded") === "true") cerrarPanelIA(false, true);
@@ -1506,6 +1522,8 @@ btnGenerarIA.addEventListener("click", async () => {
     borradorIA.textContent = data.borrador || "";
     resultadoIA.hidden = false;
     estadoIA.textContent = "Borrador listo para revisar.";
+    ajustarPanelIA();
+    panelIA.scrollTop = panelIA.scrollHeight;
   } catch (err) {
     if (err.name !== "AbortError" && version === versionEditor) {
       estadoIA.textContent = err.message || "Gemini no está disponible. Inténtalo más tarde.";

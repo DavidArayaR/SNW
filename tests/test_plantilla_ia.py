@@ -29,7 +29,9 @@ class ValidacionIATests(unittest.TestCase):
 
     def test_borrador_y_variables(self):
         self.assertEqual(ia.validar_borrador("  Hola {{nombre}} {apellido}, confirma tu cita.  "),
-                         "Hola {nombre} {apellido}, confirma tu cita.")
+                         "Hola {nombre} {apellido},\n\nconfirma tu cita.")
+        self.assertEqual(ia.validar_borrador("Hola {nombre},\n\nRevisa la promoción."),
+                         "Hola {nombre},\n\nRevisa la promoción.")
         for texto in ("", "Hola {edad}", "Hola {nombre", "https://ejemplo.com", "Hola Ana Pérez", "x" * 1025):
             with self.subTest(texto=texto[:20]), self.assertRaises(HTTPException) as error:
                 ia.validar_borrador(texto)
