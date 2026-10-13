@@ -32,6 +32,14 @@ class ValidacionIATests(unittest.TestCase):
                          "Hola {nombre} {apellido},\n\nconfirma tu cita.")
         self.assertEqual(ia.validar_borrador("Hola {nombre},\n\nRevisa la promoción."),
                          "Hola {nombre},\n\nRevisa la promoción.")
+        self.assertEqual(ia.validar_borrador("Hola {nombre},\n\nTenemos un beneficio para ti 💚"),
+                         "Hola {nombre},\n\nTenemos un beneficio para ti 💚")
+        promocion = ("Hola {nombre}\n\nCuidar de ti es lo más importante. "
+                     "Por eso, hoy queremos ofrecerte un 20% de descuento en tus próximas "
+                     "atenciones de salud mental. Escríbenos para aprovechar este beneficio.")
+        self.assertEqual(ia.validar_borrador(promocion), promocion)
+        self.assertFalse(ia.contiene_datos_sensibles(promocion))
+        self.assertTrue(ia.contiene_datos_sensibles("Hola David Araya, tenemos una promoción."))
         for texto in ("", "Hola {edad}", "Hola {nombre", "https://ejemplo.com", "Hola Ana Pérez", "x" * 1025):
             with self.subTest(texto=texto[:20]), self.assertRaises(HTTPException) as error:
                 ia.validar_borrador(texto)
@@ -112,6 +120,9 @@ class ProveedorIATests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(argumentos.kwargs["headers"]["x-goog-api-key"], "clave-falsa")
         self.assertNotIn("clave-falsa", str(argumentos.kwargs["json"]))
         self.assertNotIn("David", str(argumentos.kwargs["json"]))
+        self.assertIn("emojis", argumentos.kwargs["json"]["contents"][0]["parts"][0]["text"])
+        self.assertEqual(argumentos.kwargs["json"]["generationConfig"]["maxOutputTokens"], 1024)
+        self.assertEqual(argumentos.kwargs["json"]["generationConfig"]["thinkingConfig"]["thinkingLevel"], "low")
 
     async def test_timeout_y_cuota(self):
         with self.assertRaises(HTTPException) as error:
@@ -138,6 +149,18 @@ class ProveedorIATests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cliente.post.await_count, 2)
         self.assertIn(ia.MODELO, cliente.post.await_args_list[0].args[0])
         self.assertIn(ia.MODELO_RESPALDO, cliente.post.await_args_list[1].args[0])
+        self.assertEqual(cliente.post.await_args_list[1].kwargs["json"]["generationConfig"]["thinkingConfig"]["thinkingLevel"], "minimal")
+
+    async def test_no_muestra_respuesta_cortada_por_tokens(self):
+        respuesta = MagicMock(status_code=200)
+        respuesta.json.return_value = {"candidates": [{
+            "finishReason": "MAX_TOKENS",
+            "content": {"parts": [{"text": "Hola {nombre},\n\nCuidar de tu bienestar emocional"}]},
+        }]}
+        with self.assertRaises(HTTPException) as error:
+            await self._llamar(respuesta)
+        self.assertEqual(error.exception.status_code, 502)
+        self.assertIn("no terminó", error.exception.detail)
 
     async def test_saturacion_persistente_muestra_causa(self):
         cliente = AsyncMock()
