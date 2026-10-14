@@ -116,7 +116,7 @@ async def generar_borrador(instruccion: str) -> str:
         "Puedes usar únicamente {nombre} y {apellido} cuando resulte natural. "
         "Si comienzas con Hola {nombre}, agrega un salto de linea. "
         "Puedes incluir uno o dos emojis si aportan al tono del mensaje; úsalos con moderación y no sustituyas palabras ni variables con ellos. "
-        "Si el mensaje presenta una oferta, indica claramente que el paciente debe responder «Me interesa» si le interesa la oferta y se le enviará el numero de call center. "
+        "Si el mensaje presenta una oferta, indica claramente que el paciente debe responder exactamente «Me interesa» si le interesa la oferta y se le enviará el numero de call center. "
         "No inventes fechas, horarios, profesionales, ubicaciones ni enlaces. "
         "No incluyas información clínica individual ni prometas aprobación de Meta. "
         "No añadas encabezados, explicaciones, comillas ni formato Markdown."

@@ -1655,6 +1655,15 @@ class RespuestaIn(BaseModel):
     respuesta: str
 
 
+def _validar_respuesta_manual(respuesta: str, sesion: dict) -> None:
+    """'Respondió' manual solo para desarrolladores; el número de prueba se
+    comprueba después contra la base concreta en los dos endpoints."""
+    permitidas = (("pendiente", "baja", "respondio")
+                 if sesion.get("rol") == "desarrollador" else ("pendiente", "baja"))
+    if respuesta not in permitidas:
+        raise HTTPException(400, detail="Respuesta inválida. Use: " + ", ".join(permitidas))
+
+
 class EstadoPacientesBulkIn(BaseModel):
     pacientes: list[int]
     estado: str
@@ -1702,10 +1711,7 @@ def actualizar_respuesta_pacientes(body: RespuestaPacientesBulkIn, ambiente: str
     que el ajuste individual: 'baja' activa el opt-out y quita el interés)."""
     if not body.pacientes:
         raise HTTPException(400, detail="No se seleccionó ningún paciente")
-    # "respondio" no es un ajuste manual válido: solo la pone el paciente al
-    # contestar de verdad por WhatsApp (vía el webhook), nunca un admin a mano.
-    if body.respuesta not in ("pendiente", "baja"):
-        raise HTTPException(400, detail="Respuesta inválida. Use: pendiente, baja")
+    _validar_respuesta_manual(body.respuesta, sesion)
     t, _esp = _resolver_tabla_pacientes(sesion, ambiente, area_id)
     numeros_editables = _numeros_prueba_editables("produccion" if _esp else ambiente)
     tiene_manual = columna_existe(t, "respuesta_manual", ambiente)
@@ -1743,7 +1749,9 @@ def actualizar_respuesta_pacientes(body: RespuestaPacientesBulkIn, ambiente: str
                 f"UPDATE {t} SET respuesta_manual = %s WHERE id IN ({placeholders_enc})",
                 (body.respuesta, *encontrados),
             )
-        if body.respuesta == "pendiente":
+        # Al simular «respondió» se limpia una baja manual antigua; las bajas
+        # explícitas por WhatsApp ya quedaron excluidas de estos IDs.
+        if body.respuesta != "baja":
             cond_log, args_log = _cond_tabla_log_segura(t if _esp else None, ambiente)
             cur.execute(
                 "UPDATE log_envios SET respuesta = 'pendiente'"
@@ -1823,10 +1831,7 @@ def actualizar_respuesta_paciente(paciente_id: int, body: RespuestaIn,
                                   sesion: dict = Depends(exigir("pacientes"))):
     """Ajuste manual de la respuesta de un paciente (fallback si el webhook no
     llegó, o si el paciente avisó por otro canal). 'baja' activa el opt-out."""
-    # "respondio" no es un ajuste manual válido: solo la pone el paciente al
-    # contestar de verdad por WhatsApp (vía el webhook), nunca un admin a mano.
-    if body.respuesta not in ("pendiente", "baja"):
-        raise HTTPException(400, detail="Respuesta inválida. Use: pendiente, baja")
+    _validar_respuesta_manual(body.respuesta, sesion)
     t, _esp = _resolver_tabla_pacientes(sesion, ambiente, area_id)
     numeros_editables = _numeros_prueba_editables("produccion" if _esp else ambiente)
     tiene_manual = columna_existe(t, "respuesta_manual", ambiente)
@@ -1858,8 +1863,8 @@ def actualizar_respuesta_paciente(paciente_id: int, body: RespuestaIn,
                 f"UPDATE {t} SET respuesta_manual = %s WHERE id = %s",
                 (body.respuesta, paciente_id),
             )
-        # Deshace un 'baja' que el webhook hubiera marcado en el último envío.
-        if body.respuesta == "pendiente":
+        # Deshace un 'baja' anterior al pasar a pendiente o simular respuesta.
+        if body.respuesta != "baja":
             cond_log, args_log = _cond_tabla_log_segura(t if _esp else None, ambiente)
             cur.execute(
                 "UPDATE log_envios SET respuesta = 'pendiente'"

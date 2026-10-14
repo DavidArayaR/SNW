@@ -83,6 +83,18 @@ if (!PUEDE_GESTIONAR_PAC && chkTodos) {
 const toolbarMasivo = $("#toolbarMasivo");
 const selEstadoMasivo = $("#selEstadoMasivo");
 const selRespuestaMasivo = $("#selRespuestaMasivo");
+if (window.snwEsDev && selRespuestaMasivo) {
+  const opcion = document.createElement("option");
+  opcion.value = "respondio";
+  opcion.textContent = "Respondió (prueba)";
+  selRespuestaMasivo.add(opcion, selRespuestaMasivo.querySelector('option[value="baja"]'));
+}
+if (window.snwEsDev && selEstadoMasivo) {
+  const opcion = document.createElement("option");
+  opcion.value = "error";
+  opcion.textContent = "Error (prueba)";
+  selEstadoMasivo.add(opcion);
+}
 
 // Selector único de base de datos: legacy (dev/prod) o área, siempre
 // mostrando el nombre físico de la tabla. Valores: "dev" | "prod" | "esp:<id>".
@@ -357,6 +369,7 @@ function render() {
         `<select class="estado-select" data-id="${p.id}" hidden>` +
           `<option value="pendiente"${p.estado === "pendiente" ? " selected" : ""}>pendiente</option>` +
           `<option value="enviado"${p.estado === "enviado" ? " selected" : ""}>enviado</option>` +
+          `${window.snwEsDev || p.estado === "error" ? `<option value="error"${p.estado === "error" ? " selected" : ""}>error${window.snwEsDev ? " (prueba)" : ""}</option>` : ""}` +
         `</select>` +
       `</td>` +
       celdaError +
@@ -366,15 +379,14 @@ function render() {
           ` title="${escaparHtml(!editable || bajaBloqueada ? tituloResp + (PUEDE_GESTIONAR_PAC && !p.editable ? " · Solo se edita en números de prueba" : "") : tituloResp + " · click para cambiar")}">` +
           `${bajaBloqueada ? '<i class="fa-solid fa-lock"></i> ' : ""}${escaparHtml(respuestaLabels[respuesta] ?? respuesta)}</span>` +
         `<select class="respuesta-select" data-id="${p.id}" hidden>` +
-          // "Respondió" no es una opción manual: solo la pone el propio
-          // paciente al contestar por WhatsApp, nunca un ajuste manual acá.
+          // Un desarrollador puede simular una respuesta solo en números de
+          // prueba; el backend valida rol y número en cada actualización.
           ["pendiente", "baja"].map((v) =>
             `<option value="${v}"${v === respuesta ? " selected" : ""}>${respuestaLabels[v]}</option>`).join("") +
-          // Si el valor actual ES "respondio" (vino de una respuesta real),
-          // se agrega como opción extra ya seleccionada, así el <select> no
-          // pierde silenciosamente el valor real al abrirlo.
-          (respuesta === "respondio"
-            ? `<option value="respondio" selected>${respuestaLabels.respondio}</option>`
+          // Si ya respondió, se conserva el valor en el selector aun para
+          // quienes no pueden marcarlo manualmente.
+          (window.snwEsDev || respuesta === "respondio"
+            ? `<option value="respondio"${respuesta === "respondio" ? " selected" : ""}>${respuestaLabels.respondio}${window.snwEsDev ? " (prueba)" : ""}</option>`
             : "") +
         `</select>` +
         subResp +

@@ -14,7 +14,83 @@ import db
 class PacientesPruebaTests(unittest.TestCase):
     def setUp(self):
         self.admin = {"rol": "administrador", "usuario": "admin@example.com"}
+        self.dev = {"rol": "desarrollador", "usuario": "dev@example.com"}
         self.usuario = {"rol": "usuario", "usuario": "user@example.com"}
+
+    def test_solo_dev_puede_marcar_respondio_manualmente_en_pruebas(self):
+        body = main.RespuestaPacientesBulkIn(pacientes=[27], respuesta="respondio")
+        with self.assertRaises(HTTPException) as error, patch.object(main, "conectar") as conectar:
+            main.actualizar_respuesta_pacientes(body, ambiente="desarrollo", area_id=None,
+                                                sesion=self.admin)
+        self.assertEqual(error.exception.status_code, 400)
+        conectar.assert_not_called()
+
+        conexion = MagicMock()
+        cursor = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cursor.fetchall.return_value = [{"id": 27, "telefono": "+56912345678"}]
+        with patch.object(main, "conectar", return_value=conexion), \
+             patch.object(main, "_resolver_tabla_pacientes", return_value=("pacientes_dev", None)), \
+             patch.object(main, "_numeros_prueba_editables", return_value={"+56912345678"}), \
+             patch.object(main, "columna_existe", return_value=True), \
+             patch.object(main, "_pacientes_baja_bloqueada", return_value=set()), \
+             patch.object(main, "_cond_tabla_log_segura", return_value=("", ())):
+            resultado = main.actualizar_respuesta_pacientes(
+                body, ambiente="desarrollo", area_id=None, sesion=self.dev)
+        self.assertEqual(resultado["actualizados"], 1)
+        self.assertTrue(any("respuesta_manual = %s" in c.args[0] and c.args[1][0] == "respondio"
+                            for c in cursor.execute.call_args_list))
+        conexion.__enter__.return_value.commit.assert_called_once()
+
+    def test_dev_no_puede_marcar_respondio_en_numero_normal_ni_revertir_baja_explicita(self):
+        body = main.RespuestaPacientesBulkIn(pacientes=[27], respuesta="respondio")
+        conexion = MagicMock()
+        cursor = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cursor.fetchall.return_value = [{"id": 27, "telefono": "+56912345678"}]
+        with patch.object(main, "conectar", return_value=conexion), \
+             patch.object(main, "_resolver_tabla_pacientes", return_value=("pacientes_dev", None)), \
+             patch.object(main, "_numeros_prueba_editables", return_value=set()), \
+             patch.object(main, "columna_existe", return_value=True):
+            with self.assertRaises(HTTPException) as error:
+                main.actualizar_respuesta_pacientes(body, ambiente="desarrollo", area_id=None,
+                                                    sesion=self.dev)
+        self.assertEqual(error.exception.status_code, 403)
+        conexion.__enter__.return_value.commit.assert_not_called()
+
+        with patch.object(main, "conectar", return_value=conexion), \
+             patch.object(main, "_resolver_tabla_pacientes", return_value=("pacientes_dev", None)), \
+             patch.object(main, "_numeros_prueba_editables", return_value={"+56912345678"}), \
+             patch.object(main, "columna_existe", return_value=True), \
+             patch.object(main, "_pacientes_baja_bloqueada", return_value={27}):
+            with self.assertRaises(HTTPException) as error:
+                main.actualizar_respuesta_pacientes(body, ambiente="desarrollo", area_id=None,
+                                                    sesion=self.dev)
+        self.assertEqual(error.exception.status_code, 409)
+        conexion.__enter__.return_value.commit.assert_not_called()
+
+    def test_dev_puede_marcar_respondio_en_edicion_individual(self):
+        conexion = MagicMock()
+        cursor = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cursor.fetchone.side_effect = [
+            {"id": 27, "telefono": "+56912345678"},
+            {"id": 27, "telefono": "+56912345678", "respuesta": "respondio",
+             "fecha_actualizacion": None, "ultima_respuesta_fecha": None},
+        ]
+        with patch.object(main, "conectar", return_value=conexion), \
+             patch.object(main, "_resolver_tabla_pacientes", return_value=("pacientes_dev", None)), \
+             patch.object(main, "_numeros_prueba_editables", return_value={"+56912345678"}), \
+             patch.object(main, "columna_existe", return_value=True), \
+             patch.object(main, "_pacientes_baja_bloqueada", return_value=set()), \
+             patch.object(main, "_cond_tabla_log_segura", return_value=("", ())), \
+             patch.object(main, "expr_select_pacientes", return_value="p.id"), \
+             patch.object(main, "from_pacientes", return_value=" FROM pacientes_dev p"), \
+             patch.object(main, "_ids_csv_propios", return_value=set()):
+            resultado = main.actualizar_respuesta_paciente(
+                27, main.RespuestaIn(respuesta="respondio"), ambiente="desarrollo",
+                area_id=None, sesion=self.dev)
+        self.assertEqual(resultado["respuesta"], "respondio")
+        self.assertTrue(any("respuesta_manual = %s" in c.args[0] and c.args[1][0] == "respondio"
+                            for c in cursor.execute.call_args_list))
+        conexion.__enter__.return_value.commit.assert_called_once()
 
     def test_base_desarrollo_restringida_a_privilegiados(self):
         with self.assertRaises(HTTPException) as error:
