@@ -2694,6 +2694,8 @@ if (btnSincronizarMeta) {
   const areasSync = $("#areasSincronizar");
   const confirmarSync = $("#confirmarSincronizar");
   let sincronizando = false;
+  let eliminadasSync = [];
+  let puedeEliminarSync = false;
   btnSincronizarMeta.addEventListener("click", async () => {
     if (sincronizando) return;
     sincronizando = true;
@@ -2703,6 +2705,8 @@ if (btnSincronizarMeta) {
       if (res.status === 401) { window.snwSesionExpirada(); return; }
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.detail ?? `Error ${res.status}`);
+      eliminadasSync = data.eliminadas || [];
+      puedeEliminarSync = !!data.puede_eliminar;
       const esUsuario = (window.snwRol || "") === "usuario";
       const opciones = '<option value="">— Seleccione área —</option>' +
         (esUsuario ? "" : '<option value="global">Global (todas las bases)</option>') +
@@ -2725,6 +2729,25 @@ if (btnSincronizarMeta) {
         const aviso = document.createElement("p");
         aviso.className = "field__hint";
         aviso.textContent = "No hay plantillas nuevas. Se actualizarán los estados y el contenido de las existentes.";
+        areasSync.append(aviso);
+      }
+      if (eliminadasSync.length) {
+        const aviso = document.createElement("div");
+        aviso.className = "tpl-sync-eliminadas";
+        const titulo = document.createElement("strong");
+        titulo.textContent = `${eliminadasSync.length} plantilla(s) ya no aparecen en Meta y se quitarán del listado local:`;
+        const lista = document.createElement("ul");
+        eliminadasSync.forEach((p) => {
+          const item = document.createElement("li");
+          item.textContent = p.nombre;
+          lista.append(item);
+        });
+        aviso.append(titulo, lista);
+        if (!puedeEliminarSync) {
+          const permiso = document.createElement("p");
+          permiso.textContent = "Solo un administrador o desarrollador puede confirmar esta limpieza.";
+          aviso.append(permiso);
+        }
         areasSync.append(aviso);
       }
       confirmarSync.disabled = data.nuevas.length > 0;
@@ -2758,20 +2781,22 @@ if (btnSincronizarMeta) {
       const res = await fetch(`${API_URL}/sincronizar-meta`, {
         method: "POST",
         headers: { ...authHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({ asignaciones }),
+        body: JSON.stringify({ asignaciones, eliminadas: puedeEliminarSync ? eliminadasSync.map((p) => p.id) : [] }),
       });
       if (res.status === 401) { window.snwSesionExpirada(); return; }
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.detail ?? `Error ${res.status}`);
       // Las plantillas de call center se gestionan desde el Historial.
       plantillas = data.plantillas.filter((p) => !p.especial && esPlantillaValida(p));
+      if ((activaId && !plantillas.some((p) => p.id === activaId)) ||
+          (tplSelId && !plantillas.some((p) => p.id === tplSelId))) resetearCardEnvio();
       renderLista(buscadorEl.value);
       if (activaId) {
         const actual = plantillas.find((x) => x.id === activaId);
         if (actual) refrescarVistaPlantillaActiva(actual);
       }
       toast(
-        `Sincronizado con Meta: ${data.creadas} nueva(s), ${data.actualizadas} actualizada(s)` +
+        `Sincronizado con Meta: ${data.creadas} nueva(s), ${data.actualizadas} actualizada(s), ${data.eliminadas} eliminada(s)` +
           ` de ${data.total_meta} template(s) en Meta.`,
         "ok"
       );

@@ -4,7 +4,7 @@ Mantenerlos fuera de las rutas evita que la capa HTTP y las reglas de negocio
 queden mezcladas en ``main.py``.
 """
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class PlantillaIn(BaseModel):
@@ -21,6 +21,8 @@ class PlantillaIn(BaseModel):
 class SincronizarPlantillasIn(BaseModel):
     # Clave: identificador de la plantilla en Meta. None es global explícito.
     asignaciones: dict[str, int | None]
+    # IDs locales que el usuario vio como ausentes de Meta en la previsualización.
+    eliminadas: list[int] = Field(default_factory=list)
 
 
 class PlantillaPreviaIn(BaseModel):

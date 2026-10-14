@@ -153,6 +153,115 @@ class SincronizarAreaTests(unittest.TestCase):
         app.dependency_overrides[main.sesion_actual] = lambda: self.sesion
         self.cliente = TestClient(app)
 
+    def test_eliminada_en_meta_se_previsualiza_y_se_quita_solo_al_confirmar(self):
+        viva = {"id": "meta-viva", "name": "saludo", "language": "es",
+                "status": "APPROVED", "components": [{"type": "BODY", "text": "Hola"}]}
+        eliminada = {**PLANTILLA, "id": 8, "clave": "eliminada", "nombre": "Eliminada",
+                     "whatsapp_template": "eliminada", "whatsapp_template_id": "meta-eliminada",
+                     "whatsapp_template_status": "PENDING"}
+        borrador = {**PLANTILLA, "id": 9, "clave": "borrador", "nombre": "Borrador",
+                    "whatsapp_template": "borrador", "whatsapp_template_id": None,
+                    "whatsapp_template_status": None, "aprobacion_estado": "pendiente"}
+        almacen = [dict(PLANTILLA), eliminada, borrador]
+        with patch.object(main, "leer_plantillas", return_value=almacen), \
+             patch.object(main, "escribir_plantillas") as guardar, \
+             patch.object(main, "_resguardar_plantillas_antes_limpieza") as respaldo, \
+             patch.object(main, "auditoria_registrar") as auditoria, \
+             patch.object(main, "_detener_jobs_plantilla_no_aprobada") as detener, \
+             patch.object(main.WhatsAppService, "listar_templates_meta", return_value={
+                 "ok": True, "templates": [viva]}):
+            previa = self.cliente.get("/api/plantillas/sincronizar-meta")
+            self.assertEqual(previa.status_code, 200)
+            self.assertEqual(previa.json()["eliminadas"], [{"id": 8, "nombre": "Eliminada"}])
+            guardar.assert_not_called()
+            respuesta = self.cliente.post("/api/plantillas/sincronizar-meta", json={
+                "asignaciones": {}, "eliminadas": [8]})
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(respuesta.json()["eliminadas"], 1)
+        self.assertEqual({p["id"] for p in guardar.call_args.args[0]}, {7, 9})
+        respaldo.assert_called_once()
+        detener.assert_called_once_with(eliminada, None)
+        auditoria.assert_called_once()
+        self.assertEqual(auditoria.call_args.args[1], "plantilla_ausente_meta_eliminada")
+
+    def test_no_borra_sin_confirmacion_actual_ni_si_meta_devuelve_lista_vacia(self):
+        eliminada = {**PLANTILLA, "whatsapp_template_id": "meta-eliminada"}
+        with patch.object(main, "leer_plantillas", return_value=[eliminada]), \
+             patch.object(main, "escribir_plantillas") as guardar, \
+             patch.object(main.WhatsAppService, "listar_templates_meta", return_value={
+                 "ok": True, "templates": [{"id": "otra", "name": "otra", "language": "es"}]}):
+            respuesta = self.cliente.post("/api/plantillas/sincronizar-meta", json={
+                "asignaciones": {"otra": None}})
+        self.assertEqual(respuesta.status_code, 409)
+        guardar.assert_not_called()
+        with patch.object(main, "leer_plantillas", return_value=[eliminada]), \
+             patch.object(main, "escribir_plantillas") as guardar, \
+             patch.object(main.WhatsAppService, "listar_templates_meta", return_value={
+                 "ok": True, "templates": []}):
+            respuesta = self.cliente.get("/api/plantillas/sincronizar-meta")
+        self.assertEqual(respuesta.status_code, 502)
+        guardar.assert_not_called()
+
+    def test_fallo_de_respaldo_impide_eliminacion(self):
+        eliminada = {**PLANTILLA, "whatsapp_template_id": "meta-eliminada"}
+        with patch.object(main, "leer_plantillas", return_value=[eliminada]), \
+             patch.object(main, "escribir_plantillas") as guardar, \
+             patch.object(main, "_resguardar_plantillas_antes_limpieza",
+                          side_effect=HTTPException(500, "Sin respaldo")), \
+             patch.object(main.WhatsAppService, "listar_templates_meta", return_value={
+                 "ok": True, "templates": [{"id": "otra", "name": "otra", "language": "es"}]}):
+            respuesta = self.cliente.post("/api/plantillas/sincronizar-meta", json={
+                "asignaciones": {"otra": None}, "eliminadas": [7]})
+        self.assertEqual(respuesta.status_code, 500)
+        guardar.assert_not_called()
+
+    def test_eliminacion_requiere_permiso_de_edicion(self):
+        self.sesion.update(rol="usuario", permisos=["mensajeria"], area_ids=[8])
+        eliminada = {**PLANTILLA, "whatsapp_template_id": "meta-eliminada"}
+        with patch.object(main, "leer_plantillas", return_value=[eliminada]), \
+             patch.object(main, "escribir_plantillas") as guardar, \
+             patch.object(main, "_exigir_area", return_value={"id": 8}), \
+             patch.object(main.WhatsAppService, "listar_templates_meta", return_value={
+                 "ok": True, "templates": [{"id": "otra", "name": "otra", "language": "es"}]}):
+            respuesta = self.cliente.post("/api/plantillas/sincronizar-meta", json={
+                "asignaciones": {"otra": 8}, "eliminadas": [7]})
+            self.assertEqual(respuesta.status_code, 403)
+            guardar.assert_not_called()
+            respuesta = self.cliente.post("/api/plantillas/sincronizar-meta", json={
+                "asignaciones": {"otra": 8}, "eliminadas": []})
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertIn(7, {p["id"] for p in guardar.call_args.args[0]})
+        self.assertEqual(respuesta.json()["eliminadas"], 0)
+
+    def test_otro_idioma_con_mismo_nombre_no_oculta_la_eliminacion(self):
+        local = {**PLANTILLA, "whatsapp_template_id": "meta-es",
+                 "whatsapp_template_lang": "es"}
+        variantes = [{"id": "meta-en", "name": "saludo", "language": "en_US"}]
+        self.assertIsNone(main._coincidencia_template_meta(local, variantes))
+        self.assertEqual(main._plantillas_ausentes_meta([local], variantes), [local])
+
+    def test_error_previo_de_ausencia_se_puede_limpiar_sin_id_meta(self):
+        local = {**PLANTILLA, "whatsapp_template_id": None,
+                 "whatsapp_template_status": None,
+                 "whatsapp_template_error": "No se encontró el template 'saludo' (idioma 'es') en Meta."}
+        variantes = [{"id": "otro", "name": "otra", "language": "es"}]
+        self.assertEqual(main._plantillas_ausentes_meta([local], variantes), [local])
+
+    def test_importacion_no_reutiliza_id_de_plantilla_eliminada(self):
+        eliminada = {**PLANTILLA, "id": 20, "whatsapp_template_id": "meta-vieja"}
+        nueva = {"id": "meta-nueva", "name": "nueva", "language": "es",
+                 "status": "APPROVED", "components": [{"type": "BODY", "text": "Hola"}]}
+        with patch.object(main, "leer_plantillas", return_value=[eliminada]), \
+             patch.object(main, "escribir_plantillas") as guardar, \
+             patch.object(main, "_resguardar_plantillas_antes_limpieza"), \
+             patch.object(main, "auditoria_registrar"), \
+             patch.object(main.WhatsAppService, "listar_templates_meta", return_value={
+                 "ok": True, "templates": [nueva]}):
+            respuesta = self.cliente.post("/api/plantillas/sincronizar-meta", json={
+                "asignaciones": {"meta-nueva": None}, "eliminadas": [20]})
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual([p["id"] for p in guardar.call_args.args[0]], [21])
+
     def test_importacion_asigna_area_y_repeticion_conserva_la_existente(self):
         meta = {"id": "meta-sync", "name": "saludo_area", "language": "es",
                 "status": "APPROVED", "category": "UTILITY",

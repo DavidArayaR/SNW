@@ -11,6 +11,7 @@ import json
 import random
 import re
 import secrets
+import shutil
 import threading
 import time
 import unicodedata
@@ -1315,6 +1316,16 @@ def escribir_plantillas(datos: list) -> None:
         json.dumps(datos, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+
+
+def _resguardar_plantillas_antes_limpieza() -> None:
+    """Copia recuperable del JSON original; nunca continuar si falla."""
+    respaldo = DATA_FILE.with_name(f"plantillas-{time.time_ns()}.bak")
+    try:
+        shutil.copy2(DATA_FILE, respaldo)
+    except OSError as e:
+        log_error("_resguardar_plantillas_antes_limpieza", e)
+        raise HTTPException(500, detail="No se pudo crear el respaldo de plantillas; no se eliminó ninguna.")
 
 
 
@@ -2779,9 +2790,22 @@ def _coincidencia_template_meta(plantilla: dict, templates: list) -> dict | None
     if not nombre:
         return None
     idioma = (plantilla.get("whatsapp_template_lang") or "").strip() or "es"
-    return (next((t for t in templates if t.get("name") == nombre
-                  and t.get("language") == idioma), None)
-            or next((t for t in templates if t.get("name") == nombre), None))
+    meta_id = str(plantilla.get("whatsapp_template_id") or "").strip()
+    return (next((t for t in templates if meta_id and str(t.get("id")) == meta_id), None)
+            or next((t for t in templates if t.get("name") == nombre
+                     and t.get("language") == idioma), None))
+
+
+def _plantillas_ausentes_meta(plantillas: list[dict], templates: list[dict]) -> list[dict]:
+    """Solo registros antes vinculados a Meta; no borra borradores locales."""
+    vinculadas = [p for p in plantillas
+                  if not p.get("especial") and not _es_plantilla_protegida(p)
+                  and _aprobacion_plantilla(p) == "aprobada"
+                  and (p.get("whatsapp_template_id") or p.get("whatsapp_template_status")
+                       or str(p.get("whatsapp_template_error") or "").startswith("No se encontró el template"))]
+    if not templates and vinculadas:
+        raise HTTPException(502, detail="Meta devolvió una lista vacía. No se eliminará ninguna plantilla; verifica la cuenta de WhatsApp Business y vuelve a intentarlo.")
+    return [p for p in vinculadas if _coincidencia_template_meta(p, templates) is None]
 
 
 def _consultar_templates_meta() -> list:
@@ -2815,11 +2839,16 @@ def _descargar_encabezado_template_meta(template: dict, media_actual: str | None
 def preparar_sincronizacion_plantillas(sesion: dict = Depends(exigir("mensajeria"))):
     """Consulta sin guardar para elegir un área por cada plantilla nueva."""
     templates = _consultar_templates_meta()
-    existentes = {_match.get("id") for p in leer_plantillas()
+    plantillas = leer_plantillas()
+    eliminadas = _plantillas_ausentes_meta(plantillas, templates)
+    existentes = {_match.get("id") for p in plantillas
                   if (_match := _coincidencia_template_meta(p, templates))}
     return {"nuevas": [{"id": str(t["id"]), "nombre": t.get("name"),
                         "idioma": t.get("language")}
-                       for t in templates if t.get("id") not in existentes]}
+                       for t in templates if t.get("id") not in existentes],
+            "eliminadas": [{"id": p["id"], "nombre": p.get("nombre")}
+                           for p in _plantillas_visibles(sesion, eliminadas)],
+            "puede_eliminar": _es_privilegiado(sesion)}
 
 
 def sincronizar_plantillas_meta(body: SincronizarPlantillasIn,
@@ -2832,11 +2861,26 @@ def sincronizar_plantillas_meta(body: SincronizarPlantillasIn,
     en Meta y aquí solo se leen (GET). Esta acción:
       - Actualiza el estado/id/categoría de las plantillas locales que ya
         tienen un 'whatsapp_template' configurado, contra lo que hay en Meta.
+      - Elimina las copias locales previamente vinculadas que ya no existen
+        en Meta, solo tras mostrarlas y confirmarlas en la previsualización.
       - Importa como plantillas nuevas los templates que existen en Meta y
         todavía no tienen una plantilla local asociada.
     No crea ni edita nada en Meta, solo lee."""
     templates_meta = _consultar_templates_meta()
     plantillas = leer_plantillas()
+    siguiente_id = max((p["id"] for p in plantillas), default=0) + 1
+    ausentes = _plantillas_ausentes_meta(plantillas, templates_meta)
+    if _es_privilegiado(sesion):
+        ids_ausentes = {p["id"] for p in ausentes}
+        if ids_ausentes != set(body.eliminadas) or len(body.eliminadas) != len(ids_ausentes):
+            raise HTTPException(409, detail="Cambió la lista de plantillas eliminadas en Meta. Abre Sincronizar de nuevo para revisarla.")
+    else:
+        if body.eliminadas:
+            raise HTTPException(403, detail="Solo administradores y desarrolladores pueden quitar plantillas eliminadas en Meta.")
+        # Conserva para usuarios no privilegiados la sincronización de estado e
+        # importación; la limpieza queda pendiente para admin/dev.
+        ausentes = []
+        ids_ausentes = set()
 
     # Validar todas las asignaciones antes de modificar registros. Una plantilla
     # llegada desde la previsualización obliga a elegir su área, nunca se importa
@@ -2857,6 +2901,9 @@ def sincronizar_plantillas_meta(body: SincronizarPlantillasIn,
         local = locales_por_id.get(template["id"])
         medios_meta[template["id"]] = _descargar_encabezado_template_meta(
             template, (local or {}).get("encabezado_media_id"))
+
+    if ids_ausentes:
+        plantillas = [p for p in plantillas if p["id"] not in ids_ausentes]
 
     usados_id = set()
     actualizadas = 0
@@ -2915,16 +2962,10 @@ def sincronizar_plantillas_meta(body: SincronizarPlantillasIn,
                                              or "El encabezado aún no se registró en Meta.")
             p["texto"] = texto_nuevo
             p.update(componentes_para_vista(match.get("components")))
-        else:
-            p["whatsapp_template_status"] = None
-            p["whatsapp_template_quality_score"] = None
-            p["whatsapp_template_error"] = (
-                f"No se encontró el template '{nombre_tpl}' (idioma '{lang}') en Meta."
-            )
+        # Un borrador local sin vínculo con Meta se conserva sin modificar.
 
     nombres_ocupados = {p["nombre"].lower() for p in plantillas}
     claves_ocupadas = {p["clave"] for p in plantillas}
-    siguiente_id = max((p["id"] for p in plantillas), default=0) + 1
     creadas = 0
 
     for t in templates_meta:
@@ -2956,10 +2997,18 @@ def sincronizar_plantillas_meta(body: SincronizarPlantillasIn,
         siguiente_id += 1
         creadas += 1
 
+    if ausentes:
+        _resguardar_plantillas_antes_limpieza()
     escribir_plantillas(plantillas)
+    for p in ausentes:
+        _detener_jobs_plantilla_no_aprobada(p, None)
+        auditoria_registrar(sesion.get("usuario", ""), "plantilla_ausente_meta_eliminada",
+                            str(p.get("clave") or ""),
+                            f"Sincronización: «{p.get('nombre', '')}» ya no existe en Meta; ID local {p['id']}.")
     return {
         "creadas": creadas,
         "actualizadas": actualizadas,
+        "eliminadas": len(ausentes),
         "total_meta": len(templates_meta),
         # Cada cuenta solo recibe las plantillas de su alcance.
         "plantillas": sorted(_plantillas_visibles(sesion, plantillas),

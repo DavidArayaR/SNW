@@ -393,7 +393,7 @@ contraseña?» en el login (`/api/auth/olvide`) — mismo mecanismo, pero autose
 | DELETE | `/api/plantillas/{id}` | Eliminar. **Solo el creador** (admin/dev, cualquiera; 403 si no). Borra también el template en Meta (`DELETE /{waba_id}/message_templates?name=…`); si Meta falla la plantilla local se borra igual y la respuesta trae `meta_advertencia`. Rechaza (400) las de call center o las que no estén `APPROVED` ni `REJECTED` en Meta |
 | GET | `/api/plantillas/{id}/estado-meta` | Consulta en Meta el estado real de un template |
 | POST | `/api/plantillas/estado-meta/actualizar` | Refresca el estado de todas las plantillas con template |
-| POST | `/api/plantillas/sincronizar-meta` | Lee los templates que existen en Meta: actualiza estado/id de los conocidos e **importa como plantilla nueva** los que falten (no crea/edita nada en Meta, solo lee). Cada cuenta solo recibe en la respuesta las plantillas de su alcance |
+| GET/POST | `/api/plantillas/sincronizar-meta` | Consulta los templates de Meta, previsualiza los nuevos y las copias locales vinculadas que ya no existen, y al confirmar actualiza/importa o quita estas últimas de `data/plantillas.json`. Solo administrador/desarrollador puede confirmar la limpieza; los IDs deben coincidir con la vista previa. Otros usuarios conservan la sincronización/importación, sin borrar. Si Meta devuelve una lista vacía o cambia la lista entre vista previa y confirmación, no borra nada. Antes del borrado crea un respaldo ignorado por Git (`data/plantillas-*.bak`). No modifica plantillas en Meta. Tras desplegar esta versión en el servidor, usa **Sincronizar** para limpiar las eliminadas allí; el JSON local de otro entorno no se modifica automáticamente. |
 
 #### Mensaje de call center
 
