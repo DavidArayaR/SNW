@@ -208,6 +208,8 @@ document.addEventListener("click", (e) => {
 });
 let ambienteDetalle = "produccion";
 let areaDetalle = null; // area del envío abierto (para sus mensajes)
+let detalleActual = null;
+let cargaDetalleSecuencia = 0;
 let pacienteMsgActual = null; // { id, ambiente, interesado }
 
 let basesHist = [];
@@ -452,20 +454,43 @@ tbodyEl.addEventListener("click", async (e) => {
     || registros.find((r) => String(r.id) === envioId);
   ambienteDetalle = amb;
   areaDetalle = (envio && envio.area_id != null) ? envio.area_id : (tr.dataset.esp ? Number(tr.dataset.esp) : null);
+  detalleActual = { envioId, ambiente: amb, envio };
+  await cargarDetalle();
+});
 
+async function cargarDetalle() {
+  const objetivo = detalleActual;
+  if (!objetivo) return;
+  const secuencia = ++cargaDetalleSecuencia;
+  const btn = $("#btnActualizarDetalle");
+  const tabla = $("#tablaDetallePacientes");
+  btn.disabled = true;
+  btn.querySelector("i").classList.add("fa-spin");
+  tabla.classList.add("detalle-actualizando");
+  tabla.setAttribute("aria-busy", "true");
   try {
-    const r = await fetch(`api/notificaciones/historial/${envioId}/detalle?ambiente=${amb}`, {
+    const r = await fetch(`api/notificaciones/historial/${objetivo.envioId}/detalle?ambiente=${objetivo.ambiente}`, {
       headers: authHeaders(), cache: "no-store"
     });
     if (r.status === 401) { window.snwSesionExpirada(); return; }
     if (!r.ok) throw new Error();
     const detalle = await r.json();
-    abrirDetalle(envio, detalle);
+    if (secuencia !== cargaDetalleSecuencia) return;
+    abrirDetalle(objetivo.envio, detalle);
   } catch {
-    console.error("[historial.js render()]");
-    toast("Error al cargar el detalle.", "error");
+    if (secuencia === cargaDetalleSecuencia) {
+      console.error("[historial.js cargarDetalle()]");
+      toast("No se pudo actualizar la lista de pacientes.", "error");
+    }
+  } finally {
+    if (secuencia === cargaDetalleSecuencia) {
+      btn.disabled = false;
+      btn.querySelector("i").classList.remove("fa-spin");
+      tabla.classList.remove("detalle-actualizando");
+      tabla.removeAttribute("aria-busy");
+    }
   }
-});
+}
 
 function abrirDetalle(envio, detalle) {
   const plantilla = envio?.plantilla_nombre ?? envio?.plantilla_clave ?? "";
@@ -528,8 +553,19 @@ function respuestaLabel(r) {
   return { pendiente: "Sin respuesta", respondio: "Respondió", no_interesado: "No interesado", baja: "Se dio de baja" }[r] ?? r;
 }
 
-$("#btnCerrarDetalle").addEventListener("click", () => ($("#modalDetalle").hidden = true));
-$("#modalDetalle").addEventListener("click", (e) => { if (e.target === $("#modalDetalle")) $("#modalDetalle").hidden = true; });
+function cerrarDetalle() {
+  $("#modalDetalle").hidden = true;
+  detalleActual = null;
+  ++cargaDetalleSecuencia;
+  $("#btnActualizarDetalle").disabled = false;
+  $("#btnActualizarDetalle i").classList.remove("fa-spin");
+  $("#tablaDetallePacientes").classList.remove("detalle-actualizando");
+  $("#tablaDetallePacientes").removeAttribute("aria-busy");
+}
+
+$("#btnActualizarDetalle").addEventListener("click", cargarDetalle);
+$("#btnCerrarDetalle").addEventListener("click", cerrarDetalle);
+$("#modalDetalle").addEventListener("click", (e) => { if (e.target === $("#modalDetalle")) cerrarDetalle(); });
 
 /* ---------- Mensajes del paciente ---------- */
 

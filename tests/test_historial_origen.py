@@ -21,6 +21,16 @@ class HistorialOrigenTests(unittest.TestCase):
         self.assertIn("tablaCCDerivaciones", pagina)
         self.assertIn("api/call-center/log", script)
 
+    def test_detalle_permite_actualizar_sin_cerrar_el_modal(self):
+        raiz = Path(__file__).resolve().parents[1] / "frontend"
+        pagina = (raiz / "historial.html").read_text(encoding="utf-8")
+        script = (raiz / "js" / "historial.js").read_text(encoding="utf-8")
+        self.assertIn('id="btnActualizarDetalle"', pagina)
+        self.assertIn('id="tablaDetallePacientes"', pagina)
+        self.assertIn('$("#btnActualizarDetalle").addEventListener("click", cargarDetalle)', script)
+        self.assertIn('cache: "no-store"', script)
+        self.assertIn('tabla.setAttribute("aria-busy", "true")', script)
+
     def _consultar(self, origen, lotes, programados=()):
         conexion = MagicMock()
         cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
