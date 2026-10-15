@@ -643,7 +643,7 @@ function renderMensajes(data) {
 
 const ETIQUETAS_MENSAJE = {
   interes: "Interés", consulta: "Consulta", desinteres: "Desinterés",
-  baja_solicitada: "Baja solicitada", respuesta_automatica: "Automática",
+  baja_solicitada: "Baja solicitada", respuesta_automatica: "Bot",
   requiere_revision: "Revisar", confirmacion: "Confirmación",
   cancelacion: "Cancelación", resuelto: "Resuelto",
 };
@@ -659,7 +659,10 @@ $("#msgHilo").addEventListener("click", async (event) => {
   if (!mensaje || !Object.hasOwn(ETIQUETAS_MENSAJE, etiqueta) || guardandoEtiquetas.has(id)) return;
   const previas = mensaje.etiquetas || [];
   const nuevas = previas.includes(etiqueta)
-    ? previas.filter((e) => e !== etiqueta) : [...previas, etiqueta];
+    ? previas.filter((e) => e !== etiqueta)
+    : etiqueta === "requiere_revision"
+      ? ["requiere_revision"]
+      : [...previas.filter((e) => e !== "requiere_revision"), etiqueta];
   guardandoEtiquetas.add(id);
   const grupo = boton.closest(".msg-etiquetas");
   grupo.querySelectorAll("button").forEach((b) => { b.disabled = true; });
@@ -672,10 +675,14 @@ $("#msgHilo").addEventListener("click", async (event) => {
     );
     if (r.status === 401) { window.snwSesionExpirada(); return; }
     if (!r.ok) throw new Error();
-    mensaje.etiquetas = nuevas;
+    const guardado = await r.json();
+    mensaje.etiquetas = guardado.etiquetas;
     mensaje.origen_etiquetas = "manual";
-    boton.classList.toggle("msg-etiqueta--activa", nuevas.includes(etiqueta));
-    boton.setAttribute("aria-pressed", String(nuevas.includes(etiqueta)));
+    grupo.querySelectorAll("[data-etiqueta]").forEach((b) => {
+      const activa = guardado.etiquetas.includes(b.dataset.etiqueta);
+      b.classList.toggle("msg-etiqueta--activa", activa);
+      b.setAttribute("aria-pressed", String(activa));
+    });
     grupo.querySelector(".msg-etiquetas-origen").textContent = "Revisadas";
   } catch {
     toast("No se pudieron guardar las etiquetas.", "error");

@@ -37,7 +37,9 @@ class HistorialOrigenTests(unittest.TestCase):
         script = (raiz / "js" / "historial.js").read_text(encoding="utf-8")
         self.assertIn("msg-etiquetas-ayuda", pagina)
         self.assertIn("data-etiqueta-id", script)
+        self.assertIn('respuesta_automatica: "Bot"', script)
         self.assertIn("/etiquetas?ambiente=", script)
+        self.assertIn('previas.filter((e) => e !== "requiere_revision")', script)
 
     def test_etiquetas_solo_para_respuesta_y_autor_del_csv(self):
         body = main.EtiquetasRespuestaIn(etiquetas=["consulta", "requiere_revision"])
@@ -53,9 +55,10 @@ class HistorialOrigenTests(unittest.TestCase):
              patch.object(main, "conectar", return_value=conexion), \
              patch.object(main, "auditoria_registrar") as auditar:
             respuesta = main.etiquetar_mensaje_paciente(**kwargs)
-        self.assertEqual(respuesta["etiquetas"], ["consulta", "requiere_revision"])
+        self.assertEqual(respuesta["etiquetas"], ["consulta"])
         self.assertIn("plantilla_clave = 'respuesta'", cur.execute.call_args_list[0].args[0])
         self.assertIn("INSERT INTO respuesta_etiquetas", cur.execute.call_args_list[1].args[0])
+        self.assertEqual(cur.execute.call_args_list[1].args[1][1], '["consulta"]')
         auditar.assert_called_once()
         with patch.object(main, "tiene_permiso", return_value=True), \
              patch.object(main, "_resolver_tabla_pacientes", return_value=("pacientes_prod", None)), \

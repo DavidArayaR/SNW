@@ -1958,6 +1958,9 @@ def etiquetar_mensaje_paciente(paciente_id: int, mensaje_id: int, body: Etiqueta
     if len(etiquetas) > len(ETIQUETAS_RESPUESTA) or any(
             not isinstance(e, str) or e not in ETIQUETAS_RESPUESTA for e in etiquetas):
         raise HTTPException(422, detail="Etiqueta no permitida.")
+    # Una revisión pendiente deja de serlo al asignar una etiqueta concreta.
+    if "requiere_revision" in etiquetas and len(etiquetas) > 1:
+        etiquetas.remove("requiere_revision")
     if area_id is None and not (tiene_permiso(sesion, "historial") or tiene_permiso(sesion, "pacientes")):
         raise HTTPException(403, detail="No tienes permiso para acceder a esta sección.")
     tabla, esp = _resolver_tabla_pacientes(sesion, ambiente, area_id)
