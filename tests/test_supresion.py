@@ -16,6 +16,11 @@ TEL = "+56912345678"
 
 
 class SupresionTests(unittest.TestCase):
+    def setUp(self):
+        p = patch.object(whatsapp_service.WhatsAppService, "_guardar_corpus_respuesta")
+        p.start()
+        self.addCleanup(p.stop)
+
     def _valor(self, texto):
         return {"contacts": [{"wa_id": TEL.lstrip("+")}],
                 "messages": [{"type": "text", "text": {"body": texto}}]}

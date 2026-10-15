@@ -209,6 +209,25 @@ def asegurar_tabla_config() -> None:
                     "ALTER TABLE respuesta_etiquetas ADD COLUMN origen"
                     " ENUM('automatico','manual') NOT NULL DEFAULT 'manual'"
                 )
+            # Corpus sin vínculo al paciente ni metadatos de recepción.
+            # Solo almacena la representación de vocabulario cerrado.
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS corpus_respuestas ("
+                " id BIGINT AUTO_INCREMENT PRIMARY KEY,"
+                " texto_desidentificado TEXT NOT NULL"
+                ") CHARACTER SET utf8mb4"
+            )
+            cur.execute(
+                "SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()"
+                " AND TABLE_NAME = 'log_envios'"
+            )
+            if cur.fetchone():
+                cur.execute("SELECT COALESCE(MAX(id), 0) AS ultimo FROM log_envios")
+                corte = (cur.fetchone() or {}).get("ultimo", 0)
+                cur.execute(
+                    "INSERT IGNORE INTO configuracion (clave, valor) VALUES"
+                    " ('corpus_respuestas_corte_v1', %s)", (str(corte),)
+                )
             _migrar_numeros_prueba_a_produccion(cur)
             # Rate card de WhatsApp (tarifas por mensaje descargadas de Meta).
             cur.execute(

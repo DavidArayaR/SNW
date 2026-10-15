@@ -11,6 +11,12 @@ from intenciones_call_center import clasificar, detectar_automatizacion, patrone
 
 
 class IntencionesCallCenterTests(unittest.TestCase):
+    def setUp(self):
+        from whatsapp_service import WhatsAppService
+        p = patch.object(WhatsAppService, "_guardar_corpus_respuesta")
+        p.start()
+        self.addCleanup(p.stop)
+
     def test_etiquetas_automaticas_respetan_prioridades(self):
         from whatsapp_service import etiquetas_automaticas
         casos = {
