@@ -50,7 +50,7 @@ def graph_url() -> str:
 # Detección de baja (opt-out). Se compara sobre el texto en minúsculas y sin
 # signos. `BAJA_EXACTAS`: solo si el mensaje ES exactamente eso.
 # `BAJA_PALABRAS`: si aparece como palabra suelta. `BAJA_FRASES`: como substring.
-BAJA_EXACTAS = ("no", "no.", "stop", "baja", "cancelar", "cancelo", "salir",
+BAJA_EXACTAS = ("stop", "baja", "cancelar", "cancelo", "salir",
                 "quit", "unsubscribe", "eliminar", "remover", "detener")
 BAJA_PALABRAS = ("baja", "stop", "unsubscribe", "cancelar", "cancelo", "detener")
 BAJA_FRASES = (
@@ -59,7 +59,7 @@ BAJA_FRASES = (
     "no quiero recibir", "no deseo recibir", "no quiero mas mensajes",
     "no me manden", "no me envien","no me envíen", "no enviar mas", "dejen de enviar",
     "dejar de recibir", "dejen de mandar", "no molestar", "no me contacten",
-    "ya no quiero", "no quiero saber", "borrame", "borrenme", "borrarme",
+    "borrame", "borrenme", "borrarme",
     "sacame de", "sacarme de", "no quiero que me escriban",
     "quitar de la lista", "sacar de la lista", "borrar mi numero", "eliminar mi numero",
     "eliminar mis datos", "borra mis datos", "borrar mis datos",
@@ -80,7 +80,11 @@ NO_INTERES_FRASES = (
     "no estoy interesad", "no esta interesad", "no está interesad",
     "ya no me interesa", "ya no estoy interesad", "sigo sin interes",
     "no tengo interes", "no tengo interés", "no me llama la atencion",
-    "no me llama la atención",
+    "no me llama la atención", "no gracias", "por ahora no",
+    "no por el momento", "gracias pero no", "ya me atendi", "ya me atendí",
+    "no necesito", "ya tengo doctor", "ya tengo hora", "ya consegui hora",
+    "ya conseguí hora", "no quiero agendar", "en otra oportunidad",
+    "no x ahora", "no grax", "estoy bien gracias",
 )
 # Respaldo: cualquier negación cerca de una forma del verbo "interesar"
 # ("no", "nunca", "jamás", "tampoco"… seguido de "interesa/interesado/…").
@@ -105,10 +109,7 @@ def es_mensaje_no_interes(texto: str) -> bool:
 # igual que las de baja (texto en minúsculas, sin signos). Si el mensaje también
 # encaja como baja, gana la baja.
 INTERES_EXACTAS = (
-    "si", "sí", "sip", "ok", "oka", "okey", "okok", "dale", "listo", "bueno",
-    "claro", "dale gracias", "confirmo", "confirmar", "confirmado", "acepto",
-    "me interesa", "interesa", "interesado", "interesada", "quiero", "perfecto",
-    "correcto", "afirmativo", "por supuesto", "obvio", "de una",
+    "me interesa", "interesa", "interesado", "interesada",
 )
 INTERES_FRASES = (
     "me interesa", "si me interesa", "sí me interesa", "me interesaria",
@@ -129,6 +130,9 @@ INTERES_FRASES = (
     "cuándo puedo", "me sirve", "si me sirve", "de acuerdo", "esta bien",
     "está bien", "si quiero", "sí quiero", "si porfavor", "si por favor",
     "sí por favor", "quiero mas informacion", "quiero más información",
+    "quiero pedir una horita", "kiero hora", "quiero reservar", "quiero una cita",
+    "me pueden llamar", "necesito que me contacten", "quiero una evaluacion",
+    "quiero una evaluación", "quiero atenderme", "quisiera atenderme",
 )
 
 # Palabra de negación como palabra suelta ("no", "nooo", "nunca", "jamás"…):
@@ -966,6 +970,13 @@ class WhatsAppService:
             boton = (texto or "").strip().casefold()
             clasificacion = clasificar(cuerpo, patrones_configurados(
                 config_get("call_center_patrones_consulta", "{}"))) if tipo == "text" else None
+            if clasificacion and clasificacion.automatizacion != "SIN_EVIDENCIA_AUTOMATIZACION":
+                # No reactivar bajas, marcar interés, derivar ni contestar a una
+                # posible autorespuesta. El original permanece en el historial.
+                info = self._registrar_respuesta(telefono, cuerpo, mensaje.get("timestamp"),
+                                                 automatica=clasificacion.automatizacion)
+                acciones.append(f"respuesta_automatica_{info}")
+                continue
             interes = es_mensaje_interes(cuerpo)
             baja = self._es_baja(texto) or self._es_baja(extra)
             if clasificacion and clasificacion.cancela and any(
@@ -1196,7 +1207,8 @@ class WhatsAppService:
         fila = cur.fetchone()
         return (fila or {}).get("plantilla_clave") or None
 
-    def _registrar_respuesta(self, telefono: str, texto: str, timestamp: str) -> str:
+    def _registrar_respuesta(self, telefono: str, texto: str, timestamp: str,
+                            automatica: str = "") -> str:
         match = _TEL_MATCH.format(col="telefono")
         try:
             with conectar() as conn, conn.cursor() as cur:
@@ -1204,16 +1216,18 @@ class WhatsAppService:
                 if not pacientes:
                     return "sin_cliente"
                 for p in pacientes:
-                    cur.execute(f"UPDATE {p['tabla']} SET estado = 'enviado' WHERE {match}", (telefono,))
+                    if not automatica:
+                        cur.execute(f"UPDATE {p['tabla']} SET estado = 'enviado' WHERE {match}", (telefono,))
                     # Una respuesta real deja sin efecto una corrección manual previa.
-                    try:
-                        cur.execute(
-                            f"UPDATE {p['tabla']} SET respuesta_manual = NULL"
-                            f" WHERE {match} AND respuesta_manual IS NOT NULL",
-                            (telefono,),
-                        )
-                    except Exception:
-                        pass  # esquema sin la columna
+                    if not automatica:
+                        try:
+                            cur.execute(
+                                f"UPDATE {p['tabla']} SET respuesta_manual = NULL"
+                                f" WHERE {match} AND respuesta_manual IS NOT NULL",
+                                (telefono,),
+                            )
+                        except Exception:
+                            pass  # esquema sin la columna
                     # El mismo teléfono puede estar en varias bases. Cada una
                     # necesita su propia señal para la ficha y estadísticas.
                     esp = servicio_areas.area_por_tabla(p["tabla"])
@@ -1221,8 +1235,10 @@ class WhatsAppService:
                         "INSERT INTO log_envios (envio_id, paciente_id, nombre_paciente, numero_telefono,"
                         " mensaje, plantilla_clave, estado_envio, respuesta, descripcion_error,"
                         " area_id, tabla_pacientes)"
-                        " VALUES (NULL, %s, %s, %s, %s, 'respuesta', 'enviado', 'respondio', NULL, %s, %s)",
+                        " VALUES (NULL, %s, %s, %s, %s, 'respuesta', 'enviado', %s, %s, %s, %s)",
                         (p["id"], p["nombre"], p["telefono"], (texto or "")[:2000],
+                         "pendiente" if automatica else "respondio",
+                         automatica if automatica else None,
                          esp["id"] if esp else None, p["tabla"]),
                     )
                 conn.commit()

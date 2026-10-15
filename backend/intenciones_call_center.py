@@ -52,6 +52,41 @@ _NO_DERIVAR = re.compile(
 _CANCELACION = re.compile(r"\b(?:no puedo asistir|no podre asistir|cancelo mi hora|cancelar mi hora)\b")
 _CONFIRMACION = re.compile(r"\b(?:confirmo|confirmar|confirmado|asistire|voy a ir)\b")
 
+# Señales combinadas: ni la longitud ni los emojis prueban automatización.
+_BOT_EXPLICITO = re.compile(r"\b(?:mensaje automatico|respuesta automatica|asistente virtual|soy un bot|nuestro bot)\b")
+_BOT_INSTITUCIONAL = re.compile(
+    r"\b(?:gracias por (?:comunicarte|contactarnos|escribirnos)|bienvenid[oa] a|"
+    r"has contactado con|te damos la bienvenida)\b"
+)
+_BOT_ACUSE = re.compile(
+    r"\b(?:hemos recibido tu (?:mensaje|consulta)|recibimos tu mensaje|"
+    r"te responderemos|responderemos lo antes posible|un ejecutivo se comunicara|"
+    r"uno de nuestros asesores|en breve te responderemos)\b"
+)
+_BOT_MENU = re.compile(r"\b(?:presiona|escribe|selecciona|elige|marca)\s*(?:la opcion\s*)?[1-9]\b")
+_BOT_HORARIO = re.compile(r"\b(?:fuera de horario|nuestro horario|horario de atencion)\b")
+
+
+def detectar_automatizacion(texto: str) -> tuple[str, tuple[str, ...]]:
+    """Evidencia lingüística, nunca confirmación técnica del origen del mensaje."""
+    t = normalizar(texto)
+    if not t:
+        return "SIN_EVIDENCIA_AUTOMATIZACION", ()
+    indicadores = tuple(nombre for nombre, patron in (
+        ("declaracion_automatica", _BOT_EXPLICITO),
+        ("saludo_institucional", _BOT_INSTITUCIONAL),
+        ("acuse_generico", _BOT_ACUSE),
+        ("menu", _BOT_MENU),
+        ("horario_empresarial", _BOT_HORARIO),
+    ) if patron.search(t))
+    if ("declaracion_automatica" in indicadores or
+            {"saludo_institucional", "acuse_generico"}.issubset(indicadores) or
+            "menu" in indicadores and len(indicadores) >= 2):
+        return "AUTOMATICO_ALTA_CONFIANZA", indicadores
+    if indicadores:
+        return "AUTOMATICO_PROBABLE", indicadores
+    return "SIN_EVIDENCIA_AUTOMATIZACION", ()
+
 
 def normalizar(texto: str) -> str:
     texto = unicodedata.normalize("NFKD", (texto or "").casefold())
@@ -64,10 +99,12 @@ class Clasificacion:
     motivos: tuple[str, ...] = ()
     confirma: bool = False
     cancela: bool = False
+    automatizacion: str = "SIN_EVIDENCIA_AUTOMATIZACION"
+    indicadores: tuple[str, ...] = ()
 
     @property
     def derivar(self) -> bool:
-        return bool(self.motivos)
+        return bool(self.motivos) and self.automatizacion == "SIN_EVIDENCIA_AUTOMATIZACION"
 
 
 def patrones_configurados(valor: str) -> dict[str, tuple[str, ...]]:
@@ -91,8 +128,9 @@ def patrones_configurados(valor: str) -> dict[str, tuple[str, ...]]:
 
 def clasificar(texto: str, catalogo: dict[str, tuple[str, ...]] | None = None) -> Clasificacion:
     t = normalizar(texto)
+    automatizacion, indicadores = detectar_automatizacion(texto)
     if not t or _NO_DERIVAR.fullmatch(t):
-        return Clasificacion()
+        return Clasificacion(automatizacion=automatizacion, indicadores=indicadores)
     confirma = bool(_CONFIRMACION.search(t))
     cancela = bool(_CANCELACION.search(t))
     motivos = []
@@ -109,8 +147,8 @@ def clasificar(texto: str, catalogo: dict[str, tuple[str, ...]] | None = None) -
                             for w in palabras if len(w) >= 5):
         if any(w in palabras for w in ("quiero", "necesito", "tienen", "hay", "cuanto", "una")):
             motivos.append("CONSULTA_AMBIGUA")
-    if not motivos and len(palabras) >= 2 and not (confirma or cancela):
+    if not motivos and re.search(r"\b(?:pregunta|duda)\b", t) and not (confirma or cancela):
         motivos.append("CONSULTA_AMBIGUA")
     if (confirma or cancela) and motivos == ["CONSULTA_AMBIGUA"]:
         motivos.clear()
-    return Clasificacion(tuple(motivos), confirma, cancela)
+    return Clasificacion(tuple(motivos), confirma, cancela, automatizacion, indicadores)

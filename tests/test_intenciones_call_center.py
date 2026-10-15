@@ -7,10 +7,58 @@ from fastapi import HTTPException
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
-from intenciones_call_center import clasificar, patrones_configurados
+from intenciones_call_center import clasificar, detectar_automatizacion, patrones_configurados
 
 
 class IntencionesCallCenterTests(unittest.TestCase):
+    def test_automatizacion_exige_evidencia_y_no_deriva(self):
+        casos = (
+            "Hola, gracias por comunicarte con Centro Ejemplo. Hemos recibido tu mensaje y pronto responderemos.",
+            "Soy un asistente virtual. Para agendar escribe 1. Para consultar escribe 2.",
+            "Gracias por escribirnos. Nuestro horario de atención es de 9 a 18. Para continuar escribe 1.",
+        )
+        for texto in casos:
+            with self.subTest(texto=texto):
+                c = clasificar(texto)
+                self.assertEqual(c.automatizacion, "AUTOMATICO_ALTA_CONFIANZA")
+                self.assertFalse(c.derivar)
+        humano = clasificar("Hola 😊 quería saber si tienen hora con un doctor mañana después de las cinco 🙏")
+        self.assertEqual(humano.automatizacion, "SIN_EVIDENCIA_AUTOMATIZACION")
+        self.assertTrue(humano.derivar)
+        self.assertEqual(detectar_automatizacion("")[0], "SIN_EVIDENCIA_AUTOMATIZACION")
+
+    def test_rechazo_no_es_baja_y_si_aislado_no_es_interes(self):
+        from whatsapp_service import WhatsAppService, es_mensaje_interes, es_mensaje_no_interes
+        for texto in ("No gracias", "Por ahora no", "Ya me atendí", "Ya tengo hora", "No quiero agendar"):
+            with self.subTest(texto=texto):
+                self.assertTrue(es_mensaje_no_interes(texto))
+                self.assertFalse(WhatsAppService._es_baja(texto))
+        self.assertFalse(es_mensaje_interes("Sí"))
+        self.assertFalse(WhatsAppService._es_baja("No"))
+        self.assertTrue(WhatsAppService._es_baja("No quiero recibir publicidad"))
+
+    def test_webhook_bot_no_deriva_ni_reincorpora(self):
+        from whatsapp_service import WhatsAppService
+        servicio = WhatsAppService()
+        payload = {"contacts": [{"wa_id": "56912345678"}], "messages": [{
+            "id": "wamid.bot", "type": "text", "text": {"body":
+                "Gracias por comunicarte con Centro Ejemplo. Hemos recibido tu mensaje y pronto responderemos."}}]}
+        with patch("whatsapp_service.esta_suprimido", return_value=False), \
+             patch("whatsapp_service.es_exento", return_value=False), \
+             patch("whatsapp_service.es_numero_prueba", return_value=False), \
+             patch("whatsapp_service.config_get", return_value="{}"), \
+             patch.object(servicio, "_estaba_opt_out", return_value=True), \
+             patch.object(servicio, "_registrar_respuesta", return_value="registrada") as registro, \
+             patch.object(servicio, "_registrar_retractacion") as retractar, \
+             patch("whatsapp_service.al_detectar_consulta") as consulta, \
+             patch("whatsapp_service.al_detectar_interes") as interes:
+            acciones = servicio._procesar_mensajes(payload)
+        self.assertIn("respuesta_automatica_registrada", acciones)
+        self.assertTrue(registro.call_args.kwargs["automatica"])
+        retractar.assert_not_called()
+        consulta.assert_not_called()
+        interes.assert_not_called()
+
     def test_consultas_principales(self):
         casos = {
             "Quiero saber más": "SOLICITA_INFORMACION",
