@@ -20,6 +20,7 @@ from datetime import datetime
 import httpx
 
 from db import conectar, config_get, log_error, tabla_pacientes
+from intenciones_call_center import clasificar, patrones_configurados
 from plantilla_media import obtener_media, ruta_media
 from plantilla_revision import presentar_plantilla, variables_del_cuerpo
 from supresion import (esta_suprimido, es_exento, es_numero_prueba, solicitar_eliminacion,
@@ -163,6 +164,10 @@ ESTADO_WHATSAPP = {"sent", "delivered", "read", "failed"}
 # cuando el webhook detecta un mensaje de interés, para programar el envío
 # automático del mensaje de call center.
 al_detectar_interes = None
+
+# Callback registrado por main.py: persiste una derivación idempotente y
+# prepara el botón hacia el número externo del call center.
+al_detectar_consulta = None
 
 # Callback opcional que main.py registra: se llama con el teléfono del paciente
 # cuando el webhook detecta que se dio de baja (por botón o por texto libre),
@@ -959,8 +964,16 @@ class WhatsAppService:
             # exacto; el resto pasa por los clasificadores de texto libre.
             es_boton = tipo in ("button", "interactive")
             boton = (texto or "").strip().casefold()
+            clasificacion = clasificar(cuerpo, patrones_configurados(
+                config_get("call_center_patrones_consulta", "{}"))) if tipo == "text" else None
             interes = es_mensaje_interes(cuerpo)
             baja = self._es_baja(texto) or self._es_baja(extra)
+            if clasificacion and clasificacion.cancela and any(
+                    frase in cuerpo.casefold() for frase in ("cancelar mi hora", "cancelo mi hora")):
+                # «Cancelar mi hora» es una cancelación de cita, no una baja de
+                # notificaciones; una baja explícita en el mismo texto sí gana.
+                if not any(f in cuerpo.casefold() for f in BAJA_FRASES):
+                    baja = False
             fue_interes = interes or (es_boton and boton == BOTON_TEXTO_INTERES.casefold())
             fue_baja = baja or (es_boton and boton == BOTON_TEXTO_BAJA.casefold())
             # "no me interesa" / "no estoy interesada"…: NO es una baja, el
@@ -981,6 +994,24 @@ class WhatsAppService:
 
             info = self._registrar_respuesta(telefono, cuerpo, mensaje.get("timestamp"))
             acciones.append(f"respuesta_{info}")
+
+            # Las bajas y la supresión siempre tienen prioridad. Una consulta
+            # junto a una confirmación conserva el registro de interés, pero
+            # evita disparar además el mensaje genérico de call center.
+            if clasificacion and clasificacion.derivar and not fue_baja and not no_interes:
+                if interes:
+                    self._registrar_interes(telefono)
+                    hubo_interes = True
+                    acciones.append("interes")
+                if callable(al_detectar_consulta):
+                    try:
+                        resultado = al_detectar_consulta(
+                            telefono, cuerpo, mensaje.get("id"), clasificacion.motivos)
+                        acciones.append(f"derivacion_{resultado}")
+                    except Exception as e:
+                        log_error("al_detectar_consulta", e)
+                        acciones.append("derivacion_error")
+                continue
 
             if es_boton and boton == BOTON_TEXTO_INTERES.casefold():
                 self._registrar_interes(telefono)
@@ -1197,7 +1228,7 @@ class WhatsAppService:
                 conn.commit()
             return "registrada"
         except Exception as e:
-            log_error(f"_registrar_respuesta({telefono})", e)
+            log_error("_registrar_respuesta", e)
             return "error"
 
     def _registrar_baja(self, telefono: str, aviso: bool | None = None,

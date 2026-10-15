@@ -186,8 +186,8 @@ def _validar_categoria_template(valor: str | None) -> str:
 # `call_center_numeros`), ambas configurables en Configuración.
 CALL_CENTER_CLAVE = "call_center"
 CALL_CENTER_TEXTO_DEFAULT = (
-    "¡Hola {nombre}! Gracias por tu interés. Nuestro equipo de atención te "
-    "puede ayudar directamente por WhatsApp."
+    "🤖 Mensaje automático: Gracias por tu interés. Pulsa «Ir al call center» "
+    "y envía el mensaje preparado para conversar con una persona de nuestro equipo."
 )
 CALL_CENTER_PLANTILLA_FIJA = {
     "clave": CALL_CENTER_CLAVE,
@@ -2111,18 +2111,21 @@ def _mensaje_boton_call_center(paciente_id, ambiente: str) -> str:
     return oferta if _CC_PALABRAS_OFERTA.search(texto_origen) else generico
 
 
-def _cc_datos_envio(pac: dict, ambiente: str) -> tuple[str, dict, str]:
+def _cc_datos_envio(pac: dict, ambiente: str, consulta: str = "") -> tuple[str, dict, str]:
     """Devuelve (texto renderizado, datos_plantilla, numero_asignado) para el
     mensaje fijo de call center. Añade el botón que abre el chat del call
     center si hay al menos un número configurado; el número se elige por
     menor uso. El botón lleva un mensaje autocompletado según lo que decía la
     última plantilla enviada."""
-    texto = renderizar_mensaje(CALL_CENTER_PLANTILLA_FIJA["texto"], pac)
+    texto = (config_get("call_center_aviso_consulta") or "").strip() if consulta else ""
+    if not texto or "automátic" not in texto.casefold():
+        texto = CALL_CENTER_PLANTILLA_FIJA["texto"]
+    texto = renderizar_mensaje(texto, pac)
     datos = {"texto": texto}
     numero = _elegir_numero_call_center()
     if numero:
         url = f"https://wa.me/{numero}"
-        prefijo = _mensaje_boton_call_center(pac.get("id"), ambiente)
+        prefijo = ("Hola, esta es mi consulta: " + consulta.strip()[:500]) if consulta else _mensaje_boton_call_center(pac.get("id"), ambiente)
         if prefijo:
             url += "?text=" + urllib.parse.quote(prefijo, safe="")
         datos["cta"] = {
@@ -2132,7 +2135,8 @@ def _cc_datos_envio(pac: dict, ambiente: str) -> tuple[str, dict, str]:
     return texto, datos, numero
 
 
-def _despachar_call_center(pac: dict, ambiente: str, tabla: str | None = None) -> dict:
+def _despachar_call_center(pac: dict, ambiente: str, tabla: str | None = None,
+                           consulta: str = "") -> dict:
     """Envía el mensaje fijo de call center a un paciente y lo registra en el
     historial y en call_center_log. Devuelve {ok, error, telefono}. No lanza.
     Con `tabla` (area) se etiqueta esa tabla y se salta el filtro de
@@ -2148,7 +2152,9 @@ def _despachar_call_center(pac: dict, ambiente: str, tabla: str | None = None) -
         return {"ok": False, "error": "El número no está autorizado en la base de desarrollo", "telefono": telefono}
 
     nombre = " ".join(x for x in [pac.get("nombre"), pac.get("apellido")] if x)
-    texto, datos_plantilla, numero_cc = _cc_datos_envio(pac, ambiente)
+    texto, datos_plantilla, numero_cc = _cc_datos_envio(pac, ambiente, consulta)
+    if not numero_cc:
+        return {"ok": False, "error": "Call center sin número disponible", "telefono": telefono}
     esp_id = None
     if tabla is not None:
         _esp_cc = servicio_areas.area_por_tabla(tabla)
@@ -2178,7 +2184,8 @@ def _despachar_call_center(pac: dict, ambiente: str, tabla: str | None = None) -
             pac.get("id"), nombre, telefono, numero_cc, CALL_CENTER_CLAVE,
             True, "enviado" if ok else "error", error, tabla or nombre_base(ambiente),
         )
-    return {"ok": ok, "error": error, "telefono": telefono, "numero_call_center": numero_cc}
+    return {"ok": ok, "error": error, "telefono": telefono,
+            "numero_call_center": numero_cc, "message_id": message_id}
 
 
 # Teléfonos con un envío automático de call center ya programado o en curso: si
@@ -2200,6 +2207,15 @@ def _enviar_call_center_auto(tel: str) -> None:
     try:
         if esta_suprimido(tel):
             return
+        # Una consulta reciente ya abrió el camino al número externo; no
+        # intercalar el mensaje genérico mientras esa derivación esté vigente.
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM call_center_derivaciones WHERE telefono = %s"
+                " AND estado IN ('pendiente','notificado')"
+                " AND creado >= NOW() - INTERVAL 24 HOUR LIMIT 1", (tel,))
+            if cur.fetchone():
+                return
         match = "REPLACE(REPLACE(telefono, '+', ''), ' ', '') = REPLACE(REPLACE(%s, '+', ''), ' ', '')"
         # Bases legacy más cada tabla de area (Fase 2).
         objetivos = [("produccion", None), ("desarrollo", None)]
@@ -2246,13 +2262,11 @@ def _enviar_call_center_auto(tel: str) -> None:
                         continue
                 res = _despachar_call_center(pac, amb, tabla=t_esp)
                 if res.get("ok"):
-                    print(f"[CALL-CENTER auto] enviado a {res['telefono']} ({t})"
-                          + (f" · call center {res['numero_call_center']}" if res.get("numero_call_center") else ""),
-                          flush=True)
+                    print("[CALL-CENTER auto] respuesta enviada", flush=True)
                 else:
-                    log_error(f"_enviar_call_center_auto({tel}, {t}): {res.get('error')}")
+                    log_error(f"_enviar_call_center_auto({t}): {res.get('error')}")
             except Exception as e:
-                log_error(f"_enviar_call_center_auto({tel}, {t_esp or amb})", e)
+                log_error(f"_enviar_call_center_auto({t_esp or amb})", e)
     finally:
         with _cc_auto_lock:
             _cc_auto_pendientes.discard(tel)
@@ -2277,6 +2291,100 @@ def _programar_call_center_auto(telefono: str) -> None:
 
 # El webhook llama a este callback al detectar un mensaje de interés.
 whatsapp_service.al_detectar_interes = _programar_call_center_auto
+
+
+def _enviar_derivacion_consulta(derivacion_id: int) -> None:
+    """Despacha una sola vez la invitación a conversar con el número externo."""
+    try:
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, telefono, mensaje_original, base_datos, paciente_id, estado"
+                " FROM call_center_derivaciones WHERE id = %s", (derivacion_id,))
+            d = cur.fetchone()
+            if not d or d["estado"] != "pendiente" or esta_suprimido(d["telefono"]):
+                return
+            pacientes = WhatsAppService()._pacientes_con_tel(cur, d["telefono"])
+            pac = next((p for p in pacientes if p["tabla"] == d["base_datos"]), None)
+            if not pac:
+                cur.execute("UPDATE call_center_derivaciones SET estado = 'error' WHERE id = %s",
+                            (derivacion_id,))
+                conn.commit()
+                return
+        tabla = d["base_datos"]
+        ambiente = "desarrollo" if tabla == tabla_pacientes("desarrollo") else "produccion"
+        res = _despachar_call_center(
+            pac, ambiente, tabla=None if ambiente == "desarrollo" else tabla,
+            consulta=d["mensaje_original"])
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute(
+                "UPDATE call_center_derivaciones SET estado = %s,"
+                " numero_call_center = %s, aviso_id = %s WHERE id = %s AND estado = 'pendiente'",
+                ("notificado" if res.get("ok") else "error",
+                 res.get("numero_call_center"), res.get("message_id"), derivacion_id))
+            conn.commit()
+    except Exception as e:
+        log_error("_enviar_derivacion_consulta", e)
+        try:
+            with conectar() as conn, conn.cursor() as cur:
+                cur.execute("UPDATE call_center_derivaciones SET estado = 'error'"
+                            " WHERE id = %s AND estado = 'pendiente'", (derivacion_id,))
+                conn.commit()
+        except Exception as persist_error:
+            log_error("_enviar_derivacion_consulta_estado", persist_error)
+
+
+def _registrar_derivacion_consulta(telefono: str, texto: str, mensaje_id: str,
+                                   motivos: tuple[str, ...]) -> str:
+    """Deduplica por id de Meta y reutiliza solicitudes recientes del número."""
+    if not mensaje_id or not motivos:
+        return "sin_id"
+    tel = normalizar_telefono(telefono) or telefono
+    if esta_suprimido(tel):
+        return "suprimida"
+    nueva = False
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("SELECT derivacion_id FROM call_center_derivacion_mensajes"
+                    " WHERE mensaje_id = %s", (mensaje_id,))
+        if cur.fetchone():
+            return "duplicada"
+        cur.execute(
+            "SELECT id, estado FROM call_center_derivaciones"
+            " WHERE telefono = %s AND estado IN ('pendiente','notificado','error')"
+            " AND creado >= NOW() - INTERVAL 30 MINUTE"
+            " ORDER BY id DESC LIMIT 1 FOR UPDATE", (tel,))
+        anterior = cur.fetchone()
+        if anterior:
+            derivacion_id = anterior["id"]
+            if anterior["estado"] == "error":
+                cur.execute("UPDATE call_center_derivaciones SET estado = 'pendiente'"
+                            " WHERE id = %s", (derivacion_id,))
+                nueva = True
+        else:
+            pacientes = WhatsAppService()._pacientes_con_tel(cur, tel)
+            if not pacientes:
+                return "sin_paciente"
+            pac = next((p for p in pacientes if p["tabla"] not in
+                        (tabla_pacientes("desarrollo"), tabla_pacientes("produccion"))),
+                       pacientes[-1])
+            cur.execute(
+                "INSERT INTO call_center_derivaciones"
+                " (telefono, mensaje_original, motivos, base_datos, paciente_id)"
+                " VALUES (%s, %s, %s, %s, %s)",
+                (tel, texto[:2000], ",".join(motivos), pac["tabla"], pac["id"]))
+            derivacion_id = cur.lastrowid
+            nueva = True
+        cur.execute("INSERT INTO call_center_derivacion_mensajes"
+                    " (mensaje_id, derivacion_id) VALUES (%s, %s)",
+                    (mensaje_id[:255], derivacion_id))
+        conn.commit()
+    if nueva:
+        timer = threading.Timer(0, _enviar_derivacion_consulta, args=(derivacion_id,))
+        timer.daemon = True
+        timer.start()
+    return "nueva" if nueva else "reutilizada"
+
+
+whatsapp_service.al_detectar_consulta = _registrar_derivacion_consulta
 
 
 _MENSAJE_BAJA_DESPEDIDA = (
@@ -3551,6 +3659,7 @@ def obtener_call_center_log(sesion: dict = Depends(exigir("call_center_registro"
     No privilegiados: filas y contadores solo de sus áreas asignadas."""
     entradas = []
     contadores = {}
+    derivaciones = []
     try:
         filtro_area, args = "", ()
         if not _es_privilegiado(sesion):
@@ -3593,10 +3702,62 @@ def obtener_call_center_log(sesion: dict = Depends(exigir("call_center_registro"
                     r["numero_paciente"] = _telefono_paciente_oculto(r.get("numero_paciente"))
                     r["descripcion_error"] = None
                 entradas.append(r)
+            cur.execute(
+                "SELECT id, paciente_id, telefono, mensaje_original, motivos, estado,"
+                " numero_call_center, base_datos, creado"
+                " FROM call_center_derivaciones"
+                + (f" WHERE {filtro_area}" if filtro_area else "")
+                + " ORDER BY id DESC LIMIT 100", args or None)
+            solicitudes = cur.fetchall()
+            propios_derivacion = {
+                tabla: _ids_csv_propios(tabla, [r.get("paciente_id") for r in solicitudes
+                                            if r.get("base_datos") == tabla], sesion)
+                for tabla in {r.get("base_datos") for r in solicitudes if r.get("base_datos")}
+            }
+            for d in solicitudes:
+                propio = d.get("paciente_id") in propios_derivacion.get(d.get("base_datos"), set())
+                derivaciones.append({
+                    "id": d["id"], "motivos": d["motivos"].split(","),
+                    "estado": d["estado"], "numero_call_center": d.get("numero_call_center"),
+                    "base_datos": d.get("base_datos"),
+                    "fecha": d["creado"].strftime("%d-%m-%Y %H:%M"),
+                    "telefono": d["telefono"] if propio else _telefono_paciente_oculto(d["telefono"]),
+                    "mensaje": d["mensaje_original"] if propio else "Consulta protegida: solo quien cargó el CSV puede verla.",
+                    "puede_reintentar": propio and d["estado"] == "error",
+                })
     except Exception as e:
         log_error("obtener_call_center_log", e)
         raise HTTPException(503, detail="No se pudo cargar el historial de call center.")
-    return {"entradas": entradas, "contadores": contadores}
+    return {"entradas": entradas, "contadores": contadores,
+            "derivaciones": derivaciones}
+
+
+def reintentar_derivacion_call_center(
+        derivacion_id: int, sesion: dict = Depends(exigir("call_center_registro"))):
+    """Permite al propietario recuperar un aviso fallido, sin crear otro caso."""
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("SELECT paciente_id, base_datos, estado FROM call_center_derivaciones"
+                    " WHERE id = %s FOR UPDATE", (derivacion_id,))
+        fila = cur.fetchone()
+        if not fila:
+            raise HTTPException(404, detail="Derivación no encontrada.")
+        if fila["paciente_id"] not in _ids_csv_propios(
+                fila["base_datos"], [fila["paciente_id"]], sesion):
+            raise HTTPException(403, detail="Solo quien cargó el CSV puede reintentar esta derivación.")
+        if fila["estado"] != "error":
+            raise HTTPException(409, detail="Solo se pueden reintentar derivaciones con error.")
+        cur.execute("UPDATE call_center_derivaciones SET estado = 'pendiente'"
+                    " WHERE id = %s", (derivacion_id,))
+        conn.commit()
+    try:
+        auditoria_registrar(sesion.get("usuario", ""), "call_center_derivacion_reintentada",
+                            str(derivacion_id), "Reintentó el aviso de derivación al call center")
+    except Exception as e:
+        log_error("auditar reintento de derivación", e)
+    timer = threading.Timer(0, _enviar_derivacion_consulta, args=(derivacion_id,))
+    timer.daemon = True
+    timer.start()
+    return {"ok": True}
 
 
 def _leer_config_legacy(ambiente: str | None = None) -> dict:
@@ -3829,6 +3990,10 @@ _CONFIG_SECCIONES = [
             {"clave": "call_center_boton_mensaje_oferta", "etiqueta": "Mensaje del botón (oferta / precio especial)", "tipo": "text",
              "ayuda": "Se usa en lugar del genérico cuando la última plantilla enviada al paciente "
                       "mencionaba un descuento, una oferta o un precio especial."},
+            {"clave": "call_center_aviso_consulta", "etiqueta": "Aviso automático de derivación", "tipo": "textarea",
+             "ayuda": "Debe decir explícitamente «mensaje automático». El paciente debe pulsar el botón y enviar el texto preparado."},
+            {"clave": "call_center_patrones_consulta", "etiqueta": "Patrones de consulta (JSON)", "tipo": "textarea",
+             "ayuda": "Frases literales por motivo; se validan antes de activarse. No incluir datos de pacientes."},
         ],
     },
 ]
@@ -3877,6 +4042,22 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
         if clave == "call_center_numeros":
             partes = [re.sub(r"\D", "", p) for p in v.split(",")]
             v = ", ".join(dict.fromkeys(p for p in partes if p))
+        if clave == "call_center_aviso_consulta":
+            if not v or "mensaje automático" not in v.casefold() or len(v) > 1000:
+                raise HTTPException(422, detail="El aviso debe incluir «mensaje automático» y tener menos de 1000 caracteres.")
+        if clave == "call_center_patrones_consulta":
+            from intenciones_call_center import MOTIVOS, patrones_configurados
+            try:
+                catalogo = json.loads(v or "{}")
+            except ValueError:
+                raise HTTPException(422, detail="Los patrones deben ser JSON válido.")
+            if not isinstance(catalogo, dict) or any(k not in MOTIVOS or not isinstance(frases, list)
+                                                    or len(frases) > 30 or any(not isinstance(f, str)
+                                                    or not 4 <= len(f) <= 80 or re.search(r"\d|@", f)
+                                                    for f in frases)
+                                                    for k, frases in catalogo.items()):
+                raise HTTPException(422, detail="Patrones inválidos: usa motivos conocidos y hasta 30 frases de 4 a 80 caracteres, sin datos personales.")
+            v = json.dumps(patrones_configurados(v), ensure_ascii=False)
         if clave in ("smtp_tls", "wa_rate_limit_activo", "anti_flip_flop_dev"):
             v = "true" if v.lower() in ("true", "1", "on", "si", "sí") else "false"
         if clave == "groq_api_key":

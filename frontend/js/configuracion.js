@@ -149,6 +149,8 @@ function render(secciones) {
         control =
           `<label class="config-switch"><input type="checkbox" id="${id}" data-clave="${c.clave}"${on ? " checked" : ""}>` +
           `<span>Activado</span></label>`;
+      } else if (c.tipo === "textarea") {
+        control = `<textarea id="${id}" data-clave="${c.clave}" rows="4" autocomplete="off" spellcheck="false">${escaparHtml(val)}</textarea>`;
       } else {
         const t = c.tipo === "number" ? "number" : c.tipo === "password" ? "password" : "text";
         control = `<input type="${t}" id="${id}" data-clave="${c.clave}" value="${escaparAtributo(val)}" autocomplete="off" spellcheck="false">`;

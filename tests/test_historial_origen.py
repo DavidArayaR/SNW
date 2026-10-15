@@ -12,13 +12,14 @@ import main
 
 
 class HistorialOrigenTests(unittest.TestCase):
-    def test_tabla_dice_tipo_y_no_muestra_registro_call_center(self):
+    def test_tabla_dice_tipo_y_muestra_registro_call_center(self):
         raiz = Path(__file__).resolve().parents[1] / "frontend"
         pagina = (raiz / "historial.html").read_text(encoding="utf-8")
         script = (raiz / "js" / "historial.js").read_text(encoding="utf-8")
         self.assertIn("<th>Tipo</th>", pagina)
-        self.assertNotIn("panelCCRegistro", pagina)
-        self.assertNotIn("api/call-center/log", script)
+        self.assertIn("panelCCRegistro", pagina)
+        self.assertIn("tablaCCDerivaciones", pagina)
+        self.assertIn("api/call-center/log", script)
 
     def _consultar(self, origen, lotes, programados=()):
         conexion = MagicMock()

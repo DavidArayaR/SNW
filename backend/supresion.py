@@ -284,6 +284,11 @@ def _limpiar_datos(cur, telefono: str) -> tuple[int, int]:
         por_id = row.get("paciente_id") in ids_por_tabla.get(row.get("base_datos") or "", ())
         if por_numero or por_id:
             cur.execute("DELETE FROM call_center_log WHERE id = %s", (row["id"],))
+    # La derivación conserva el texto original; ELIMINAR debe retirarlo también.
+    cur.execute("SELECT id, telefono FROM call_center_derivaciones")
+    for row in cur.fetchall():
+        if normalizar_telefono(row.get("telefono") or "") == telefono:
+            cur.execute("DELETE FROM call_center_derivaciones WHERE id = %s", (row["id"],))
     cur.execute("SELECT telefono, tipo FROM whatsapp_avisos_unicos")
     for row in cur.fetchall():
         if normalizar_telefono(row.get("telefono") or "") == telefono:

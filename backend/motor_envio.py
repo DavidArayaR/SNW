@@ -12,14 +12,11 @@ class MotorSimulado:
     def enviar(self, telefono: str, mensaje: str, plantilla: dict | None = None, variables: dict | None = None):
         if esta_suprimido(telefono):
             return False, None, "Número suprimido por solicitud del paciente"
-        vista = mensaje.replace("\n", " ")[:60]
         cta = (plantilla or {}).get("cta") if isinstance(plantilla, dict) else None
-        extra = f"  [botón: {cta.get('texto')} -> {cta.get('url')}]" if cta and cta.get("url") else ""
-        try:
-            print(f"[MOTOR {self.nombre}] -> {telefono}: {vista}...{extra}")
-        except UnicodeEncodeError:
-            # La consola de Windows (cp1252) no puede imprimir emojis del mensaje.
-            print(f"[MOTOR {self.nombre}] -> {telefono}: ({len(mensaje)} caracteres){extra}")
+        # El URL puede llevar una consulta del paciente prellenada; jamás
+        # imprimir mensaje, teléfono ni URL en la consola de simulación.
+        print(f"[MOTOR {self.nombre}] mensaje simulado ({len(mensaje)} caracteres, "
+              f"botón={'sí' if cta and cta.get('url') else 'no'})")
         return True, None, None
 
 

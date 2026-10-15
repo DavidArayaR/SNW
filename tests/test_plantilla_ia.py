@@ -119,6 +119,7 @@ class ProveedorIATests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("clave-falsa", str(argumentos.kwargs["json"]))
         self.assertNotIn("David", str(argumentos.kwargs["json"]))
         self.assertIn("emojis", argumentos.kwargs["json"]["messages"][0]["content"])
+        self.assertIn("responder exactamente «Me interesa»", argumentos.kwargs["json"]["messages"][0]["content"])
         self.assertEqual(argumentos.kwargs["json"]["model"], ia.MODELO)
         self.assertEqual(argumentos.kwargs["json"]["max_completion_tokens"], 1536)
         self.assertEqual(argumentos.kwargs["json"]["reasoning_effort"], "low")

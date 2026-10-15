@@ -623,6 +623,25 @@ toastEl.addEventListener("click", () => toastEl.classList.remove("visible"));
 
 /* ---------- Historial de respuestas de call center ---------- */
 const panelCCLogEl = $("#panelCCRegistro");
+const etiquetasMotivoCC = {
+  CONSULTA_HORAS: "Horas",
+  CONSULTA_MEDICO: "Profesionales",
+  CONSULTA_PRECIOS: "Precios y servicios",
+  SOLICITA_CONTACTO: "Contacto",
+  SOLICITA_INFORMACION: "Información",
+  CONSULTA_AMBIGUA: "Consulta general"
+};
+const etiquetasEstadoCC = {
+  pendiente: "Pendiente",
+  notificado: "Botón enviado",
+  error: "Error de envío",
+  finalizado: "Finalizada"
+};
+
+function badgeEstadoCC(estado) {
+  const clave = Object.hasOwn(etiquetasEstadoCC, estado) ? estado : "pendiente";
+  return `<span class="historial__cc-estado-badge historial__cc-estado-badge--${clave}">${etiquetasEstadoCC[clave]}</span>`;
+}
 
 function numeroCCVisible(numero) {
   const valor = String(numero ?? "").trim();
@@ -632,8 +651,10 @@ function numeroCCVisible(numero) {
 async function cargarLogCC(mostrarFeedback = false) {
   if (!panelCCLogEl) return;
   const body = $("#ccLogBody");
+  const derivacionesBody = $("#ccDerivacionesBody");
   const cont = $("#ccLogContadores");
   body.innerHTML = `<tr><td colspan="6" class="historial__cc-estado">Cargando historial…</td></tr>`;
+  derivacionesBody.innerHTML = `<tr><td colspan="6" class="historial__cc-estado">Cargando consultas…</td></tr>`;
   try {
     const r = await fetch("api/call-center/log", { headers: authHeaders(), cache: "no-store" });
     if (r.status === 401) { window.snwSesionExpirada(); return; }
@@ -648,9 +669,24 @@ async function cargarLogCC(mostrarFeedback = false) {
           `<div class="historial__cc-uso"><span>${escaparHtml(numeroCCVisible(numero))}</span>` +
           `<strong>${(Number(usos) || 0).toLocaleString("es-CL")} uso${Number(usos) === 1 ? "" : "s"}</strong></div>`
         ).join("")
-      : `<p class="field__hint">Todavía no hay usos registrados.</p>`;
+      : `<p class="historial__cc-sin-usos">Todavía no hay usos registrados.</p>`;
 
     const filas = data.entradas || [];
+    const derivaciones = data.derivaciones || [];
+    derivacionesBody.innerHTML = derivaciones.length
+      ? derivaciones.map((d) => `<tr>` +
+          `<td class="campo-fecha">${escaparHtml(d.fecha ?? "—")}</td>` +
+          `<td class="campo-tel">${escaparHtml(d.telefono ?? "—")}</td>` +
+          `<td class="historial__cc-mensaje">${escaparHtml(d.mensaje ?? "—")}</td>` +
+          `<td><div class="historial__cc-motivos">${(d.motivos || []).map((motivo) =>
+            `<span class="historial__cc-motivo">${escaparHtml(etiquetasMotivoCC[motivo] || motivo)}</span>`
+          ).join("") || "—"}</div></td>` +
+          `<td class="campo-tel">${escaparHtml(numeroCCVisible(d.numero_call_center))}</td>` +
+          `<td>${badgeEstadoCC(d.estado)}` +
+          (d.puede_reintentar ? ` <button type="button" class="btn btn--ghost historial__cc-reintentar" data-reintentar-derivacion="${Number(d.id)}">Reintentar</button>` : "") +
+          `</td>` +
+          `</tr>`).join("")
+      : `<tr><td colspan="6" class="historial__cc-estado">Todavía no hay consultas derivadas.</td></tr>`;
     body.innerHTML = filas.length
       ? filas.map((f) => {
           const enviado = f.estado === "enviado";
@@ -661,7 +697,7 @@ async function cargarLogCC(mostrarFeedback = false) {
             `<td class="campo-tel">${escaparHtml(f.numero_paciente ?? "—")}</td>` +
             `<td>${escaparHtml(f.base_datos ?? "—")}</td>` +
             `<td class="campo-tel">${escaparHtml(numeroCCVisible(f.numero_call_center))}</td>` +
-            `<td><span class="estado-envio estado-envio--${enviado ? "completado" : "rechazado"}">${estado}</span>` +
+            `<td><span class="historial__cc-estado-badge historial__cc-estado-badge--${enviado ? "notificado" : "error"}">${estado}</span>` +
             (f.descripcion_error ? `<div class="hist-msg">${escaparHtml(f.descripcion_error)}</div>` : "") +
             `</td></tr>`;
         }).join("")
@@ -671,11 +707,29 @@ async function cargarLogCC(mostrarFeedback = false) {
     console.error("[historial.js cargarLogCC()]", err);
     cont.innerHTML = "";
     body.innerHTML = `<tr><td colspan="6" class="historial__cc-estado historial__cc-estado--error">No se pudo cargar el historial de call center.</td></tr>`;
+    derivacionesBody.innerHTML = `<tr><td colspan="6" class="historial__cc-estado historial__cc-estado--error">No se pudieron cargar las consultas.</td></tr>`;
   }
 }
 
 if (panelCCLogEl) {
   window.snwConCooldown($("#btnActualizarCCLog"), () => cargarLogCC(true));
+  $("#ccDerivacionesBody").addEventListener("click", async (evento) => {
+    const boton = evento.target.closest("[data-reintentar-derivacion]");
+    if (!boton || boton.disabled) return;
+    boton.disabled = true;
+    try {
+      const id = Number(boton.dataset.reintentarDerivacion);
+      const r = await fetch(`api/call-center/derivaciones/${id}/reintentar`, {
+        method: "POST", headers: authHeaders()
+      });
+      if (!r.ok) throw new Error("No se pudo reintentar la derivación.");
+      toast("Aviso de derivación reprogramado.");
+      await cargarLogCC();
+    } catch (err) {
+      toast(err.message || "No se pudo reintentar.", "error");
+      boton.disabled = false;
+    }
+  });
 }
 
 cargarBasesHist();

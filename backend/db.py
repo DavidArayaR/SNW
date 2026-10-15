@@ -88,6 +88,11 @@ CONFIG_DEFAULTS = {
     "call_center_numeros": "",
     "call_center_boton_mensaje": "Hola, estoy interesado/a en la información que me enviaron.",
     "call_center_boton_mensaje_oferta": "Hola, estoy interesado/a en la oferta que me enviaron.",
+    "call_center_aviso_consulta": (
+        "🤖 Mensaje automático: Recibimos tu consulta. Pulsa «Ir al call center» "
+        "y envía el mensaje preparado para que una persona pueda atenderte."
+    ),
+    "call_center_patrones_consulta": "{}",
     # Correo (confirmación de envíos en producción)
     "smtp_host": "",
     "smtp_port": "587",
@@ -218,6 +223,33 @@ def asegurar_tabla_config() -> None:
                 "  fecha_hora DATETIME DEFAULT CURRENT_TIMESTAMP,"
                 "  INDEX idx_numero (numero_call_center),"
                 "  INDEX idx_fecha (fecha_hora)"
+                ") CHARACTER SET utf8mb4"
+            )
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS call_center_derivaciones ("
+                " id BIGINT AUTO_INCREMENT PRIMARY KEY,"
+                " telefono VARCHAR(20) NOT NULL,"
+                " mensaje_original TEXT NOT NULL,"
+                " motivos VARCHAR(255) NOT NULL,"
+                " estado ENUM('pendiente','notificado','error','finalizado') NOT NULL DEFAULT 'pendiente',"
+                " numero_call_center VARCHAR(20) DEFAULT NULL,"
+                " base_datos VARCHAR(50) DEFAULT NULL,"
+                " paciente_id INT DEFAULT NULL,"
+                " aviso_id VARCHAR(255) DEFAULT NULL,"
+                " creado DATETIME DEFAULT CURRENT_TIMESTAMP,"
+                " actualizado DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
+                " INDEX idx_telefono_estado (telefono, estado, creado),"
+                " INDEX idx_creado (creado)"
+                ") CHARACTER SET utf8mb4"
+            )
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS call_center_derivacion_mensajes ("
+                " mensaje_id VARCHAR(255) PRIMARY KEY,"
+                " derivacion_id BIGINT NOT NULL,"
+                " creado DATETIME DEFAULT CURRENT_TIMESTAMP,"
+                " INDEX idx_derivacion (derivacion_id),"
+                " FOREIGN KEY (derivacion_id) REFERENCES call_center_derivaciones(id)"
+                " ON DELETE CASCADE"
                 ") CHARACTER SET utf8mb4"
             )
             # Cuentas de la aplicación (antes en data/usuarios.json).

@@ -11,6 +11,7 @@ RUTAS = (
     ("/api/pacientes/{paciente_id}/respuesta", "PUT", "actualizar_respuesta_paciente", None),
     ("/api/pacientes/{paciente_id}/mensajes", "GET", "mensajes_paciente", None),
     ("/api/call-center/log", "GET", "obtener_call_center_log", None),
+    ("/api/call-center/derivaciones/{derivacion_id}/reintentar", "POST", "reintentar_derivacion_call_center", None),
 )
 
 def registrar(handlers): return crear_router("Pacientes", handlers, RUTAS)

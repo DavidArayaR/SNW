@@ -362,32 +362,128 @@ tbody tr:last-child td { border-bottom: none; }
 
 .campo-fecha { white-space: nowrap; color: var(--texto-suave); font-size: .82rem; }
 
-/* Respuestas de call center: resumen histórico por número y detalle reciente. */
-.historial__cc-intro { margin: 0 0 14px; }
+/* Historial de call center: jerarquía, lectura y estados en ambos temas. */
+.historial__cc-contenido {
+  display: grid;
+  gap: 28px;
+  padding: 22px;
+}
+.historial__cc-seccion { min-width: 0; }
+.historial__cc-seccion + .historial__cc-seccion {
+  padding-top: 24px;
+  border-top: 1px solid var(--borde);
+}
+.historial__cc-seccion-head { margin-bottom: 14px; }
+.historial__cc-seccion-head h3 {
+  margin: 0 0 4px;
+  color: var(--texto);
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+.historial__cc-seccion-head p {
+  max-width: 70ch;
+  margin: 0;
+  color: var(--texto-suave);
+  font-size: .84rem;
+  line-height: 1.5;
+}
 .historial__cc-usos {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 10px;
-  margin-bottom: 18px;
 }
 .historial__cc-uso {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  min-width: 150px;
-  padding: 10px 14px;
+  gap: 6px;
+  min-width: 0;
+  padding: 14px 16px;
   border: 1px solid var(--borde);
-  border-radius: 10px;
+  border-radius: var(--radio);
   background: var(--surface-2);
   color: var(--texto);
 }
-.historial__cc-uso span { color: var(--texto-suave); font-size: .8rem; }
-.historial__cc-uso strong { font-size: 1.08rem; font-variant-numeric: tabular-nums; }
+.historial__cc-uso span { color: var(--texto-suave); font-size: .78rem; line-height: 1.4; }
+.historial__cc-uso strong { font-size: 1.25rem; line-height: 1.2; font-variant-numeric: tabular-nums; }
 .historial__cc-uso--total {
   border-color: var(--ok-bd);
   background: var(--ok-bg);
 }
 .historial__cc-uso--total strong { color: var(--ok-fg); }
+.historial__cc-sin-usos {
+  margin: 0;
+  padding: 16px;
+  border: 1px dashed var(--borde);
+  border-radius: var(--radio);
+  color: var(--texto-suave);
+  font-size: .86rem;
+}
+.historial__cc-tabla-wrap {
+  max-height: 420px;
+  border: 1px solid var(--borde);
+  border-radius: var(--radio);
+  background: var(--panel);
+}
+.historial__cc-tabla-wrap:focus-visible {
+  outline: 2px solid var(--verde);
+  outline-offset: 2px;
+}
+#tablaCCDerivaciones, #tablaCCLog { min-width: 790px; }
+#panelCCRegistro .historial__cc-tabla-wrap th {
+  padding: 12px 14px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--borde);
+  color: var(--texto-suave);
+}
+#panelCCRegistro .historial__cc-tabla-wrap td {
+  padding: 13px 14px;
+  border-bottom: 1px solid var(--linea);
+  line-height: 1.45;
+}
+#panelCCRegistro .historial__cc-tabla-wrap tbody tr:last-child td { border-bottom: 0; }
+#panelCCRegistro .historial__cc-tabla-wrap tbody tr:hover { background: var(--hover); }
+.historial__cc-mensaje {
+  min-width: 220px;
+  max-width: 360px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.historial__cc-motivos { display: flex; flex-wrap: wrap; gap: 5px; max-width: 240px; }
+.historial__cc-motivo {
+  display: inline-block;
+  padding: 3px 8px;
+  border: 1px solid var(--brand-tint-bd);
+  border-radius: 7px;
+  background: var(--brand-tint);
+  color: var(--brand-tint-fg);
+  font-size: .72rem;
+  font-weight: 650;
+  line-height: 1.4;
+}
+.historial__cc-estado-badge {
+  display: inline-block;
+  padding: 4px 9px;
+  border: 1px solid var(--neutral-bd);
+  border-radius: 7px;
+  background: var(--neutral-bg);
+  color: var(--neutral-fg);
+  font-size: .76rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.historial__cc-estado-badge--notificado,
+.historial__cc-estado-badge--finalizado {
+  border-color: var(--ok-bd);
+  background: var(--ok-bg);
+  color: var(--ok-fg);
+}
+.historial__cc-estado-badge--error {
+  border-color: var(--danger-bd);
+  background: var(--danger-bg);
+  color: var(--danger-fg);
+}
+.historial__cc-reintentar { display: block; margin-top: 7px; }
 .historial__cc-estado { padding: 20px; text-align: center; color: var(--texto-suave); }
 .historial__cc-estado--error { color: var(--danger-fg); }
 #tablaCCLog .campo-nombre { white-space: nowrap; }
@@ -614,10 +710,18 @@ tbody tr:last-child td { border-bottom: none; }
 .msg-interes-estado--si { color: var(--ok-fg); }
 .msg-interes-estado--si i { color: var(--ok-fg); }
 
-#panelCCRegistro .tabla-wrap { max-height: 420px; }
-#panelCCRegistro th, #panelCCRegistro td { padding: 9px 16px; }
 #panelCCRegistro .campo-tel { font-size: .82rem; }
 #panelCCRegistro tbody tr { cursor: default; user-select: text; }
+
+@media (max-width: 700px) {
+  .historial__cc-contenido { gap: 22px; padding: 16px; }
+  .historial__cc-seccion + .historial__cc-seccion { padding-top: 20px; }
+  .historial__cc-usos { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .historial__cc-uso { padding: 12px; }
+}
+@media (max-width: 420px) {
+  .historial__cc-usos { grid-template-columns: 1fr; }
+}
 
 .respuesta-badge {
   display: inline-block;

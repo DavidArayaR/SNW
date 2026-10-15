@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
   <link rel="stylesheet" href="css/tema.css?v=scrollbar1">
   <link rel="stylesheet" href="css/styles.css">
-  <link rel="stylesheet" href="css/componentes.css?v=historial-call-center1">
+  <link rel="stylesheet" href="css/componentes.css?v=historial-call-center2">
   <link rel="stylesheet" href="css/layout.css?v=scrollbar1">
   <link rel="stylesheet" href="css/refinamiento.css?v=frontend4">
   <script src="js/tema.js?v=scrollbar1"></script>
@@ -104,24 +104,55 @@
         <h2>Historial de call center</h2>
         <button id="btnActualizarCCLog" class="btn btn--ghost" type="button">Actualizar</button>
       </div>
-      <p class="field__hint historial__cc-intro">
-        Últimos 200 registros. Los usos por número cuentan todos los envíos exitosos registrados.
-      </p>
-      <div id="ccLogContadores" class="historial__cc-usos" aria-live="polite"></div>
-      <div class="tabla-wrap">
-        <table id="tablaCCLog">
-          <thead>
-            <tr>
-              <th>Fecha</th>
-              <th>Paciente</th>
-              <th>Teléfono del paciente</th>
-              <th>Base de datos</th>
-              <th>Número de call center</th>
-              <th>Estado</th>
-            </tr>
-          </thead>
-          <tbody id="ccLogBody"></tbody>
-        </table>
+      <div class="historial__cc-contenido">
+        <section class="historial__cc-seccion" aria-labelledby="ccUsosTitulo">
+          <div class="historial__cc-seccion-head">
+            <div>
+              <h3 id="ccUsosTitulo">Uso de números</h3>
+              <p>Envíos exitosos por número de call center.</p>
+            </div>
+          </div>
+          <div id="ccLogContadores" class="historial__cc-usos" aria-live="polite"></div>
+        </section>
+
+        <section class="historial__cc-seccion" aria-labelledby="ccDerivacionesTitulo">
+          <div class="historial__cc-seccion-head">
+            <div>
+              <h3 id="ccDerivacionesTitulo">Consultas derivadas</h3>
+              <p>El botón enviado no confirma que el paciente haya iniciado la conversación con un ejecutivo.</p>
+            </div>
+          </div>
+          <div class="tabla-wrap historial__cc-tabla-wrap" role="region" aria-label="Consultas derivadas" tabindex="0">
+            <table id="tablaCCDerivaciones">
+              <thead><tr><th>Fecha</th><th>Paciente</th><th>Consulta</th><th>Motivo</th><th>Número de call center</th><th>Estado</th></tr></thead>
+              <tbody id="ccDerivacionesBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="historial__cc-seccion" aria-labelledby="ccAvisosTitulo">
+          <div class="historial__cc-seccion-head">
+            <div>
+              <h3 id="ccAvisosTitulo">Avisos enviados</h3>
+              <p>Últimos 200 mensajes con el número asignado y su estado de envío.</p>
+            </div>
+          </div>
+          <div class="tabla-wrap historial__cc-tabla-wrap" role="region" aria-label="Avisos de call center enviados" tabindex="0">
+            <table id="tablaCCLog">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Paciente</th>
+                  <th>Teléfono del paciente</th>
+                  <th>Base de datos</th>
+                  <th>Número de call center</th>
+                  <th>Estado</th>
+                </tr>
+              </thead>
+              <tbody id="ccLogBody"></tbody>
+            </table>
+          </div>
+        </section>
       </div>
     </section>
 
@@ -171,7 +202,7 @@
 
   <script src="js/layout.js?v=navcurve7"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/historial.js?v=historial-call-center1"></script>
+  <script src="js/historial.js?v=historial-call-center2"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>

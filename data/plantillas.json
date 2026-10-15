@@ -1,22 +1,23 @@
 [
   {
-    "id": 2,
-    "clave": "descuento_25",
-    "nombre": "Descuento 25",
-    "texto": "¡Hola {nombre} 👋!\n\n💚 Esta semana, aprovecha un *25% de descuento* en tu sesión de *Salud Mental*.\n\n✍️ Selecciona *_Me interesa_* para agendar tu hora antes de que termine la promoción.\n¡Cuidarte también es quererte! 🏥✨",
-    "whatsapp_template": "descuento_25",
+    "id": 1,
+    "clave": "smpt_25000",
+    "nombre": "Smpt 25000",
+    "area_id": 11,
+    "texto": "Hola {nombre}, ¿cómo has estado? 💙\n\nEn Salud Mental Para Todos queremos seguir acompañándote. Por haberte atendido con nosotros, tu próxima consulta con médico de salud mental tiene un precio preferencial de $25.000.\n\nSi quieres retomar tus controles o continuar tu tratamiento, aquí estamos para ti 🤗\n\n🩺 Evaluación y seguimiento de tu tratamiento, con recetas de medicamentos y licencias médicas cuando corresponda, según evaluación médica.\n\n📍 Presencial en Santiago Centro o por telemedicina desde todo Chile.\n\nElige el horario que te acomode y agenda aquí:\nhttps://saludmentalparatodos.cl\n\nUn abrazo,\nEquipo Salud Mental Para Todos 💙",
+    "whatsapp_template": "smpt_25000",
     "whatsapp_template_lang": "es",
     "whatsapp_template_categoria": "MARKETING",
-    "whatsapp_template_id": "1737252654192451",
+    "whatsapp_template_id": "2296662054234554",
     "whatsapp_template_status": "APPROVED",
-    "whatsapp_template_rejected_reason": "NONE",
-    "whatsapp_template_error": null,
-    "actualizada": 1790617559020,
-    "area_id": null,
     "whatsapp_template_quality_score": {
       "score": "UNKNOWN",
-      "date": 1788793537
+      "date": 1791995016
     },
+    "whatsapp_template_rejected_reason": "NONE",
+    "whatsapp_template_error": null,
+    "encabezado_media_id": "99d44ce71be241169f5e921e84f763d7",
+    "encabezado_meta_registrado": true,
     "botones": [
       {
         "tipo": "respuesta",
@@ -36,168 +37,32 @@
     ],
     "encabezado_texto": null,
     "pie_texto": null,
-    "whatsapp_header_format": null
+    "whatsapp_header_format": "IMAGE",
+    "actualizada": 1791996097818
   },
   {
-    "id": 3,
-    "clave": "default",
-    "nombre": "Default",
-    "texto": "¡Hola {nombre} 👋!\n\n💚 Esta semana, en *Salud Mental Para Todos* aprovecha tu sesión a solo *$25.000*.\n\n✍️ Selecciona *_Me interesa_* para agendar tu hora antes de que termine la promoción. \n¡Cuidarte también es quererte! 🏥✨",
-    "whatsapp_template": "default",
-    "whatsapp_template_lang": "es",
-    "whatsapp_template_categoria": "MARKETING",
-    "whatsapp_template_id": "1382444860710230",
-    "whatsapp_template_status": "APPROVED",
-    "whatsapp_template_rejected_reason": "NONE",
-    "whatsapp_template_error": null,
-    "actualizada": 1791895208110,
-    "ultima_edicion": 1791895208110,
-    "whatsapp_template_aprobada_en": 1791895387976,
-    "area_id": null,
-    "encabezado_media_id": null,
-    "encabezado_meta_registrado": null,
-    "whatsapp_template_quality_score": {
-      "score": "UNKNOWN",
-      "date": 1788793570
-    },
-    "botones": [
-      {
-        "tipo": "respuesta",
-        "texto": "Me interesa",
-        "url": null
-      },
-      {
-        "tipo": "respuesta",
-        "texto": "No me interesa",
-        "url": null
-      },
-      {
-        "tipo": "respuesta",
-        "texto": "Dar de baja",
-        "url": null
-      }
-    ],
-    "encabezado_texto": null,
-    "pie_texto": null,
-    "whatsapp_header_format": null
-  },
-  {
-    "id": 4,
+    "id": 6,
     "clave": "hello_world",
     "nombre": "Hello world",
+    "area_id": null,
     "texto": "Welcome and congratulations!! This message demonstrates your ability to send a WhatsApp message notification from the Cloud API, hosted by Meta. Thank you for taking the time to test with us.",
     "whatsapp_template": "hello_world",
     "whatsapp_template_lang": "en_US",
     "whatsapp_template_categoria": "UTILITY",
     "whatsapp_template_id": "1285483704651425",
     "whatsapp_template_status": "APPROVED",
-    "whatsapp_template_rejected_reason": "NONE",
-    "whatsapp_template_error": null,
-    "actualizada": 1790617613535,
-    "area_id": null,
-    "ultima_edicion": 1790617613535,
-    "whatsapp_template_aprobada_en": 1790617655686,
     "whatsapp_template_quality_score": {
       "score": "UNKNOWN",
       "date": 1788551720
     },
+    "whatsapp_template_rejected_reason": "NONE",
+    "whatsapp_template_error": null,
+    "encabezado_media_id": null,
+    "encabezado_meta_registrado": false,
     "botones": null,
     "encabezado_texto": "Hello World",
     "pie_texto": "WhatsApp Business Platform sample message",
-    "whatsapp_header_format": "TEXT"
-  },
-  {
-    "id": 7,
-    "clave": "testimagen",
-    "nombre": "testimagen",
-    "texto": "Hola {nombre},\n\nEn esta semana queremos acompañarte en tu bienestar con un 20% de descuento en Salud Mental Para Todos. \nCuidar de ti es el primer paso para sentirte mejor y estamos aquí para apoyarte. 🧠💚\nContáctanos para agendar tu cita. 🌿✨",
-    "area_id": 1,
-    "encabezado_media_id": "1c16ab3a2a034ab4a69519e947efaa71",
-    "whatsapp_template": "testimagen",
-    "whatsapp_template_lang": "es",
-    "whatsapp_template_categoria": "MARKETING",
-    "actualizada": 1791906320883,
-    "creado_por": "dav.araya@duocuc.cl",
-    "creada_en": 1791555016772,
-    "aprobacion_estado": "aprobada",
-    "aprobada_por": "dav.araya@duocuc.cl",
-    "aprobada_en": 1791555016772,
-    "rechazo_motivo": null,
-    "whatsapp_template_id": "1129181472977686",
-    "whatsapp_template_status": "APPROVED",
-    "whatsapp_template_error": null,
-    "encabezado_meta_registrado": true,
-    "botones": [
-      {
-        "tipo": "respuesta",
-        "texto": "Me interesa"
-      },
-      {
-        "tipo": "respuesta",
-        "texto": "No me interesa"
-      },
-      {
-        "tipo": "respuesta",
-        "texto": "Dar de baja"
-      }
-    ],
-    "pie_texto": null,
-    "encabezado_texto": null,
-    "whatsapp_header_format": "VIDEO",
-    "whatsapp_template_aprobada_en": 1791906537620,
-    "whatsapp_template_rejected_reason": "NONE",
-    "whatsapp_template_quality_score": {
-      "score": "UNKNOWN",
-      "date": 1791555258
-    },
-    "ultima_edicion": 1791906320883
-  },
-  {
-    "id": 8,
-    "clave": "test_estimagen",
-    "nombre": "test_estimagen",
-    "texto": "Hola, te invitamos a agendar con un 20% de descuento!",
-    "area_id": 1,
-    "encabezado_media_id": "7cde51351e6447a3bdd990dd47efeff6",
-    "whatsapp_template": "test_estimagen",
-    "whatsapp_template_lang": "es",
-    "whatsapp_template_categoria": "MARKETING",
-    "actualizada": 1791895777155,
-    "creado_por": "dav.araya@duocuc.cl",
-    "creada_en": 1791560230238,
-    "aprobacion_estado": "aprobada",
-    "aprobada_por": "dav.araya@duocuc.cl",
-    "aprobada_en": 1791560230238,
-    "rechazo_motivo": null,
-    "whatsapp_template_id": "1797317438711057",
-    "whatsapp_template_status": "APPROVED",
-    "whatsapp_template_error": null,
-    "encabezado_meta_registrado": true,
-    "botones": [
-      {
-        "tipo": "respuesta",
-        "texto": "Me interesa",
-        "url": null
-      },
-      {
-        "tipo": "respuesta",
-        "texto": "No me interesa",
-        "url": null
-      },
-      {
-        "tipo": "respuesta",
-        "texto": "Dar de baja",
-        "url": null
-      }
-    ],
-    "pie_texto": null,
-    "encabezado_texto": null,
-    "whatsapp_header_format": "IMAGE",
-    "whatsapp_template_aprobada_en": 1791560430603,
-    "whatsapp_template_rejected_reason": "NONE",
-    "whatsapp_template_quality_score": {
-      "score": "UNKNOWN",
-      "date": 1791560482
-    }
+    "whatsapp_header_format": "TEXT",
+    "actualizada": 1791996097818
   }
 ]
