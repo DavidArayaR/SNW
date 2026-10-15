@@ -1,4 +1,4 @@
-"""Representación conservadora para estudiar intención sin copiar datos libres.
+"""Corpus de respuestas y compatibilidad con el corpus desidentificado legado.
 
 Solo sobreviven palabras de un vocabulario cerrado. Nombres, teléfonos,
 direcciones, diagnósticos y cualquier palabra no aprobada se sustituyen.
@@ -7,6 +7,27 @@ No es una copia recuperable del mensaje original.
 
 import re
 import unicodedata
+
+
+def guardar_mensaje_completo(cur, texto: str, telefono: str) -> None:
+    """Inserta texto íntegro y vínculo seudónimo en la misma transacción.
+
+    La llamada falla sin huella válida; jamás deja un texto completo huérfano.
+    """
+    from supresion import huella_telefono
+
+    huella = huella_telefono(telefono)
+    cur.execute("SELECT estado FROM supresion_telefonos WHERE huella = %s FOR UPDATE",
+                (huella,))
+    estado = cur.fetchone()
+    if estado and estado["estado"] != "exento":
+        return
+    cur.execute("INSERT INTO corpus_respuestas_completas (mensaje) VALUES (%s)",
+                (texto or "",))
+    cur.execute(
+        "INSERT INTO corpus_respuestas_origen (corpus_id, huella) VALUES (%s, %s)",
+        (cur.lastrowid, huella),
+    )
 
 _PALABRAS = frozenset("""
 hola holi buenas buenos dias tardes noches gracias por favor porfavor

@@ -217,6 +217,23 @@ def asegurar_tabla_config() -> None:
                 " texto_desidentificado TEXT NOT NULL"
                 ") CHARACTER SET utf8mb4"
             )
+            # El corpus anterior se conserva como legado: sus sustituciones
+            # [otro] no permiten recuperar el texto original.
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS corpus_respuestas_completas ("
+                " id BIGINT AUTO_INCREMENT PRIMARY KEY,"
+                " mensaje MEDIUMTEXT NOT NULL"
+                ") ENGINE=InnoDB CHARACTER SET utf8mb4"
+            )
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS corpus_respuestas_origen ("
+                " corpus_id BIGINT NOT NULL PRIMARY KEY,"
+                " huella CHAR(64) NOT NULL,"
+                " KEY idx_corpus_origen_huella (huella),"
+                " CONSTRAINT fk_corpus_origen_mensaje FOREIGN KEY (corpus_id)"
+                " REFERENCES corpus_respuestas_completas(id) ON DELETE CASCADE"
+                ") ENGINE=InnoDB CHARACTER SET utf8mb4"
+            )
             cur.execute(
                 "SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()"
                 " AND TABLE_NAME = 'log_envios'"
@@ -227,6 +244,10 @@ def asegurar_tabla_config() -> None:
                 cur.execute(
                     "INSERT IGNORE INTO configuracion (clave, valor) VALUES"
                     " ('corpus_respuestas_corte_v1', %s)", (str(corte),)
+                )
+                cur.execute(
+                    "INSERT IGNORE INTO configuracion (clave, valor) VALUES"
+                    " ('corpus_respuestas_corte_v2', %s)", (str(corte),)
                 )
             _migrar_numeros_prueba_a_produccion(cur)
             # Rate card de WhatsApp (tarifas por mensaje descargadas de Meta).

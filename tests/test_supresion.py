@@ -347,6 +347,9 @@ class SupresionTests(unittest.TestCase):
         self.assertTrue(any("DELETE FROM programado_destinatarios" in c.args[0] for c in consultas))
         self.assertTrue(any("DELETE FROM call_center_log" in c.args[0] for c in consultas))
         self.assertTrue(any("UPDATE whatsapp_eventos SET payload" in c.args[0] for c in consultas))
+        corpus = next(c for c in consultas if c.args[0].startswith(
+            "DELETE c FROM corpus_respuestas_completas"))
+        self.assertEqual(len(corpus.args[1][0]), 64)
         actualizacion = next(c for c in consultas if "UPDATE log_envios SET" in c.args[0])
         self.assertEqual(actualizacion.args[1][:2], ("Ma Pé", "****5678"))
 

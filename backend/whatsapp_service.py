@@ -21,7 +21,7 @@ from datetime import datetime
 import httpx
 
 from db import conectar, config_get, log_error, tabla_pacientes
-from corpus_respuestas import desidentificar_mensaje
+from corpus_respuestas import guardar_mensaje_completo
 from intenciones_call_center import clasificar, patrones_configurados
 from plantilla_media import obtener_media, ruta_media
 from plantilla_revision import presentar_plantilla, variables_del_cuerpo
@@ -980,7 +980,7 @@ class WhatsAppService:
                 pie = (mensaje.get(tipo) or {}).get("caption", "") if tipo in (
                     "image", "video", "document") else ""
                 if not es_solicitud_eliminar(pie):
-                    self._guardar_corpus_respuesta(pie)
+                    self._guardar_corpus_respuesta(pie, telefono)
                 continue
             cuerpo = texto or extra
 
@@ -1004,10 +1004,9 @@ class WhatsAppService:
                 acciones.append("baja_sin_aviso_de_eliminacion")
                 continue
 
-            # Copia irreversible de vocabulario cerrado: una fila por mensaje
-            # entrante, incluso si el remitente no figura en pacientes. No se
-            # guardan teléfono, ID de Meta, fecha, área ni texto original.
-            self._guardar_corpus_respuesta(cuerpo)
+            # El mensaje íntegro se guarda separado de su huella técnica para
+            # poder retirarlo de todas las áreas al recibir ELIMINAR.
+            self._guardar_corpus_respuesta(cuerpo, telefono)
 
             # Los 3 botones de la plantilla normal se identifican por su texto
             # exacto; el resto pasa por los clasificadores de texto libre.
@@ -1187,13 +1186,10 @@ class WhatsAppService:
 
     # ---------- Registro de respuestas y estados ----------
     @staticmethod
-    def _guardar_corpus_respuesta(texto: str) -> None:
+    def _guardar_corpus_respuesta(texto: str, telefono: str) -> None:
         try:
             with conectar() as conn, conn.cursor() as cur:
-                cur.execute(
-                    "INSERT INTO corpus_respuestas (texto_desidentificado) VALUES (%s)",
-                    (desidentificar_mensaje(texto),),
-                )
+                guardar_mensaje_completo(cur, texto, telefono)
                 conn.commit()
         except Exception as exc:
             # El corpus es auxiliar: no debe impedir una baja o respuesta.

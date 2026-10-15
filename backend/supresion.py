@@ -332,6 +332,13 @@ def _limpiar_datos(cur, telefono: str) -> tuple[int, int]:
         if digitos in re.sub(r"\D", "", row.get("payload") or ""):
             cur.execute("UPDATE whatsapp_eventos SET payload = '[suprimido]' WHERE id = %s",
                         (row["id"],))
+    # Al final de la transacción: incluye mensajes sin paciente y cualquier
+    # respuesta que haya entrado mientras se recorrían las demás tablas.
+    cur.execute(
+        "DELETE c FROM corpus_respuestas_completas c"
+        " INNER JOIN corpus_respuestas_origen o ON o.corpus_id = c.id"
+        " WHERE o.huella = %s", (huella_telefono(telefono),),
+    )
     return tablas_afectadas, afectados
 
 
