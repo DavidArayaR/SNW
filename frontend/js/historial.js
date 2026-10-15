@@ -495,9 +495,9 @@ function abrirDetalle(envio, detalle) {
   if (!detalle.length) {
     body.innerHTML = `<tr><td colspan="${cols}" style="text-align:center;color:#66757f;">Sin detalle individual registrado.</td></tr>`;
   } else {
-    const pesoRespuesta = { respondio: 0, baja: 1, pendiente: 2 };
+    const pesoRespuesta = { respondio: 0, no_interesado: 1, baja: 2, pendiente: 3 };
     const orden = [...detalle].sort(
-      (x, y) => (pesoRespuesta[x.respuesta] ?? 3) - (pesoRespuesta[y.respuesta] ?? 3) || (x.id - y.id)
+      (x, y) => (pesoRespuesta[x.respuesta] ?? 4) - (pesoRespuesta[y.respuesta] ?? 4) || (x.id - y.id)
     );
     for (const d of orden) {
       const r = d.respuesta ?? "pendiente";
@@ -525,7 +525,7 @@ function abrirDetalle(envio, detalle) {
 }
 
 function respuestaLabel(r) {
-  return { pendiente: "Sin respuesta", respondio: "Respondió", baja: "Se dio de baja" }[r] ?? r;
+  return { pendiente: "Sin respuesta", respondio: "Respondió", no_interesado: "No interesado", baja: "Se dio de baja" }[r] ?? r;
 }
 
 $("#btnCerrarDetalle").addEventListener("click", () => ($("#modalDetalle").hidden = true));
@@ -561,8 +561,7 @@ function renderMensajes(data) {
   const iniciales = inicialesPaciente([pac.nombre, pac.apellido].filter(Boolean).join(" "));
   $("#mensajesTitulo").textContent = iniciales === "—" ? "Mensajes del paciente" : `Mensajes · ${iniciales}`;
 
-  const estado = pac.respuesta === "baja" ? "Se dio de baja"
-    : pac.respuesta === "respondio" ? "Respondió" : "Sin respuesta";
+  const estado = respuestaLabel(pac.respuesta || "pendiente");
   $("#msgPacienteCab").innerHTML =
     `<span>${escaparHtml(telefonoEnmascarado(pac.telefono))}</span>` +
     `<span class="msg-cab__estado">${escaparHtml(estado)}</span>` +

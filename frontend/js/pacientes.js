@@ -334,7 +334,7 @@ function render() {
     // Baja pedida con sus propias palabras por WhatsApp: no se puede editar a
     // mano, solo se libera si el paciente se retracta (webhook).
     const bajaBloqueada = respuesta === "baja" && !!p.whatsapp_opt_out && !!p.opt_out_explicito;
-    const respuestaLabels = { pendiente: "Sin respuesta", respondio: "Respondió", baja: "Se dio de baja" };
+    const respuestaLabels = { pendiente: "Sin respuesta", respondio: "Respondió", no_interesado: "No interesado", baja: "Se dio de baja" };
     tr.classList.toggle("es-baja", esBaja);
     const hayError = p.estado === "error" || p.ultimo_estado_envio === "error";
     const textoError = hayError && p.ultimo_error ? String(p.ultimo_error) : "";
@@ -388,6 +388,9 @@ function render() {
           (window.snwEsDev || respuesta === "respondio"
             ? `<option value="respondio"${respuesta === "respondio" ? " selected" : ""}>${respuestaLabels.respondio}${window.snwEsDev ? " (prueba)" : ""}</option>`
             : "") +
+          (respuesta === "no_interesado"
+            ? `<option value="no_interesado" selected disabled>${respuestaLabels.no_interesado} (WhatsApp)</option>`
+            : "") +
         `</select>` +
         subResp +
       `</td>` +
@@ -420,7 +423,7 @@ function render() {
     if (conteo[p.estado] !== undefined) conteo[p.estado]++;
   }
 
-  const conteoResp = { todas: pacientes.length, pendiente: 0, respondio: 0, baja: 0 };
+  const conteoResp = { todas: pacientes.length, pendiente: 0, respondio: 0, no_interesado: 0, baja: 0 };
   for (const p of pacientes) {
     const r = p.respuesta || "pendiente";
     if (conteoResp[r] !== undefined) conteoResp[r]++;
@@ -702,7 +705,7 @@ if (selPageSizePac) selPageSizePac.addEventListener("change", () => {
 
 // --- Edición masiva: cambiar estado o respuesta de todos los seleccionados --
 const ESTADO_LABEL = { pendiente: "pendiente", enviado: "enviado", error: "error" };
-const RESPUESTA_LABEL = { pendiente: "sin respuesta", respondio: "respondió", baja: "dado de baja" };
+const RESPUESTA_LABEL = { pendiente: "sin respuesta", respondio: "respondió", no_interesado: "no interesado", baja: "dado de baja" };
 
 // Feedback visual mientras se aplica un cambio: las filas afectadas pulsan
 // hasta que la tabla se vuelve a dibujar (ver .fila-actualizando en CSS).

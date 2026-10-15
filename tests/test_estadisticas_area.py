@@ -151,6 +151,19 @@ class EstadisticasAreaTests(unittest.TestCase):
         self.assertLess(expresion.index("le.respuesta = 'baja'"),
                         expresion.index("p.interesado, 0) = 1"))
 
+    def test_no_interesado_se_distingue_en_vistas_sin_alterar_estadisticas(self):
+        vista = main.expr_respuesta_efectiva(
+            "p", tiene_interes=True, mostrar_no_interesado=True)
+        estadisticas = main.expr_respuesta_efectiva("p", tiene_interes=True)
+        self.assertIn("THEN 'no_interesado'", vista)
+        self.assertIn("p.interesado, 0) = 0", vista)
+        self.assertLess(vista.index("le.respuesta = 'baja'"),
+                        vista.index("THEN 'no_interesado'"))
+        self.assertLess(vista.index("THEN 'no_interesado'"),
+                        vista.index("le.respuesta = 'respondio'"))
+        self.assertNotIn("THEN 'no_interesado'", estadisticas)
+        self.assertIn("p.no_interesado, 0) = 1 THEN 'respondio'", estadisticas)
+
     def test_webhook_registra_respuesta_en_cada_base(self):
         class ConexionFalsa:
             def __init__(self):

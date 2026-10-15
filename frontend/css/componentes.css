@@ -734,6 +734,7 @@ tbody tr:last-child td { border-bottom: none; }
 }
 .respuesta-pendiente { background: var(--neutral-bg); color: var(--neutral-fg); border: 1px solid var(--neutral-bd); }
 .respuesta-respondio { background: var(--ok-bg); color: var(--ok-fg); border: 1px solid var(--ok-bd); }
+.respuesta-no_interesado { background: var(--warn-bg); color: var(--warn-fg); border: 1px solid var(--warn-bd); }
 .respuesta-baja { background: var(--danger-bg); color: var(--danger-fg); border: 1px solid var(--danger-bd); }
 
 @media (max-width: 700px) {

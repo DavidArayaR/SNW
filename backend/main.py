@@ -1363,17 +1363,19 @@ def _filtro_log_paciente(tabla: str, ambiente: str, alias: str) -> str:
 
 def expr_respuesta_efectiva(alias: str = "p", tiene_opt_out: bool = True,
                             tiene_manual: bool = False, tabla_log: str | None = None,
-                            tiene_interes: bool = False) -> str:
+                            tiene_interes: bool = False,
+                            mostrar_no_interesado: bool = False) -> str:
     """Respuesta de un paciente para saber quién interactuó por WhatsApp.
 
     Prioridad:
       1. opt-out activo  -> 'baja'
       2. corrección manual (columna respuesta_manual), si existe
-      3. señal automática 'pegajosa': la más fuerte que haya tenido alguna vez
-         (baja > respondió), ignorando los ajustes manuales antiguos
-      4. interés/no interés registrado en la ficha (webhooks antiguos)
-      5. 'pendiente'
-    Se usa igual en /api/pacientes y en /api/estadisticas."""
+      3. baja automática del historial
+      4. no interés vigente en la ficha (solo en vistas de pacientes)
+      5. respuesta automática del historial o interés en la ficha
+      6. 'pendiente'
+    En vistas de pacientes se distingue 'no_interesado'; en estadísticas
+    sigue contando como una respuesta."""
     baja_opt = f"WHEN {alias}.whatsapp_opt_out = 1 THEN 'baja' " if tiene_opt_out else ""
     manual = (
         f"WHEN {alias}.respuesta_manual IS NOT NULL AND {alias}.respuesta_manual <> '' "
@@ -1384,6 +1386,11 @@ def expr_respuesta_efectiva(alias: str = "p", tiene_opt_out: bool = True,
         f"WHEN COALESCE({alias}.interesado, 0) = 1 OR "
         f"COALESCE({alias}.no_interesado, 0) = 1 THEN 'respondio' "
         if tiene_interes else ""
+    )
+    no_interes = (
+        f"WHEN COALESCE({alias}.no_interesado, 0) = 1 AND "
+        f"COALESCE({alias}.interesado, 0) = 0 THEN 'no_interesado' "
+        if tiene_interes and mostrar_no_interesado else ""
     )
     ex = lambda r: (
         f"WHEN EXISTS(SELECT 1 FROM log_envios le WHERE le.paciente_id = {alias}.id"
@@ -1396,6 +1403,7 @@ def expr_respuesta_efectiva(alias: str = "p", tiene_opt_out: bool = True,
         + baja_opt
         + manual
         + ex("baja")
+        + no_interes
         + ex("respondio")
         + interes
         + "ELSE 'pendiente' END)"
@@ -1436,7 +1444,8 @@ def expr_select_pacientes(ambiente: str, tabla: str | None = None) -> str:
     exprs.append(
         expr_respuesta_efectiva("p", "whatsapp_opt_out" in cols, "respuesta_manual" in cols,
                                 tabla_log=t if (tabla and log_tiene_tabla) else None,
-                                tiene_interes={"interesado", "no_interesado"} <= cols)
+                                tiene_interes={"interesado", "no_interesado"} <= cols,
+                                mostrar_no_interesado=True)
         + " AS respuesta"
     )
     exprs.append("COALESCE(l.respuesta, 'pendiente') AS respuesta_ultimo_envio")
@@ -1944,7 +1953,8 @@ def mensajes_paciente(paciente_id: int, ambiente: str = Query("produccion"),
     tiene_int = "interesado" in cols
     re_expr = expr_respuesta_efectiva("p", tiene_opt, "respuesta_manual" in cols,
                                       tabla_log=t if (_esp and "tabla_pacientes" in columnas_tabla("log_envios", ambiente)) else None,
-                                      tiene_interes={"interesado", "no_interesado"} <= cols)
+                                      tiene_interes={"interesado", "no_interesado"} <= cols,
+                                      mostrar_no_interesado=True)
     with conectar(ambiente) as conn, conn.cursor() as cur:
         cur.execute(
             f"SELECT p.id, p.nombre, p.apellido, p.telefono,"
@@ -6738,7 +6748,8 @@ def detalle_historial(envio_id: str, ambiente: str = Query("produccion"),
     tiene_int = columna_existe(t, "interesado", ambiente)
     re_expr = expr_respuesta_efectiva("pac", tiene_opt, columna_existe(t, "respuesta_manual", ambiente),
                                       tabla_log=t if (tabla_env and "tabla_pacientes" in columnas_tabla("log_envios", ambiente)) else None,
-                                      tiene_interes=tiene_int and columna_existe(t, "no_interesado", ambiente))
+                                      tiene_interes=tiene_int and columna_existe(t, "no_interesado", ambiente),
+                                      mostrar_no_interesado=True)
     int_expr = "COALESCE(pac.interesado, 0)" if tiene_int else "0"
     if "tabla_pacientes" in columnas_tabla("log_envios", ambiente):
         cond_r, args_r = (("AND r.tabla_pacientes = %s", (tabla_env,)) if tabla_env
