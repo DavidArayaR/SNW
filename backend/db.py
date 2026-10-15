@@ -186,6 +186,29 @@ def asegurar_tabla_config() -> None:
                 "  PRIMARY KEY (usuario_hash, ventana_hora)"
                 ") CHARACTER SET utf8mb4"
             )
+            # Etiquetas de revisión humana: separadas de la respuesta original
+            # y de los estados que gobiernan baja, interés y envíos.
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS respuesta_etiquetas ("
+                "  log_envio_id INT NOT NULL PRIMARY KEY,"
+                "  etiquetas VARCHAR(512) NOT NULL,"
+                "  origen ENUM('automatico','manual') NOT NULL DEFAULT 'manual',"
+                "  actualizado_por VARCHAR(150) NOT NULL,"
+                "  actualizado_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                "    ON UPDATE CURRENT_TIMESTAMP"
+                ") CHARACTER SET utf8mb4"
+            )
+            cur.execute(
+                "SELECT COLUMN_NAME FROM information_schema.COLUMNS"
+                " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'respuesta_etiquetas'"
+                " AND COLUMN_NAME = 'origen'"
+            )
+            if not cur.fetchone():
+                # Filas previas fueron creadas por una revisión humana.
+                cur.execute(
+                    "ALTER TABLE respuesta_etiquetas ADD COLUMN origen"
+                    " ENUM('automatico','manual') NOT NULL DEFAULT 'manual'"
+                )
             _migrar_numeros_prueba_a_produccion(cur)
             # Rate card de WhatsApp (tarifas por mensaje descargadas de Meta).
             cur.execute(

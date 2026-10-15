@@ -308,6 +308,9 @@ def _limpiar_datos(cur, telefono: str) -> tuple[int, int]:
                            for t in ("pacientes_dev", "pacientes_prod"))
         if not coincide:
             continue
+        # Las etiquetas de revisión también revelan información sobre la
+        # respuesta; no deben sobrevivir a ELIMINAR junto al historial reducido.
+        cur.execute("DELETE FROM respuesta_etiquetas WHERE log_envio_id = %s", (row["id"],))
         area_pequena = (row.get("area_id") in areas_pequenas
                         or (tabla in areas_por_tabla and areas_por_tabla[tabla] in areas_pequenas))
         nombre = None if area_pequena else (

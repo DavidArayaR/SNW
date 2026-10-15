@@ -51,7 +51,7 @@ from plantilla_media import (MAX_MEDIA_BYTES, descargar_media_meta, guardar_medi
 from plantilla_revision import MAX_CUERPO, presentar_plantilla, componentes_para_vista
 from groq_service import consumir_cuota, generar_borrador, validar_instruccion
 from wa_rate_limit import gobernador as wa_gobernador
-from whatsapp_service import WhatsAppService, es_mensaje_interes
+from whatsapp_service import WhatsAppService, es_mensaje_interes, etiquetas_automaticas
 from whatsapp_webhook import router as whatsapp_router
 from supresion import (asegurar_tabla_supresion, reintentar_pendientes,
                       esta_suprimido, es_exento, es_numero_prueba,
@@ -1938,6 +1938,55 @@ def _propagar_baja_otras_bases(tabla: str, telefono: str | None, ambiente: str) 
     return detalle
 
 
+ETIQUETAS_RESPUESTA = (
+    "interes", "consulta", "desinteres", "baja_solicitada",
+    "respuesta_automatica", "requiere_revision", "confirmacion",
+    "cancelacion", "resuelto",
+)
+
+
+class EtiquetasRespuestaIn(BaseModel):
+    etiquetas: list[str]
+
+
+def etiquetar_mensaje_paciente(paciente_id: int, mensaje_id: int, body: EtiquetasRespuestaIn,
+                              ambiente: str = Query("produccion"),
+                              area_id: int | None = Query(None),
+                              sesion: dict = Depends(sesion_actual)):
+    """Anotación manual; nunca cambia la baja ni las decisiones automáticas."""
+    etiquetas = list(dict.fromkeys(body.etiquetas))
+    if len(etiquetas) > len(ETIQUETAS_RESPUESTA) or any(
+            not isinstance(e, str) or e not in ETIQUETAS_RESPUESTA for e in etiquetas):
+        raise HTTPException(422, detail="Etiqueta no permitida.")
+    if area_id is None and not (tiene_permiso(sesion, "historial") or tiene_permiso(sesion, "pacientes")):
+        raise HTTPException(403, detail="No tienes permiso para acceder a esta sección.")
+    tabla, esp = _resolver_tabla_pacientes(sesion, ambiente, area_id)
+    if paciente_id not in _ids_csv_propios(tabla, [paciente_id], sesion):
+        raise HTTPException(403, detail="Solo quien incorporó a este paciente puede etiquetar sus mensajes.")
+    cond_log, args_log = _cond_tabla_log_segura(tabla if esp else None, ambiente)
+    with conectar(ambiente) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT id FROM log_envios WHERE id = %s AND paciente_id = %s"
+            " AND plantilla_clave = 'respuesta'" + f" {cond_log}",
+            (mensaje_id, paciente_id, *args_log),
+        )
+        if not cur.fetchone():
+            raise HTTPException(404, detail="Respuesta no encontrada.")
+        # También se conserva una selección vacía: es una revisión manual y
+        # no debe reaparecer la sugerencia automática al volver a abrir.
+        cur.execute(
+            "INSERT INTO respuesta_etiquetas (log_envio_id, etiquetas, origen, actualizado_por)"
+            " VALUES (%s, %s, 'manual', %s) ON DUPLICATE KEY UPDATE"
+            " etiquetas = VALUES(etiquetas), origen = 'manual',"
+            " actualizado_por = VALUES(actualizado_por)",
+            (mensaje_id, json.dumps(etiquetas), sesion.get("usuario") or ""),
+        )
+        conn.commit()
+    auditoria_registrar(sesion.get("usuario", ""), "respuesta_etiquetada",
+                       f"mensaje:{mensaje_id}", f"{len(etiquetas)} etiqueta(s)")
+    return {"id": mensaje_id, "etiquetas": etiquetas, "origen_etiquetas": "manual"}
+
+
 def mensajes_paciente(paciente_id: int, ambiente: str = Query("produccion"),
                       area_id: int | None = Query(None),
                       sesion: dict = Depends(sesion_actual)):
@@ -1980,12 +2029,35 @@ def mensajes_paciente(paciente_id: int, ambiente: str = Query("produccion"),
             (paciente_id, *args_log),
         )
         filas = cur.fetchall()
+        ids_entrantes = [f["id"] for f in filas if f.get("plantilla_clave") == "respuesta"]
+        etiquetas_por_id = {}
+        if ids_entrantes:
+            placeholders = ", ".join(["%s"] * len(ids_entrantes))
+            cur.execute(
+                f"SELECT log_envio_id, etiquetas, origen FROM respuesta_etiquetas"
+                f" WHERE log_envio_id IN ({placeholders})", ids_entrantes,
+            )
+            for fila in cur.fetchall():
+                try:
+                    etiquetas = [
+                        e for e in json.loads(fila["etiquetas"])
+                        if e in ETIQUETAS_RESPUESTA
+                    ]
+                except (TypeError, ValueError):
+                    etiquetas = []
+                etiquetas_por_id[fila["log_envio_id"]] = {
+                    "etiquetas": etiquetas,
+                    "origen": "automatico" if fila.get("origen") == "automatico" else "manual",
+                }
     pac["interesado"] = bool(pac.get("interesado"))
     pac["whatsapp_opt_out"] = bool(pac.get("whatsapp_opt_out"))
     mensajes = []
     for f in filas:
         entrante = (f.get("plantilla_clave") or "") == "respuesta"
         txt = (f.get("mensaje") or "").strip()
+        etiqueta_info = (etiquetas_por_id.get(f["id"]) or {
+            "etiquetas": list(etiquetas_automaticas(txt)), "origen": "automatico",
+        }) if entrante else {"etiquetas": [], "origen": None}
         mensajes.append({
             "id": f["id"],
             "fecha": f["fecha_hora"].strftime("%d-%m-%Y %H:%M"),
@@ -1995,6 +2067,8 @@ def mensajes_paciente(paciente_id: int, ambiente: str = Query("produccion"),
             "estado": f.get("estado_envio"),
             "error": f.get("descripcion_error"),
             "interes": entrante and es_mensaje_interes(txt),
+            "etiquetas": etiqueta_info["etiquetas"],
+            "origen_etiquetas": etiqueta_info["origen"],
         })
     return {"paciente": pac, "mensajes": mensajes}
 

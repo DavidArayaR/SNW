@@ -591,6 +591,7 @@ async function abrirMensajes(pacienteId) {
 }
 
 function renderMensajes(data) {
+  mensajesVistaActual = data;
   const pac = data.paciente || {};
   pacienteMsgActual = { id: pac.id, ambiente: ambienteDetalle, interesado: !!pac.interesado };
 
@@ -613,9 +614,18 @@ function renderMensajes(data) {
       const meta = `${m.direccion === "entrante" ? "Paciente" : "Sistema"} · ${escaparHtml(m.fecha)}` +
         (m.interes ? " · interés" : "") +
         (m.estado === "error" ? " · no entregado" : "");
+      const etiquetas = m.direccion === "entrante" ?
+        `<div class="msg-etiquetas" aria-label="Etiquetas de esta respuesta">` +
+        `<span class="msg-etiquetas-origen" title="Puedes corregir las etiquetas sugeridas sin alterar el estado del paciente">` +
+        `${m.origen_etiquetas === "manual" ? "Revisadas" : "Sugeridas automáticamente"}</span>` +
+        Object.entries(ETIQUETAS_MENSAJE).map(([clave, nombre]) =>
+          `<button type="button" class="msg-etiqueta${(m.etiquetas || []).includes(clave) ? " msg-etiqueta--activa" : ""}"` +
+          ` data-etiqueta-id="${Number(m.id)}" data-etiqueta="${clave}"` +
+          ` aria-pressed="${(m.etiquetas || []).includes(clave)}">${nombre}</button>`).join("") +
+        `</div>` : "";
       return `<div class="msg-burbuja msg-burbuja--${m.direccion}${m.interes ? " msg-burbuja--interes" : ""}">` +
         `<div class="msg-texto">${escaparHtml(texto)}</div>` +
-        `<div class="msg-meta">${meta}</div></div>`;
+        `<div class="msg-meta">${meta}</div>${etiquetas}</div>`;
     }).join("");
   }
   const estadoInteres = $("#msgInteresEstado");
@@ -630,6 +640,50 @@ function renderMensajes(data) {
   // el navegador calcule la altura real del hilo.
   requestAnimationFrame(() => { hilo.scrollTop = hilo.scrollHeight; });
 }
+
+const ETIQUETAS_MENSAJE = {
+  interes: "Interés", consulta: "Consulta", desinteres: "Desinterés",
+  baja_solicitada: "Baja solicitada", respuesta_automatica: "Automática",
+  requiere_revision: "Revisar", confirmacion: "Confirmación",
+  cancelacion: "Cancelación", resuelto: "Resuelto",
+};
+let mensajesVistaActual = null;
+const guardandoEtiquetas = new Set();
+
+$("#msgHilo").addEventListener("click", async (event) => {
+  const boton = event.target.closest("[data-etiqueta-id]");
+  if (!boton || !mensajesVistaActual || !pacienteMsgActual) return;
+  const id = Number(boton.dataset.etiquetaId);
+  const etiqueta = boton.dataset.etiqueta;
+  const mensaje = (mensajesVistaActual.mensajes || []).find((m) => m.id === id && m.direccion === "entrante");
+  if (!mensaje || !Object.hasOwn(ETIQUETAS_MENSAJE, etiqueta) || guardandoEtiquetas.has(id)) return;
+  const previas = mensaje.etiquetas || [];
+  const nuevas = previas.includes(etiqueta)
+    ? previas.filter((e) => e !== etiqueta) : [...previas, etiqueta];
+  guardandoEtiquetas.add(id);
+  const grupo = boton.closest(".msg-etiquetas");
+  grupo.querySelectorAll("button").forEach((b) => { b.disabled = true; });
+  try {
+    const area = areaDetalle != null ? `&area_id=${areaDetalle}` : "";
+    const r = await fetch(
+      `api/pacientes/${pacienteMsgActual.id}/mensajes/${id}/etiquetas?ambiente=${ambienteDetalle}${area}`,
+      { method: "PUT", headers: authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ etiquetas: nuevas }) },
+    );
+    if (r.status === 401) { window.snwSesionExpirada(); return; }
+    if (!r.ok) throw new Error();
+    mensaje.etiquetas = nuevas;
+    mensaje.origen_etiquetas = "manual";
+    boton.classList.toggle("msg-etiqueta--activa", nuevas.includes(etiqueta));
+    boton.setAttribute("aria-pressed", String(nuevas.includes(etiqueta)));
+    grupo.querySelector(".msg-etiquetas-origen").textContent = "Revisadas";
+  } catch {
+    toast("No se pudieron guardar las etiquetas.", "error");
+  } finally {
+    guardandoEtiquetas.delete(id);
+    grupo.querySelectorAll("button").forEach((b) => { b.disabled = false; });
+  }
+});
 
 $("#btnCerrarMensajes").addEventListener("click", () => ($("#modalMensajes").hidden = true));
 $("#modalMensajes").addEventListener("click", (e) => { if (e.target === $("#modalMensajes")) $("#modalMensajes").hidden = true; });

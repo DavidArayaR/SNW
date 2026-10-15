@@ -31,6 +31,63 @@ class HistorialOrigenTests(unittest.TestCase):
         self.assertIn('cache: "no-store"', script)
         self.assertIn('tabla.setAttribute("aria-busy", "true")', script)
 
+    def test_ventana_de_mensajes_permite_etiquetar_sin_cambiar_estado(self):
+        raiz = Path(__file__).resolve().parents[1] / "frontend"
+        pagina = (raiz / "historial.html").read_text(encoding="utf-8")
+        script = (raiz / "js" / "historial.js").read_text(encoding="utf-8")
+        self.assertIn("msg-etiquetas-ayuda", pagina)
+        self.assertIn("data-etiqueta-id", script)
+        self.assertIn("/etiquetas?ambiente=", script)
+
+    def test_etiquetas_solo_para_respuesta_y_autor_del_csv(self):
+        body = main.EtiquetasRespuestaIn(etiquetas=["consulta", "requiere_revision"])
+        conexion = MagicMock()
+        cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cur.fetchone.return_value = {"id": 17}
+        kwargs = dict(paciente_id=4, mensaje_id=17, body=body,
+                      ambiente="produccion", area_id=None, sesion={"usuario": "autor"})
+        with patch.object(main, "tiene_permiso", return_value=True), \
+             patch.object(main, "_resolver_tabla_pacientes", return_value=("pacientes_prod", None)), \
+             patch.object(main, "_ids_csv_propios", return_value={4}), \
+             patch.object(main, "_cond_tabla_log_segura", return_value=("", ())), \
+             patch.object(main, "conectar", return_value=conexion), \
+             patch.object(main, "auditoria_registrar") as auditar:
+            respuesta = main.etiquetar_mensaje_paciente(**kwargs)
+        self.assertEqual(respuesta["etiquetas"], ["consulta", "requiere_revision"])
+        self.assertIn("plantilla_clave = 'respuesta'", cur.execute.call_args_list[0].args[0])
+        self.assertIn("INSERT INTO respuesta_etiquetas", cur.execute.call_args_list[1].args[0])
+        auditar.assert_called_once()
+        with patch.object(main, "tiene_permiso", return_value=True), \
+             patch.object(main, "_resolver_tabla_pacientes", return_value=("pacientes_prod", None)), \
+             patch.object(main, "_ids_csv_propios", return_value=set()):
+            with self.assertRaises(HTTPException) as error:
+                main.etiquetar_mensaje_paciente(**kwargs)
+        self.assertEqual(error.exception.status_code, 403)
+        with self.assertRaises(HTTPException) as error:
+            main.etiquetar_mensaje_paciente(**{**kwargs,
+                "body": main.EtiquetasRespuestaIn(etiquetas=["etiqueta_inventada"])})
+        self.assertEqual(error.exception.status_code, 422)
+
+    def test_vaciar_etiquetas_se_conserva_como_revision_manual(self):
+        conexion = MagicMock()
+        cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cur.fetchone.return_value = {"id": 17}
+        with patch.object(main, "tiene_permiso", return_value=True), \
+             patch.object(main, "_resolver_tabla_pacientes", return_value=("pacientes_prod", None)), \
+             patch.object(main, "_ids_csv_propios", return_value={4}), \
+             patch.object(main, "_cond_tabla_log_segura", return_value=("", ())), \
+             patch.object(main, "conectar", return_value=conexion), \
+             patch.object(main, "auditoria_registrar"):
+            respuesta = main.etiquetar_mensaje_paciente(
+                paciente_id=4, mensaje_id=17,
+                body=main.EtiquetasRespuestaIn(etiquetas=[]),
+                ambiente="produccion", area_id=None, sesion={"usuario": "autor"})
+        self.assertEqual(respuesta["origen_etiquetas"], "manual")
+        self.assertEqual(respuesta["etiquetas"], [])
+        self.assertIn("INSERT INTO respuesta_etiquetas", cur.execute.call_args_list[1].args[0])
+        self.assertFalse(any("DELETE FROM respuesta_etiquetas" in c.args[0]
+                             for c in cur.execute.call_args_list))
+
     def _consultar(self, origen, lotes, programados=()):
         conexion = MagicMock()
         cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value

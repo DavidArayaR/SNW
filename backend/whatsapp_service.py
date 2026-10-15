@@ -11,6 +11,7 @@ o desde el router de webhook.
 
 import asyncio
 import hashlib
+import json
 import re
 import threading
 import time
@@ -57,7 +58,8 @@ BAJA_FRASES = (
     "dar de baja", "darme de baja", "darse de baja", "me doy de baja", "de baja",
     "quiero darme de baja", "quiero que me den de baja", "deseo darme de baja",
     "no quiero recibir", "no deseo recibir", "no quiero mas mensajes",
-    "no me manden", "no me envien","no me envíen", "no enviar mas", "dejen de enviar",
+    "no me manden", "no me envien","no me envíen", "no me escriban",
+    "dejen de escribirme", "no enviar mas", "dejen de enviar",
     "dejar de recibir", "dejen de mandar", "no molestar", "no me contacten",
     "borrame", "borrenme", "borrarme",
     "sacame de", "sacarme de", "no quiero que me escriban",
@@ -159,6 +161,37 @@ def es_mensaje_interes(texto: str) -> bool:
         return True
     # Cualquier forma del verbo "interesar" (sin negación de por medio) cuenta.
     return bool(_RE_INTERESAR.search(t))
+
+
+def etiquetas_automaticas(texto: str, clasificacion=None) -> tuple[str, ...]:
+    """Sugiere etiquetas locales; no ejecuta acciones ni modifica al paciente."""
+    c = clasificacion or clasificar(texto)
+    if c.automatizacion != "SIN_EVIDENCIA_AUTOMATIZACION":
+        return (("respuesta_automatica", "requiere_revision")
+                if c.automatizacion == "AUTOMATICO_PROBABLE"
+                else ("respuesta_automatica",))
+    baja = WhatsAppService._es_baja(texto)
+    if c.cancela and any(f in (texto or "").casefold()
+                         for f in ("cancelar mi hora", "cancelo mi hora")):
+        if not any(f in (texto or "").casefold() for f in BAJA_FRASES):
+            baja = False
+    if baja:
+        return ("baja_solicitada",)
+    if es_mensaje_no_interes(texto):
+        return ("desinteres",)
+    etiquetas = []
+    if c.cancela:
+        etiquetas.append("cancelacion")
+    elif c.confirma:
+        etiquetas.append("confirmacion")
+    if c.derivar:
+        if any(m != "CONSULTA_AMBIGUA" for m in c.motivos):
+            etiquetas.append("consulta")
+        else:
+            etiquetas.append("requiere_revision")
+    if not (c.confirma or c.cancela) and es_mensaje_interes(texto):
+        etiquetas.append("interes")
+    return tuple(dict.fromkeys(etiquetas or ["requiere_revision"]))
 
 
 # Estados de entrega que Meta reporta por webhook.
@@ -1241,6 +1274,17 @@ class WhatsAppService:
                          automatica if automatica else None,
                          esp["id"] if esp else None, p["tabla"]),
                     )
+                    respuesta_id = cur.lastrowid
+                    try:
+                        cur.execute(
+                            "INSERT IGNORE INTO respuesta_etiquetas"
+                            " (log_envio_id, etiquetas, origen, actualizado_por)"
+                            " VALUES (%s, %s, 'automatico', 'sistema')",
+                            (respuesta_id, json.dumps(etiquetas_automaticas(texto), ensure_ascii=False)),
+                        )
+                    except Exception as exc:
+                        # La anotación no debe impedir conservar la respuesta.
+                        log_error("etiquetas_automaticas: no se pudo guardar", exc)
                 conn.commit()
             return "registrada"
         except Exception as e:

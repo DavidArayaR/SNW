@@ -169,6 +169,7 @@ class EstadisticasAreaTests(unittest.TestCase):
             def __init__(self):
                 self.consultas = []
                 self.commits = 0
+                self.lastrowid = 0
 
             def __enter__(self):
                 return self
@@ -181,6 +182,8 @@ class EstadisticasAreaTests(unittest.TestCase):
 
             def execute(self, sql, parametros=None):
                 self.consultas.append((sql, parametros))
+                if sql.startswith("INSERT INTO log_envios"):
+                    self.lastrowid += 1
 
             def commit(self):
                 self.commits += 1
@@ -202,6 +205,9 @@ class EstadisticasAreaTests(unittest.TestCase):
         self.assertEqual(conexion.commits, 1)
         self.assertEqual([(r[0], r[-2], r[-1]) for r in registros],
                          [(1, None, "pacientes_prod"), (2, 9, "pacientes_test")])
+        etiquetas = [params for sql, params in conexion.consultas
+                     if sql.startswith("INSERT IGNORE INTO respuesta_etiquetas")]
+        self.assertEqual([r[0] for r in etiquetas], [1, 2])
 
 
 if __name__ == "__main__":

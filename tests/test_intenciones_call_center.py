@@ -11,6 +11,22 @@ from intenciones_call_center import clasificar, detectar_automatizacion, patrone
 
 
 class IntencionesCallCenterTests(unittest.TestCase):
+    def test_etiquetas_automaticas_respetan_prioridades(self):
+        from whatsapp_service import etiquetas_automaticas
+        casos = {
+            "Me interesa, ¿cuánto cuesta?": ("consulta", "interes"),
+            "No gracias": ("desinteres",),
+            "No me escriban más": ("baja_solicitada",),
+            "Confirmo mi hora": ("confirmacion",),
+            "No podré asistir": ("cancelacion",),
+            "Hola": ("requiere_revision",),
+            "Gracias por comunicarte con Centro Ejemplo. Hemos recibido tu mensaje y pronto responderemos.":
+                ("respuesta_automatica",),
+        }
+        for texto, etiquetas in casos.items():
+            with self.subTest(texto=texto):
+                self.assertEqual(etiquetas_automaticas(texto), etiquetas)
+
     def test_automatizacion_exige_evidencia_y_no_deriva(self):
         casos = (
             "Hola, gracias por comunicarte con Centro Ejemplo. Hemos recibido tu mensaje y pronto responderemos.",
