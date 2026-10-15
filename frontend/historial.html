@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
   <link rel="stylesheet" href="css/tema.css?v=scrollbar1">
   <link rel="stylesheet" href="css/styles.css">
-  <link rel="stylesheet" href="css/componentes.css?v=historial-carga1">
+  <link rel="stylesheet" href="css/componentes.css?v=historial-call-center1">
   <link rel="stylesheet" href="css/layout.css?v=scrollbar1">
   <link rel="stylesheet" href="css/refinamiento.css?v=frontend4">
   <script src="js/tema.js?v=scrollbar1"></script>
@@ -99,6 +99,32 @@
       </div>
     </section>
 
+    <section class="panel" id="panelCCRegistro" data-perm="call_center_registro">
+      <div class="panel__head">
+        <h2>Historial de call center</h2>
+        <button id="btnActualizarCCLog" class="btn btn--ghost" type="button">Actualizar</button>
+      </div>
+      <p class="field__hint historial__cc-intro">
+        Últimos 200 registros. Los usos por número cuentan todos los envíos exitosos registrados.
+      </p>
+      <div id="ccLogContadores" class="historial__cc-usos" aria-live="polite"></div>
+      <div class="tabla-wrap">
+        <table id="tablaCCLog">
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Paciente</th>
+              <th>Teléfono del paciente</th>
+              <th>Base de datos</th>
+              <th>Número de call center</th>
+              <th>Estado</th>
+            </tr>
+          </thead>
+          <tbody id="ccLogBody"></tbody>
+        </table>
+      </div>
+    </section>
+
       </main>
     </div>
   </div>
@@ -145,7 +171,7 @@
 
   <script src="js/layout.js?v=navcurve7"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/historial.js?v=historial-tipo1"></script>
+  <script src="js/historial.js?v=historial-call-center1"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>

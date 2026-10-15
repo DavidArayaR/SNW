@@ -227,8 +227,9 @@ categoría de su plantilla.
 **`call_center_log`** — una fila por cada respuesta de call center enviada a un paciente
 interesado, con el `numero_call_center` que le asignó el servicio de `call_center_url`, si
 fue `automatico` o manual y el `estado` (`enviado`/`error`). El contador de usos por número
-sale de aquí (`GROUP BY numero_call_center`). Se ve en el panel **«Registro de respuestas de
-call center»** del Historial (permiso `call_center_registro`).
+sale de los envíos exitosos aquí registrados (`GROUP BY numero_call_center`). El panel
+**«Historial de call center»** muestra las últimas 200 filas y los contadores históricos
+en Historial (permiso `call_center_registro`).
 
 **`usuarios`** — cuentas de la app. `usuario` (correo o nombre corto para las semilla, único),
 `nombre`, `rol` (`usuario`/`supervisor`/`administrador`/`desarrollador`), `permisos` (lista CSV, solo
@@ -423,12 +424,15 @@ tiene template de Meta (va como texto libre, ventana de 24 h). No hay gestión d
   palabras clave sobre `log_envios.mensaje`), o `call_center_boton_mensaje` en cualquier otro
   caso (ambos en **Configuración → Call center**; vacíos = sin autocompletar).
 - **Registro:** cada envío queda en `call_center_log` con el número asignado.
-  El panel de respuestas de call center se retiró de Historial; no se borran
-  las filas de auditoría ni se detiene el registro de nuevas respuestas.
+  El panel de Historial muestra la fecha, el nombre y teléfono del paciente,
+  su base de datos, el número de call center asignado y el estado. También
+  indica cuántos envíos exitosos se registraron con cada número. Los datos
+  completos del paciente solo se muestran a quien subió su CSV; para otras
+  cuentas se usan iniciales y teléfono enmascarado.
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/call-center/log` | (permiso `call_center_registro`) `{entradas, contadores}` — últimas 200 respuestas de call center + usos por número. Se conserva como API protegida, sin panel en Historial. `numero_paciente` viene `null` si quien pregunta no es admin/dev. Cuentas no privilegiadas solo ven filas de sus áreas |
+| GET | `/api/call-center/log` | (permiso `call_center_registro`) `{entradas, contadores}` — últimas 200 respuestas de call center y usos históricos exitosos por número. Para cuentas no privilegiadas, filas y contadores se limitan a sus áreas. Los datos completos del paciente se muestran solo a quien subió su CSV |
 
 ### Envíos
 

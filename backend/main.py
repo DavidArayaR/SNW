@@ -3548,26 +3548,38 @@ def obtener_call_center_log(sesion: dict = Depends(exigir("call_center_registro"
     """Últimas respuestas enviadas a pacientes interesados, con el número de
     call center asignado a cada una, y el contador de usos por número.
     Permiso propio: `call_center_registro` (admin/dev lo tienen de forma implícita).
-    No privilegiados: solo filas de sus areas asignadas."""
+    No privilegiados: filas y contadores solo de sus áreas asignadas."""
     entradas = []
+    contadores = {}
     try:
-        where, args = "", ()
+        filtro_area, args = "", ()
         if not _es_privilegiado(sesion):
             permitidas = {e["nombre_tabla_base"]
                           for e in servicio_areas.listar_areas()
                           if e["id"] in set(sesion.get("area_ids") or [])}
             if not permitidas:
                 return {"entradas": [], "contadores": {}}
-            placeholders = ", ".join("%s" for _ in permitidas)
-            where, args = f" WHERE base_datos IN ({placeholders})", tuple(permitidas)
+            args = tuple(sorted(permitidas))
+            placeholders = ", ".join("%s" for _ in args)
+            filtro_area = f"base_datos IN ({placeholders})"
         with conectar() as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT id, paciente_id, nombre_paciente, numero_paciente, numero_call_center,"
                 " plantilla_clave, automatico, estado, descripcion_error, base_datos, fecha_hora"
-                f" FROM call_center_log{where} ORDER BY id DESC LIMIT 200",
+                " FROM call_center_log"
+                + (f" WHERE {filtro_area}" if filtro_area else "")
+                + " ORDER BY id DESC LIMIT 200",
                 args or None,
             )
             filas = cur.fetchall()
+            cur.execute(
+                "SELECT numero_call_center AS n, COUNT(*) AS c FROM call_center_log"
+                " WHERE estado = 'enviado'"
+                + (f" AND {filtro_area}" if filtro_area else "")
+                + " GROUP BY numero_call_center ORDER BY c DESC, n",
+                args or None,
+            )
+            contadores = {r["n"]: int(r["c"] or 0) for r in cur.fetchall() if r["n"]}
             propios_por_tabla = {
                 tabla: _ids_csv_propios(tabla, [r.get("paciente_id") for r in filas
                                                  if r.get("base_datos") == tabla], sesion)
@@ -3583,7 +3595,8 @@ def obtener_call_center_log(sesion: dict = Depends(exigir("call_center_registro"
                 entradas.append(r)
     except Exception as e:
         log_error("obtener_call_center_log", e)
-    return {"entradas": entradas, "contadores": _contadores_call_center()}
+        raise HTTPException(503, detail="No se pudo cargar el historial de call center.")
+    return {"entradas": entradas, "contadores": contadores}
 
 
 def _leer_config_legacy(ambiente: str | None = None) -> dict:

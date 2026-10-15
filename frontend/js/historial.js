@@ -621,6 +621,64 @@ function toast(msg, tipo = "ok") {
 // Los errores no se desvanecen solos: se cierran con click para leerlos bien.
 toastEl.addEventListener("click", () => toastEl.classList.remove("visible"));
 
+/* ---------- Historial de respuestas de call center ---------- */
+const panelCCLogEl = $("#panelCCRegistro");
+
+function numeroCCVisible(numero) {
+  const valor = String(numero ?? "").trim();
+  return valor ? (valor.startsWith("+") ? valor : `+${valor}`) : "—";
+}
+
+async function cargarLogCC(mostrarFeedback = false) {
+  if (!panelCCLogEl) return;
+  const body = $("#ccLogBody");
+  const cont = $("#ccLogContadores");
+  body.innerHTML = `<tr><td colspan="6" class="historial__cc-estado">Cargando historial…</td></tr>`;
+  try {
+    const r = await fetch("api/call-center/log", { headers: authHeaders(), cache: "no-store" });
+    if (r.status === 401) { window.snwSesionExpirada(); return; }
+    if (r.status === 403) { panelCCLogEl.remove(); return; }
+    if (!r.ok) throw new Error();
+    const data = await r.json();
+    const contadores = Object.entries(data.contadores || {});
+    const totalUsos = contadores.reduce((total, [, usos]) => total + (Number(usos) || 0), 0);
+    cont.innerHTML = contadores.length
+      ? `<div class="historial__cc-uso historial__cc-uso--total"><span>Total de usos</span><strong>${totalUsos.toLocaleString("es-CL")}</strong></div>` +
+        contadores.map(([numero, usos]) =>
+          `<div class="historial__cc-uso"><span>${escaparHtml(numeroCCVisible(numero))}</span>` +
+          `<strong>${(Number(usos) || 0).toLocaleString("es-CL")} uso${Number(usos) === 1 ? "" : "s"}</strong></div>`
+        ).join("")
+      : `<p class="field__hint">Todavía no hay usos registrados.</p>`;
+
+    const filas = data.entradas || [];
+    body.innerHTML = filas.length
+      ? filas.map((f) => {
+          const enviado = f.estado === "enviado";
+          const estado = enviado ? "Enviado" : "Error";
+          return `<tr>` +
+            `<td class="campo-fecha">${escaparHtml(f.fecha ?? "—")}</td>` +
+            `<td class="campo-nombre">${escaparHtml(f.nombre_paciente ?? "—")}</td>` +
+            `<td class="campo-tel">${escaparHtml(f.numero_paciente ?? "—")}</td>` +
+            `<td>${escaparHtml(f.base_datos ?? "—")}</td>` +
+            `<td class="campo-tel">${escaparHtml(numeroCCVisible(f.numero_call_center))}</td>` +
+            `<td><span class="estado-envio estado-envio--${enviado ? "completado" : "rechazado"}">${estado}</span>` +
+            (f.descripcion_error ? `<div class="hist-msg">${escaparHtml(f.descripcion_error)}</div>` : "") +
+            `</td></tr>`;
+        }).join("")
+      : `<tr><td colspan="6" class="historial__cc-estado">Todavía no hay respuestas de call center registradas.</td></tr>`;
+    if (mostrarFeedback) toast("Historial de call center actualizado.");
+  } catch (err) {
+    console.error("[historial.js cargarLogCC()]", err);
+    cont.innerHTML = "";
+    body.innerHTML = `<tr><td colspan="6" class="historial__cc-estado historial__cc-estado--error">No se pudo cargar el historial de call center.</td></tr>`;
+  }
+}
+
+if (panelCCLogEl) {
+  window.snwConCooldown($("#btnActualizarCCLog"), () => cargarLogCC(true));
+}
+
 cargarBasesHist();
 cargar();
+cargarLogCC();
 cargarEnProgreso();
