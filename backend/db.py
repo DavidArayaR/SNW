@@ -194,6 +194,7 @@ def asegurar_tabla_config() -> None:
                 "  etiquetas VARCHAR(512) NOT NULL,"
                 "  origen ENUM('automatico','manual') NOT NULL DEFAULT 'manual',"
                 "  actualizado_por VARCHAR(150) NOT NULL,"
+                "  ofensa_detalle TEXT NULL,"
                 "  actualizado_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"
                 "    ON UPDATE CURRENT_TIMESTAMP"
                 ") CHARACTER SET utf8mb4"
@@ -209,6 +210,14 @@ def asegurar_tabla_config() -> None:
                     "ALTER TABLE respuesta_etiquetas ADD COLUMN origen"
                     " ENUM('automatico','manual') NOT NULL DEFAULT 'manual'"
                 )
+            cur.execute(
+                "SELECT COLUMN_NAME FROM information_schema.COLUMNS"
+                " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'respuesta_etiquetas'"
+                " AND COLUMN_NAME = 'ofensa_detalle'"
+            )
+            if not cur.fetchone():
+                cur.execute("ALTER TABLE respuesta_etiquetas"
+                            " ADD COLUMN ofensa_detalle TEXT NULL")
             # Corpus sin vínculo al paciente ni metadatos de recepción.
             # Solo almacena la representación de vocabulario cerrado.
             cur.execute(

@@ -643,6 +643,7 @@ function renderMensajes(data) {
 
 const ETIQUETAS_MENSAJE = {
   interes: "Interés", consulta: "Consulta", desinteres: "Desinterés",
+  lenguaje_ofensivo: "Lenguaje ofensivo",
   baja_solicitada: "Baja solicitada", respuesta_automatica: "Bot",
   requiere_revision: "Revisar", confirmacion: "Confirmación",
   cancelacion: "Cancelación", resuelto: "Resuelto",

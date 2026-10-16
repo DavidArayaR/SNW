@@ -10,6 +10,8 @@ import unicodedata
 from dataclasses import dataclass
 from difflib import get_close_matches
 
+from deteccion_ofensas import DeteccionOfensa, detectar_ofensa
+
 MOTIVOS = (
     "CONSULTA_HORAS", "CONSULTA_MEDICO", "CONSULTA_PRECIOS",
     "SOLICITA_CONTACTO", "SOLICITA_INFORMACION", "CONSULTA_AMBIGUA",
@@ -66,6 +68,10 @@ _BOT_ACUSE = re.compile(
 _BOT_MENU = re.compile(r"\b(?:presiona|escribe|selecciona|elige|marca)\s*(?:la opcion\s*)?[1-9]\b")
 _BOT_HORARIO = re.compile(r"\b(?:fuera de horario|nuestro horario|horario de atencion)\b")
 
+def contiene_insulto(texto: str) -> bool:
+    """Compatibilidad: solo agresión directa, no mera coincidencia léxica."""
+    return detectar_ofensa(texto).categoria == "INSULTO_DIRECTO"
+
 
 def detectar_automatizacion(texto: str) -> tuple[str, tuple[str, ...]]:
     """Evidencia lingüística, nunca confirmación técnica del origen del mensaje."""
@@ -101,6 +107,7 @@ class Clasificacion:
     cancela: bool = False
     automatizacion: str = "SIN_EVIDENCIA_AUTOMATIZACION"
     indicadores: tuple[str, ...] = ()
+    ofensa: DeteccionOfensa = DeteccionOfensa()
 
     @property
     def derivar(self) -> bool:
@@ -129,8 +136,10 @@ def patrones_configurados(valor: str) -> dict[str, tuple[str, ...]]:
 def clasificar(texto: str, catalogo: dict[str, tuple[str, ...]] | None = None) -> Clasificacion:
     t = normalizar(texto)
     automatizacion, indicadores = detectar_automatizacion(texto)
+    ofensa = detectar_ofensa(texto, automatica=automatizacion != "SIN_EVIDENCIA_AUTOMATIZACION")
     if not t or _NO_DERIVAR.fullmatch(t):
-        return Clasificacion(automatizacion=automatizacion, indicadores=indicadores)
+        return Clasificacion(automatizacion=automatizacion, indicadores=indicadores,
+                             ofensa=ofensa)
     confirma = bool(_CONFIRMACION.search(t))
     cancela = bool(_CANCELACION.search(t))
     motivos = []
@@ -151,4 +160,5 @@ def clasificar(texto: str, catalogo: dict[str, tuple[str, ...]] | None = None) -
         motivos.append("CONSULTA_AMBIGUA")
     if (confirma or cancela) and motivos == ["CONSULTA_AMBIGUA"]:
         motivos.clear()
-    return Clasificacion(tuple(motivos), confirma, cancela, automatizacion, indicadores)
+    return Clasificacion(tuple(motivos), confirma, cancela, automatizacion, indicadores,
+                         ofensa)

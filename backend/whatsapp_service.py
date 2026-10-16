@@ -177,10 +177,12 @@ def etiquetas_automaticas(texto: str, clasificacion=None) -> tuple[str, ...]:
         if not any(f in (texto or "").casefold() for f in BAJA_FRASES):
             baja = False
     if baja:
-        return ("baja_solicitada",)
-    if es_mensaje_no_interes(texto):
-        return ("desinteres",)
+        return ("baja_solicitada", "lenguaje_ofensivo") if c.ofensa.categoria == "INSULTO_DIRECTO" else ("baja_solicitada",)
     etiquetas = []
+    if c.ofensa.categoria in ("INSULTO_DIRECTO", "LENGUAJE_OFENSIVO"):
+        etiquetas.append("lenguaje_ofensivo")
+    if es_mensaje_no_interes(texto):
+        etiquetas.append("desinteres")
     if c.cancela:
         etiquetas.append("cancelacion")
     elif c.confirma:
@@ -192,6 +194,9 @@ def etiquetas_automaticas(texto: str, clasificacion=None) -> tuple[str, ...]:
             etiquetas.append("requiere_revision")
     if not (c.confirma or c.cancela) and es_mensaje_interes(texto):
         etiquetas.append("interes")
+    if (c.ofensa.categoria == "INSULTO_DIRECTO" and not c.derivar
+            and not es_mensaje_interes(texto) and "desinteres" not in etiquetas):
+        etiquetas.append("desinteres")
     return tuple(dict.fromkeys(etiquetas or ["requiere_revision"]))
 
 
@@ -216,6 +221,7 @@ al_detectar_baja = None
 # cuando escribe estando dado de baja, para reactivarlo y mandarle un mensaje
 # de bienvenida de vuelta.
 al_detectar_retractacion = None
+al_detectar_insulto = None
 
 # Texto exacto de los 3 botones de respuesta rápida que se agregan a toda
 # plantilla normal (no de call center). Los presses de estos botones se
@@ -225,6 +231,9 @@ al_detectar_retractacion = None
 BOTON_TEXTO_INTERES = "Me interesa"
 BOTON_TEXTO_NO_INTERES = "No me interesa"
 BOTON_TEXTO_BAJA = "Dar de baja"
+BOTON_TEXTO_EJECUTIVA = "Hablar con ejecutiva"
+BOTON_ID_EJECUTIVA = "snw_hablar_ejecutiva"
+BOTON_ID_BAJA_INSULTO = "snw_dar_de_baja"
 BOTONES_RESPUESTA = [
     {"type": "QUICK_REPLY", "text": BOTON_TEXTO_INTERES},
     {"type": "QUICK_REPLY", "text": BOTON_TEXTO_NO_INTERES},
@@ -813,6 +822,26 @@ class WhatsAppService:
         }
         return payload, "cta_url"
 
+    def construir_payload_opciones_insulto(self, telefono: str, mensaje: str) -> tuple:
+        """Respuesta de servicio con elección explícita de ejecutiva o baja."""
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": telefono.lstrip("+"),
+            "type": "interactive",
+            "interactive": {
+                "type": "button",
+                "body": {"text": mensaje[:1024]},
+                "action": {"buttons": [
+                    {"type": "reply", "reply": {"id": BOTON_ID_EJECUTIVA,
+                                                "title": BOTON_TEXTO_EJECUTIVA}},
+                    {"type": "reply", "reply": {"id": BOTON_ID_BAJA_INSULTO,
+                                                "title": BOTON_TEXTO_BAJA}},
+                ]},
+            },
+        }
+        return payload, "botones_servicio"
+
     def construir_payload_template(self, telefono: str, nombre: str, lang: str,
                                    variables: list[str] | None = None,
                                    componentes: list[dict] | None = None) -> tuple:
@@ -880,6 +909,8 @@ class WhatsAppService:
             payload_, _ = self.construir_payload_template(
                 telefono, nombre_template, idioma, componentes=componentes or None,
             )
+        elif msg.get("opciones_insulto"):
+            payload_, _ = self.construir_payload_opciones_insulto(telefono, mensaje)
         elif cta and cta.get("url"):
             payload_, _ = self.construir_payload_cta_url(
                 telefono, mensaje, cta.get("texto") or "Abrir", cta["url"],
@@ -1021,6 +1052,16 @@ class WhatsAppService:
                                                  automatica=clasificacion.automatizacion)
                 acciones.append(f"respuesta_automatica_{info}")
                 continue
+            # La ofensa es independiente: no omite una consulta ni una baja.
+            # El aviso se limita por número en la base compartida.
+            if (tipo == "text" and clasificacion
+                    and clasificacion.ofensa.categoria == "INSULTO_DIRECTO"
+                    and not self._es_baja(cuerpo) and callable(al_detectar_insulto)):
+                try:
+                    al_detectar_insulto(telefono, mensaje.get("id"))
+                    acciones.append("opciones_baja_ofrecidas")
+                except Exception as exc:
+                    log_error("al_detectar_insulto", exc)
             interes = es_mensaje_interes(cuerpo)
             baja = self._es_baja(texto) or self._es_baja(extra)
             if clasificacion and clasificacion.cancela and any(
@@ -1049,6 +1090,18 @@ class WhatsAppService:
 
             info = self._registrar_respuesta(telefono, cuerpo, mensaje.get("timestamp"))
             acciones.append(f"respuesta_{info}")
+
+            if es_boton and (extra == BOTON_ID_EJECUTIVA or
+                            boton == BOTON_TEXTO_EJECUTIVA.casefold()):
+                if callable(al_detectar_consulta):
+                    try:
+                        resultado = al_detectar_consulta(
+                            telefono, "Solicita hablar con ejecutiva", mensaje.get("id"),
+                            ("SOLICITA_CONTACTO",), True)
+                        acciones.append(f"derivacion_{resultado}")
+                    except Exception as exc:
+                        log_error("al_detectar_consulta: ejecutiva", exc)
+                continue
 
             # Las bajas y la supresión siempre tienen prioridad. Una consulta
             # junto a una confirmación conserva el registro de interés, pero
@@ -1303,11 +1356,23 @@ class WhatsAppService:
                     )
                     respuesta_id = cur.lastrowid
                     try:
+                        clasificacion = clasificar(texto)
+                        ofensa = clasificacion.ofensa
+                        detalle = json.dumps({
+                            "categoria": ofensa.categoria,
+                            "confianza": ofensa.confianza,
+                            "terminos": ofensa.terminos,
+                            "accion_recomendada": ofensa.accion_recomendada,
+                            "motivos_consulta": clasificacion.motivos,
+                            "interes": es_mensaje_interes(texto),
+                            "baja": self._es_baja(texto),
+                        }, ensure_ascii=False)
                         cur.execute(
                             "INSERT IGNORE INTO respuesta_etiquetas"
-                            " (log_envio_id, etiquetas, origen, actualizado_por)"
-                            " VALUES (%s, %s, 'automatico', 'sistema')",
-                            (respuesta_id, json.dumps(etiquetas_automaticas(texto), ensure_ascii=False)),
+                            " (log_envio_id, etiquetas, origen, actualizado_por, ofensa_detalle)"
+                            " VALUES (%s, %s, 'automatico', 'sistema', %s)",
+                            (respuesta_id, json.dumps(etiquetas_automaticas(texto, clasificacion),
+                                                     ensure_ascii=False), detalle),
                         )
                     except Exception as exc:
                         # La anotación no debe impedir conservar la respuesta.

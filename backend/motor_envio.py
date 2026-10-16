@@ -16,7 +16,7 @@ class MotorSimulado:
         # El URL puede llevar una consulta del paciente prellenada; jamás
         # imprimir mensaje, teléfono ni URL en la consola de simulación.
         print(f"[MOTOR {self.nombre}] mensaje simulado ({len(mensaje)} caracteres, "
-              f"botón={'sí' if cta and cta.get('url') else 'no'})")
+              f"botón={'sí' if (cta and cta.get('url')) or (plantilla or {}).get('opciones_insulto') else 'no'})")
         return True, None, None
 
 

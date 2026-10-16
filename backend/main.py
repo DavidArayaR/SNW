@@ -1939,7 +1939,7 @@ def _propagar_baja_otras_bases(tabla: str, telefono: str | None, ambiente: str) 
 
 
 ETIQUETAS_RESPUESTA = (
-    "interes", "consulta", "desinteres", "baja_solicitada",
+    "interes", "consulta", "desinteres", "lenguaje_ofensivo", "baja_solicitada",
     "respuesta_automatica", "requiere_revision", "confirmacion",
     "cancelacion", "resuelto",
 )
@@ -2448,7 +2448,7 @@ def _enviar_derivacion_consulta(derivacion_id: int) -> None:
 
 
 def _registrar_derivacion_consulta(telefono: str, texto: str, mensaje_id: str,
-                                   motivos: tuple[str, ...]) -> str:
+                                   motivos: tuple[str, ...], forzar_nueva: bool = False) -> str:
     """Deduplica por ID de Meta; solo números reales reutilizan consultas recientes."""
     if not mensaje_id or not motivos:
         return "sin_id"
@@ -2461,7 +2461,7 @@ def _registrar_derivacion_consulta(telefono: str, texto: str, mensaje_id: str,
                     " WHERE mensaje_id = %s", (mensaje_id,))
         if cur.fetchone():
             return "duplicada"
-        if es_numero_prueba(tel):
+        if forzar_nueva or es_numero_prueba(tel):
             anterior = None  # Cada consulta nueva de prueba recibe su propio aviso.
         else:
             cur.execute(
@@ -2521,6 +2521,10 @@ _MENSAJE_BIENVENIDA_DEVUELTA = (
     "¡Bienvenido/a de vuelta! Ya reactivamos tus notificaciones."
     " Puedes volver a darte de baja cuando quieras."
 )
+_MENSAJE_OPCIONES_INSULTO = (
+    "Lamentamos que hayas tenido una mala experiencia. Si quieres, puedes "
+    "hablar con una ejecutiva o darte de baja inmediatamente."
+)
 
 
 def _reservar_aviso_unico(telefono: str, tipo: str) -> bool:
@@ -2539,7 +2543,32 @@ def _reservar_aviso_unico(telefono: str, tipo: str) -> bool:
         return False
 
 
-def _enviar_mensaje_directo(telefono_evento: str, texto: str, clave_log: str) -> bool:
+def _reservar_aviso_insulto(telefono: str) -> bool:
+    """Un aviso como máximo cada 24 h por número, también entre instancias."""
+    tel = normalizar_telefono(telefono) or telefono
+    try:
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT IGNORE INTO whatsapp_avisos_unicos (telefono, tipo)"
+                " VALUES (%s, 'insulto_baja')", (tel,),
+            )
+            reservado = cur.rowcount == 1
+            if not reservado:
+                cur.execute(
+                    "UPDATE whatsapp_avisos_unicos SET enviado = NOW()"
+                    " WHERE telefono = %s AND tipo = 'insulto_baja'"
+                    " AND enviado < DATE_SUB(NOW(), INTERVAL 24 HOUR)", (tel,),
+                )
+                reservado = cur.rowcount == 1
+            conn.commit()
+            return reservado
+    except Exception as exc:
+        log_error("reservar aviso de opciones de baja", exc)
+        return False
+
+
+def _enviar_mensaje_directo(telefono_evento: str, texto: str, clave_log: str,
+                           plantilla: dict | None = None) -> bool:
     """Manda un mensaje de texto libre (respuesta inmediata, dentro de la
     ventana de 24h) al paciente que coincide con este teléfono. Se usa para
     los avisos automáticos de baja y retractación: no dependen de un template
@@ -2581,7 +2610,8 @@ def _enviar_mensaje_directo(telefono_evento: str, texto: str, clave_log: str) ->
             nombre = " ".join(x for x in [pac.get("nombre"), pac.get("apellido")] if x)
             canal = obtener_canal(cfg)
             try:
-                resultado = canal.enviar(tel, texto)
+                resultado = (canal.enviar(tel, texto, plantilla=plantilla) if plantilla
+                             else canal.enviar(tel, texto))
             except Exception as e:
                 log_error(f"_enviar_mensaje_directo(pac={pac.get('id')}, {amb})", e)
                 resultado = (False, None, f"Error inesperado: {e}")
@@ -2630,6 +2660,23 @@ def _avisar_retractacion(telefono: str) -> None:
         _enviar_mensaje_directo(telefono, _MENSAJE_BIENVENIDA_DEVUELTA, "retractacion_aviso")
 
 
+def _avisar_insulto(telefono: str) -> None:
+    """Ofrece elegir, sin modificar preferencias ni iniciar una derivación."""
+    tel = normalizar_telefono(telefono) or telefono
+    if (esta_suprimido(tel) or eliminacion_simulada_activa(tel)
+            or WhatsAppService()._estaba_opt_out(tel)):
+        return
+    if not _reservar_aviso_insulto(tel):
+        return
+    if not _enviar_mensaje_directo(
+            tel, _MENSAJE_OPCIONES_INSULTO, "insulto_aviso",
+            plantilla={"opciones_insulto": True}):
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute("DELETE FROM whatsapp_avisos_unicos"
+                        " WHERE telefono = %s AND tipo = 'insulto_baja'", (tel,))
+            conn.commit()
+
+
 def _programar_aviso(fn, telefono: str) -> None:
     """El webhook (endpoint async) llama a estos callbacks de forma síncrona,
     dentro del event loop en curso; MotorApiOficial.enviar usa asyncio.run()
@@ -2645,6 +2692,7 @@ def _programar_aviso(fn, telefono: str) -> None:
 # libre) y al detectar que un paciente dado de baja volvió a escribir.
 whatsapp_service.al_detectar_baja = lambda tel: _programar_aviso(_avisar_baja, tel)
 whatsapp_service.al_detectar_retractacion = lambda tel: _programar_aviso(_avisar_retractacion, tel)
+whatsapp_service.al_detectar_insulto = lambda tel, _mensaje_id: _programar_aviso(_avisar_insulto, tel)
 
 
 def _registrar_template_meta(p: dict, nombre_anterior: str | None = None,
