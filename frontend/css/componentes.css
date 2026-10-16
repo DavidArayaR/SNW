@@ -549,29 +549,13 @@ tbody tr:last-child td { border-bottom: none; }
   padding: 30px 0;
 }
 
-#tablaHistorial .historial-fila-cargando td {
-  height: 112px;
-  text-align: center;
-  color: var(--texto-suave);
-  cursor: default;
-}
-#tablaHistorial .historial-fila-cargando:hover { background: transparent; }
-.historial-cargando {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  font-weight: 600;
-}
-.historial-cargando__spinner {
-  width: 22px;
-  height: 22px;
-  border: 3px solid var(--borde);
-  border-top-color: var(--verde-oscuro);
-  border-radius: 50%;
-  animation: spin .7s linear infinite;
-}
+#tablaHistorialWrap.is-loading { min-height: 180px; }
+.tabla-cargando { position: sticky; left: 0; top: 0; z-index: 3; display: flex; justify-content: center; padding: 10px 14px; background: color-mix(in srgb, var(--panel) 90%, transparent); }
+.tabla-cargando[hidden] { display: none; }
+.tabla-cargando__contenido { display: inline-flex; align-items: center; gap: 12px; padding: 12px 16px; border: 1px solid var(--borde); border-radius: 12px; background: var(--panel); color: var(--texto); font-weight: 600; box-shadow: var(--sombra); }
+.tabla-cargando__rueda { width: 20px; height: 20px; border: 3px solid var(--borde); border-top-color: var(--verde); border-radius: 50%; animation: spin .7s linear infinite; }
 @media (prefers-reduced-motion: reduce) {
-  .historial-cargando__spinner { animation: none; }
+  .tabla-cargando__rueda { animation: none; border-color: var(--verde); }
 }
 
 .badge--db {

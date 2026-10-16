@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
   <link rel="stylesheet" href="css/tema.css?v=scrollbar1">
   <link rel="stylesheet" href="css/styles.css">
-  <link rel="stylesheet" href="css/componentes.css?v=aviso-call-center1">
+  <link rel="stylesheet" href="css/componentes.css?v=historial-carga1">
   <link rel="stylesheet" href="css/layout.css?v=scrollbar1">
   <link rel="stylesheet" href="css/refinamiento.css?v=frontend4">
   <script src="js/tema.js?v=scrollbar1"></script>
@@ -77,8 +77,14 @@
         </span>
       </div>
 
-      <div class="tabla-wrap">
-        <table id="tablaHistorial">
+      <div class="tabla-wrap" id="tablaHistorialWrap">
+        <div id="tablaCargandoHist" class="tabla-cargando" role="status" aria-live="polite" hidden>
+          <div class="tabla-cargando__contenido">
+            <span class="tabla-cargando__rueda" aria-hidden="true"></span>
+            <span id="tablaCargandoHistTexto">Cargando historial…</span>
+          </div>
+        </div>
+        <table id="tablaHistorial" aria-busy="false">
           <thead>
             <tr>
               <th>Fecha</th>
@@ -220,7 +226,7 @@
 
   <script src="js/layout.js?v=navcurve7"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/historial.js?v=paginacion-servidor1"></script>
+  <script src="js/historial.js?v=paginacion-servidor2"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>

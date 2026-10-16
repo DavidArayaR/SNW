@@ -309,6 +309,10 @@ if (selPageSizeHist) {
 
 const tbodyEl = $("#tablaHistorial tbody");
 const vacioEl = $("#tablaVacia");
+const tablaHistorialEl = $("#tablaHistorial");
+const tablaHistorialWrap = $("#tablaHistorialWrap");
+const tablaCargandoHist = $("#tablaCargandoHist");
+const tablaCargandoHistTexto = $("#tablaCargandoHistTexto");
 const buscadorEl = $("#buscador");
 const statsEl = $("#stats");
 const contadorEl = $("#contador");
@@ -327,16 +331,15 @@ async function cargar(mantenerPagina = false, mostrarFeedback = false, mostrarCa
   const control = new AbortController();
   controlCargaHistorial = control;
   if (!mantenerPagina) paginaHist = 1;
-  const inicioCarga = mostrarCarga ? performance.now() : 0;
+  const inicioCarga = performance.now();
+  tablaCargandoHist.hidden = false;
+  tablaHistorialWrap.classList.add("is-loading");
+  tablaHistorialEl.setAttribute("aria-busy", "true");
+  vacioEl.hidden = true;
   if (mostrarCarga) {
     cargandoCambioBase = true;
     registros = [];
-    tbodyEl.closest("table").setAttribute("aria-busy", "true");
-    tbodyEl.innerHTML = `<tr class="historial-fila-cargando"><td colspan="10">` +
-      `<span class="historial-cargando" role="status">` +
-      `<span class="historial-cargando__spinner" aria-hidden="true"></span>` +
-      `Actualizando historial…</span></td></tr>`;
-    vacioEl.hidden = true;
+    tbodyEl.innerHTML = "";
     contadorEl.textContent = "Actualizando…";
     statsEl.innerHTML = "";
     $("#pagInfoHist").textContent = "Actualizando…";
@@ -355,6 +358,8 @@ async function cargar(mantenerPagina = false, mostrarFeedback = false, mostrarCa
     let respuesta;
     do {
       params.set("pagina", String(paginaHist));
+      tablaCargandoHistTexto.textContent =
+        `Cargando historial… página ${paginaHist} de ${requiereTotal ? "…" : totalPaginasHist(totalHistorial)}`;
       const rh = await fetch(`${API_HISTORIAL}/pagina?${params}`, {
         headers: authHeaders(), cache: "no-store", signal: control.signal,
       });
@@ -368,10 +373,10 @@ async function cargar(mantenerPagina = false, mostrarFeedback = false, mostrarCa
         params.set("incluir_total", "false");
       } else break;
     } while (true);
-    if (mostrarCarga) {
-      const restante = 250 - (performance.now() - inicioCarga);
-      if (restante > 0) await new Promise((resolver) => setTimeout(resolver, restante));
-    }
+    tablaCargandoHistTexto.textContent =
+      `Cargando historial… página ${paginaHist} de ${totalPaginasHist(totalHistorial)}`;
+    const restante = 250 - (performance.now() - inicioCarga);
+    if (restante > 0) await new Promise((resolver) => setTimeout(resolver, restante));
     if (secuencia !== cargaHistSecuencia) return;
     registros = respuesta.registros || [];
     consultaHistorialAnterior = claveConsulta;
@@ -381,20 +386,22 @@ async function cargar(mantenerPagina = false, mostrarFeedback = false, mostrarCa
     if (secuencia !== cargaHistSecuencia) return;
     if (err?.name === "AbortError") return;
     console.error("[historial.js cargar()]");
-    if (mostrarCarga) {
-      tbodyEl.innerHTML = `<tr class="historial-fila-cargando"><td colspan="10">` +
-        `No se pudo actualizar el historial. Inténtalo de nuevo.</td></tr>`;
+    if (mostrarCarga || !registros.length) {
+      vacioEl.textContent = "No se pudo actualizar el historial. Inténtalo de nuevo.";
+      vacioEl.hidden = false;
       contadorEl.textContent = "—";
       $("#pagInfoHist").textContent = "No disponible";
+    } else {
+      vacioEl.hidden = true;
     }
-    if (!mantenerPagina) toast("Error al conectar con el servidor.", "error");
+    if (mostrarCarga || !mantenerPagina) toast("Error al conectar con el servidor.", "error");
   } finally {
     if (secuencia === cargaHistSecuencia) {
       controlCargaHistorial = null;
-      if (mostrarCarga) {
-        cargandoCambioBase = false;
-        tbodyEl.closest("table").removeAttribute("aria-busy");
-      }
+      tablaCargandoHist.hidden = true;
+      tablaHistorialWrap.classList.remove("is-loading");
+      tablaHistorialEl.setAttribute("aria-busy", "false");
+      cargandoCambioBase = false;
     }
   }
 }
@@ -417,6 +424,7 @@ function pintarPaginadorHist(total) {
 }
 
 function render() {
+  vacioEl.textContent = "Sin envíos registrados.";
   const paginas = totalPaginasHist(totalHistorial);
   if (paginaHist > paginas) paginaHist = paginas;
   if (paginaHist < 1) paginaHist = 1;
@@ -881,6 +889,9 @@ if (panelCCLogEl) {
   });
 }
 
+tablaCargandoHist.hidden = false;
+tablaHistorialWrap.classList.add("is-loading");
+tablaHistorialEl.setAttribute("aria-busy", "true");
 (async () => { await cargarBasesHist(); cargar(); })();
 cargarLogCC();
 cargarEnProgreso();
