@@ -7,8 +7,11 @@ function authHeaders(extra = {}) {
 if (!localStorage.getItem("snw_token")) location.replace("login.html");
 
 let registros = [];
+let totalHistorial = 0;
+let consultaHistorialAnterior = null;
 let cargaHistSecuencia = 0;
 let cargandoCambioBase = false;
+let controlCargaHistorial = null;
 let filtro = "";
 let paginaHist = 1;
 let pageSizeHist = Math.min(100, Math.max(10, Number(localStorage.getItem("snw_page_size_hist")) || 10));
@@ -76,6 +79,7 @@ async function cancelarEnProgreso(url, btn) {
     if (!r.ok) throw new Error(data.detail || "No se pudo cancelar.");
     toast("Envío cancelado.", "ok");
     cargarEnProgreso();
+    consultaHistorialAnterior = null;
     cargar();
   } catch (err) {
     console.error("[historial.js cancelarEnProgreso()]", err);
@@ -144,7 +148,10 @@ async function cargarEnProgreso(mostrarFeedback = false) {
   }
   // Si algo terminó o cambió, la tabla se recarga sola (sin mover página ni avisar).
   const firma = items.map((it) => `${it.origen}:${it.id ?? it.job_id}:${it.estado}`).join("|");
-  if (firmaProgreso !== null && firmaProgreso !== firma) cargar(true);
+  if (firmaProgreso !== null && firmaProgreso !== firma) {
+    consultaHistorialAnterior = null;
+    cargar(true);
+  }
   firmaProgreso = firma;
   // La cadencia sigue a la lista: rápida con envíos vivos, lenta si no hay nada.
   if (hayProgresoVivo !== !!items.length) {
@@ -283,12 +290,11 @@ if (selBaseHist) selBaseHist.addEventListener("change", () => {
 
 const pagAntHist = $("#pagAntHist");
 if (pagAntHist) pagAntHist.addEventListener("click", () => {
-  if (paginaHist > 1) { paginaHist -= 1; render(); }
+  if (paginaHist > 1) { paginaHist -= 1; cargar(true, false, true); }
 });
 const pagSigHist = $("#pagSigHist");
 if (pagSigHist) pagSigHist.addEventListener("click", () => {
-  paginaHist += 1;
-  render();
+  if (paginaHist < totalPaginasHist(totalHistorial)) { paginaHist += 1; cargar(true, false, true); }
 });
 const selPageSizeHist = $("#selPageSizeHist");
 if (selPageSizeHist) {
@@ -297,7 +303,7 @@ if (selPageSizeHist) {
     pageSizeHist = Math.min(100, Math.max(10, Number(selPageSizeHist.value) || 10));
     localStorage.setItem("snw_page_size_hist", String(pageSizeHist));
     paginaHist = 1;
-    render();
+    cargar(true, false, true);
   });
 }
 
@@ -315,8 +321,12 @@ function escaparHtml(texto) {
 }
 
 async function cargar(mantenerPagina = false, mostrarFeedback = false, mostrarCarga = false) {
-  if (cargandoCambioBase && !mostrarCarga) return;
+  if (cargandoCambioBase) mostrarCarga = true;
   const secuencia = ++cargaHistSecuencia;
+  if (controlCargaHistorial) controlCargaHistorial.abort();
+  const control = new AbortController();
+  controlCargaHistorial = control;
+  if (!mantenerPagina) paginaHist = 1;
   const inicioCarga = mostrarCarga ? performance.now() : 0;
   if (mostrarCarga) {
     cargandoCambioBase = true;
@@ -337,23 +347,39 @@ async function cargar(mantenerPagina = false, mostrarFeedback = false, mostrarCa
     const base = (selBaseHist && selBaseHist.value) || "todos";
     const params = new URLSearchParams(base !== "todos" ? { tabla: base } : { ambiente: "todos" });
     params.set("origen", (selOrigenHist && selOrigenHist.value) || "todos");
-    const rh = await fetch(`${API_HISTORIAL}?${params}`, {
-      headers: authHeaders(), cache: "no-store",
-    });
-    if (rh.status === 401) { window.snwSesionExpirada(); return; }
-    if (!rh.ok) throw new Error();
-    const nuevosRegistros = await rh.json();
+    params.set("q", filtro.trim().slice(0, 100));
+    params.set("limite", String(pageSizeHist));
+    const claveConsulta = `${base}|${params.get("origen")}|${params.get("q")}`;
+    const requiereTotal = claveConsulta !== consultaHistorialAnterior || mostrarFeedback;
+    params.set("incluir_total", String(requiereTotal));
+    let respuesta;
+    do {
+      params.set("pagina", String(paginaHist));
+      const rh = await fetch(`${API_HISTORIAL}/pagina?${params}`, {
+        headers: authHeaders(), cache: "no-store", signal: control.signal,
+      });
+      if (rh.status === 401) { window.snwSesionExpirada(); return; }
+      if (!rh.ok) throw new Error();
+      respuesta = await rh.json();
+      if (secuencia !== cargaHistSecuencia) return;
+      if (respuesta.total !== null) totalHistorial = Number(respuesta.total) || 0;
+      if (paginaHist > totalPaginasHist(totalHistorial)) {
+        paginaHist = totalPaginasHist(totalHistorial);
+        params.set("incluir_total", "false");
+      } else break;
+    } while (true);
     if (mostrarCarga) {
       const restante = 250 - (performance.now() - inicioCarga);
       if (restante > 0) await new Promise((resolver) => setTimeout(resolver, restante));
     }
     if (secuencia !== cargaHistSecuencia) return;
-    registros = nuevosRegistros;
-    if (!mantenerPagina) paginaHist = 1;
+    registros = respuesta.registros || [];
+    consultaHistorialAnterior = claveConsulta;
     render();
     if (mostrarFeedback) toast("Historial actualizado correctamente.");
-  } catch {
+  } catch (err) {
     if (secuencia !== cargaHistSecuencia) return;
+    if (err?.name === "AbortError") return;
     console.error("[historial.js cargar()]");
     if (mostrarCarga) {
       tbodyEl.innerHTML = `<tr class="historial-fila-cargando"><td colspan="10">` +
@@ -363,9 +389,12 @@ async function cargar(mantenerPagina = false, mostrarFeedback = false, mostrarCa
     }
     if (!mantenerPagina) toast("Error al conectar con el servidor.", "error");
   } finally {
-    if (secuencia === cargaHistSecuencia && mostrarCarga) {
-      cargandoCambioBase = false;
-      tbodyEl.closest("table").removeAttribute("aria-busy");
+    if (secuencia === cargaHistSecuencia) {
+      controlCargaHistorial = null;
+      if (mostrarCarga) {
+        cargandoCambioBase = false;
+        tbodyEl.closest("table").removeAttribute("aria-busy");
+      }
     }
   }
 }
@@ -388,18 +417,10 @@ function pintarPaginadorHist(total) {
 }
 
 function render() {
-  const q = filtro.trim().toLowerCase();
-  const visibles = registros.filter(
-    (r) => !q ||
-      [r.base_datos, r.plantilla_clave, r.plantilla_nombre]
-        .filter(Boolean)
-        .some((v) => v.toLowerCase().includes(q))
-  );
-
-  const paginas = totalPaginasHist(visibles.length);
+  const paginas = totalPaginasHist(totalHistorial);
   if (paginaHist > paginas) paginaHist = paginas;
   if (paginaHist < 1) paginaHist = 1;
-  const parte = visibles.slice((paginaHist - 1) * pageSizeHist, paginaHist * pageSizeHist);
+  const parte = registros;
 
   tbodyEl.innerHTML = "";
 
@@ -436,11 +457,11 @@ function render() {
     tbodyEl.appendChild(tr);
   }
 
-  vacioEl.hidden = visibles.length > 0;
-  contadorEl.textContent = `${visibles.length} envío${visibles.length === 1 ? "" : "s"}`;
-  pintarPaginadorHist(visibles.length);
+  vacioEl.hidden = registros.length > 0;
+  contadorEl.textContent = `${totalHistorial} envío${totalHistorial === 1 ? "" : "s"}`;
+  pintarPaginadorHist(totalHistorial);
 
-  const totalEnvios = visibles.length;
+  const totalEnvios = totalHistorial;
   statsEl.innerHTML =
     `<button type="button" class="stat stat--total activo" data-estado="todos">Total envíos <strong>${totalEnvios}</strong></button>`;
 }
@@ -696,10 +717,12 @@ $("#msgHilo").addEventListener("click", async (event) => {
 $("#btnCerrarMensajes").addEventListener("click", () => ($("#modalMensajes").hidden = true));
 $("#modalMensajes").addEventListener("click", (e) => { if (e.target === $("#modalMensajes")) $("#modalMensajes").hidden = true; });
 
+let timerBusquedaHist = null;
 buscadorEl.addEventListener("input", () => {
   filtro = buscadorEl.value;
   paginaHist = 1;
-  render();
+  clearTimeout(timerBusquedaHist);
+  timerBusquedaHist = setTimeout(() => cargar(false, false, true), 250);
 });
 
 window.snwConCooldown($("#btnActualizar"), () => cargar(false, true));
@@ -858,7 +881,6 @@ if (panelCCLogEl) {
   });
 }
 
-cargarBasesHist();
-cargar();
+(async () => { await cargarBasesHist(); cargar(); })();
 cargarLogCC();
 cargarEnProgreso();

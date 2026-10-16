@@ -6942,8 +6942,13 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
             g["_sin_lote"] = True
             filas.append(g)
 
+    return _presentar_historial(filas, sesion, limite=300)
+
+
+def _presentar_historial(filas: list[dict], sesion: dict, limite: int | None = None) -> list[dict]:
     filas.sort(key=lambda r: (r["_orden"] is not None, r["_orden"]), reverse=True)
-    filas = filas[:300]
+    if limite is not None:
+        filas = filas[:limite]
     with JOBS_LOCK:
         vivos = {j.get("envio_id"): (jid, j.get("estado"))
                  for jid, j in JOBS.items()
@@ -6984,6 +6989,167 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
                 f["job_id"] = ""
                 f["puede_cancelar"] = False
     return filas
+
+
+def _fuentes_historial_pagina(sesion: dict, ambiente: str, area_id: int | None,
+                             tabla: str | None, origen: str, q: str,
+                             cols_env: set[str]) -> tuple[str, tuple]:
+    """Une solo claves/fechas visibles; los detalles se buscan tras paginar."""
+    if origen not in ("todos", "manual", "programado"):
+        raise HTTPException(422, detail="Tipo de envío inválido.")
+    if not tabla and ambiente == "desarrollo":
+        _exigir_base_desarrollo(sesion, ambiente)
+    if tabla:
+        if not servicio_areas.tabla_valida(tabla):
+            raise HTTPException(422, detail="Base de datos inválida.")
+        if tabla in ("pacientes_dev", "pacientes_prod"):
+            if not _es_privilegiado(sesion):
+                raise HTTPException(403, detail="No tienes acceso a esta base de datos.")
+        else:
+            esp = servicio_areas.area_por_tabla(tabla)
+            if esp is None:
+                if not _es_privilegiado(sesion):
+                    raise HTTPException(403, detail="No tienes acceso a esta base de datos.")
+                if not servicio_areas.tabla_fisica_existe(tabla):
+                    raise HTTPException(404, detail="Base de datos no encontrada.")
+            else:
+                _exigir_area(sesion, esp["id"])
+    if area_id is not None:
+        _exigir_area(sesion, area_id)
+
+    privilegiado = _es_privilegiado(sesion)
+    permitidas = list(sesion.get("area_ids") or [])
+    sql_partes = []
+    argumentos = []
+    like = f"%{q.strip()}%" if q.strip() else None
+
+    if origen != "programado" or "programado_id" in cols_env:
+        cond_e, args_e = [], []
+        if origen == "manual" and "programado_id" in cols_env:
+            cond_e.append("e.programado_id IS NULL")
+        elif origen == "programado":
+            cond_e.append("e.programado_id IS NOT NULL")
+        if tabla:
+            cond_e.append("e.base_datos = %s")
+            args_e.append(tabla)
+        elif ambiente != "todos":
+            cond_e.append("e.base_datos = %s")
+            args_e.append(nombre_base(ambiente))
+        if area_id is not None and "area_id" in cols_env:
+            cond_e.append("e.area_id = %s")
+            args_e.append(int(area_id))
+        if not privilegiado:
+            if "area_id" not in cols_env or not permitidas:
+                cond_e.append("1 = 0")
+            elif area_id is None:
+                marcadores = ", ".join("%s" for _ in permitidas)
+                cond_e.append(f"e.area_id IN ({marcadores})")
+                args_e.extend(permitidas)
+        if like:
+            cond_e.append("(e.base_datos LIKE %s OR e.plantilla_clave LIKE %s"
+                          " OR e.plantilla_nombre LIKE %s)")
+            args_e.extend((like, like, like))
+        if "programado_id" in cols_env and origen != "manual":
+            fecha_e = "COALESCE(pp.creado, e.fecha_hora)"
+            join_e = " LEFT JOIN envios_programados pp ON pp.id = e.programado_id"
+        else:
+            fecha_e = "e.fecha_hora"
+            join_e = ""
+        sql_partes.append("SELECT 0 AS tipo, e.id AS id,"
+                          f" {fecha_e} AS fecha_orden FROM envios e{join_e}"
+                          + (" WHERE " + " AND ".join(cond_e) if cond_e else ""))
+        argumentos.extend(args_e)
+
+    if origen != "manual":
+        cond_p, args_p = [], []
+        if "programado_id" in cols_env:
+            cond_p.append("NOT EXISTS (SELECT 1 FROM envios e WHERE e.programado_id = p.id)")
+        if tabla:
+            cond_p.append("p.tabla = %s")
+            args_p.append(tabla)
+        elif ambiente != "todos":
+            cond_p.append("p.ambiente = %s")
+            args_p.append(ambiente)
+        if area_id is not None:
+            cond_p.append("p.area_id = %s")
+            args_p.append(int(area_id))
+        if not privilegiado:
+            if not permitidas and area_id is None:
+                cond_p.append("1 = 0")
+            cond_p.append("NOT (p.ambiente = 'desarrollo' AND p.area_id IS NULL)")
+            if sesion.get("rol") != "supervisor":
+                yo = (sesion.get("usuario") or "").strip().lower()
+                if permitidas:
+                    marcadores = ", ".join("%s" for _ in permitidas)
+                    cond_p.append(f"(TRIM(LOWER(p.creador)) = %s OR p.area_id IN ({marcadores}))")
+                    args_p.extend((yo, *permitidas))
+                else:
+                    cond_p.append("TRIM(LOWER(p.creador)) = %s")
+                    args_p.append(yo)
+        if like:
+            cond_p.append("(p.tabla LIKE %s OR p.plantilla_nombre LIKE %s)")
+            args_p.extend((like, like))
+        sql_partes.append("SELECT 1 AS tipo, p.id AS id,"
+                          " COALESCE(p.creado, p.programado_para) AS fecha_orden"
+                          " FROM envios_programados p"
+                          + (" WHERE " + " AND ".join(cond_p) if cond_p else ""))
+        argumentos.extend(args_p)
+    return " UNION ALL ".join(sql_partes), tuple(argumentos)
+
+
+def listar_historial_pagina(q: str = Query("", max_length=100),
+                           ambiente: str = Query("produccion"),
+                           area_id: int | None = Query(None),
+                           tabla: str | None = Query(None),
+                           origen: str = Query("todos"),
+                           pagina: int = Query(1, ge=1, le=1000000),
+                           limite: int = Query(10, ge=10, le=100),
+                           incluir_total: bool = Query(True),
+                           sesion: dict = Depends(exigir("historial"))):
+    cols_env = columnas_tabla("envios", "produccion")
+    union, args = _fuentes_historial_pagina(sesion, ambiente, area_id, tabla, origen, q, cols_env)
+    with conectar() as conn, conn.cursor() as cur:
+        total = None
+        if incluir_total:
+            cur.execute(f"SELECT COUNT(*) AS total FROM ({union}) h", args)
+            total = int((cur.fetchone() or {}).get("total") or 0)
+        cur.execute(f"SELECT tipo, id FROM ({union}) h"
+                    " ORDER BY fecha_orden DESC, tipo ASC, id DESC LIMIT %s OFFSET %s",
+                    (*args, limite, (pagina - 1) * limite))
+        claves = [(int(r["tipo"]), int(r["id"])) for r in (cur.fetchall() or [])]
+        ids_e = [ident for tipo, ident in claves if tipo == 0]
+        ids_p = [ident for tipo, ident in claves if tipo == 1]
+        por_clave = {}
+        if ids_e:
+            com_col = "comentario" if "comentario" in cols_env else "NULL AS comentario"
+            esp_col = "area_id" if "area_id" in cols_env else "NULL AS area_id"
+            tab_col = "tabla_pacientes" if "tabla_pacientes" in cols_env else "NULL AS tabla_pacientes"
+            prog_col = "programado_id" if "programado_id" in cols_env else "NULL AS programado_id"
+            prog_fecha = ("(SELECT p.creado FROM envios_programados p"
+                          " WHERE p.id = envios.programado_id) AS programado_creado"
+                          if "programado_id" in cols_env else "NULL AS programado_creado")
+            marcadores = ", ".join("%s" for _ in ids_e)
+            cur.execute("SELECT id, base_datos, plantilla_clave, plantilla_nombre, total_pacientes,"
+                        f" enviados, fallidos, invalidos, estado, {com_col}, {esp_col}, {tab_col},"
+                        f" {prog_col}, {prog_fecha}, fecha_hora FROM envios"
+                        f" WHERE id IN ({marcadores})", tuple(ids_e))
+            for f in cur.fetchall() or []:
+                fecha = f.pop("fecha_hora")
+                f["_orden"] = f.pop("programado_creado", None) or fecha
+                f["origen"] = "programado" if f.pop("programado_id", None) is not None else "manual"
+                por_clave[(0, int(f["id"]))] = f
+        if ids_p:
+            marcadores = ", ".join("%s" for _ in ids_p)
+            cur.execute(f"SELECT * FROM envios_programados WHERE id IN ({marcadores})", tuple(ids_p))
+            for g in cur.fetchall() or []:
+                if not _prog_visible(sesion, g):
+                    continue
+                g["_orden"] = g.get("creado") or g.get("programado_para")
+                g["origen"] = "programado"
+                g["_sin_lote"] = True
+                por_clave[(1, int(g["id"]))] = g
+    filas = [por_clave[clave] for clave in claves if clave in por_clave]
+    return {"registros": _presentar_historial(filas, sesion), "total": total}
 
 
 def detalle_historial(envio_id: str, ambiente: str = Query("produccion"),

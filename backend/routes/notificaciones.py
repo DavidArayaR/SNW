@@ -13,6 +13,7 @@ RUTAS = (
     ("/api/notificaciones/jobs/{job_id}/pausa", "POST", "pausar_job", None),
     ("/api/notificaciones/jobs/{job_id}/reanudar", "POST", "reanudar_job", None),
     ("/api/notificaciones/historial", "GET", "listar_historial", None),
+    ("/api/notificaciones/historial/pagina", "GET", "listar_historial_pagina", None),
     ("/api/notificaciones/historial/{envio_id}/detalle", "GET", "detalle_historial", None),
     ("/api/notificaciones/historial/{registro_id}/respuesta", "PUT", "actualizar_respuesta", None),
     ("/api/notificaciones/programados", "POST", "crear_programado", None),
