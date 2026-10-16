@@ -328,8 +328,10 @@ async function cargar(mostrarFeedback = false) {
     let bloque;
     do {
       parametros.set("pagina", String(paginaPac));
+      // Solo se descarga la página visible: "1 de N" aquí parecía un
+      // progreso de carga de todas las páginas, aunque no ocurre eso.
       if (tablaCargandoTexto) tablaCargandoTexto.textContent =
-        `Cargando pacientes… página ${paginaPac} de ${consultaPacientesAnterior === claveConsulta ? totalPaginasPac(totalPacientesFiltrados) : "…"}`;
+        `Cargando pacientes de la página ${paginaPac}…`;
       const rp = await fetch(`${API_PACIENTES}/pagina?${parametros}`, {
         headers: authHeaders(), cache: "no-store", signal: control.signal,
       });
