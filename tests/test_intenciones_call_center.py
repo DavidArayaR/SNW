@@ -1,6 +1,7 @@
 import sys
 import unittest
 import urllib.parse
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 from fastapi import HTTPException
@@ -203,6 +204,50 @@ class IntencionesCallCenterTests(unittest.TestCase):
         enlace = datos["cta"]["url"]
         self.assertEqual(urllib.parse.unquote(enlace.split("text=", 1)[1]),
                          "Hola, esta es mi consulta: ¿Tienen horas mañana?")
+
+    def test_vista_de_aviso_solo_se_entrega_al_dueno_del_csv(self):
+        import main
+        vista = '{"texto":"Aviso privado","boton_texto":"Ir al call center","mensaje_preparado":"Consulta privada"}'
+
+        def consultar(propios):
+            conn = MagicMock()
+            cur = conn.__enter__.return_value.cursor.return_value.__enter__.return_value
+            cur.fetchall.side_effect = [[{
+                "id": 7, "paciente_id": 2, "nombre_paciente": "Paciente Apellido",
+                "numero_paciente": "+56912345678", "numero_call_center": "56999999999",
+                "plantilla_clave": "call_center", "automatico": 1, "estado": "enviado",
+                "descripcion_error": None, "base_datos": "pacientes_prod",
+                "vista_mensaje": vista, "fecha_hora": datetime(2026, 10, 16, 12, 0),
+            }], [], []]
+            with patch.object(main, "conectar", return_value=conn), \
+                 patch.object(main, "_es_privilegiado", return_value=True), \
+                 patch.object(main, "_ids_csv_propios", return_value=propios):
+                return main.obtener_call_center_log({"usuario": "operador"})["entradas"][0]
+
+        self.assertEqual(consultar({2})["vista_mensaje"]["texto"], "Aviso privado")
+        self.assertIsNone(consultar(set())["vista_mensaje"])
+
+    def test_despacho_guarda_la_vista_del_boton_realmente_preparado(self):
+        import main
+        canal = MagicMock()
+        canal.enviar.return_value = (True, "wamid.aviso", None)
+        datos = {"texto": "Mensaje automático", "cta": {
+            "texto": "Ir al call center",
+            "url": "https://wa.me/56999999999?text=Hola%2C%20esta%20es%20mi%20consulta",
+        }}
+        with patch.object(main, "esta_suprimido", return_value=False), \
+             patch.object(main, "leer_config", return_value={}), \
+             patch.object(main, "obtener_canal", return_value=canal), \
+             patch.object(main, "_cc_datos_envio", return_value=("Mensaje automático", datos, "56999999999")), \
+             patch.object(main, "registrar_historial"), \
+             patch.object(main, "_registrar_call_center_log") as registrar:
+            resultado = main._despachar_call_center(
+                {"id": 2, "nombre": "Paciente", "telefono": "+56912345678"}, "produccion")
+        self.assertTrue(resultado["ok"])
+        self.assertEqual(registrar.call_args.args[-1], {
+            "texto": "Mensaje automático", "boton_texto": "Ir al call center",
+            "mensaje_preparado": "Hola, esta es mi consulta",
+        })
 
     def test_reintento_restringido_a_propietario_del_csv(self):
         import main

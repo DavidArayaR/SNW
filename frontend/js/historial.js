@@ -744,6 +744,28 @@ function numeroCCVisible(numero) {
   return valor ? (valor.startsWith("+") ? valor : `+${valor}`) : "—";
 }
 
+const vistasAvisoCC = new Map();
+
+function abrirAvisoCC(id) {
+  const fila = vistasAvisoCC.get(Number(id));
+  if (!fila?.vista_mensaje) return;
+  const vista = fila.vista_mensaje;
+  $("#avisoCCEstado").textContent = fila.estado === "enviado"
+    ? "Vista del aviso registrado al enviarlo." : "Aviso preparado; el envío registró un error.";
+  $("#avisoCCTexto").textContent = vista.texto || "—";
+  $("#avisoCCBoton").textContent = vista.boton_texto || "Ir al call center";
+  $("#avisoCCDestino").textContent = `El botón abre el chat con ${numeroCCVisible(fila.numero_call_center)}.`;
+  $("#avisoCCPreparado").textContent = vista.mensaje_preparado
+    ? `Mensaje preparado al pulsar: ${vista.mensaje_preparado}`
+    : "El botón no tenía un texto preparado.";
+  $("#modalAvisoCC").hidden = false;
+}
+
+$("#btnCerrarAvisoCC").addEventListener("click", () => { $("#modalAvisoCC").hidden = true; });
+$("#modalAvisoCC").addEventListener("click", (evento) => {
+  if (evento.target === $("#modalAvisoCC")) $("#modalAvisoCC").hidden = true;
+});
+
 async function cargarLogCC(mostrarFeedback = false) {
   if (!panelCCLogEl) return;
   const body = $("#ccLogBody");
@@ -768,6 +790,8 @@ async function cargarLogCC(mostrarFeedback = false) {
       : `<p class="historial__cc-sin-usos">Todavía no hay usos registrados.</p>`;
 
     const filas = data.entradas || [];
+    vistasAvisoCC.clear();
+    filas.forEach((fila) => { if (fila.vista_mensaje) vistasAvisoCC.set(Number(fila.id), fila); });
     const derivaciones = data.derivaciones || [];
     derivacionesBody.innerHTML = derivaciones.length
       ? derivaciones.map((d) => `<tr>` +
@@ -794,6 +818,7 @@ async function cargarLogCC(mostrarFeedback = false) {
             `<td>${escaparHtml(f.base_datos ?? "—")}</td>` +
             `<td class="campo-tel">${escaparHtml(numeroCCVisible(f.numero_call_center))}</td>` +
             `<td><span class="historial__cc-estado-badge historial__cc-estado-badge--${enviado ? "notificado" : "error"}">${estado}</span>` +
+            (f.vista_mensaje ? ` <button type="button" class="btn btn--ghost btn--sm historial__cc-ver-aviso" data-ver-aviso-cc="${Number(f.id)}">Ver mensaje</button>` : "") +
             (f.descripcion_error ? `<div class="hist-msg">${escaparHtml(f.descripcion_error)}</div>` : "") +
             `</td></tr>`;
         }).join("")
@@ -809,6 +834,10 @@ async function cargarLogCC(mostrarFeedback = false) {
 
 if (panelCCLogEl) {
   window.snwConCooldown($("#btnActualizarCCLog"), () => cargarLogCC(true));
+  $("#ccLogBody").addEventListener("click", (evento) => {
+    const boton = evento.target.closest("[data-ver-aviso-cc]");
+    if (boton) abrirAvisoCC(boton.dataset.verAvisoCc);
+  });
   $("#ccDerivacionesBody").addEventListener("click", async (evento) => {
     const boton = evento.target.closest("[data-reintentar-derivacion]");
     if (!boton || boton.disabled) return;

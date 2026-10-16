@@ -283,11 +283,19 @@ def asegurar_tabla_config() -> None:
                 "  estado ENUM('enviado','error') NOT NULL DEFAULT 'enviado',"
                 "  descripcion_error VARCHAR(255) DEFAULT NULL,"
                 "  base_datos VARCHAR(50) DEFAULT NULL,"
+                "  vista_mensaje TEXT DEFAULT NULL,"
                 "  fecha_hora DATETIME DEFAULT CURRENT_TIMESTAMP,"
                 "  INDEX idx_numero (numero_call_center),"
                 "  INDEX idx_fecha (fecha_hora)"
                 ") CHARACTER SET utf8mb4"
             )
+            cur.execute(
+                "SELECT COLUMN_NAME FROM information_schema.COLUMNS"
+                " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'call_center_log'"
+                " AND COLUMN_NAME = 'vista_mensaje'"
+            )
+            if not cur.fetchone():
+                cur.execute("ALTER TABLE call_center_log ADD COLUMN vista_mensaje TEXT NULL")
             cur.execute(
                 "CREATE TABLE IF NOT EXISTS call_center_derivaciones ("
                 " id BIGINT AUTO_INCREMENT PRIMARY KEY,"

@@ -490,6 +490,31 @@ tbody tr:last-child td { border-bottom: none; }
   color: var(--danger-fg);
 }
 .historial__cc-reintentar { display: block; margin-top: 7px; }
+.historial__cc-ver-aviso { display: block; margin-top: 8px; }
+.historial__cc-vista {
+  max-width: 520px;
+  margin: 12px auto;
+  overflow: hidden;
+  border: 1px solid var(--chat-out-bd);
+  border-radius: 14px;
+  background: var(--chat-out);
+}
+.historial__cc-vista-texto {
+  padding: 18px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+.historial__cc-vista-boton {
+  display: block;
+  padding: 12px 16px;
+  border-top: 1px solid var(--chat-out-bd);
+  color: var(--verde);
+  text-align: center;
+  font-weight: 700;
+}
+.historial__cc-vista-destino,
+.historial__cc-vista-preparado { color: var(--texto-suave); font-size: .84rem; overflow-wrap: anywhere; }
 .historial__cc-estado { padding: 20px; text-align: center; color: var(--texto-suave); }
 .historial__cc-estado--error { color: var(--danger-fg); }
 #tablaCCLog .campo-nombre { white-space: nowrap; }

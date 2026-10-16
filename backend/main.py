@@ -2145,15 +2145,18 @@ def _elegir_numero_call_center() -> str:
 
 
 def _registrar_call_center_log(paciente_id, nombre, numero_paciente, numero_cc,
-                               plantilla_clave, automatico, estado, error, base_datos) -> None:
+                               plantilla_clave, automatico, estado, error, base_datos,
+                               vista_mensaje: dict | None = None) -> None:
     try:
         with conectar() as conn, conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO call_center_log (paciente_id, nombre_paciente, numero_paciente,"
-                " numero_call_center, plantilla_clave, automatico, estado, descripcion_error, base_datos)"
-                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                " numero_call_center, plantilla_clave, automatico, estado, descripcion_error,"
+                " base_datos, vista_mensaje)"
+                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 (paciente_id, nombre, numero_paciente, numero_cc, plantilla_clave,
-                 1 if automatico else 0, estado, (error or "")[:255] or None, base_datos),
+                 1 if automatico else 0, estado, (error or "")[:255] or None, base_datos,
+                 json.dumps(vista_mensaje, ensure_ascii=False) if vista_mensaje else None),
             )
             conn.commit()
     except Exception as e:
@@ -2267,9 +2270,13 @@ def _despachar_call_center(pac: dict, ambiente: str, tabla: str | None = None,
                         whatsapp_message_id=message_id,
                         area_id=esp_id, tabla_pacientes=tabla)
     if numero_cc:
+        cta = datos_plantilla.get("cta") or {}
+        vista = {"texto": texto, "boton_texto": cta.get("texto") or "",
+                 "mensaje_preparado": urllib.parse.parse_qs(
+                     urllib.parse.urlparse(cta.get("url") or "").query).get("text", [""])[0]}
         _registrar_call_center_log(
             pac.get("id"), nombre, telefono, numero_cc, CALL_CENTER_CLAVE,
-            True, "enviado" if ok else "error", error, tabla or nombre_base(ambiente),
+            True, "enviado" if ok else "error", error, tabla or nombre_base(ambiente), vista,
         )
     return {"ok": ok, "error": error, "telefono": telefono,
             "numero_call_center": numero_cc, "message_id": message_id}
@@ -3761,7 +3768,8 @@ def obtener_call_center_log(sesion: dict = Depends(exigir("call_center_registro"
         with conectar() as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT id, paciente_id, nombre_paciente, numero_paciente, numero_call_center,"
-                " plantilla_clave, automatico, estado, descripcion_error, base_datos, fecha_hora"
+                " plantilla_clave, automatico, estado, descripcion_error, base_datos,"
+                " vista_mensaje, fecha_hora"
                 " FROM call_center_log"
                 + (f" WHERE {filtro_area}" if filtro_area else "")
                 + " ORDER BY id DESC LIMIT 200",
@@ -3784,7 +3792,13 @@ def obtener_call_center_log(sesion: dict = Depends(exigir("call_center_registro"
             for r in filas:
                 r["fecha"] = r.pop("fecha_hora").strftime("%d-%m-%Y %H:%M")
                 r["automatico"] = bool(r["automatico"])
-                if r.get("paciente_id") not in propios_por_tabla.get(r.get("base_datos"), set()):
+                propio = r.get("paciente_id") in propios_por_tabla.get(r.get("base_datos"), set())
+                vista = r.pop("vista_mensaje", None)
+                try:
+                    r["vista_mensaje"] = json.loads(vista) if propio and vista else None
+                except (TypeError, ValueError):
+                    r["vista_mensaje"] = None
+                if not propio:
                     r["nombre_paciente"] = _iniciales_paciente(r.get("nombre_paciente"))
                     r["numero_paciente"] = _telefono_paciente_oculto(r.get("numero_paciente"))
                     r["descripcion_error"] = None
