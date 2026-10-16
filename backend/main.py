@@ -1542,28 +1542,21 @@ def _propagar_baja_manual_a_pruebas(cur, telefono: str, tabla_origen: str,
         indice={numero: coincidencias})
 
 
-def listar_pacientes(q: str | None = Query(None), ambiente: str = Query("produccion"),
-                     area_id: int | None = Query(None),
-                     sesion: dict = Depends(sesion_actual)):
-    # Lectura: con area basta estar asignado (cualquier rol, para que
-    # el usuario vea su base); sin ella se exige el permiso de pacientes.
+def _tabla_lectura_pacientes(sesion: dict, ambiente: str, area_id: int | None) -> tuple[str, dict | None]:
+    # Con área basta estar asignado; sin ella se exige permiso de pacientes.
     if area_id is not None:
-        t, _esp = _resolver_tabla_pacientes(sesion, ambiente, area_id)
-    else:
-        if not tiene_permiso(sesion, "pacientes"):
-            raise HTTPException(403, detail="No tienes permiso para acceder a esta sección.")
-        t, _esp = _resolver_tabla_pacientes(sesion, ambiente, None)
-    sql = "SELECT " + expr_select_pacientes(ambiente, tabla=t) + from_pacientes(ambiente, tabla=t)
-    sql += " ORDER BY p.id"
+        return _resolver_tabla_pacientes(sesion, ambiente, area_id)
+    if not tiene_permiso(sesion, "pacientes"):
+        raise HTTPException(403, detail="No tienes permiso para acceder a esta sección.")
+    return _resolver_tabla_pacientes(sesion, ambiente, None)
 
-    with conectar(ambiente) as conn, conn.cursor() as cur:
-        cur.execute(sql)
-        # PyMySQL devuelve fetchall() como tupla; más abajo se ordena la lista.
-        filas = list(cur.fetchall() or [])
 
+def _presentar_filas_pacientes(filas: list[dict], t: str, ambiente: str,
+                               esp: dict | None, sesion: dict) -> list[dict]:
+    """Aplica la misma visibilidad y máscara tanto a la lectura completa como a la paginada."""
     propios = _ids_csv_propios(t, [f["id"] for f in filas], sesion)
     puede_ver_todos_dev = t == "pacientes_dev" and _es_privilegiado(sesion)
-    numeros_editables = _numeros_prueba_editables("produccion" if _esp else ambiente)
+    numeros_editables = _numeros_prueba_editables("produccion" if esp else ambiente)
     numeros_prueba_prod = _numeros_prueba_editables("produccion") if t == "pacientes_dev" else set()
     for f in filas:
         f["editable"] = _es_numero_prueba_editable(f.get("telefono"), numeros_editables)
@@ -1577,6 +1570,22 @@ def listar_pacientes(q: str | None = Query(None), ambiente: str = Query("producc
         f["actualizado"] = fecha.strftime("%d-%m-%Y %H:%M") if fecha else "—"
         fr = f.get("ultima_respuesta_fecha")
         f["ultima_respuesta_fecha"] = fr.strftime("%d-%m-%Y %H:%M") if fr else None
+    return filas
+
+
+def listar_pacientes(q: str | None = Query(None), ambiente: str = Query("produccion"),
+                     area_id: int | None = Query(None),
+                     sesion: dict = Depends(sesion_actual)):
+    t, esp = _tabla_lectura_pacientes(sesion, ambiente, area_id)
+    sql = "SELECT " + expr_select_pacientes(ambiente, tabla=t) + from_pacientes(ambiente, tabla=t)
+    sql += " ORDER BY p.id"
+
+    with conectar(ambiente) as conn, conn.cursor() as cur:
+        cur.execute(sql)
+        # PyMySQL devuelve fetchall() como tupla; más abajo se ordena la lista.
+        filas = list(cur.fetchall() or [])
+
+    _presentar_filas_pacientes(filas, t, ambiente, esp, sesion)
     if q and q.strip():
         texto = q.strip().casefold()
         filas = [f for f in filas if texto in f["nombre"].casefold()
@@ -1585,6 +1594,125 @@ def listar_pacientes(q: str | None = Query(None), ambiente: str = Query("producc
     # de prueba quedan siempre primero, también tras recargar o buscar.
     filas.sort(key=lambda f: (not f["editable"], f["id"]))
     return filas
+
+
+def _expresiones_filtro_pacientes(t: str, ambiente: str) -> tuple[str, str, str, str]:
+    cols = columnas_tabla(t, ambiente)
+    estado = "COALESCE(NULLIF(p.estado, ''), 'pendiente')" if "estado" in cols else "'pendiente'"
+    respuesta = expr_respuesta_efectiva(
+        "p", "whatsapp_opt_out" in cols, "respuesta_manual" in cols,
+        tabla_log=t if "tabla_pacientes" in columnas_tabla("log_envios", ambiente) else None,
+        tiene_interes={"interesado", "no_interesado"} <= cols, mostrar_no_interesado=True)
+    interesado = "COALESCE(p.interesado, 0)" if "interesado" in cols else "0"
+    no_interesado = "COALESCE(p.no_interesado, 0)" if "no_interesado" in cols else "0"
+    return estado, respuesta, interesado, no_interesado
+
+
+def _filtro_pagina_pacientes(t: str, ambiente: str, sesion: dict, q: str,
+                            estado: str, respuesta: str, interes: str) -> tuple[str, tuple]:
+    ex_estado, ex_respuesta, ex_interes, ex_no_interes = _expresiones_filtro_pacientes(t, ambiente)
+    condiciones = []
+    valores = []
+    if estado != "todos":
+        condiciones.append(f"{ex_estado} = %s")
+        valores.append(estado)
+    if respuesta != "todas":
+        condiciones.append(f"{ex_respuesta} = %s")
+        valores.append(respuesta)
+    if interes != "todos":
+        condiciones.append(f"{ex_interes if interes == 'interesado' else ex_no_interes} = 1")
+    if q.strip():
+        texto = q.strip().lower()
+        uid = servicio_areas.usuario_id_por_correo(sesion.get("usuario", ""))
+        if t == "pacientes_dev" and _es_privilegiado(sesion):
+            acceso = "1"
+            args_acceso = ()
+        elif uid:
+            acceso = ("EXISTS (SELECT 1 FROM paciente_csv_accesos a"
+                      " WHERE a.tabla_pacientes = %s AND a.usuario_id = %s AND a.paciente_id = p.id)")
+            args_acceso = (t, uid)
+        else:
+            acceso = "0"
+            args_acceso = ()
+        iniciales = "CONCAT(LEFT(p.nombre, 1), '. ', LEFT(p.apellido, 1), '.')"
+        telefono_oculto = ("CASE WHEN p.telefono REGEXP "
+                           "'^([+]569[0-9]{8}|569[0-9]{8}|56[0-9]{8}|9[0-9]{7,8})$'"
+                           " THEN CONCAT('+569 **** *', RIGHT(p.telefono, 3)) ELSE '—' END")
+        condiciones.append(
+            f"(({acceso} AND (LOCATE(%s, LOWER(CONCAT_WS(' ', p.nombre, p.apellido))) > 0"
+            " OR LOCATE(%s, LOWER(p.telefono)) > 0))"
+            f" OR (NOT ({acceso}) AND (LOCATE(%s, LOWER({iniciales})) > 0"
+            f" OR LOCATE(%s, LOWER({telefono_oculto})) > 0)))")
+        valores.extend((*args_acceso, texto, texto, *args_acceso, texto, texto))
+    return (" WHERE " + " AND ".join(condiciones) if condiciones else ""), tuple(valores)
+
+
+def listar_pacientes_pagina(ambiente: str = Query("produccion"),
+                           area_id: int | None = Query(None),
+                           pagina: int = Query(1, ge=1, le=1000000),
+                           limite: int = Query(10, ge=10, le=100),
+                           q: str = Query("", max_length=100),
+                           estado: str = Query("todos"),
+                           respuesta: str = Query("todas"),
+                           interes: str = Query("todos"),
+                           incluir_total: bool = Query(True),
+                           incluir_resumen: bool = Query(False),
+                           sesion: dict = Depends(sesion_actual)):
+    """Solo los registros de la página solicitada; totales agregados sin listar PII."""
+    t, esp = _tabla_lectura_pacientes(sesion, ambiente, area_id)
+    if estado not in ("todos", "pendiente", "enviado", "error") or \
+       respuesta not in ("todas", "pendiente", "respondio", "no_interesado", "baja") or \
+       interes not in ("todos", "interesado", "no_interesado"):
+        raise HTTPException(422, detail="Filtro de pacientes inválido.")
+    filtro_sql, args = _filtro_pagina_pacientes(t, ambiente, sesion, q, estado, respuesta, interes)
+    numeros_editables = _numeros_prueba_editables("produccion" if esp else ambiente)
+    with conectar(ambiente) as conn, conn.cursor() as cur:
+        if incluir_resumen:
+            ex_estado, ex_respuesta, ex_interes, ex_no_interes = _expresiones_filtro_pacientes(t, ambiente)
+            cur.execute(
+                "SELECT COUNT(*) AS total,"
+                f" SUM({ex_estado} = 'pendiente') AS pendiente,"
+                f" SUM({ex_estado} = 'enviado') AS enviado,"
+                f" SUM({ex_estado} = 'error') AS error,"
+                f" SUM({ex_respuesta} = 'pendiente') AS sin_respuesta,"
+                f" SUM({ex_respuesta} = 'baja') AS baja,"
+                f" SUM({ex_interes} = 1) AS interesado,"
+                f" SUM({ex_no_interes} = 1) AS no_interesado"
+                f" FROM {t} p")
+            resumen = {k: int(v or 0) for k, v in (cur.fetchone() or {}).items()}
+        else:
+            resumen = None
+        total = None
+        if incluir_total:
+            if not filtro_sql and resumen is not None:
+                total = resumen.get("total", 0)
+            else:
+                cur.execute(f"SELECT COUNT(*) AS total FROM {t} p{filtro_sql}", args)
+                total = int((cur.fetchone() or {}).get("total") or 0)
+        orden = "p.id"
+        orden_args = ()
+        if numeros_editables:
+            marcadores = ", ".join("%s" for _ in numeros_editables)
+            orden = f"CASE WHEN p.telefono IN ({marcadores}) THEN 0 ELSE 1 END, p.id"
+            orden_args = tuple(sorted(numeros_editables))
+        # Elegir primero IDs evita calcular el último envío y los mensajes
+        # correlacionados de los miles de registros que no están en pantalla.
+        cur.execute(f"SELECT p.id FROM {t} p{filtro_sql}"
+                    f" ORDER BY {orden} LIMIT %s OFFSET %s",
+                    (*args, *orden_args, limite, (pagina - 1) * limite))
+        ids = [int(f["id"]) for f in (cur.fetchall() or [])]
+        if ids:
+            marcadores_ids = ", ".join("%s" for _ in ids)
+            sql = ("SELECT " + expr_select_pacientes(ambiente, tabla=t)
+                   + from_pacientes(ambiente, tabla=t)
+                   + f" WHERE p.id IN ({marcadores_ids})")
+            cur.execute(sql, tuple(ids))
+            por_id = {int(f["id"]): f for f in (cur.fetchall() or [])}
+            filas = [por_id[pid] for pid in ids if pid in por_id]
+        else:
+            filas = []
+    _presentar_filas_pacientes(filas, t, ambiente, esp, sesion)
+    return {"pacientes": filas, "total": total, "resumen": resumen}
 
 
 class PacientePruebaIn(BaseModel):

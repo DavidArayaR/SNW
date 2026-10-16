@@ -2,6 +2,7 @@ from ._registry import crear_router
 
 RUTAS = (
     ("/api/pacientes", "GET", "listar_pacientes", None),
+    ("/api/pacientes/pagina", "GET", "listar_pacientes_pagina", None),
     ("/api/pacientes/prueba", "POST", "crear_paciente_prueba", None),
     ("/api/pacientes/prueba/{paciente_id}/autorizar", "POST", "autorizar_numero_paciente_prueba", None),
     ("/api/pacientes/prueba/{paciente_id}/autorizar", "DELETE", "quitar_autorizacion_numero_paciente_prueba", None),

@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="css/tema.css?v=scrollbar1">
   <link rel="stylesheet" href="css/styles.css">
   <link rel="stylesheet" href="css/componentes.css?v=no-interesado1">
-  <link rel="stylesheet" href="css/pacientes.css?v=pruebas4">
+  <link rel="stylesheet" href="css/pacientes.css?v=carga-tabla2">
   <link rel="stylesheet" href="css/layout.css?v=scrollbar1">
   <link rel="stylesheet" href="css/admin.css?v=inlinecss1">
   <link rel="stylesheet" href="css/refinamiento.css?v=frontend4">
@@ -51,7 +51,7 @@
           </div>
 
           <div class="toolbar-pacientes">
-            <input type="search" id="buscador" placeholder="Buscar por nombre, tel&eacute;fono o info..." autocomplete="off">
+            <input type="search" id="buscador" placeholder="Buscar por nombre, tel&eacute;fono o info..." maxlength="100" autocomplete="off">
             <span id="contadorSel" class="contador-sel"></span>
             <span class="pag-grupo">
               <span id="pagInfoPac" class="pag-info"></span>
@@ -95,8 +95,14 @@
 
           <p class="field__hint pacientes__aviso-pruebas">Solo los números de prueba configurados para esta base permiten cambiar manualmente su estado o respuesta.</p>
 
-          <div class="tabla-wrap">
-            <table id="tablaPacientes">
+          <div class="tabla-wrap" id="tablaPacientesWrap">
+            <div id="tablaCargando" class="tabla-cargando" role="status" aria-live="polite" hidden>
+              <div class="tabla-cargando__contenido">
+                <span class="tabla-cargando__rueda" aria-hidden="true"></span>
+                <span id="tablaCargandoTexto">Cargando pacientes…</span>
+              </div>
+            </div>
+            <table id="tablaPacientes" aria-busy="false">
               <thead>
                 <tr>
                   <th class="col-check"><input type="checkbox" id="chkTodos" title="Seleccionar todos los visibles"></th>
@@ -228,8 +234,8 @@
 
   <script src="js/layout.js?v=navcurve7"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/csv-chunks.js?v=1"></script>
-  <script src="js/pacientes.js?v=csv-bloques1"></script>
+  <script src="js/csv-chunks.js?v=filas2000-1"></script>
+  <script src="js/pacientes.js?v=paginacion-servidor1"></script>
   <script>
     (function () {
       if (window.snwCargarPacientes) window.snwCargarPacientes();

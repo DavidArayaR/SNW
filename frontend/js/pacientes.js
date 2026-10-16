@@ -9,13 +9,17 @@ let ambienteAdmin = localStorage.getItem("snw_ambiente_admin");
 let _ambienteInicializado = false;
 
 let pacientes = [];
-let config = null;
+let totalPacientesFiltrados = 0;
+let resumenPacientes = null;
+let baseResumenPacientes = null;
+let consultaPacientesAnterior = null;
 let areas = [];
 let filtro = "";
 let filtroEstado = "todos";
 let filtroRespuesta = "todas";
 let filtroInteres = "todos";
 let seleccionados = new Set();
+let seleccionadosDatos = new Map();
 let todoMarcado = false;
 
 // Paginación de la tabla: 10 a 100 pacientes por página.
@@ -23,17 +27,8 @@ let paginaPac = 1;
 let pageSizePac = Math.min(100, Math.max(10, Number(localStorage.getItem("snw_page_size_pac")) || 10));
 
 function filtradosPac() {
-  const q = filtro.trim().toLowerCase();
-  return pacientes.filter(
-    (p) =>
-      (filtroEstado === "todos" || p.estado === filtroEstado) &&
-      (filtroRespuesta === "todas" || (p.respuesta || "pendiente") === filtroRespuesta) &&
-      (filtroInteres === "todos" || !!p[filtroInteres]) &&
-      (!q ||
-        [p.nombre, p.apellido, p.telefono]
-          .filter(Boolean)
-          .some((v) => v.toLowerCase().includes(q)))
-  );
+  // El servidor ya aplicó la búsqueda y los filtros a toda la base.
+  return pacientes;
 }
 
 function totalPaginasPac(n) {
@@ -41,10 +36,10 @@ function totalPaginasPac(n) {
 }
 
 function itemsPaginaPac(visibles) {
-  const total = totalPaginasPac(visibles.length);
+  const total = totalPaginasPac(totalPacientesFiltrados);
   if (paginaPac > total) paginaPac = total;
   if (paginaPac < 1) paginaPac = 1;
-  return visibles.slice((paginaPac - 1) * pageSizePac, paginaPac * pageSizePac);
+  return visibles;
 }
 
 function pintarPaginadorPac(total) {
@@ -63,7 +58,23 @@ function pintarPaginadorPac(total) {
 const $ = (sel) => document.querySelector(sel);
 
 const tbodyEl = $("#tablaPacientes tbody");
+const tablaEl = $("#tablaPacientes");
 const vacioEl = $("#tablaVacia");
+const tablaWrap = $("#tablaPacientesWrap");
+const tablaCargando = $("#tablaCargando");
+const tablaCargandoTexto = $("#tablaCargandoTexto");
+let solicitudPacientes = 0;
+let controlCargaPacientes = null;
+
+function mostrarCargaPacientes(activa) {
+  if (tablaCargando) tablaCargando.hidden = !activa;
+  if (activa && tablaCargandoTexto) tablaCargandoTexto.textContent = "Cargando pacientes…";
+  if (tablaWrap) {
+    tablaWrap.classList.toggle("is-loading", activa);
+  }
+  if (tablaEl) tablaEl.setAttribute("aria-busy", String(activa));
+  if (activa && vacioEl) vacioEl.hidden = true;
+}
 const buscadorEl = $("#buscador");
 const statsEl = $("#stats");
 const chkTodos = $("#chkTodos");
@@ -225,7 +236,7 @@ function aplicarModoBase() {
   const msg = $("#csvMsg");
   if (msg) {
     msg.textContent = esArea
-      ? `Destino: ${area.nombre_visible} (${area.nombre_tabla_base}) · columnas: nombre, apellido, telefono (UTF-8). Los archivos grandes se cargan por partes.`
+      ? `Destino: ${area.nombre_visible} (${area.nombre_tabla_base}) · columnas: nombre, apellido, telefono (UTF-8). La carga se divide en partes de hasta 2.000 filas o 2 MB.`
       : "Destino: —";
   }
 
@@ -246,6 +257,7 @@ if (selBasePac) selBasePac.addEventListener("change", async () => {
     localStorage.setItem("snw_ambiente_admin", ambienteAdmin);
   }
   seleccionados = new Set();
+  seleccionadosDatos.clear();
   todoMarcado = false;
   paginaPac = 1;
   aplicarModoBase();
@@ -259,13 +271,19 @@ function escaparHtml(texto) {
 }
 
 async function cargar(mostrarFeedback = false) {
+  const solicitud = ++solicitudPacientes;
+  if (controlCargaPacientes) controlCargaPacientes.abort();
+  const control = new AbortController();
+  controlCargaPacientes = control;
+  mostrarCargaPacientes(true);
   try {
     // Si no hay preferencia guardada, usar el entorno global de la configuración como default
     if (!_ambienteInicializado && !localStorage.getItem("snw_ambiente_admin")) {
       try {
-        const r0 = await fetch("api/configuracion", { headers: authHeaders(), cache: "no-store" });
+        const r0 = await fetch("api/configuracion", { headers: authHeaders(), cache: "no-store", signal: control.signal });
         if (r0.ok) {
           const c0 = await r0.json();
+          if (solicitud !== solicitudPacientes) return;
           ambienteAdmin = c0.entorno;
           if (selBasePac && espPacId() == null) {
             const preferida = ambienteAdmin === "produccion" ? "prod" : "dev";
@@ -279,42 +297,75 @@ async function cargar(mostrarFeedback = false) {
       } catch {}
       _ambienteInicializado = true;
     }
+    if (solicitud !== solicitudPacientes) return;
     if (!selBasePac?.value) {
       pacientes = [];
+      totalPacientesFiltrados = 0;
+      resumenPacientes = null;
+      consultaPacientesAnterior = null;
       render();
       return;
     }
+    const baseQs = qsBase();
+    if (baseResumenPacientes !== baseQs) {
+      resumenPacientes = null;
+      baseResumenPacientes = baseQs;
+      totalPacientesFiltrados = 0;
+      consultaPacientesAnterior = null;
+    }
+    pacientes = [];
+    render();
     const esp = espPacId();
-    const amb = esp != null ? "produccion" : (basePacActual() === "prod" ? "produccion" : "desarrollo");
-    const [rp, rc] = await Promise.all([
-      fetch(`${API_PACIENTES}?${qsBase()}`, { headers: authHeaders(), cache: "no-store" }),
-      fetch(`api/configuracion?ambiente=${amb}`, { headers: authHeaders(), cache: "no-store" }),
-    ]);
-    if (rp.status === 401 || rc.status === 401) { window.snwSesionExpirada(); return; }
-    if (rp.status === 403) {
-      toast(esp ? "No tienes acceso a esta área." : "Sin acceso a esta base.", "error");
-      pacientes = [];
-      render();
-      return;
-    }
-
-    pacientes = (await rp.json()).map((p) => ({
-      ...p,
-      estado: p.estado || "pendiente",
-    }));
-    config = await rc.json();
-
-    seleccionados = new Set([...seleccionados].filter((id) =>
-      pacientes.some((p) => p.id === id && puedeSeleccionarPaciente(p))));
-    if (!seleccionados.size) todoMarcado = false;
+    const parametros = new URLSearchParams(baseQs);
+    parametros.set("limite", String(pageSizePac));
+    parametros.set("q", filtro.trim().slice(0, 100));
+    parametros.set("estado", filtroEstado);
+    parametros.set("respuesta", filtroRespuesta);
+    parametros.set("interes", filtroInteres);
+    const claveConsulta = `${baseQs}|${filtro.trim().slice(0, 100)}|${filtroEstado}|${filtroRespuesta}|${filtroInteres}`;
+    parametros.set("incluir_total", String(claveConsulta !== consultaPacientesAnterior || mostrarFeedback));
+    parametros.set("incluir_resumen", String(resumenPacientes === null || mostrarFeedback));
+    let bloque;
+    do {
+      parametros.set("pagina", String(paginaPac));
+      if (tablaCargandoTexto) tablaCargandoTexto.textContent =
+        `Cargando pacientes… página ${paginaPac} de ${consultaPacientesAnterior === claveConsulta ? totalPaginasPac(totalPacientesFiltrados) : "…"}`;
+      const rp = await fetch(`${API_PACIENTES}/pagina?${parametros}`, {
+        headers: authHeaders(), cache: "no-store", signal: control.signal,
+      });
+      if (solicitud !== solicitudPacientes) return;
+      if (rp.status === 401) { window.snwSesionExpirada(); return; }
+      if (rp.status === 403) throw new Error(esp ? "No tienes acceso a esta área." : "Sin acceso a esta base.");
+      if (!rp.ok) throw new Error("No se pudieron obtener los pacientes de esta base.");
+      bloque = await rp.json();
+      if (solicitud !== solicitudPacientes) return;
+      if (bloque.total !== null) totalPacientesFiltrados = Number(bloque.total) || 0;
+      if (bloque.resumen) resumenPacientes = bloque.resumen;
+      if (paginaPac > totalPaginasPac(totalPacientesFiltrados)) {
+        paginaPac = totalPaginasPac(totalPacientesFiltrados);
+        parametros.set("incluir_total", "false");
+        parametros.set("incluir_resumen", "false");
+      } else break;
+    } while (true);
+    pacientes = (bloque.pacientes || []).map((p) => ({ ...p, estado: p.estado || "pendiente" }));
+    consultaPacientesAnterior = claveConsulta;
+    for (const p of pacientes) if (seleccionados.has(p.id)) seleccionadosDatos.set(p.id, p);
 
     aplicarModoBase();
 
     render();
     if (mostrarFeedback) toast("Pacientes actualizados correctamente.");
   } catch (err) {
+    if (solicitud !== solicitudPacientes) return;
+    if (err?.name === "AbortError") return;
     console.error("[pacientes] cargar:", err);
-    toast("Error al conectar con el servidor" + (err && err.message ? `: ${err.message}` : "."), "error");
+    toast(err?.message || "Error al cargar pacientes.", "error");
+  } finally {
+    if (solicitud === solicitudPacientes) {
+      controlCargaPacientes = null;
+      mostrarCargaPacientes(false);
+      render();
+    }
   }
 }
 
@@ -408,28 +459,21 @@ function render() {
     }
     const chk = tr.querySelector('input[type="checkbox"]');
     if (chk) chk.addEventListener("change", (e) => {
-      e.target.checked ? seleccionados.add(p.id) : seleccionados.delete(p.id);
+      if (e.target.checked) { seleccionados.add(p.id); seleccionadosDatos.set(p.id, p); }
+      else { seleccionados.delete(p.id); seleccionadosDatos.delete(p.id); }
       if (!e.target.checked) todoMarcado = false;
       refrescarSeleccion();
     });
     tbodyEl.appendChild(tr);
   }
 
-  vacioEl.hidden = visibles.length > 0;
-  pintarPaginadorPac(visibles.length);
+  vacioEl.hidden = visibles.length > 0 || !!(tablaCargando && !tablaCargando.hidden);
+  pintarPaginadorPac(totalPacientesFiltrados);
 
-  const conteo = { total: pacientes.length, pendiente: 0, enviado: 0, error: 0 };
-  for (const p of pacientes) {
-    if (conteo[p.estado] !== undefined) conteo[p.estado]++;
-  }
-
-  const conteoResp = { todas: pacientes.length, pendiente: 0, respondio: 0, no_interesado: 0, baja: 0 };
-  for (const p of pacientes) {
-    const r = p.respuesta || "pendiente";
-    if (conteoResp[r] !== undefined) conteoResp[r]++;
-  }
-  const conteoInteresados = pacientes.filter((p) => !!p.interesado).length;
-  const conteoNoInteresados = pacientes.filter((p) => !!p.no_interesado).length;
+  const conteo = resumenPacientes || {};
+  const conteoResp = resumenPacientes || {};
+  const conteoInteresados = conteo.interesado || 0;
+  const conteoNoInteresados = conteo.no_interesado || 0;
 
   const esActivoEstado = (estado) => filtroRespuesta === "todas" && filtroInteres === "todos" && filtroEstado === estado;
   const esActivoResp = (resp) => filtroEstado === "todos" && filtroInteres === "todos" && filtroRespuesta === resp;
@@ -444,13 +488,13 @@ function render() {
       `<span class="stat-card__texto"><strong>${numero}</strong><span>${etiqueta}</span></span>` +
     `</button>`;
   statsEl.innerHTML =
-    statCard("neutral", "fa-users", esActivoEstado("todos"), 'data-estado="todos"', "Total", conteo.total) +
-    statCard("warn", "fa-clock", esActivoEstado("pendiente"), 'data-estado="pendiente"', "Pendientes", conteo.pendiente) +
-    statCard("ok", "fa-paper-plane", esActivoEstado("enviado"), 'data-estado="enviado"', "Enviados", conteo.enviado) +
-    statCard("danger", "fa-triangle-exclamation", esActivoEstado("error"), 'data-estado="error"', "Errores", conteo.error) +
-    statCard("neutral", "fa-comment-slash", esActivoResp("pendiente"), 'data-respuesta="pendiente"', "Sin resp.", conteoResp.pendiente) +
+    statCard("neutral", "fa-users", esActivoEstado("todos"), 'data-estado="todos"', "Total", conteo.total || 0) +
+    statCard("warn", "fa-clock", esActivoEstado("pendiente"), 'data-estado="pendiente"', "Pendientes", conteo.pendiente || 0) +
+    statCard("ok", "fa-paper-plane", esActivoEstado("enviado"), 'data-estado="enviado"', "Enviados", conteo.enviado || 0) +
+    statCard("danger", "fa-triangle-exclamation", esActivoEstado("error"), 'data-estado="error"', "Errores", conteo.error || 0) +
+    statCard("neutral", "fa-comment-slash", esActivoResp("pendiente"), 'data-respuesta="pendiente"', "Sin resp.", conteoResp.sin_respuesta || 0) +
     statCard("ok", "fa-thumbs-up", esActivoInteres("interesado"), 'data-interes="interesado"', "Interesados", conteoInteresados) +
-    statCard("danger", "fa-user-slash", esActivoResp("baja"), 'data-respuesta="baja"', "Baja", conteoResp.baja) +
+    statCard("danger", "fa-user-slash", esActivoResp("baja"), 'data-respuesta="baja"', "Baja", conteoResp.baja || 0) +
     statCard("info", "fa-thumbs-down", esActivoInteres("no_interesado"), 'data-interes="no_interesado"', "No le interesa", conteoNoInteresados);
 
   refrescarSeleccion(enPagina);
@@ -467,7 +511,7 @@ function refrescarSeleccion(visibles = null) {
   if (toolbarMasivo) toolbarMasivo.hidden = seleccionados.size === 0;
 
   const soloPruebas = [...seleccionados].every((id) =>
-    pacientes.some((p) => p.id === id && puedeEditarPaciente(p)));
+    puedeEditarPaciente(seleccionadosDatos.get(id) || {}));
   if (selEstadoMasivo) selEstadoMasivo.disabled = !soloPruebas;
   if (selRespuestaMasivo) selRespuestaMasivo.disabled = !soloPruebas;
   const avisoMasivo = $("#avisoMasivoPrueba");
@@ -493,10 +537,11 @@ function sincronizarSeleccionConFiltro() {
   if (todoMarcado) {
     // Re-seleccionar exactamente los del filtro actual.
     seleccionados = new Set([...seleccionables]);
+    seleccionadosDatos = new Map(pacientes.filter((p) => seleccionados.has(p.id)).map((p) => [p.id, p]));
   } else {
     // Conservar solo los seleccionados que aún cumplen el filtro.
     for (const id of [...seleccionados]) {
-      if (!seleccionables.has(id)) seleccionados.delete(id);
+      if (!seleccionables.has(id)) { seleccionados.delete(id); seleccionadosDatos.delete(id); }
     }
   }
 }
@@ -508,7 +553,7 @@ chkTodos.addEventListener("change", (e) => {
     sincronizarSeleccionConFiltro();
   } else {
     // Desmarcar todos los del filtro actual.
-    for (const id of idsSeleccionables()) seleccionados.delete(id);
+    for (const id of idsSeleccionables()) { seleccionados.delete(id); seleccionadosDatos.delete(id); }
   }
   render();
 });
@@ -522,7 +567,12 @@ tbodyEl.addEventListener("click", (e) => {
   const chk = tr.querySelector("input[type=checkbox]");
   if (!chk) return;
   chk.checked = !chk.checked;
-  chk.checked ? seleccionados.add(Number(chk.dataset.id)) : seleccionados.delete(Number(chk.dataset.id));
+  const id = Number(chk.dataset.id);
+  if (chk.checked) {
+    seleccionados.add(id);
+    const p = pacientes.find((item) => item.id === id);
+    if (p) seleccionadosDatos.set(id, p);
+  } else { seleccionados.delete(id); seleccionadosDatos.delete(id); }
   if (!chk.checked) todoMarcado = false;
   refrescarSeleccion();
 });
@@ -575,7 +625,7 @@ tbodyEl.addEventListener("change", async (e) => {
     toast(nueva === "baja"
       ? mensajeBaja(paciente, "Paciente marcado como dado de baja.")
       : `Respuesta actualizada a "${nueva}".`, "ok");
-    render();
+    await cargarTrasCambio();
   } catch (err) {
     console.error("[pacientes.js:477]", err);
     toast(err.message || "No se pudo actualizar la respuesta", "error");
@@ -622,7 +672,7 @@ tbodyEl.addEventListener("change", async (e) => {
       paciente.actualizado = actualizado.actualizado;
     }
     toast(`Estado actualizado a "${nuevoEstado}"`, "ok");
-    render();
+    await cargarTrasCambio();
   } catch (err) {
     console.error("[pacientes.js:521]", err);
     toast(err.message || "No se pudo actualizar el estado", "error");
@@ -654,11 +704,15 @@ document.addEventListener("click", (e) => {
   tbodyEl.querySelectorAll(".estado-select:not([hidden]), .respuesta-select:not([hidden])").forEach(cerrarSelectInline);
 });
 
+let timerBusquedaPac = null;
 buscadorEl.addEventListener("input", () => {
   filtro = buscadorEl.value;
   paginaPac = 1;
-  sincronizarSeleccionConFiltro();
-  render();
+  seleccionados.clear();
+  seleccionadosDatos.clear();
+  todoMarcado = false;
+  clearTimeout(timerBusquedaPac);
+  timerBusquedaPac = setTimeout(() => cargar(), 250);
 });
 
 statsEl.addEventListener("click", (e) => {
@@ -678,8 +732,10 @@ statsEl.addEventListener("click", (e) => {
     filtroRespuesta = "todas";
   }
   paginaPac = 1;
-  sincronizarSeleccionConFiltro();
-  render();
+  seleccionados.clear();
+  seleccionadosDatos.clear();
+  todoMarcado = false;
+  cargar();
 });
 
 window.snwConCooldown($("#btnActualizar"), () => cargar(true));
@@ -690,18 +746,23 @@ const pagSigPac = $("#pagSigPac");
 const selPageSizePac = $("#selPageSizePac");
 if (selPageSizePac) selPageSizePac.value = String(pageSizePac);
 if (pagAntPac) pagAntPac.addEventListener("click", () => {
-  if (paginaPac > 1) { paginaPac -= 1; render(); }
+  if (paginaPac > 1) { paginaPac -= 1; cargar(); }
 });
 if (pagSigPac) pagSigPac.addEventListener("click", () => {
-  paginaPac += 1;
-  render();
+  if (paginaPac < totalPaginasPac(totalPacientesFiltrados)) { paginaPac += 1; cargar(); }
 });
 if (selPageSizePac) selPageSizePac.addEventListener("change", () => {
   pageSizePac = Math.min(100, Math.max(10, Number(selPageSizePac.value) || 10));
   localStorage.setItem("snw_page_size_pac", String(pageSizePac));
   paginaPac = 1;
-  render();
+  cargar();
 });
+
+function cargarTrasCambio() {
+  resumenPacientes = null;
+  consultaPacientesAnterior = null;
+  return cargar();
+}
 
 // --- Edición masiva: cambiar estado o respuesta de todos los seleccionados --
 const ESTADO_LABEL = { pendiente: "pendiente", enviado: "enviado", error: "error" };
@@ -740,7 +801,7 @@ function pedirConfirmacionMasiva(sel, url, campo) {
     toast("Selecciona al menos un paciente primero.", "error");
     return;
   }
-  if (ids.some((id) => !pacientes.some((p) => p.id === id && puedeEditarPaciente(p)))) {
+  if (ids.some((id) => !puedeEditarPaciente(seleccionadosDatos.get(id) || {}))) {
     sel.value = "";
     toast("Solo los números de prueba permiten cambiar estado o respuesta.", "error");
     return;
@@ -790,7 +851,7 @@ async function ejecutarMasivo() {
       msg += ` También se aplicó en otras bases: ${detalle}.`;
     }
     toast(msg, data.bloqueados ? "error" : "ok");
-    await cargar();
+    await cargarTrasCambio();
   } catch (err) {
     console.error("[pacientes.js ejecutarMasivo()]", err);
     toast(err.message || "No se pudo aplicar el cambio", "error");
@@ -868,14 +929,14 @@ async function ejecutarEliminacion() {
         method: "DELETE", headers: authHeaders(),
       });
       if (res.status === 401) { window.snwSesionExpirada(); return; }
-      if (res.ok) { ok += 1; seleccionados.delete(id); }
+      if (res.ok) { ok += 1; seleccionados.delete(id); seleccionadosDatos.delete(id); }
       else mal += 1;
     } catch { mal += 1; }
   }
   toast(mal ? `${ok} eliminados, ${mal} fallaron.` : `${ok} registro${ok === 1 ? "" : "s"} eliminado${ok === 1 ? "" : "s"}.`, mal ? "error" : "ok");
   todoMarcado = false;
   btnEliminarMasivo.disabled = false;
-  cargar();
+  cargarTrasCambio();
 }
 
 let toastTimer;
@@ -923,7 +984,7 @@ if (formPacientePrueba) formPacientePrueba.addEventListener("submit", async (e) 
     if (!res.ok) throw new Error(await errorApiPrueba(res));
     formPacientePrueba.reset();
     toast("Paciente de prueba agregado. Puedes autorizar su número en la tabla.");
-    await cargar();
+    await cargarTrasCambio();
   } catch (err) {
     toast(err.message || "No se pudo agregar el paciente.", "error");
   } finally {
@@ -942,7 +1003,7 @@ tbodyEl.addEventListener("click", async (e) => {
     if (res.status === 401) { window.snwSesionExpirada(); return; }
     if (!res.ok) throw new Error(await errorApiPrueba(res));
     toast("Número autorizado para pruebas en desarrollo y producción.");
-    await cargar();
+    await cargarTrasCambio();
   } catch (err) {
     toast(err.message || "No se pudo autorizar el número.", "error");
     boton.disabled = false;
@@ -961,7 +1022,7 @@ tbodyEl.addEventListener("click", async (e) => {
     if (res.status === 401) { window.snwSesionExpirada(); return; }
     if (!res.ok) throw new Error(await errorApiPrueba(res));
     toast("Número quitado de las listas de prueba. El paciente permanece en desarrollo.");
-    await cargar();
+    await cargarTrasCambio();
   } catch (err) {
     toast(err.message || "No se pudo quitar el número de prueba.", "error");
     boton.disabled = false;
@@ -1029,10 +1090,11 @@ if (btnConfirmarDelTabla) btnConfirmarDelTabla.addEventListener("click", async (
     toast(`Tabla ${data.nombre_tabla_base || ""} eliminada.`.trim(), "ok");
     cerrarModalDelTabla();
     seleccionados = new Set();
+    seleccionadosDatos.clear();
     todoMarcado = false;
     localStorage.removeItem("snw_esp_pacientes");
     await cargarBasesPac();
-    cargar();
+    cargarTrasCambio();
   } catch (err) {
     console.error("[pacientes.js cerrarModalDelTabla()]", err);
     cerrarModalDelTabla();
@@ -1098,7 +1160,7 @@ if (btnConfirmarVaciarTabla) btnConfirmarVaciarTabla.addEventListener("click", a
     toast(`Base de datos vaciada (${data.pacientes_eliminados ?? 0} pacientes eliminados).`, "ok");
     cerrarModalVaciarTabla();
     await cargarBasesPac();
-    cargar();
+    cargarTrasCambio();
   } catch (err) {
     console.error("[pacientes.js btnConfirmarVaciarTabla()]", err);
     cerrarModalVaciarTabla();
@@ -1200,13 +1262,13 @@ if (btnSubirCsv) btnSubirCsv.addEventListener("click", async () => {
     csvInput.value = "";
     archivoElegido = null;
     if (nombreArchivo) nombreArchivo.textContent = "No se ha seleccionado ningún archivo";
-    cargar();
+    cargarTrasCambio();
   } catch (err) {
     console.error("[pacientes.js btnSubirCsv]", err);
     if (csvResultado) csvResultado.textContent = bloquesCompletados
       ? `Carga interrumpida tras ${bloquesCompletados} parte(s): ${informeTotal.insertados || 0} pacientes insertados. Puedes reintentar el archivo; los pacientes ya importados no se duplicarán.`
       : "No se cargó ninguna parte del CSV.";
-    if (bloquesCompletados) cargar();
+    if (bloquesCompletados) cargarTrasCambio();
     toast(err.message || "No se pudo cargar el archivo.", "error");
   } finally {
     if (selBasePac) selBasePac.disabled = baseEstabaDeshabilitada;
