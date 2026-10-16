@@ -2282,34 +2282,36 @@ def _despachar_call_center(pac: dict, ambiente: str, tabla: str | None = None,
             "numero_call_center": numero_cc, "message_id": message_id}
 
 
-# Teléfonos con un envío automático de call center ya programado o en curso: si
-# el paciente manda varios mensajes de interés seguidos, la respuesta sale UNA
-# sola vez (no una por cada mensaje).
+# Los pacientes reales agrupan intereses simultáneos por teléfono; las pruebas
+# se separan por ID para permitir un aviso por cada mensaje nuevo.
 _cc_auto_lock = threading.Lock()
-_cc_auto_pendientes: set[str] = set()
+_cc_auto_pendientes: set[str | tuple[str, str]] = set()
 
 
-def _enviar_call_center_auto(tel: str) -> None:
+def _enviar_call_center_auto(tel: str, mensaje_prueba_id: str | None = None) -> None:
     """Timer: envía el mensaje fijo de call center al paciente interesado cuyo
     número coincide, en la(s) base(s) donde esté marcado como interesado.
 
-    Se manda UNA vez por cada plantilla enviada (una ronda): si el paciente
+    Para pacientes reales se manda una vez por plantilla enviada: si el paciente
     responde interés a una plantilla nueva, se le manda el call center; si
     vuelve a escribir «me interesa» sin que haya una plantilla nueva de por
     medio, no se repite. Una baja y reintegración en cualquier momento lo
-    vuelven elegible (si vuelve a estar `interesado`)."""
+    vuelven elegible (si vuelve a estar `interesado`). En números de prueba,
+    cada ID entrante de interés puede generar un aviso nuevo."""
     try:
         if esta_suprimido(tel):
             return
+        prueba_por_mensaje = bool(mensaje_prueba_id and es_numero_prueba(tel))
         # Una consulta reciente ya abrió el camino al número externo; no
         # intercalar el mensaje genérico mientras esa derivación esté vigente.
-        with conectar() as conn, conn.cursor() as cur:
-            cur.execute(
-                "SELECT 1 FROM call_center_derivaciones WHERE telefono = %s"
-                " AND estado IN ('pendiente','notificado')"
-                " AND creado >= NOW() - INTERVAL 24 HOUR LIMIT 1", (tel,))
-            if cur.fetchone():
-                return
+        if not prueba_por_mensaje:
+            with conectar() as conn, conn.cursor() as cur:
+                cur.execute(
+                    "SELECT 1 FROM call_center_derivaciones WHERE telefono = %s"
+                    " AND estado IN ('pendiente','notificado')"
+                    " AND creado >= NOW() - INTERVAL 24 HOUR LIMIT 1", (tel,))
+                if cur.fetchone():
+                    return
         match = "REPLACE(REPLACE(telefono, '+', ''), ' ', '') = REPLACE(REPLACE(%s, '+', ''), ' ', '')"
         # Bases legacy más cada tabla de area (Fase 2).
         objetivos = [("produccion", None), ("desarrollo", None)]
@@ -2352,33 +2354,51 @@ def _enviar_call_center_auto(tel: str) -> None:
                     # Si ya se le mandó el call center después de la última
                     # plantilla, no hubo plantilla nueva en el medio: el interés
                     # repetido no se responde otra vez.
-                    if ult_cc is not None and (ult_plantilla is None or ult_cc > ult_plantilla):
+                    if not prueba_por_mensaje and ult_cc is not None and (
+                            ult_plantilla is None or ult_cc > ult_plantilla):
                         continue
                 res = _despachar_call_center(pac, amb, tabla=t_esp)
                 if res.get("ok"):
                     print("[CALL-CENTER auto] respuesta enviada", flush=True)
+                    if prueba_por_mensaje:
+                        return  # Un único aviso por mensaje, aunque esté en varias bases.
                 else:
                     log_error(f"_enviar_call_center_auto({t}): {res.get('error')}")
             except Exception as e:
                 log_error(f"_enviar_call_center_auto({t_esp or amb})", e)
     finally:
         with _cc_auto_lock:
-            _cc_auto_pendientes.discard(tel)
+            _cc_auto_pendientes.discard((tel, mensaje_prueba_id) if mensaje_prueba_id else tel)
 
 
 CALL_CENTER_AUTO_SEGUNDOS = 1  # espera fija: siempre da tiempo a que quede feedback perceptible.
 
 
-def _programar_call_center_auto(telefono: str) -> None:
+def _programar_call_center_auto(telefono: str, mensaje_id: str | None = None) -> None:
     """Callback del webhook: programa el envío automático 1s después de
-    detectar interés. Si ya hay uno programado para este número, no programa
-    otro."""
+    detectar interés. Para números reales agrupa por teléfono; para pruebas
+    reserva cada ID de Meta y evita repetir el mismo mensaje."""
     tel = normalizar_telefono(telefono) or telefono
-    with _cc_auto_lock:
-        if tel in _cc_auto_pendientes:
+    prueba = es_numero_prueba(tel)
+    if prueba:
+        if not mensaje_id:
+            return  # Sin ID de Meta no se puede evitar el reenvío duplicado.
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT IGNORE INTO call_center_prueba_interes (mensaje_id, telefono)"
+                " VALUES (%s, %s)", (mensaje_id[:255], tel),
+            )
+            reservado = cur.rowcount == 1
+            conn.commit()
+        if not reservado:
             return
-        _cc_auto_pendientes.add(tel)
-    timer = threading.Timer(CALL_CENTER_AUTO_SEGUNDOS, _enviar_call_center_auto, args=(tel,))
+    clave_pendiente = (tel, mensaje_id) if prueba else tel
+    with _cc_auto_lock:
+        if clave_pendiente in _cc_auto_pendientes:
+            return
+        _cc_auto_pendientes.add(clave_pendiente)
+    timer = threading.Timer(CALL_CENTER_AUTO_SEGUNDOS, _enviar_call_center_auto,
+                            args=(tel, mensaje_id if prueba else None))
     timer.daemon = True
     timer.start()
 
@@ -2429,7 +2449,7 @@ def _enviar_derivacion_consulta(derivacion_id: int) -> None:
 
 def _registrar_derivacion_consulta(telefono: str, texto: str, mensaje_id: str,
                                    motivos: tuple[str, ...]) -> str:
-    """Deduplica por id de Meta y reutiliza solicitudes recientes del número."""
+    """Deduplica por ID de Meta; solo números reales reutilizan consultas recientes."""
     if not mensaje_id or not motivos:
         return "sin_id"
     tel = normalizar_telefono(telefono) or telefono
@@ -2441,12 +2461,15 @@ def _registrar_derivacion_consulta(telefono: str, texto: str, mensaje_id: str,
                     " WHERE mensaje_id = %s", (mensaje_id,))
         if cur.fetchone():
             return "duplicada"
-        cur.execute(
-            "SELECT id, estado FROM call_center_derivaciones"
-            " WHERE telefono = %s AND estado IN ('pendiente','notificado','error')"
-            " AND creado >= NOW() - INTERVAL 30 MINUTE"
-            " ORDER BY id DESC LIMIT 1 FOR UPDATE", (tel,))
-        anterior = cur.fetchone()
+        if es_numero_prueba(tel):
+            anterior = None  # Cada consulta nueva de prueba recibe su propio aviso.
+        else:
+            cur.execute(
+                "SELECT id, estado FROM call_center_derivaciones"
+                " WHERE telefono = %s AND estado IN ('pendiente','notificado','error')"
+                " AND creado >= NOW() - INTERVAL 30 MINUTE"
+                " ORDER BY id DESC LIMIT 1 FOR UPDATE", (tel,))
+            anterior = cur.fetchone()
         if anterior:
             derivacion_id = anterior["id"]
             if anterior["estado"] == "error":

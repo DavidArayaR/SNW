@@ -297,6 +297,14 @@ def asegurar_tabla_config() -> None:
             if not cur.fetchone():
                 cur.execute("ALTER TABLE call_center_log ADD COLUMN vista_mensaje TEXT NULL")
             cur.execute(
+                "CREATE TABLE IF NOT EXISTS call_center_prueba_interes ("
+                " mensaje_id VARCHAR(255) PRIMARY KEY,"
+                " telefono VARCHAR(20) NOT NULL,"
+                " creado DATETIME DEFAULT CURRENT_TIMESTAMP,"
+                " INDEX idx_cc_prueba_telefono (telefono)"
+                ") CHARACTER SET utf8mb4"
+            )
+            cur.execute(
                 "CREATE TABLE IF NOT EXISTS call_center_derivaciones ("
                 " id BIGINT AUTO_INCREMENT PRIMARY KEY,"
                 " telefono VARCHAR(20) NOT NULL,"

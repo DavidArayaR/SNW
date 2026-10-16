@@ -1074,7 +1074,10 @@ class WhatsAppService:
                 acciones.append("interes_boton")
                 if callable(al_detectar_interes):
                     try:
-                        al_detectar_interes(telefono)
+                        if numero_prueba:
+                            al_detectar_interes(telefono, mensaje.get("id"))
+                        else:
+                            al_detectar_interes(telefono)
                     except Exception as e:
                         log_error(f"al_detectar_interes({telefono})", e)
                 continue
@@ -1096,7 +1099,10 @@ class WhatsAppService:
                 acciones.append("interes")
                 if callable(al_detectar_interes):
                     try:
-                        al_detectar_interes(telefono)
+                        if numero_prueba:
+                            al_detectar_interes(telefono, mensaje.get("id"))
+                        else:
+                            al_detectar_interes(telefono)
                     except Exception as e:
                         log_error(f"al_detectar_interes({telefono})", e)
             elif baja:

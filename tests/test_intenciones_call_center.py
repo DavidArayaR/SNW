@@ -166,6 +166,7 @@ class IntencionesCallCenterTests(unittest.TestCase):
         cur.lastrowid = 7
         with patch.object(main, "conectar", return_value=conn), \
              patch.object(main, "esta_suprimido", return_value=False), \
+             patch.object(main, "es_numero_prueba", return_value=False), \
              patch.object(main.WhatsAppService, "_pacientes_con_tel", return_value=[
                  {"id": 2, "tabla": "pacientes_prod"}]), \
              patch.object(main.threading, "Timer") as timer:
@@ -186,11 +187,88 @@ class IntencionesCallCenterTests(unittest.TestCase):
         cur.fetchone.side_effect = [None, {"id": 7, "estado": "notificado"}]
         with patch.object(main, "conectar", return_value=conn), \
              patch.object(main, "esta_suprimido", return_value=False), \
+             patch.object(main, "es_numero_prueba", return_value=False), \
              patch.object(main.threading, "Timer") as timer:
             estado = main._registrar_derivacion_consulta(
                 "+56912345678", "¿Cuánto cuesta?", "wamid.124", ("CONSULTA_PRECIOS",))
         self.assertEqual(estado, "reutilizada")
         timer.assert_not_called()
+
+    def test_consultas_de_prueba_nuevas_generan_avisos_separados(self):
+        import main
+        conn = MagicMock()
+        cur = conn.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cur.fetchone.side_effect = [None, None]
+        cur.lastrowid = 7
+        with patch.object(main, "conectar", return_value=conn), \
+             patch.object(main, "esta_suprimido", return_value=False), \
+             patch.object(main, "es_numero_prueba", return_value=True), \
+             patch.object(main.WhatsAppService, "_pacientes_con_tel", return_value=[
+                 {"id": 2, "tabla": "pacientes_dev"}]), \
+             patch.object(main.threading, "Timer") as timer:
+            self.assertEqual(main._registrar_derivacion_consulta(
+                "+56912345678", "¿Tienen horas?", "wamid.1", ("CONSULTA_HORAS",)), "nueva")
+            self.assertEqual(main._registrar_derivacion_consulta(
+                "+56912345678", "¿Cuánto cuesta?", "wamid.2", ("CONSULTA_PRECIOS",)), "nueva")
+        self.assertEqual(timer.call_count, 2)
+        self.assertFalse(any("INTERVAL 30 MINUTE" in c.args[0]
+                             for c in cur.execute.call_args_list))
+
+    def test_intereses_de_prueba_se_reservan_por_id_no_por_telefono(self):
+        import main
+        conn = MagicMock()
+        cur = conn.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cur.rowcount = 1
+        try:
+            with patch.object(main, "conectar", return_value=conn), \
+                 patch.object(main, "es_numero_prueba", return_value=True), \
+                 patch.object(main.threading, "Timer") as timer:
+                main._programar_call_center_auto("+56912345678", "wamid.1")
+                main._programar_call_center_auto("+56912345678", "wamid.2")
+                cur.rowcount = 0
+                main._programar_call_center_auto("+56912345678", "wamid.1")
+            self.assertEqual(timer.call_count, 2)
+            self.assertEqual(timer.call_args_list[0].kwargs["args"],
+                             ("+56912345678", "wamid.1"))
+        finally:
+            main._cc_auto_pendientes.clear()
+
+    def test_webhook_interes_de_prueba_entrega_id_del_mensaje(self):
+        from whatsapp_service import WhatsAppService
+        servicio = WhatsAppService()
+        payload = {"contacts": [{"wa_id": "56912345678"}], "messages": [{
+            "id": "wamid.interes-2", "type": "text", "text": {"body": "Me interesa"}}]}
+        with patch("whatsapp_service.esta_suprimido", return_value=False), \
+             patch("whatsapp_service.es_exento", return_value=False), \
+             patch("whatsapp_service.es_numero_prueba", return_value=True), \
+             patch.object(servicio, "_estaba_opt_out", return_value=False), \
+             patch.object(servicio, "_registrar_respuesta", return_value="registrada"), \
+             patch.object(servicio, "_registrar_interes"), \
+             patch("whatsapp_service.al_detectar_interes") as interes:
+            servicio._procesar_mensajes(payload)
+        interes.assert_called_once_with("+56912345678", "wamid.interes-2")
+
+    def test_interes_de_prueba_ignora_la_ronda_anterior_y_envia_una_vez(self):
+        import main
+        conn = MagicMock()
+        cur = conn.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cur.fetchone.side_effect = [
+            {"id": 2, "nombre": "Prueba", "telefono": "+56912345678", "interesado": 1},
+            {"ult_plantilla": 10, "ult_cc": 20},
+        ]
+        try:
+            with patch.object(main, "esta_suprimido", return_value=False), \
+                 patch.object(main, "es_numero_prueba", return_value=True), \
+                 patch.object(main, "conectar", return_value=conn), \
+                 patch.object(main, "columnas_tabla", return_value={"interesado"}), \
+                 patch.object(main.servicio_areas, "listar_tablas_areas", return_value=[]), \
+                 patch.object(main, "_despachar_call_center", return_value={"ok": True}) as despachar:
+                main._enviar_call_center_auto("+56912345678", "wamid.nuevo")
+            despachar.assert_called_once()
+            self.assertFalse(any("INTERVAL 24 HOUR" in c.args[0]
+                                 for c in cur.execute.call_args_list))
+        finally:
+            main._cc_auto_pendientes.clear()
 
     def test_aviso_identifica_automatizacion_y_boton_conserva_consulta(self):
         import main

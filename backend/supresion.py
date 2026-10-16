@@ -289,6 +289,7 @@ def _limpiar_datos(cur, telefono: str) -> tuple[int, int]:
     for row in cur.fetchall():
         if normalizar_telefono(row.get("telefono") or "") == telefono:
             cur.execute("DELETE FROM call_center_derivaciones WHERE id = %s", (row["id"],))
+    cur.execute("DELETE FROM call_center_prueba_interes WHERE telefono = %s", (telefono,))
     cur.execute("SELECT telefono, tipo FROM whatsapp_avisos_unicos")
     for row in cur.fetchall():
         if normalizar_telefono(row.get("telefono") or "") == telefono:
