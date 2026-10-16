@@ -3,6 +3,7 @@
   "use strict";
 
   const TAMANO_BLOQUE_CSV = 2 * 1024 * 1024;
+  const MAX_FILAS_BLOQUE_CSV = 2000;
 
   async function* registrosCsv(archivo) {
     const lector = archivo.stream().getReader();
@@ -32,7 +33,11 @@
     }
   }
 
-  async function* fragmentarCsv(archivo, maxBytes = TAMANO_BLOQUE_CSV) {
+  async function* fragmentarCsv(archivo, maxBytes = TAMANO_BLOQUE_CSV,
+                                maxFilas = MAX_FILAS_BLOQUE_CSV) {
+    if (!Number.isInteger(maxFilas) || maxFilas < 1) {
+      throw new Error("El máximo de filas por bloque debe ser positivo.");
+    }
     const registros = registrosCsv(archivo);
     const primero = await registros.next();
     if (primero.done) throw new Error("El archivo CSV está vacío.");
@@ -52,7 +57,7 @@
       if (bytesEncabezado + bytesLinea > maxBytes) {
         throw new Error(`La fila ${filaSiguiente} supera el tamaño máximo de un bloque CSV.`);
       }
-      if (tamano + bytesLinea > maxBytes && cantidad) {
+      if ((tamano + bytesLinea > maxBytes || cantidad >= maxFilas) && cantidad) {
         yield { contenido, filaInicial, cantidad };
         contenido = encabezado;
         tamano = bytesEncabezado;
@@ -67,7 +72,7 @@
     if (cantidad || filaSiguiente === 2) yield { contenido, filaInicial, cantidad };
   }
 
-  const api = { fragmentarCsv, TAMANO_BLOQUE_CSV };
+  const api = { fragmentarCsv, TAMANO_BLOQUE_CSV, MAX_FILAS_BLOQUE_CSV };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   if (raiz) raiz.snwCsvChunks = api;
 })(typeof window !== "undefined" ? window : null);

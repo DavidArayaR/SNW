@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { fragmentarCsv } = require("../frontend/js/csv-chunks.js");
+const { fragmentarCsv, MAX_FILAS_BLOQUE_CSV } = require("../frontend/js/csv-chunks.js");
 
 async function bloques(texto, maxBytes) {
   const resultado = [];
@@ -44,4 +44,15 @@ test("un archivo mayor a cinco MB produce partes menores a dos MB", async () => 
   for (const parte of partes) {
     assert.ok(new TextEncoder().encode(parte.contenido).length <= 2 * 1024 * 1024);
   }
+});
+
+test("cuarenta mil filas compactas se suben en veinte partes", async () => {
+  const fila = "Ana,Sol,+56911111111\n";
+  const partes = await bloques(`nombre,apellido,telefono\n${fila.repeat(40000)}`);
+  assert.equal(MAX_FILAS_BLOQUE_CSV, 2000);
+  assert.equal(partes.length, 20);
+  assert.equal(partes.reduce((total, parte) => total + parte.cantidad, 0), 40000);
+  assert.deepEqual(partes.map((parte) => parte.filaInicial),
+    Array.from({ length: 20 }, (_, indice) => 2 + indice * 2000));
+  assert.ok(partes.every((parte) => parte.cantidad === 2000));
 });
