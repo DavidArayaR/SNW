@@ -27,7 +27,7 @@ from telefono import normalizar_telefono
 # tabla solo cuenta como especialidad si está registrada en `areas`.
 TABLA_RE = re.compile(r"^pacientes_[a-z0-9_]{1,54}$")
 
-# La subida de CSV se rechaza si supera este tamaño (en bytes).
+# Máximo por petición/bloque; el navegador puede dividir un archivo mayor.
 CSV_MAX_BYTES = 5 * 1024 * 1024
 
 # Esquema de las tablas dinámicas: el mismo de pacientes_dev/prod incluyendo
@@ -711,7 +711,8 @@ def _limpiar_celda_csv(valor: str | None) -> str:
     return (valor or "").strip(" ;\t")
 
 
-def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int) -> dict:
+def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int,
+                           fila_inicial: int = 2) -> dict:
     """Valida un CSV y lo carga en la tabla de la especialidad.
 
     Columnas obligatorias: `nombre`, `apellido`, `telefono` (UTF-8).
@@ -767,7 +768,7 @@ def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int) -> dict:
         errores: list[dict] = []
         bases: dict[str, int] = {}
         vistos_archivo: set[str] = set()
-        for nro, fila in enumerate(lector, start=2):
+        for nro, fila in enumerate(lector, start=fila_inicial):
             nombre = normalizar_texto(_limpiar_celda_csv(fila.get(cols["nombre"])))
             apellido = normalizar_texto(_limpiar_celda_csv(fila.get(cols["apellido"])))
             telefono_crudo = _limpiar_celda_csv(fila.get(cols["telefono"]))

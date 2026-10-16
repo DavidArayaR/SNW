@@ -225,7 +225,7 @@ function aplicarModoBase() {
   const msg = $("#csvMsg");
   if (msg) {
     msg.textContent = esArea
-      ? `Destino: ${area.nombre_visible} (${area.nombre_tabla_base}) · columnas: nombre, apellido, telefono (UTF-8).`
+      ? `Destino: ${area.nombre_visible} (${area.nombre_tabla_base}) · columnas: nombre, apellido, telefono (UTF-8). Los archivos grandes se cargan por partes.`
       : "Destino: —";
   }
 
@@ -1125,33 +1125,57 @@ if (csvInput) {
   });
 }
 
+function acumularInformeCsv(total, parcial) {
+  for (const campo of ["procesados", "insertados", "duplicados", "rechazados", "actualizados",
+    "propagados", "omitidos_candado", "omitidos_eliminados"]) {
+    total[campo] = (total[campo] || 0) + (parcial[campo] || 0);
+  }
+  for (const base of parcial.bases || []) {
+    const previa = total.bases.find((b) => b.tabla === base.tabla);
+    if (previa) previa.actualizados += base.actualizados || 0;
+    else total.bases.push({ ...base });
+  }
+  total.errores.push(...(parcial.errores || []).slice(0, Math.max(0, 20 - total.errores.length)));
+}
+
 if (btnSubirCsv) btnSubirCsv.addEventListener("click", async () => {
   const esp = espPacId();
   if (esp == null) return toast("Elige un área como base de datos.", "error");
   if (!archivoElegido) return toast("Elige un archivo CSV.", "error");
+  const archivo = archivoElegido;
+  const informeTotal = { bases: [], errores: [] };
+  let bloquesCompletados = 0;
+  const baseEstabaDeshabilitada = !!selBasePac?.disabled;
   btnSubirCsv.disabled = true;
-  if (csvResultado) csvResultado.innerHTML = `<p class="field__hint">Subiendo…</p>`;
+  csvInput.disabled = true;
+  if (selBasePac) selBasePac.disabled = true;
+  if (csvResultado) csvResultado.textContent = "Preparando el CSV para subirlo por partes…";
   try {
-    const datos = new FormData();
-    datos.append("archivo", archivoElegido);
-    const res = await fetch(`api/areas/${esp}/pacientes/csv`, {
-      method: "POST", headers: authHeaders(), body: datos,
-    });
-    const cuerpo = await res.json().catch(() => ({}));
-    if (res.status === 401) { window.snwSesionExpirada(); return; }
-    if (res.status === 403) throw new Error("No tienes acceso a esta área.");
-    if (!res.ok) {
-      const det = cuerpo.detail;
-      throw new Error(
-        (det && det.columnas) || (typeof det === "string" ? det : `Error ${res.status}`)
-      );
+    for await (const bloque of window.snwCsvChunks.fragmentarCsv(archivo)) {
+      if (csvResultado) csvResultado.textContent =
+        `Subiendo parte ${bloquesCompletados + 1}… ${informeTotal.procesados || 0} filas procesadas.`;
+      const datos = new FormData();
+      datos.append("archivo", new Blob([bloque.contenido], { type: "text/csv;charset=utf-8" }), archivo.name);
+      const res = await fetch(`api/areas/${esp}/pacientes/csv?fila_inicial=${bloque.filaInicial}`, {
+        method: "POST", headers: authHeaders(), body: datos,
+      });
+      const cuerpo = await res.json().catch(() => ({}));
+      if (res.status === 401) { window.snwSesionExpirada(); return; }
+      if (res.status === 403) throw new Error("No tienes acceso a esta área.");
+      if (!res.ok) {
+        const det = cuerpo.detail;
+        throw new Error((det && det.columnas) ||
+          (typeof det === "string" ? det : `Error ${res.status}`));
+      }
+      acumularInformeCsv(informeTotal, cuerpo.informe || {});
+      bloquesCompletados++;
     }
-    const inf = cuerpo.informe || {};
+    const inf = informeTotal;
     const errores = inf.errores || [];
     const mostrados = errores.slice(0, 20);
     if (csvResultado) {
       csvResultado.innerHTML =
-        `<p><strong>${inf.insertados ?? 0}</strong> insertados de ` +
+        `<p>CSV cargado en ${bloquesCompletados} parte(s). <strong>${inf.insertados ?? 0}</strong> insertados de ` +
         `${inf.procesados ?? 0} procesados ` +
         `(${inf.duplicados ?? 0} ya estaban, ${inf.rechazados ?? 0} rechazados` +
         `${inf.actualizados ? `, ${inf.actualizados} actualizados` : ""}` +
@@ -1168,8 +1192,8 @@ if (btnSubirCsv) btnSubirCsv.addEventListener("click", async () => {
               `y no se reactivaron.</p>` : "")) +
         (mostrados.length
           ? `<ul>` + mostrados.map((e) => `<li>fila ${e.fila}: ${escaparHtml(e.motivo)}</li>`).join("") + `</ul>` +
-            (errores.length > mostrados.length
-              ? `<p class="field__hint">…y ${errores.length - mostrados.length} más.</p>` : "")
+            ((inf.rechazados || 0) > mostrados.length
+              ? `<p class="field__hint">…y ${inf.rechazados - mostrados.length} más.</p>` : "")
           : "");
     }
     toast("Base de datos cargada.", "ok");
@@ -1179,9 +1203,13 @@ if (btnSubirCsv) btnSubirCsv.addEventListener("click", async () => {
     cargar();
   } catch (err) {
     console.error("[pacientes.js btnSubirCsv]", err);
-    if (csvResultado) csvResultado.innerHTML = "";
+    if (csvResultado) csvResultado.textContent = bloquesCompletados
+      ? `Carga interrumpida tras ${bloquesCompletados} parte(s): ${informeTotal.insertados || 0} pacientes insertados. Puedes reintentar el archivo; los pacientes ya importados no se duplicarán.`
+      : "No se cargó ninguna parte del CSV.";
+    if (bloquesCompletados) cargar();
     toast(err.message || "No se pudo cargar el archivo.", "error");
   } finally {
+    if (selBasePac) selBasePac.disabled = baseEstabaDeshabilitada;
     aplicarModoBase();
   }
 });

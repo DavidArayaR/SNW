@@ -1190,6 +1190,7 @@ def vaciar_tabla_area(area_id: int, sesion: dict = Depends(sesion_actual)):
 
 
 async def importar_pacientes_csv(area_id: int, archivo: UploadFile = File(...),
+                                 fila_inicial: int = Query(2, ge=2),
                                  sesion: dict = Depends(sesion_actual)):
     """Carga pacientes vía CSV en la tabla de la area.
 
@@ -1207,11 +1208,13 @@ async def importar_pacientes_csv(area_id: int, archivo: UploadFile = File(...),
         raise HTTPException(403, detail="No tienes acceso a esta área.")
     if uid is None:
         raise HTTPException(403, detail="No se pudo identificar la cuenta que sube el CSV.")
-    datos = await archivo.read()
+    # Nunca leer una petición arbitrariamente grande completa en memoria.
+    datos = await archivo.read(CSV_MAX_BYTES + 1)
     if len(datos) > CSV_MAX_BYTES:
         raise HTTPException(413, detail="El archivo supera los 5 MB.")
     try:
-        informe = servicio_areas.importar_pacientes_csv(area_id, datos, uid)
+        informe = await asyncio.to_thread(servicio_areas.importar_pacientes_csv,
+                                          area_id, datos, uid, fila_inicial=fila_inicial)
     except ValueError as e:
         raise _error_area(str(e))
     auditoria_registrar(sesion.get("usuario", ""), "area_csv",
