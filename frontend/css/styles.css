@@ -510,6 +510,8 @@ body[data-pagina="mensajeria"] .layout { width: 100%; }
   padding: 8px;
   overflow-y: auto;
 }
+#cargandoPlantillas { flex-shrink: 0; }
+#listaPlantillas.is-loading { min-height: 160px; }
 
 .tpl-item {
   display: block;

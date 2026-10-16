@@ -43,6 +43,28 @@ function nombreArea(id) {
 const $ = (sel) => document.querySelector(sel);
 
 const listaEl = $("#listaPlantillas");
+const cargandoPlantillasEl = $("#cargandoPlantillas");
+const cargandoPlantillasTextoEl = $("#cargandoPlantillasTexto");
+let cargasPlantillas = 0;
+
+function iniciarCargaPlantillas(mensaje = "Cargando plantillas…") {
+  cargasPlantillas += 1;
+  cargandoPlantillasTextoEl.textContent = mensaje;
+  cargandoPlantillasEl.hidden = false;
+  listaEl.classList.add("is-loading");
+  listaEl.setAttribute("aria-busy", "true");
+  return performance.now();
+}
+
+async function terminarCargaPlantillas(inicio) {
+  const restante = 250 - (performance.now() - inicio);
+  if (restante > 0) await new Promise((resolver) => setTimeout(resolver, restante));
+  cargasPlantillas = Math.max(0, cargasPlantillas - 1);
+  if (cargasPlantillas) return;
+  cargandoPlantillasEl.hidden = true;
+  listaEl.classList.remove("is-loading");
+  listaEl.setAttribute("aria-busy", "false");
+}
 const buscadorEl = $("#buscador");
 const selFiltroArea = $("#selFiltroArea");
 let filtroArea = localStorage.getItem("snw_filtro_tpl") || "todas";
@@ -338,40 +360,45 @@ function construirOpcionesBaseConf(forzarEspId) {
 }
 
 async function cargar() {
-  for (let intento = 1; intento <= 2; intento++) {
-    try {
-      const res = await fetch(API_URL, { headers: authHeaders(), cache: "no-store" });
-      if (res.status === 401) { window.snwSesionExpirada(); return; }
-      if (!res.ok) throw new Error(res.status);
-      const datos = await res.json();
-      if (!Array.isArray(datos)) throw new Error("formato inválido");
-      // Las plantillas de call center se gestionan desde el Historial.
-      plantillas = datos.filter((p) => !p.especial && esPlantillaValida(p));
-      renderLista(buscadorEl.value);
-      // Restaura la selección guardada (si la plantilla sigue existiendo).
+  const inicioCarga = iniciarCargaPlantillas();
+  try {
+    for (let intento = 1; intento <= 2; intento++) {
       try {
-        const guardada = Number(localStorage.getItem("snw_tpl_sel") || 0) || null;
-        if (guardada && plantillas.some((p) => p.id === guardada)) {
-          tplSelId = guardada;
-          renderLista(buscadorEl.value);
-          if (tabMsg === "envios") abrirModalConf(guardada);
-          else if (tabMsg === "programados") actualizarProgPlantilla();
+        const res = await fetch(API_URL, { headers: authHeaders(), cache: "no-store" });
+        if (res.status === 401) { window.snwSesionExpirada(); return; }
+        if (!res.ok) throw new Error(res.status);
+        const datos = await res.json();
+        if (!Array.isArray(datos)) throw new Error("formato inválido");
+        // Las plantillas de call center se gestionan desde el Historial.
+        plantillas = datos.filter((p) => !p.especial && esPlantillaValida(p));
+        renderLista(buscadorEl.value);
+        // Restaura la selección guardada (si la plantilla sigue existiendo).
+        try {
+          const guardada = Number(localStorage.getItem("snw_tpl_sel") || 0) || null;
+          if (guardada && plantillas.some((p) => p.id === guardada)) {
+            tplSelId = guardada;
+            renderLista(buscadorEl.value);
+            if (tabMsg === "envios") abrirModalConf(guardada);
+            else if (tabMsg === "programados") actualizarProgPlantilla();
+          }
+        } catch { /* sin almacenamiento */ }
+        if (activaId === null) {
+          const rest = plantillas.find((p) => p.id === tplSelId);
+          if (rest) abrir(rest.id);
+          else seleccionarDefault();
         }
-      } catch { /* sin almacenamiento */ }
-      if (activaId === null) {
-        const rest = plantillas.find((p) => p.id === tplSelId);
-        if (rest) abrir(rest.id);
-        else seleccionarDefault();
-      }
-      return;
-    } catch (err) {
-      console.error("[app.js cargar()]", err);
-      if (intento === 2) {
-        toast("Error al conectar con el servidor.", "error");
-      } else {
-        await new Promise((r) => setTimeout(r, 900));
+        return;
+      } catch (err) {
+        console.error("[app.js cargar()]", err);
+        if (intento === 2) {
+          toast("Error al conectar con el servidor.", "error");
+        } else {
+          await new Promise((r) => setTimeout(r, 900));
+        }
       }
     }
+  } finally {
+    await terminarCargaPlantillas(inicioCarga);
   }
 }
 
@@ -2659,6 +2686,7 @@ function refrescarVistaPlantillaActiva(p) {
 
 if (btnRevisarTodos) {
   btnRevisarTodos.addEventListener("click", async () => {
+    const inicioCarga = iniciarCargaPlantillas("Actualizando plantillas…");
     setConsultandoEstado(true, btnRevisarTodos, "Actualizando...");
     try {
       const res = await fetch(`${API_URL}/estado-meta/actualizar`, {
@@ -2680,6 +2708,7 @@ if (btnRevisarTodos) {
       console.error("[app.js refrescarVistaPlantillaActiva()]", err);
       toast(`No se pudieron actualizar los estados: ${err.message}`, "error");
     } finally {
+      await terminarCargaPlantillas(inicioCarga);
       setConsultandoEstado(false, btnRevisarTodos);
       window.snwCooldownBoton(btnRevisarTodos);
     }
@@ -2699,6 +2728,7 @@ if (btnSincronizarMeta) {
   btnSincronizarMeta.addEventListener("click", async () => {
     if (sincronizando) return;
     sincronizando = true;
+    const inicioCarga = iniciarCargaPlantillas("Consultando plantillas…");
     setConsultandoEstado(true, btnSincronizarMeta, "Consultando...");
     try {
       const res = await fetch(`${API_URL}/sincronizar-meta`, { headers: authHeaders(), cache: "no-store" });
@@ -2757,6 +2787,7 @@ if (btnSincronizarMeta) {
       console.error("[app.js preparar sincronización]", err);
       toast(`No se pudo consultar Meta: ${err.message}`, "error");
     } finally {
+      await terminarCargaPlantillas(inicioCarga);
       sincronizando = false;
       setConsultandoEstado(false, btnSincronizarMeta);
     }
@@ -2776,6 +2807,7 @@ if (btnSincronizarMeta) {
       selector.dataset.metaId, selector.value === "global" ? null : Number(selector.value),
     ]));
     modalSync.hidden = true;
+    const inicioCarga = iniciarCargaPlantillas("Sincronizando plantillas…");
     setConsultandoEstado(true, btnSincronizarMeta, "Sincronizando...");
     try {
       const res = await fetch(`${API_URL}/sincronizar-meta`, {
@@ -2804,6 +2836,7 @@ if (btnSincronizarMeta) {
       console.error("[app.js refrescarVistaPlantillaActiva()]", err);
       toast(`No se pudo sincronizar con Meta: ${err.message}`, "error");
     } finally {
+      await terminarCargaPlantillas(inicioCarga);
       sincronizando = false;
       setConsultandoEstado(false, btnSincronizarMeta);
       window.snwCooldownBoton(btnSincronizarMeta);
@@ -3731,6 +3764,7 @@ modoVacia();
 cargarMiUsuario();
 // Las áreas primero: la restauración de la plantilla seleccionada necesita
 // misAreas (card de envío / formulario de programar).
-cargarAreas().then(cargar);
+const inicioCargaInicialPlantillas = iniciarCargaPlantillas();
+cargarAreas().then(cargar).finally(() => terminarCargaPlantillas(inicioCargaInicialPlantillas));
 cargarProgramados();
 setInterval(revisarPlantillasEnSegundoPlano, 30000);

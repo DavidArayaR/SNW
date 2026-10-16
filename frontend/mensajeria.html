@@ -7,8 +7,8 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
   <link rel="stylesheet" href="css/tema.css?v=scrollbar1">
-  <link rel="stylesheet" href="css/styles.css?v=plantillas-sync-limpieza1">
-  <link rel="stylesheet" href="css/componentes.css">
+  <link rel="stylesheet" href="css/styles.css?v=carga-plantillas1">
+  <link rel="stylesheet" href="css/componentes.css?v=historial-carga1">
   <link rel="stylesheet" href="css/layout.css?v=scrollbar1">
   <link rel="stylesheet" href="css/mensajeria.css?v=gemini-ia5">
   <link rel="stylesheet" href="css/calendario.css?v=base1">
@@ -57,7 +57,13 @@
           <option value="global">Globales</option>
         </select>
       </div>
-      <ul id="listaPlantillas" class="tpl-list" aria-label="Listado de plantillas"></ul>
+      <div id="cargandoPlantillas" class="tabla-cargando" role="status" aria-live="polite" hidden>
+        <div class="tabla-cargando__contenido">
+          <span class="tabla-cargando__rueda" aria-hidden="true"></span>
+          <span id="cargandoPlantillasTexto">Cargando plantillas…</span>
+        </div>
+      </div>
+      <ul id="listaPlantillas" class="tpl-list" aria-label="Listado de plantillas" aria-busy="false"></ul>
     </aside>
 
     <section class="panel panel--editor" id="panelEditor">
@@ -538,7 +544,7 @@
   <script src="js/layout.js?v=tabs3-navcurve7"></script>
   <script src="js/pass-toggle.js"></script>
   <script src="js/plantilla-ia.js?v=sin-confirmacion1"></script>
-  <script src="js/app.js?v=sync-limpieza1"></script>
+  <script src="js/app.js?v=carga-plantillas1"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>
