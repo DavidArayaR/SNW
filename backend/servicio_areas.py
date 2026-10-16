@@ -543,26 +543,48 @@ def tablas_de_pacientes() -> list[str]:
     ))
 
 
-def indice_pacientes_por_telefono(cur, ambiente: str | None = None) -> dict[str, dict[str, list[int]]]:
+def indice_pacientes_por_telefono(
+        cur, ambiente: str | None = None,
+        telefonos_objetivo: set[str] | None = None) -> dict[str, dict[str, list[int]]]:
     """Índice de pacientes de TODAS las tablas por teléfono canónico.
 
     Normaliza también el valor guardado en la tabla, no solo el del CSV: así
     se emparejan números con espacios, guiones, paréntesis o prefijo distinto.
-    Se puede reutilizar el índice durante toda una importación CSV.
+    Se puede reutilizar el índice durante toda una importación CSV. Cuando se
+    conoce el conjunto objetivo, consulta por índice los números canónicos y
+    revisa por separado solo las filas con formato antiguo/no canónico.
     """
     indice: dict[str, dict[str, list[int]]] = {}
+    if telefonos_objetivo is not None and not telefonos_objetivo:
+        return indice
     for tabla in tablas_de_pacientes():
         if not tabla_valida(tabla):
             continue
         try:
-            cur.execute(f"SELECT id, telefono FROM {tabla}")
-            filas = cur.fetchall()
+            if telefonos_objetivo is None:
+                cur.execute(f"SELECT id, telefono FROM {tabla}")
+                grupos = [cur.fetchall()]
+            else:
+                grupos = []
+                canonicos = sorted(telefonos_objetivo)
+                for inicio in range(0, len(canonicos), 500):
+                    lote = canonicos[inicio:inicio + 500]
+                    marcadores = ", ".join("%s" for _ in lote)
+                    cur.execute(f"SELECT id, telefono FROM {tabla}"
+                                f" WHERE telefono IN ({marcadores})", tuple(lote))
+                    grupos.append(cur.fetchall())
+                # El índice exacto no cubre teléfonos históricos con espacios,
+                # guiones o prefijos distintos. Conservamos su normalización.
+                cur.execute(f"SELECT id, telefono FROM {tabla}"
+                            " WHERE telefono NOT LIKE %s", ("+569________",))
+                grupos.append(cur.fetchall())
         except Exception:
             continue  # tabla aún no creada o sin el esquema esperado
-        for fila in filas:
-            telefono = normalizar_telefono(fila.get("telefono") or "")
-            if telefono:
-                indice.setdefault(telefono, {}).setdefault(tabla, []).append(fila["id"])
+        for filas in grupos:
+            for fila in filas:
+                telefono = normalizar_telefono(fila.get("telefono") or "")
+                if telefono and (telefonos_objetivo is None or telefono in telefonos_objetivo):
+                    indice.setdefault(telefono, {}).setdefault(tabla, []).append(fila["id"])
     return indice
 
 
@@ -748,13 +770,18 @@ def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int,
                           if c in cols), None)
     col_estado = next((cols[c] for c in ("estado", "estado_paciente", "estado_envio")
                        if c in cols), None)
+    filas_csv = list(enumerate(lector, start=fila_inicial))
+    telefonos_objetivo = {
+        telefono for _, fila in filas_csv
+        if (telefono := normalizar_telefono(_limpiar_celda_csv(fila.get(cols["telefono"]))))
+    }
 
     from supresion import huella_telefono
 
     with conectar() as conn, conn.cursor() as cur:
         cur.execute("SELECT huella FROM supresion_telefonos WHERE estado <> 'exento'")
         huellas_bloqueadas = {r["huella"] for r in cur.fetchall()}
-        indice = indice_pacientes_por_telefono(cur)
+        indice = indice_pacientes_por_telefono(cur, telefonos_objetivo=telefonos_objetivo)
         existentes = {
             tel: por_tabla.get(tabla, [])
             for tel, por_tabla in indice.items()
@@ -768,7 +795,8 @@ def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int,
         errores: list[dict] = []
         bases: dict[str, int] = {}
         vistos_archivo: set[str] = set()
-        for nro, fila in enumerate(lector, start=fila_inicial):
+        accesos_pendientes: list[tuple[str, int, int]] = []
+        for nro, fila in filas_csv:
             nombre = normalizar_texto(_limpiar_celda_csv(fila.get(cols["nombre"])))
             apellido = normalizar_texto(_limpiar_celda_csv(fila.get(cols["apellido"])))
             telefono_crudo = _limpiar_celda_csv(fila.get(cols["telefono"]))
@@ -860,10 +888,8 @@ def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int,
                 aplicar_en_tabla(cur, tabla, ids_objetivo, respuesta_aplicar, estado,
                                  candado=candado_aplicar)
                 insertados += 1
-            cur.executemany(
-                "INSERT IGNORE INTO paciente_csv_accesos"
-                " (tabla_pacientes, paciente_id, usuario_id) VALUES (%s, %s, %s)",
-                [(tabla, pid, int(usuario_id)) for pid in ids_objetivo],
+            accesos_pendientes.extend(
+                (tabla, pid, int(usuario_id)) for pid in ids_objetivo
             )
             vistos_archivo.add(telefono)
             # Y lo mismo en las demás bases donde esté el número.
@@ -875,6 +901,13 @@ def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int,
                     bases[b["tabla"]] = bases.get(b["tabla"], 0) + b["actualizados"]
                     propagados += b["actualizados"]
                 omitidos += res["omitidos"]
+        if accesos_pendientes:
+            sentencia_accesos = (
+                "INSERT IGNORE INTO paciente_csv_accesos"
+                " (tabla_pacientes, paciente_id, usuario_id) VALUES (%s, %s, %s)"
+            )
+            for inicio in range(0, len(accesos_pendientes), 500):
+                cur.executemany(sentencia_accesos, accesos_pendientes[inicio:inicio + 500])
         conn.commit()
 
     detalle = [{"tabla": t, "nombre": nombre_de_tabla(t), "actualizados": n}
