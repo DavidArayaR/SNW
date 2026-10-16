@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
   <link rel="stylesheet" href="css/tema.css?v=scrollbar1">
   <link rel="stylesheet" href="css/styles.css">
-  <link rel="stylesheet" href="css/componentes.css">
+  <link rel="stylesheet" href="css/componentes.css?v=historial-carga1">
   <link rel="stylesheet" href="css/layout.css?v=scrollbar1">
   <link rel="stylesheet" href="css/admin.css?v=inlinecss1">
   <link rel="stylesheet" href="css/estadisticas.css?v=tabs-contenido-lateral1">
@@ -30,7 +30,13 @@
         <span class="app-topbar__titulo">Estadísticas</span>
       </header>
 
-      <main class="layout layout--ancho">
+      <main class="layout layout--ancho" id="contenidoEstadisticas" aria-busy="false">
+        <div id="cargandoEstadisticas" class="tabla-cargando" role="status" aria-live="polite" hidden>
+          <div class="tabla-cargando__contenido">
+            <span class="tabla-cargando__rueda" aria-hidden="true"></span>
+            <span>Cargando estadísticas…</span>
+          </div>
+        </div>
 
         <section class="panel">
           <div class="panel__head">
@@ -165,7 +171,7 @@
 
   <script src="js/layout.js?v=navcurve7"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/estadisticas.js?v=estadisticas-desarrollo1"></script>
+  <script src="js/estadisticas.js?v=carga-estadisticas1"></script>
   <script>
     if (window.snwCargarEstadisticas) window.snwCargarEstadisticas();
   </script>

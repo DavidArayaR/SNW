@@ -7,6 +7,26 @@ function authHeaders() {
 }
 
 const toastEl = $("#toast");
+const cargandoEstadisticasEl = $("#cargandoEstadisticas");
+const contenidoEstadisticasEl = $("#contenidoEstadisticas");
+let cargasEstadisticas = 0;
+
+function iniciarCargaEstadisticas() {
+  cargasEstadisticas += 1;
+  cargandoEstadisticasEl.hidden = false;
+  contenidoEstadisticasEl.setAttribute("aria-busy", "true");
+  return performance.now();
+}
+
+async function terminarCargaEstadisticas(inicio) {
+  const restante = 250 - (performance.now() - inicio);
+  if (restante > 0) await new Promise((resolver) => setTimeout(resolver, restante));
+  cargasEstadisticas = Math.max(0, cargasEstadisticas - 1);
+  if (cargasEstadisticas) return;
+  cargandoEstadisticasEl.hidden = true;
+  contenidoEstadisticasEl.setAttribute("aria-busy", "false");
+}
+
 let toastTimer;
 function toast(msg, tipo = "ok") {
   clearTimeout(toastTimer);
@@ -99,12 +119,11 @@ if (selAreaEst) selAreaEst.addEventListener("change", () => {
 });
 
 async function recargarTodo() {
-  cargar();
-  await cargarEnvios(granEnvios);
+  const cargas = [cargar(), cargarEnvios(granEnvios)];
   if (ES_ADMIN && $("#panelCostos")) {
-    cargarTarifas();
-    cargarCostos(granCostos);
+    cargas.push(cargarTarifas(), cargarCostos(granCostos));
   }
+  await Promise.all(cargas);
 }
 
 function chip(label, valor, clase, resp) {
@@ -115,6 +134,7 @@ function chip(label, valor, clase, resp) {
 async function cargar(mostrarFeedback = false) {
   // El botón lo deshabilita/rehabilita el cooldown de snwConCooldown, no
   // esta función (ver el addEventListener más abajo).
+  const inicioCarga = iniciarCargaEstadisticas();
   try {
     const alcance = qsEspEst();
     const res = await fetch(`api/estadisticas${alcance ? `?${alcance.slice(1)}` : ""}`, { headers: authHeaders(), cache: "no-store" });
@@ -125,6 +145,8 @@ async function cargar(mostrarFeedback = false) {
   } catch {
     console.error("[estadisticas.js cargar()]");
     toast("No se pudieron cargar las estadísticas.", "error");
+  } finally {
+    await terminarCargaEstadisticas(inicioCarga);
   }
 }
 
@@ -354,6 +376,7 @@ let diasConEnvios = new Set();
 async function cargarEnvios(gran) {
   granEnvios = filtroCalendarioCostos?.modo || gran;
   const solicitud = ++solicitudEnvios;
+  const inicioCarga = iniciarCargaEstadisticas();
   try {
     const qsPeriodos = filtroCalendarioCostos
       ? `&periodos=${encodeURIComponent(filtroCalendarioCostos.valores.join(","))}` : "";
@@ -388,6 +411,8 @@ async function cargarEnvios(gran) {
     console.error("[estadisticas.js cargarEnvios()]");
     $("#enviosGrafico").innerHTML =
       '<p class="mes-vacio" style="padding:8px 18px;">No se pudo cargar el gráfico.</p>';
+  } finally {
+    await terminarCargaEstadisticas(inicioCarga);
   }
 }
 
@@ -493,6 +518,7 @@ function limpiarFiltroCalendarioCostos() {
 }
 
 async function cargarTarifas() {
+  const inicioCarga = iniciarCargaEstadisticas();
   try {
     const res = await fetch("api/tarifas", { headers: authHeaders(), cache: "no-store" });
     if (res.status === 401) { window.snwSesionExpirada(); return; }
@@ -502,6 +528,8 @@ async function cargarTarifas() {
     console.error("[estadisticas.js cargarTarifas()]");
     $("#tarifasVigente").innerHTML =
       '<p class="mes-vacio" style="padding:8px 0;">No se pudieron cargar las tarifas.</p>';
+  } finally {
+    await terminarCargaEstadisticas(inicioCarga);
   }
 }
 
@@ -620,6 +648,7 @@ async function descargarCsvChile(e) {
 }
 
 async function actualizarTarifas() {
+  const inicioCarga = iniciarCargaEstadisticas();
   const btn = $("#btnActualizarTarifas");
   const textoOriginal = btn.textContent;
   btn.disabled = true;
@@ -651,12 +680,15 @@ async function actualizarTarifas() {
     toast("No se pudieron actualizar las tarifas. " + (err.message || ""), "error");
     btn.disabled = false;
     btn.textContent = textoOriginal;
+  } finally {
+    await terminarCargaEstadisticas(inicioCarga);
   }
 }
 
 async function cargarCostos(gran) {
   granCostos = filtroCalendarioCostos?.modo || gran;
   const solicitud = ++solicitudCostos;
+  const inicioCarga = iniciarCargaEstadisticas();
   try {
     const qsCat = catCostos !== "todas" ? `&categoria=${encodeURIComponent(catCostos)}` : "";
     const qsPeriodos = filtroCalendarioCostos
@@ -675,6 +707,8 @@ async function cargarCostos(gran) {
     $("#costosBarras").innerHTML =
       '<p class="mes-vacio" style="padding:8px 18px;">No se pudieron cargar los costos.</p>';
     $("#costosTotal").textContent = "";
+  } finally {
+    await terminarCargaEstadisticas(inicioCarga);
   }
 }
 
@@ -866,8 +900,13 @@ window.snwCargarEstadisticas = function () {
   if (yaCargada) return;
   yaCargada = true;
   (async () => {
-    await cargarAreasEst();
-    recargarTodo();
+    const inicioCarga = iniciarCargaEstadisticas();
+    try {
+      await cargarAreasEst();
+      await recargarTodo();
+    } finally {
+      await terminarCargaEstadisticas(inicioCarga);
+    }
   })();
 };
 })();
