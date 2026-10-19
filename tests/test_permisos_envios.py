@@ -3,6 +3,7 @@ import sys
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
@@ -11,6 +12,81 @@ import main
 
 
 class PermisosEnviosTests(unittest.TestCase):
+    def test_migracion_acciones_conserva_capacidades_sin_reotorgar_por_rol(self):
+        migrados = set(db._migrar_permisos_acciones_legacy(
+            "mensajeria,plantillas_editar,call_center_registro,pacientes_ver_datos",
+            "supervisor").split(","))
+        self.assertTrue({"pacientes_vaciar", "envios_cancelar", "envios_decidir",
+                         "plantillas_eliminar", "call_center_reintentar"} <= migrados)
+        self.assertNotIn("envios_decidir", db._migrar_permisos_acciones_legacy(
+            "mensajeria", "usuario").split(","))
+
+    def test_acciones_sensibles_no_heredan_permisos_generales(self):
+        sesion = {"rol": "usuario", "usuario": "test@ejemplo.cl", "area_ids": [9],
+                  "permisos": ["mensajeria", "plantillas_editar", "call_center_registro",
+                               "pacientes_ver_datos"]}
+        main.app.dependency_overrides[main.sesion_actual] = lambda: sesion
+        cliente = TestClient(main.app)
+        try:
+            with patch.object(main.servicio_areas, "obtener_area", return_value={"id": 9}):
+                self.assertEqual(cliente.delete("/api/areas/9/tabla/datos").status_code, 403)
+            self.assertEqual(cliente.delete("/api/plantillas/1").status_code, 403)
+            self.assertEqual(cliente.post("/api/notificaciones/jobs/job/cancelar").status_code, 403)
+            self.assertEqual(cliente.post("/api/notificaciones/programados/1/aprobar").status_code, 403)
+            self.assertEqual(cliente.post("/api/call-center/derivaciones/1/reintentar").status_code, 403)
+        finally:
+            main.app.dependency_overrides.clear()
+
+    def test_vaciar_area_funciona_con_permiso_especifico_y_area_asignada(self):
+        sesion = {"rol": "usuario", "usuario": "test@ejemplo.cl", "area_ids": [9],
+                  "permisos": ["pacientes_vaciar"]}
+        main.app.dependency_overrides[main.sesion_actual] = lambda: sesion
+        try:
+            with patch.object(main.servicio_areas, "obtener_area", return_value={
+                    "id": 9, "nombre_visible": "Prueba"}), \
+                 patch.object(main.servicio_areas, "usuario_id_por_correo", return_value=3), \
+                 patch.object(main.servicio_areas, "puede_acceder_area", return_value=True), \
+                 patch.object(main.servicio_areas, "vaciar_tabla_area", return_value={
+                    "pacientes_eliminados": 2, "nombre_tabla_base": "pacientes_prueba"}), \
+                 patch.object(main, "auditoria_registrar"):
+                respuesta = TestClient(main.app).delete("/api/areas/9/tabla/datos")
+            self.assertEqual(respuesta.status_code, 200)
+            self.assertEqual(respuesta.json()["pacientes_eliminados"], 2)
+        finally:
+            main.app.dependency_overrides.clear()
+
+    def test_control_job_requiere_permiso_autor_y_area(self):
+        job = {"usuario": "dueño@ejemplo.cl", "area_id": 9}
+        sesion = {"rol": "usuario", "usuario": "dueño@ejemplo.cl", "area_ids": [9],
+                  "permisos": ["envios_cancelar"]}
+        self.assertTrue(main._puede_controlar_job(sesion, job))
+        self.assertFalse(main._puede_controlar_job({**sesion, "area_ids": [8]}, job))
+        self.assertFalse(main._puede_controlar_job({**sesion, "usuario": "otro@ejemplo.cl"}, job))
+        self.assertFalse(main._puede_controlar_job({**sesion, "permisos": ["mensajeria"]}, job))
+
+    def test_decidir_programado_requiere_permiso_y_area(self):
+        f = {"area_id": 9}
+        sesion = {"rol": "supervisor", "area_ids": [9], "permisos": ["envios_decidir"]}
+        main._exigir_prog_decisor(sesion, f)
+        for sin_permiso in ({**sesion, "permisos": []}, {**sesion, "area_ids": [8]}):
+            with self.assertRaises(main.HTTPException) as error:
+                main._exigir_prog_decisor(sin_permiso, f)
+            self.assertEqual(error.exception.status_code, 403)
+
+    def test_correo_de_aprobacion_solo_a_supervisores_con_permiso(self):
+        destinatarios = [
+            {"usuario": "con@ejemplo.cl", "correo": "con@ejemplo.cl"},
+            {"usuario": "sin@ejemplo.cl", "correo": "sin@ejemplo.cl"},
+        ]
+        cuentas = {
+            "con@ejemplo.cl": {"rol": "supervisor", "permisos": ["envios_decidir"]},
+            "sin@ejemplo.cl": {"rol": "supervisor", "permisos": ["mensajeria"]},
+        }
+        with patch.object(main.servicio_areas, "correos_supervisores_area",
+                          return_value=destinatarios), \
+             patch.object(main, "usuario_buscar", side_effect=cuentas.get):
+            self.assertEqual(main._correos_supervisores_decisores(9), ["con@ejemplo.cl"])
+
     def test_migracion_conserva_carga_y_envios_pero_no_otorga_pii(self):
         permisos = set(db._migrar_permisos_envios_legacy(
             "mensajeria,historial,envio_produccion", "usuario").split(","))

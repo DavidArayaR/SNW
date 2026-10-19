@@ -238,7 +238,10 @@ function aplicarModoBase() {
   // Sin áreas no hay nada que gestionar; con tabla general tampoco.
   const puedeOperar = esArea && puedeCargarArea;
   if (btnSubir) btnSubir.disabled = !puedeOperar;
-  if (btnVaciar) btnVaciar.disabled = !esArea || !(!!window.snwEsPrivilegiado || window.snwPuede?.("mensajeria"));
+  if (btnVaciar) {
+    btnVaciar.hidden = !window.snwPuede?.("pacientes_vaciar");
+    btnVaciar.disabled = !esArea;
+  }
   if (inpCsv) inpCsv.disabled = !puedeOperar;
   if (lblCsv) lblCsv.classList.toggle("is-disabled", !puedeOperar);
   if (btnEliminarTabla) btnEliminarTabla.hidden = !PUEDE_ELIMINAR_TABLA;

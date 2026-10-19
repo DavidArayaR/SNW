@@ -18,15 +18,22 @@ const PERM_LABEL = {
   mensajeria: "Mensajería",
   historial: "Historial",
   plantillas_editar: "Editar plantillas",
+  plantillas_eliminar: "Eliminar plantillas",
   csv_subir: "Subir CSV",
+  pacientes_vaciar: "Vaciar pacientes de un área",
   pacientes_ver_datos: "Ver datos de pacientes (Historial y Base de datos)",
   envio_manual: "Crear envíos manuales",
   envio_programado: "Crear envíos programados",
   call_center_registro: "Ver registro de respuestas de call center",
+  call_center_reintentar: "Reintentar derivaciones de call center",
+  envios_decidir: "Aprobar o rechazar envíos",
+  envios_cancelar: "Cancelar, pausar o reanudar envíos",
 };
 const _EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/;
 const PERM_PAGINAS = ["mensajeria", "historial"];
-const PERM_ACCIONES = ["plantillas_editar", "csv_subir", "pacientes_ver_datos", "call_center_registro"];
+const PERM_ACCIONES = ["plantillas_editar", "plantillas_eliminar", "csv_subir", "pacientes_vaciar",
+  "pacientes_ver_datos", "call_center_registro", "call_center_reintentar",
+  "envios_decidir", "envios_cancelar"];
 const PERMISOS_BASICOS = ["mensajeria", "historial", "plantillas_editar"];
 const ROL_LABEL = { usuario: "Usuario", supervisor: "Supervisor", administrador: "Administrador", desarrollador: "Desarrollador" };
 const ROLES_TOTALES = ["administrador", "desarrollador"];

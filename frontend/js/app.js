@@ -213,10 +213,11 @@ if (!localStorage.getItem("snw_token")) location.replace("login.html");
 // edición queda de solo lectura: se puede elegir una plantilla y enviarla,
 // pero no modificarla.
 const PUEDE_EDITAR_PLANTILLAS = !window.snwPuede || window.snwPuede("plantillas_editar");
+const PUEDE_ELIMINAR_PLANTILLAS = !window.snwPuede || window.snwPuede("plantillas_eliminar");
 
 function aplicarModoSoloLecturaPlantillas() {
   if (PUEDE_EDITAR_PLANTILLAS) return;
-  [btnGuardar, btnEliminar, $("#btnCancelar"), $("#btnNuevaEmpty"), avisoNombrePermanente,
+  [btnGuardar, $("#btnCancelar"), $("#btnNuevaEmpty"), avisoNombrePermanente,
    document.querySelector(".field__hint.atajos")].forEach((el) => el && (el.hidden = true));
   document.querySelectorAll(".wildcards").forEach((el) => (el.hidden = true));
 }
@@ -1183,7 +1184,7 @@ function actualizarBotonesSegunEstado(p) {
   // sigue disponible aunque Guardar esté bloqueado por el enfriamiento.
   // Además solo el creador edita/elimina las suyas (admin/dev, cualquiera).
   const puedeGuardar = PUEDE_EDITAR_PLANTILLAS && puedeEditarEsta(p) && editable && !enEnfriamiento && !esPlantillaProtegida(p);
-  const puedeEliminar = PUEDE_EDITAR_PLANTILLAS && puedeEditarEsta(p) && editable && !esPlantillaProtegida(p);
+  const puedeEliminar = PUEDE_ELIMINAR_PLANTILLAS && puedeEditarEsta(p) && editable && !esPlantillaProtegida(p);
   const puedeRevisar = p && ap === "pendiente" && puedeAprobarPlantillas();
   document.querySelectorAll(".wildcards").forEach((el) => { el.hidden = !puedeGuardar; });
   const puedeGuardarArea = p && PUEDE_EDITAR_PLANTILLAS && puedeEditarEsta(p) &&
@@ -1985,10 +1986,10 @@ function setBloqueoEnvioConf(bloquear) {
     const el = document.getElementById(id);
     if (el) el.disabled = bloquear;
   });
-  // Cancelar y Limpiar de la card de envío siempre quedan disponibles.
+  // Limpiar sigue disponible; cancelar un envío activo requiere permiso propio.
   ["btnCancelarConf", "btnCerrarConf"].forEach((id) => {
     const b = document.getElementById(id);
-    if (b) b.disabled = false;
+    if (b) b.disabled = id === "btnCancelarConf" && bloquear && !window.snwPuede?.("envios_cancelar");
   });
   if (!bloquear) actualizarBloqueoCampos();
   actualizarPasosManual();

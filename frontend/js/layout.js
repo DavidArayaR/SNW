@@ -164,7 +164,7 @@
     { pagina: "inicio",       href: "index.html",        icono: "fa-house",             texto: "Inicio" },
     { pagina: "mensajeria",   href: "mensajeria.html",   icono: "fa-paper-plane",       texto: "Mensajería", perm: "mensajeria" },
     { pagina: "historial",    href: "historial.html",    icono: "fa-clock-rotate-left", texto: "Historial", perm: "historial" },
-    { pagina: "pacientes",    href: "pacientes.html",    icono: "fa-database",          texto: "Base de datos", perms: ["mensajeria", "csv_subir", "pacientes_ver_datos"], soloNoPriv: true },
+    { pagina: "pacientes",    href: "pacientes.html",    icono: "fa-database",          texto: "Base de datos", perms: ["mensajeria", "csv_subir", "pacientes_ver_datos", "pacientes_vaciar"], soloNoPriv: true },
   ];
 
   // Submenú de administración (desplegable): solo admin/dev.

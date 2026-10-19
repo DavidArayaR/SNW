@@ -73,6 +73,25 @@ def _migrar_permisos_envios_legacy(permisos: str, rol: str) -> str:
     return ",".join(nuevos)
 
 
+def _migrar_permisos_acciones_legacy(permisos: str, rol: str) -> str:
+    """Una sola vez conserva capacidades existentes al separar acciones sensibles."""
+    anteriores = [p for p in (permisos or "").split(",") if p]
+    nuevos = list(dict.fromkeys(anteriores))
+    def agregar(permiso):
+        if permiso not in nuevos:
+            nuevos.append(permiso)
+    if "mensajeria" in anteriores:
+        agregar("pacientes_vaciar")
+        agregar("envios_cancelar")
+        if rol == "supervisor":
+            agregar("envios_decidir")
+    if "plantillas_editar" in anteriores:
+        agregar("plantillas_eliminar")
+    if "call_center_registro" in anteriores and "pacientes_ver_datos" in anteriores:
+        agregar("call_center_reintentar")
+    return ",".join(nuevos)
+
+
 # ---------------------------------------------------------------------------
 # TODA la configuración vive en la tabla `configuracion` (clave/valor) y se
 # edita desde la página de Configuración. En .env quedan solo las credenciales
@@ -743,6 +762,22 @@ def asegurar_tabla_config() -> None:
                 cur.execute("INSERT INTO configuracion (clave, valor) VALUES (%s, '1')",
                             ("permisos_envios_v2",))
 
+            # Mantiene el acceso histórico una sola vez. Después se puede
+            # revocar cada acción sin que un reinicio vuelva a concederla.
+            cur.execute("SELECT valor FROM configuracion WHERE clave = %s FOR UPDATE",
+                        ("permisos_acciones_v1",))
+            if not cur.fetchone():
+                cur.execute("SELECT usuario, rol, permisos FROM usuarios"
+                            " WHERE rol NOT IN ('administrador', 'desarrollador')")
+                for cuenta in cur.fetchall():
+                    anteriores = cuenta.get("permisos") or ""
+                    nuevos = _migrar_permisos_acciones_legacy(anteriores, cuenta.get("rol"))
+                    if nuevos != anteriores:
+                        cur.execute("UPDATE usuarios SET permisos = %s WHERE usuario = %s",
+                                    (nuevos, cuenta["usuario"]))
+                cur.execute("INSERT INTO configuracion (clave, valor) VALUES (%s, '1')",
+                            ("permisos_acciones_v1",))
+
             # Estadísticas (y costos) son exclusivas de admin/dev: se retiran
             # esos permisos de las cuentas no privilegiadas que los tuvieran.
             cur.execute(
@@ -777,10 +812,12 @@ MAX_DESARROLLADORES = 4
 #                            asignado, paciente) en la página de Historial.
 PERMISOS_VALIDOS = (
     "pacientes", "mensajeria", "historial", "estadisticas",
-    "plantillas_editar", "csv_subir", "pacientes_ver_datos",
+    "plantillas_editar", "plantillas_eliminar", "csv_subir", "pacientes_ver_datos",
+    "pacientes_vaciar",
     "envio_manual", "envio_manual_directo",
     "envio_programado", "envio_programado_directo", "tarifas_editar",
-    "call_center", "call_center_registro",
+    "envios_decidir", "envios_cancelar",
+    "call_center", "call_center_registro", "call_center_reintentar",
 )
 PERMISOS_BASICOS = ["mensajeria", "historial", "plantillas_editar"]
 

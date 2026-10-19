@@ -1152,15 +1152,15 @@ def eliminar_tabla_area(area_id: int, sesion: dict = Depends(solo_admin)):
 
 def vaciar_tabla_area(area_id: int, sesion: dict = Depends(sesion_actual)):
     """Vacía SOLO los pacientes de la tabla de la area (los datos que se
-    cargaron). Igual que importar CSV: admin/dev, supervisores y usuarios con
-    acceso al área pueden vaciarla. No toca la tabla física, el rol, las
+    cargaron). Requiere permiso específico además de acceso al área.
+    No toca la tabla física, el rol, las
     asignaciones ni el registro de la area; el historial de envíos de conserva."""
+    privilegiado = _es_privilegiado(sesion)
+    if not tiene_permiso(sesion, "pacientes_vaciar"):
+        raise HTTPException(403, detail="No tienes permiso para vaciar pacientes.")
     esp = servicio_areas.obtener_area(area_id)
     if not esp:
         raise HTTPException(404, detail="Área no encontrada.")
-    privilegiado = _es_privilegiado(sesion)
-    if not privilegiado and not tiene_permiso(sesion, "mensajeria"):
-        raise HTTPException(403, detail="No tienes permiso para cargar o vaciar pacientes.")
     uid = servicio_areas.usuario_id_por_correo(sesion.get("usuario", ""))
     if not servicio_areas.puede_acceder_area(privilegiado, uid, area_id):
         raise HTTPException(403, detail="No tienes acceso a esta área.")
@@ -3796,7 +3796,7 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
     raise HTTPException(404, detail="Plantilla no encontrada")
 
 
-def eliminar_plantilla(plantilla_id: int, sesion: dict = Depends(exigir("plantillas_editar"))):
+def eliminar_plantilla(plantilla_id: int, sesion: dict = Depends(exigir("plantillas_eliminar"))):
     plantillas = leer_plantillas()
     objetivo = next((p for p in plantillas if p["id"] == plantilla_id), None)
     if objetivo is None:
@@ -3984,7 +3984,8 @@ def obtener_call_center_log(sesion: dict = Depends(exigir("call_center_registro"
                     "fecha": d["creado"].strftime("%d-%m-%Y %H:%M"),
                     "telefono": d["telefono"] if puede_ver_datos else _telefono_paciente_oculto(d["telefono"]),
                     "mensaje": d["mensaje_original"] if puede_ver_datos else "Consulta protegida: requiere permiso para ver datos de pacientes.",
-                    "puede_reintentar": puede_ver_datos and d["estado"] == "error",
+                    "puede_reintentar": puede_ver_datos and tiene_permiso(sesion, "call_center_reintentar")
+                    and d["estado"] == "error",
                 })
     except Exception as e:
         log_error("obtener_call_center_log", e)
@@ -3994,8 +3995,10 @@ def obtener_call_center_log(sesion: dict = Depends(exigir("call_center_registro"
 
 
 def reintentar_derivacion_call_center(
-        derivacion_id: int, sesion: dict = Depends(exigir("call_center_registro"))):
+        derivacion_id: int, sesion: dict = Depends(exigir("call_center_reintentar"))):
     """Recupera un aviso fallido dentro del área autorizada."""
+    if not tiene_permiso(sesion, "call_center_registro"):
+        raise HTTPException(403, detail="No tienes permiso para ver el registro de call center.")
     if not tiene_permiso(sesion, "pacientes_ver_datos"):
         raise HTTPException(403, detail="No tienes permiso para ver datos de pacientes.")
     with conectar() as conn, conn.cursor() as cur:
@@ -5366,11 +5369,9 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         correos_sup: list[str] | None = None
         if esp:
             correos_sup = []
-            for _sup in servicio_areas.correos_supervisores_area(esp["id"]):
-                if _sup["correo"] not in correos_sup:
-                    correos_sup.append(_sup["correo"])
+            correos_sup = _correos_supervisores_decisores(esp["id"])
             if not correos_sup:
-                raise HTTPException(409, detail="El área no tiene supervisores con correo configurado: no se puede pedir confirmación.")
+                raise HTTPException(409, detail="El área no tiene supervisores con permiso de aprobación y correo configurado.")
         _enviar_correo_confirmacion(token, len(destinatarios), plantilla["nombre"], plantilla["texto"],
                                     amb, plantilla["clave"], solicitante,
                                     destinos_extra=correos_sup,
@@ -5759,7 +5760,7 @@ def envios_en_progreso(sesion: dict = Depends(exigir("mensajeria"))):
             continue
         items.append({
             "origen": "manual", "id": None, "job_id": job_id,
-            "puede_cancelar": bool(tiene_permiso(sesion, "mensajeria")),
+            "puede_cancelar": _puede_controlar_job(sesion, job),
             "plantilla": (job.get("plantilla") or {}).get("nombre") or "",
             "estado": job.get("estado"),
             "total": job.get("total", 0), "enviados": job.get("enviados", 0),
@@ -5772,10 +5773,23 @@ def envios_en_progreso(sesion: dict = Depends(exigir("mensajeria"))):
     return items
 
 
-def cancelar_job(job_id: str, sesion: dict = Depends(exigir("mensajeria"))):
+def _puede_controlar_job(sesion: dict, job: dict) -> bool:
+    if not tiene_permiso(sesion, "envios_cancelar"):
+        return False
+    if _es_privilegiado(sesion):
+        return True
+    area_id = job.get("area_id")
+    if area_id is not None and area_id not in (sesion.get("area_ids") or []):
+        return False
+    return (sesion.get("usuario") or "").strip().lower() == (job.get("usuario") or "").strip().lower()
+
+
+def cancelar_job(job_id: str, sesion: dict = Depends(exigir("envios_cancelar"))):
     job = JOBS.get(job_id)
     if job is None:
         raise HTTPException(404, detail="Envío no encontrado")
+    if not _puede_controlar_job(sesion, job):
+        raise HTTPException(403, detail="No puedes cancelar este envío.")
     if job.get("ambiente") == "desarrollo" and job.get("area_id") is None:
         _exigir_base_desarrollo(sesion, "desarrollo")
     if job.get("estado") in ("completado", "cancelado", "error"):
@@ -5784,10 +5798,12 @@ def cancelar_job(job_id: str, sesion: dict = Depends(exigir("mensajeria"))):
     return {"ok": True, "estado": "cancelado"}
 
 
-def pausar_job(job_id: str, sesion: dict = Depends(exigir("mensajeria"))):
+def pausar_job(job_id: str, sesion: dict = Depends(exigir("envios_cancelar"))):
     job = JOBS.get(job_id)
     if job is None:
         raise HTTPException(404, detail="Envío no encontrado")
+    if not _puede_controlar_job(sesion, job):
+        raise HTTPException(403, detail="No puedes pausar este envío.")
     if job.get("ambiente") == "desarrollo" and job.get("area_id") is None:
         _exigir_base_desarrollo(sesion, "desarrollo")
     if job.get("estado") in ("completado", "cancelado", "error"):
@@ -5796,10 +5812,12 @@ def pausar_job(job_id: str, sesion: dict = Depends(exigir("mensajeria"))):
     return {"ok": True, "estado": "pausado"}
 
 
-def reanudar_job(job_id: str, sesion: dict = Depends(exigir("mensajeria"))):
+def reanudar_job(job_id: str, sesion: dict = Depends(exigir("envios_cancelar"))):
     job = JOBS.get(job_id)
     if job is None:
         raise HTTPException(404, detail="Envío no encontrado")
+    if not _puede_controlar_job(sesion, job):
+        raise HTTPException(403, detail="No puedes reanudar este envío.")
     if job.get("ambiente") == "desarrollo" and job.get("area_id") is None:
         _exigir_base_desarrollo(sesion, "desarrollo")
     if job.get("estado") in ("completado", "cancelado", "error"):
@@ -5992,18 +6010,17 @@ def _prog_a_respuesta(f: dict, sesion: dict, preelegidos: int | None = None) -> 
     esp = servicio_areas.obtener_area(f["area_id"]) if f.get("area_id") is not None else None
     priv = _es_privilegiado(sesion)
     es_sup = sesion.get("rol") == "supervisor"
-    puede_decidir = False
-    if f["estado"] == "pendiente":
-        if priv:
-            puede_decidir = True
-        elif es_sup and f.get("area_id") is not None and f["area_id"] in (sesion.get("area_ids") or []):
-            puede_decidir = True
+    puede_decidir = f["estado"] == "pendiente" and (
+        priv or (tiene_permiso(sesion, "envios_decidir") and f.get("area_id") is not None
+                 and f["area_id"] in (sesion.get("area_ids") or [])))
     puede_cancelar = False
     # Pendiente solo se acepta o rechaza; cancelar aplica una vez aprobado.
-    if f["estado"] == "aprobado":
+    if f["estado"] == "aprobado" and tiene_permiso(sesion, "envios_cancelar"):
         if priv:
             puede_cancelar = True
-        elif (sesion.get("usuario") or "").strip().lower() == (f.get("creador") or "").strip().lower():
+        elif f.get("area_id") in (sesion.get("area_ids") or []) and (
+                es_sup or (sesion.get("usuario") or "").strip().lower()
+                == (f.get("creador") or "").strip().lower()):
             puede_cancelar = True
     # Costo aproximado solo para admin/dev/supervisor y mientras el envío
     # todavía no se ejecutó. Se cobra cuando el envío se realice.
@@ -6063,14 +6080,25 @@ def _prog_costo_estimado(f: dict, plantilla_nombre: str = "",
 
 
 def _exigir_prog_decisor(sesion: dict, f: dict) -> None:
-    """Quién puede aprobar/rechazar: admin/dev en cualquiera; supervisor solo
-    en sus areas (legacy sin area: solo admin/dev)."""
+    """Quién puede decidir: admin/dev o permiso explícito en su área."""
     if _es_privilegiado(sesion):
         return
-    if sesion.get("rol") == "supervisor" and f.get("area_id") is not None \
+    if tiene_permiso(sesion, "envios_decidir") and f.get("area_id") is not None \
             and f["area_id"] in (sesion.get("area_ids") or []):
         return
-    raise HTTPException(403, detail="Solo un administrador o el supervisor del área puede decidir.")
+    raise HTTPException(403, detail="No tienes permiso para aprobar o rechazar este envío.")
+
+
+def _correos_supervisores_decisores(area_id: int) -> list[str]:
+    """Solo envía enlaces de decisión a supervisores aún autorizados."""
+    correos = []
+    for supervisor in servicio_areas.correos_supervisores_area(area_id):
+        usuario = usuario_buscar(supervisor.get("usuario") or "")
+        if usuario and usuario.get("activo", True) and "envios_decidir" in permisos_efectivos(usuario):
+            correo = supervisor.get("correo")
+            if correo and correo not in correos:
+                correos.append(correo)
+    return correos
 
 
 def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeria"))):
@@ -6222,13 +6250,13 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
                 cur.execute("DELETE FROM envios_programados WHERE id = %s", (prog_id,))
                 conn.commit()
             raise HTTPException(409, detail="Sin área no hay supervisores a quienes pedir confirmación.")
-        sups = [s["correo"] for s in servicio_areas.correos_supervisores_area(esp["id"]) if s.get("correo")]
+        sups = _correos_supervisores_decisores(esp["id"])
         if not sups:
             _liberar_destinatarios_prog(prog_id)
             with conectar() as conn, conn.cursor() as cur:
                 cur.execute("DELETE FROM envios_programados WHERE id = %s", (prog_id,))
                 conn.commit()
-            raise HTTPException(409, detail="El área no tiene supervisores con correo: no se puede pedir confirmación.")
+            raise HTTPException(409, detail="El área no tiene supervisores con permiso de aprobación y correo configurado.")
         # Mismo correo que el envío manual, con los destinatarios preelegidos.
         _enviar_correo_prog(sups, prog_id, plantilla.get("nombre") or "", esp["nombre_visible"],
                             cuando.strftime("%d-%m-%Y %H:%M"), limite,
@@ -6379,15 +6407,15 @@ def _traer_programado(prog_id: int) -> dict:
     return f
 
 
-def aprobar_programado(prog_id: int, sesion: dict = Depends(exigir("mensajeria"))):
+def aprobar_programado(prog_id: int, sesion: dict = Depends(exigir("envios_decidir"))):
     f = _traer_programado(prog_id)
     if _prog_es_base_desarrollo(f):
         _exigir_base_desarrollo(sesion, "desarrollo")
+    _exigir_prog_decisor(sesion, f)
     if f["estado"] == "aprobado":
         return _prog_a_respuesta(f, sesion)  # idempotente (doble click)
     if f["estado"] != "pendiente":
         raise HTTPException(409, detail=f"Ya está {f['estado']}: no se puede aprobar.")
-    _exigir_prog_decisor(sesion, f)
     quien = (sesion.get("usuario") or "").strip().lower()
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(
@@ -6399,7 +6427,7 @@ def aprobar_programado(prog_id: int, sesion: dict = Depends(exigir("mensajeria")
     return _prog_a_respuesta(_traer_programado(f["id"]), sesion)
 
 
-def rechazar_programado(prog_id: int, body: dict | None = None, sesion: dict = Depends(exigir("mensajeria"))):
+def rechazar_programado(prog_id: int, body: dict | None = None, sesion: dict = Depends(exigir("envios_decidir"))):
     f = _traer_programado(prog_id)
     if _prog_es_base_desarrollo(f):
         _exigir_base_desarrollo(sesion, "desarrollo")
@@ -6418,7 +6446,7 @@ def rechazar_programado(prog_id: int, body: dict | None = None, sesion: dict = D
     return _prog_a_respuesta(_traer_programado(f["id"]), sesion)
 
 
-def cancelar_programado(prog_id: int, sesion: dict = Depends(exigir("mensajeria"))):
+def cancelar_programado(prog_id: int, sesion: dict = Depends(exigir("envios_cancelar"))):
     # Solo se cancela una vez aprobado: lo pendiente solo se acepta o rechaza.
     f = _traer_programado(prog_id)
     if _prog_es_base_desarrollo(f):
@@ -6426,6 +6454,8 @@ def cancelar_programado(prog_id: int, sesion: dict = Depends(exigir("mensajeria"
     if f["estado"] != "aprobado":
         raise HTTPException(409, detail=f"Ya está {f['estado']}: no se puede cancelar.")
     if not _es_privilegiado(sesion):
+        if f.get("area_id") not in (sesion.get("area_ids") or []):
+            raise HTTPException(403, detail="No tienes acceso a esta área.")
         if sesion.get("rol") == "supervisor":
             pass  # superiores cancelan cualquiera
         elif (sesion.get("usuario") or "").strip().lower() != (f.get("creador") or "").strip().lower():
@@ -6948,7 +6978,8 @@ def _presentar_historial(filas: list[dict], sesion: dict, limite: int | None = N
                 # Lote con job activo: se muestra En progreso (no Completado).
                 f["estado"] = "en_progreso"
                 f["job_id"] = jid
-                f["puede_cancelar"] = bool(tiene_permiso(sesion, "mensajeria"))
+                job = JOBS.get(jid)
+                f["puede_cancelar"] = bool(job and _puede_controlar_job(sesion, job))
             else:
                 f["job_id"] = ""
                 f["puede_cancelar"] = False

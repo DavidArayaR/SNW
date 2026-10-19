@@ -858,8 +858,8 @@ esa misma pestaña (una cuenta por vez, elegida en un desplegable).
 
 | Rol | Alcance | Puede gestionar |
 |---|---|---|
-| `usuario` | Solo lo que tenga en `permisos`, acotado a sus áreas asignadas. Solo crea/edita/elimina las plantillas que él creó y solo en sus áreas (sin globales) | — |
-| `supervisor` | Como `usuario`, más aprobar plantillas y confirmar envíos en producción de sus áreas. Sin Estadísticas | — |
+| `usuario` | Solo lo que tenga en `permisos`, acotado a sus áreas asignadas. Puede editar o eliminar sus propias plantillas según los permisos separados; las acciones sobre envíos también requieren permisos específicos | — |
+| `supervisor` | Como `usuario`, más aprobar plantillas. Puede decidir envíos en sus áreas si tiene `envios_decidir`. Sin Estadísticas | — |
 | `administrador` | Todo **salvo la página Configuración** | Permisos, activar/desactivar y rol (`usuario`/`supervisor`/`administrador`) en cuentas de rol `usuario` o `supervisor` (nunca toca otro admin/dev ni la suya) |
 | `desarrollador` | Acceso total, **incluida Configuración** | Rol (cualquiera), permisos y activar/desactivar de cualquier cuenta salvo la suya |
 
@@ -892,15 +892,26 @@ lectura y no depende de si la cuenta se puede editar. También pagina de a **10 
 **Permisos** (campo `permisos` de la tabla; los roles privilegiados los tienen todos de forma implícita):
 
 - Páginas: `mensajeria`, `historial`
-- Acciones: `plantillas_editar`, `csv_subir` (carga CSV en áreas asignadas),
+- Acciones: `plantillas_editar`, `plantillas_eliminar` (borrado independiente),
+  `csv_subir` (carga CSV en áreas asignadas), `pacientes_vaciar` (vaciar los
+  pacientes de un área sin borrar su tabla),
   `pacientes_ver_datos` (datos completos de pacientes de las bases/áreas a las
   que la cuenta tiene acceso, en Base de datos e Historial, sin depender de
   quién subió el CSV), `envio_manual` y `envio_programado`
-  (creación independiente), `call_center_registro` (registro de call center).
+  (creación independiente), `envios_decidir` (aprobar/rechazar programados en
+  áreas asignadas), `envios_cancelar` (cancelar programados propios o, si es
+  supervisor, del área; controlar jobs manuales propios),
+  `call_center_registro` (registro de call center) y `call_center_reintentar`
+  (requiere además ver el registro y datos completos).
   Cada permiso de creación tiene su casilla «Necesita confirmación»: al
   desmarcarla se concede `envio_manual_directo` o `envio_programado_directo`.
   La confirmación solo se aplica en producción; admin/dev tienen envío directo.
-  Los permisos antiguos de carga y creación se migran una sola vez. El nuevo
+  Los permisos antiguos de carga y creación, y las capacidades de estas
+  acciones separadas, se migran una sola vez para no romper cuentas existentes;
+  después se pueden revocar individualmente. Los nuevos correos de aprobación
+  se envían solo a supervisores que aún tienen `envios_decidir`. Los enlaces
+  de aprobación ya emitidos siguen siendo enlaces de un solo uso: son una vía
+  de autorización por token independiente de la sesión. El nuevo
   acceso completo a datos **no se concede automáticamente** a cuentas no
   privilegiadas: debe otorgarse de forma explícita. Las cuentas nuevas también
   deben recibir explícitamente los permisos de carga y creación de envíos.
