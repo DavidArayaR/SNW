@@ -4261,7 +4261,7 @@ _CONFIG_SECCIONES = [
             {"clave": "call_center_aviso_consulta", "etiqueta": "Aviso automático de derivación", "tipo": "textarea",
              "ayuda": "Debe decir explícitamente «mensaje automático». El paciente debe pulsar el botón y enviar el texto preparado."},
             {"clave": "call_center_patrones_consulta", "etiqueta": "Patrones de consulta (JSON)", "tipo": "textarea",
-             "ayuda": "Frases literales por motivo; se validan antes de activarse. No incluir datos de pacientes."},
+             "ayuda": "Usa una frase por línea en el editor sencillo o marca «Pegar JSON». Se validan antes de activarse; no incluyas datos de pacientes."},
         ],
     },
 ]

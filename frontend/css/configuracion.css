@@ -93,6 +93,67 @@
   background: var(--brand-tint);
 }
 
+/* Patrones de consulta: formulario sencillo o JSON crudo, el mismo valor. */
+.config-campo--patrones { grid-column: 1 / -1; }
+.config-patrones {
+  border: 1px solid var(--borde);
+  border-radius: 12px;
+  background: var(--panel-2);
+  padding: 14px;
+}
+.config-campo .config-patrones__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  width: fit-content;
+  margin: 0 0 12px;
+  color: var(--texto);
+  cursor: pointer;
+}
+.config-patrones__toggle input { width: 18px; height: 18px; accent-color: var(--verde); }
+.config-patrones__facil[hidden], .config-patrones__raw[hidden],
+.config-patrones__error[hidden] { display: none; }
+.config-patrones__intro { margin: 0 0 12px; color: var(--texto-suave); font-size: .86rem; }
+.config-patrones__grupos {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.config-patrones__grupo {
+  min-width: 0;
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+  background: var(--panel);
+  padding: 11px;
+}
+.config-campo .config-patrones__grupo label { justify-content: space-between; }
+.config-patrones__contador { font-size: .76rem; font-weight: 500; color: var(--texto-suave); }
+.config-patrones textarea { min-height: 82px; }
+.config-patrones__raw textarea {
+  min-height: 220px;
+  font-family: Consolas, "SFMono-Regular", monospace;
+  font-size: .85rem;
+  line-height: 1.5;
+}
+.config-patrones textarea[aria-invalid="true"] { border-color: var(--rojo); }
+.config-patrones__error { margin: 6px 0 0; color: var(--danger-fg); font-size: .8rem; }
+.config-patrones__vista { margin-top: 12px; color: var(--texto-suave); font-size: .84rem; }
+.config-patrones__vista summary { cursor: pointer; width: fit-content; }
+.config-patrones__vista pre {
+  overflow: auto;
+  margin: 9px 0 0;
+  border: 1px solid var(--borde);
+  border-radius: 9px;
+  padding: 12px;
+  background: var(--surface-2);
+  color: var(--texto);
+  font-size: .8rem;
+  line-height: 1.5;
+}
+@media (max-width: 700px) {
+  .config-patrones__grupos { grid-template-columns: 1fr; }
+}
+
 /* Campo calculado de solo lectura (URL del webhook) */
 .config-campo--derivado { grid-column: 1 / -1; }
 .config-campo--derivado input[readonly] {

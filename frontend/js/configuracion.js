@@ -26,6 +26,145 @@ let estadoSupresion = {};  // solo conteos; nunca teléfonos ni huellas
 let campos = {};           // clave -> { def, input }
 let derivados = [];        // campos calculados (ej. URL del webhook)
 
+const CATEGORIAS_PATRONES = [
+  ["CONSULTA_HORAS", "Horas y citas"],
+  ["CONSULTA_MEDICO", "Profesionales de salud"],
+  ["CONSULTA_PRECIOS", "Precios"],
+  ["SOLICITA_CONTACTO", "Solicitud de contacto"],
+  ["SOLICITA_INFORMACION", "Solicitud de información"],
+  ["CONSULTA_AMBIGUA", "Consultas generales"],
+];
+
+function leerPatrones(valor) {
+  try {
+    const obj = JSON.parse(valor || "{}");
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) return null;
+    const conocidas = new Set(CATEGORIAS_PATRONES.map(([clave]) => clave));
+    if (Object.entries(obj).some(([clave, frases]) =>
+      !conocidas.has(clave) || !Array.isArray(frases) || frases.some((f) => typeof f !== "string"))) return null;
+    return obj;
+  } catch { return null; }
+}
+
+function patronesEquivalentes(a, b) {
+  const primero = leerPatrones(a);
+  const segundo = leerPatrones(b);
+  if (!primero || !segundo) return a.trim() === b.trim();
+  return CATEGORIAS_PATRONES.every(([clave]) =>
+    JSON.stringify(primero[clave] || []) === JSON.stringify(segundo[clave] || []));
+}
+
+function htmlEditorPatrones(clave, valor) {
+  const obj = leerPatrones(valor);
+  const grupos = CATEGORIAS_PATRONES.map(([motivo, titulo]) => {
+    const id = `patrones_${motivo}`;
+    return `<div class="config-patrones__grupo">` +
+      `<label for="${id}">${escaparHtml(titulo)} <span class="config-patrones__contador" data-contador-patron="${motivo}">0/30</span></label>` +
+      `<textarea id="${id}" data-patron="${motivo}" rows="3" placeholder="Una frase por línea" spellcheck="true">${escaparHtml((obj?.[motivo] || []).join("\n"))}</textarea>` +
+      `<p class="config-patrones__error" data-error-patron="${motivo}" hidden></p></div>`;
+  }).join("");
+  return `<div class="config-patrones" data-modo="${obj ? "facil" : "json"}">` +
+    `<label class="config-patrones__toggle"><input type="checkbox" data-pegar-json${obj ? "" : " checked"}> Pegar JSON</label>` +
+    `<div class="config-patrones__facil"${obj ? "" : " hidden"}>` +
+      `<p class="config-patrones__intro">Escribe una frase por línea en la categoría correspondiente.</p>` +
+      `<div class="config-patrones__grupos">${grupos}</div>` +
+      `<details class="config-patrones__vista"><summary>Ver JSON que se guardará</summary><pre></pre></details></div>` +
+    `<div class="config-patrones__raw"${obj ? " hidden" : ""}>` +
+      `<label for="patrones_json_raw">Pega o edita el JSON completo</label>` +
+      `<textarea id="patrones_json_raw" data-patrones-raw rows="12" spellcheck="false">${escaparHtml(obj ? JSON.stringify(obj, null, 2) : valor)}</textarea>` +
+      `<p class="config-patrones__error" data-error-json hidden></p></div>` +
+    `<textarea id="cf_${clave}" data-clave="${clave}" hidden>${escaparHtml(valor)}</textarea></div>`;
+}
+
+function actualizarEditorPatrones(wrap) {
+  const editor = wrap.querySelector(".config-patrones");
+  if (!editor) return;
+  const obj = {};
+  let valido = true;
+  for (const [motivo] of CATEGORIAS_PATRONES) {
+    const textarea = editor.querySelector(`[data-patron="${motivo}"]`);
+    const frases = textarea.value.split(/\r?\n/).map((f) => f.trim()).filter(Boolean);
+    const error = editor.querySelector(`[data-error-patron="${motivo}"]`);
+    const mensaje = frases.length > 30 ? "Máximo 30 frases por categoría." :
+      frases.some((f) => f.length < 4 || f.length > 80 || /[\d@]/.test(f))
+        ? "Cada frase debe tener entre 4 y 80 caracteres, sin números ni @." : "";
+    error.textContent = mensaje;
+    error.hidden = !mensaje;
+    textarea.setAttribute("aria-invalid", mensaje ? "true" : "false");
+    editor.querySelector(`[data-contador-patron="${motivo}"]`).textContent = `${frases.length}/30`;
+    if (mensaje) valido = false;
+    if (frases.length) obj[motivo] = frases;
+  }
+  editor.classList.toggle("config-patrones--invalido", !valido);
+  editor.querySelector("[data-clave]").value = JSON.stringify(obj);
+  editor.querySelector("pre").textContent = JSON.stringify(obj, null, 2);
+  editor.querySelector("[data-patrones-raw]").value = JSON.stringify(obj, null, 2);
+  marcarCambios();
+}
+
+function actualizarJsonPatrones(wrap) {
+  const editor = wrap.querySelector(".config-patrones");
+  const raw = editor.querySelector("[data-patrones-raw]");
+  const obj = leerPatrones(raw.value);
+  let mensaje = !obj ? "JSON inválido: usa un objeto con las categorías conocidas y listas de frases." : "";
+  if (obj && !mensaje) {
+    for (const [motivo] of CATEGORIAS_PATRONES) {
+      const frases = obj[motivo] || [];
+      if (frases.length > 30) mensaje = `${motivo}: máximo 30 frases.`;
+      else if (frases.some((f) => f.length < 4 || f.length > 80 || /[\d@]/.test(f))) {
+        mensaje = `${motivo}: cada frase debe tener entre 4 y 80 caracteres, sin números ni @.`;
+      }
+      if (mensaje) break;
+    }
+  }
+  const error = editor.querySelector("[data-error-json]");
+  error.textContent = mensaje;
+  error.hidden = !mensaje;
+  raw.setAttribute("aria-invalid", mensaje ? "true" : "false");
+  editor.classList.toggle("config-patrones--invalido", !!mensaje);
+  editor.querySelector("[data-clave]").value = raw.value.trim();
+  marcarCambios();
+}
+
+function cambiarModoPatrones(wrap) {
+  const editor = wrap.querySelector(".config-patrones");
+  const check = editor.querySelector("[data-pegar-json]");
+  if (check.checked) {
+    editor.dataset.modo = "json";
+    editor.querySelector(".config-patrones__facil").hidden = true;
+    editor.querySelector(".config-patrones__raw").hidden = false;
+    actualizarJsonPatrones(wrap);
+    return;
+  }
+  const obj = leerPatrones(editor.querySelector("[data-patrones-raw]").value);
+  if (!obj || editor.classList.contains("config-patrones--invalido")) {
+    check.checked = true;
+    toast("Corrige el JSON antes de volver al editor sencillo.", "error");
+    return;
+  }
+  for (const [motivo] of CATEGORIAS_PATRONES) {
+    editor.querySelector(`[data-patron="${motivo}"]`).value = (obj[motivo] || []).join("\n");
+  }
+  editor.dataset.modo = "facil";
+  editor.querySelector(".config-patrones__facil").hidden = false;
+  editor.querySelector(".config-patrones__raw").hidden = true;
+  actualizarEditorPatrones(wrap);
+}
+
+function restaurarPatrones(wrap, valor) {
+  const editor = wrap.querySelector(".config-patrones");
+  const obj = leerPatrones(valor);
+  editor.querySelector("[data-patrones-raw]").value = obj ? JSON.stringify(obj, null, 2) : valor;
+  if (!obj) editor.querySelector("[data-pegar-json]").checked = true;
+  if (obj) {
+    editor.classList.remove("config-patrones--invalido");
+    for (const [motivo] of CATEGORIAS_PATRONES) {
+      editor.querySelector(`[data-patron="${motivo}"]`).value = (obj[motivo] || []).join("\n");
+    }
+  }
+  cambiarModoPatrones(wrap);
+}
+
 // Une URL base + ruta evitando "/" duplicados o faltantes.
 function unirUrl(base, ruta) {
   base = (base || "").trim().replace(/\/+$/, "");
@@ -134,12 +273,15 @@ function render(secciones) {
 
       const val = valores[c.clave] ?? "";
       const wrap = document.createElement("div");
-      wrap.className = "field config-campo";
+      wrap.className = "field config-campo" +
+        (c.clave === "call_center_patrones_consulta" ? " config-campo--patrones" : "");
 
       const id = "cf_" + c.clave;
       let control = "";
 
-      if (c.tipo === "select") {
+      if (c.clave === "call_center_patrones_consulta") {
+        control = htmlEditorPatrones(c.clave, val);
+      } else if (c.tipo === "select") {
         control =
           `<select id="${id}" data-clave="${c.clave}">` +
           (c.opciones || []).map((o) => `<option value="${o}"${o === val ? " selected" : ""}>${o}</option>`).join("") +
@@ -157,7 +299,7 @@ function render(secciones) {
       }
 
       wrap.innerHTML =
-        `<label for="${id}">${escaparHtml(c.etiqueta)} <span class="config-clave">${c.clave}</span></label>` +
+        `<label${c.clave === "call_center_patrones_consulta" ? "" : ` for="${id}"`}>${escaparHtml(c.etiqueta)} <span class="config-clave">${c.clave}</span></label>` +
         control +
         (c.ayuda ? `<p class="field__hint">${escaparHtml(c.ayuda)}</p>` : "");
       grid.appendChild(wrap);
@@ -166,6 +308,14 @@ function render(secciones) {
       campos[c.clave] = { def: c, input };
       input.addEventListener("input", marcarCambios);
       input.addEventListener("change", marcarCambios);
+      if (c.clave === "call_center_patrones_consulta" && wrap.querySelector(".config-patrones")) {
+        wrap.querySelectorAll("[data-patron]").forEach((textarea) =>
+          textarea.addEventListener("input", () => actualizarEditorPatrones(wrap)));
+        wrap.querySelector("[data-patrones-raw]").addEventListener("input", () => actualizarJsonPatrones(wrap));
+        wrap.querySelector("[data-pegar-json]").addEventListener("change", () => cambiarModoPatrones(wrap));
+        if (wrap.querySelector("[data-pegar-json]").checked) actualizarJsonPatrones(wrap);
+        else actualizarEditorPatrones(wrap);
+      }
 
     }
     cont.appendChild(panel);
@@ -184,7 +334,10 @@ function diff() {
   for (const clave of Object.keys(campos)) {
     const nuevo = String(valorActual(clave));
     const viejo = String(valores[clave] ?? "");
-    if (nuevo.trim() !== viejo.trim()) cambios[clave] = nuevo.trim();
+    if (clave === "call_center_patrones_consulta" ?
+        !patronesEquivalentes(nuevo, viejo) : nuevo.trim() !== viejo.trim()) {
+      cambios[clave] = nuevo.trim();
+    }
   }
   return cambios;
 }
@@ -199,14 +352,20 @@ function marcarCambios() {
   }
 
   const hay = n > 0;
-  $("#btnGuardar").disabled = !hay;
+  const invalido = !!cont.querySelector(".config-patrones--invalido");
+  $("#btnGuardar").disabled = !hay || invalido;
+  $("#btnGuardarFijo").disabled = !hay || invalido;
   $("#barraGuardar").hidden = !hay;
   $("#cambiosResumen").textContent = hay
-    ? `${n} cambio${n === 1 ? "" : "s"} sin guardar: ${Object.keys(cambios).join(", ")}`
+    ? `${n} cambio${n === 1 ? "" : "s"} sin guardar${invalido ? " · Corrige las frases marcadas" : ""}: ${Object.keys(cambios).join(", ")}`
     : "Sin cambios";
 }
 
 async function guardar() {
+  if (cont.querySelector(".config-patrones--invalido")) {
+    toast("Corrige las frases marcadas antes de guardar.", "error");
+    return;
+  }
   const cambios = diff();
   if (!Object.keys(cambios).length) return;
 
@@ -229,6 +388,9 @@ async function guardar() {
       const v = valores[clave] ?? "";
       if (input.type === "checkbox") input.checked = String(v).toLowerCase() === "true";
       else input.value = v;
+      if (clave === "call_center_patrones_consulta" && input.closest(".config-patrones")) {
+        restaurarPatrones(input.closest(".config-campo"), v);
+      }
     }
     marcarCambios();
     toast(
@@ -252,6 +414,9 @@ function descartar() {
     const v = valores[clave] ?? "";
     if (input.type === "checkbox") input.checked = String(v).toLowerCase() === "true";
     else input.value = v;
+    if (clave === "call_center_patrones_consulta" && input.closest(".config-patrones")) {
+      restaurarPatrones(input.closest(".config-campo"), v);
+    }
   }
   marcarCambios();
 }
