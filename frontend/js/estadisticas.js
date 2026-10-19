@@ -63,27 +63,39 @@ function escaparHtml(valor) {
   return span.innerHTML;
 }
 
-// Base/área (solo admin/dev): producción por defecto, desarrollo separado;
-// un id filtra los tres endpoints a un área de producción.
+// Alcance global (Entorno + Área): alimenta los tres endpoints. Producción por
+// defecto; Desarrollo es la base de pruebas; un id filtra a esa área de prod.
 let areasEst = [];
+const selEntornoEst = $("#selEntornoEst");
 const selAreaEst = $("#selAreaEst");
+const campoAreaEst = $("#campoAreaEst");
+
+function entornoEst() {
+  return selEntornoEst?.value === "desarrollo" ? "desarrollo" : "produccion";
+}
 
 function areaEstActual() {
+  if (entornoEst() === "desarrollo") return null;
   const v = selAreaEst ? selAreaEst.value : "";
   return /^\d+$/.test(v) ? Number(v) : null;
 }
 
 function qsEspEst() {
-  if (selAreaEst?.value === "desarrollo") return "&base=desarrollo";
+  if (entornoEst() === "desarrollo") return "&base=desarrollo";
   const esp = areaEstActual();
   return esp ? `&area_id=${esp}` : "";
 }
 
 function nombreAreaEst() {
-  if (selAreaEst?.value === "desarrollo") return "desarrollo";
+  if (entornoEst() === "desarrollo") return "desarrollo";
   const esp = areaEstActual();
   const e = areasEst.find((x) => x.id === esp);
   return e ? e.nombre_visible : "";
+}
+
+// El selector de área solo aplica al entorno de producción.
+function pintarCampoAreaEst() {
+  if (campoAreaEst) campoAreaEst.hidden = entornoEst() === "desarrollo";
 }
 
 async function cargarAreasEst() {
@@ -96,18 +108,31 @@ async function cargarAreasEst() {
     console.error("[estadisticas.js cargarAreasEst()]");
     areasEst = [];
   }
-  const guardada = localStorage.getItem("snw_esp_estadisticas") || "";
+  const entornoGuardado = localStorage.getItem("snw_entorno_est");
+  if (selEntornoEst) {
+    selEntornoEst.value = entornoGuardado === "desarrollo" ? "desarrollo" : "produccion";
+  }
+  const areaGuardada = localStorage.getItem("snw_esp_estadisticas") || "";
   selAreaEst.innerHTML =
-    `<option value="">Producción · todas las áreas</option>` +
-    `<option value="desarrollo">Desarrollo</option>` +
+    `<option value="">Todas las &aacute;reas</option>` +
     areasEst.map((e) => `<option value="${e.id}">${escaparHtml(e.nombre_visible)} (${escaparHtml(e.nombre_tabla_base)})</option>`).join("");
-  if (guardada === "desarrollo" || areasEst.some((e) => String(e.id) === guardada)) {
-    selAreaEst.value = guardada;
+  if (areasEst.some((e) => String(e.id) === areaGuardada)) {
+    selAreaEst.value = areaGuardada;
   } else {
     localStorage.removeItem("snw_esp_estadisticas");
   }
+  pintarCampoAreaEst();
   selAreaEst.hidden = false;
 }
+
+if (selEntornoEst) selEntornoEst.addEventListener("change", () => {
+  if (selEntornoEst.value === "desarrollo") localStorage.setItem("snw_entorno_est", "desarrollo");
+  else localStorage.removeItem("snw_entorno_est");
+  pintarCampoAreaEst();
+  limpiarFiltroCalendarioCostos();
+  cerrarCalendarioCostos();
+  recargarTodo();
+});
 
 if (selAreaEst) selAreaEst.addEventListener("change", () => {
   const v = selAreaEst.value;
@@ -152,10 +177,12 @@ async function cargar(mostrarFeedback = false) {
 
 function render(d) {
   $("#nombreMes").textContent = nombreMes(d.mes);
+  const nombreMesResp = $("#nombreMesResp");
+  if (nombreMesResp) nombreMesResp.textContent = nombreMes(d.mes);
   $("#enviadosMes").textContent = num(d.enviados_mes);
 
   const espNombre = (d.area && d.area.nombre_visible) || nombreAreaEst();
-  const heroSub = document.querySelector(".hero-sub");
+  const heroSub = document.querySelector("#stabEnvios .hero-sub");
   if (heroSub) {
     heroSub.textContent = espNombre
       ? `mensajes enviados este mes · ${espNombre}`
@@ -165,17 +192,23 @@ function render(d) {
   if (hintResp) {
     const alcance = espNombre ? `de <strong>${escaparHtml(espNombre)}</strong>` : "de producción";
     hintResp.innerHTML = `Estado actual de los pacientes ${alcance} ` +
-      `<strong>a los que ya se les envió un mensaje</strong>. Usa el filtro para comparar ` +
-      `respuestas o interés. Sin una señal explícita de interés o rechazo de la oferta quedan «Sin clasificar». ` +
+      `<strong>a los que ya se les envió un mensaje</strong>. Sin una señal explícita de interés o rechazo de la oferta quedan «Sin clasificar». ` +
       `En <a href="historial.html">Historial</a> puedes ver quiénes son.`;
   }
 
+  // Pestaña Envíos: eventos de envío del mes.
   $("#statsMes").innerHTML =
     chip("Enviados", d.enviados_mes, "stat--enviado") +
     chip("Fallidos", d.fallidos_mes, "stat--error") +
-    chip("Inválidos", d.invalidos_mes, "stat--invalido") +
-    chip("Respondieron", d.respondio_mes, "stat--resp", "respondio") +
-    chip("Bajas", d.baja_mes, "stat--resp", "baja");
+    chip("Inválidos", d.invalidos_mes, "stat--invalido");
+
+  // Pestaña Respuestas: eventos de respuesta del mes.
+  const statsRespMes = $("#statsRespMes");
+  if (statsRespMes) {
+    statsRespMes.innerHTML =
+      chip("Respondieron", d.respondio_mes, "stat--resp", "respondio") +
+      chip("Bajas", d.baja_mes, "stat--resp", "baja");
+  }
 
   $("#statsTotal").innerHTML =
     chip("Mensajes enviados", d.total_enviados_historico, "stat--total") +
@@ -896,6 +929,46 @@ if (barraSeries) {
   }));
   window.addEventListener("resize", posicionarIndicadorSeries);
   requestAnimationFrame(posicionarIndicadorSeries);
+}
+
+/* -- Pestañas principales: Envíos / Respuestas ---------------------- */
+const statsTabs = $("#statsTabs");
+function posicionarIndicadorStatsTabs() {
+  const activa = statsTabs?.querySelector(".stats-series-tab.activo");
+  if (!activa) return;
+  const rectBarra = statsTabs.getBoundingClientRect();
+  const rectTab = activa.getBoundingClientRect();
+  statsTabs.style.setProperty("--msg-indicador-x", `${rectTab.left - rectBarra.left - statsTabs.clientLeft}px`);
+  statsTabs.style.setProperty("--msg-indicador-ancho", `${rectTab.width}px`);
+}
+function activarTabStats(stab, animar = true) {
+  if (!statsTabs) return;
+  const boton = statsTabs.querySelector(`[data-stab="${stab}"]`) || statsTabs.querySelector("[data-stab]");
+  if (!boton) return;
+  const destino = boton.dataset.stab === "envios" ? $("#stabEnvios") : $("#stabRespuestas");
+  if (animar) destino?.style.setProperty("--stats-panel-entrada-x", boton.dataset.stab === "respuestas" ? "20px" : "-20px");
+  statsTabs.querySelectorAll(".stats-series-tab").forEach((tab) => {
+    const activa = tab === boton;
+    tab.classList.toggle("activo", activa);
+    tab.setAttribute("aria-selected", String(activa));
+    tab.tabIndex = activa ? 0 : -1;
+  });
+  $("#stabEnvios").hidden = boton.dataset.stab !== "envios";
+  $("#stabRespuestas").hidden = boton.dataset.stab !== "respuestas";
+  posicionarIndicadorStatsTabs();
+}
+if (statsTabs) {
+  statsTabs.querySelectorAll(".stats-series-tab").forEach((b) => b.addEventListener("click", () => {
+    if (b.classList.contains("activo")) return;
+    activarTabStats(b.dataset.stab);
+    try { localStorage.setItem("snw_stats_tab", b.dataset.stab); } catch { /* sin almacenamiento */ }
+  }));
+  window.addEventListener("resize", posicionarIndicadorStatsTabs);
+  // Pestaña recordada (por defecto Envíos).
+  let tabGuardada = "envios";
+  try { tabGuardada = localStorage.getItem("snw_stats_tab") || "envios"; } catch { /* sin almacenamiento */ }
+  activarTabStats(tabGuardada === "respuestas" ? "respuestas" : "envios", false);
+  requestAnimationFrame(posicionarIndicadorStatsTabs);
 }
 
 let yaCargada = false;

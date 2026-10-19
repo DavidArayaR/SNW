@@ -1,5 +1,21 @@
 /* Página de Estadísticas */
 
+/* Esta vista usa toda el área disponible junto a la sidebar; el tope de
+   .layout--ancho dejaba los paneles angostos en pantallas amplias. */
+#contenidoEstadisticas {
+  width: 100%;
+  max-width: none;
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 0;
+}
+#contenidoEstadisticas > .stats-contexto,
+#contenidoEstadisticas > .stats-contenedor,
+#contenidoEstadisticas .stats-vista,
+#contenidoEstadisticas .stats-vista > .panel {
+  width: 100%;
+  min-width: 0;
+}
+
 .stats__respuestas-hint,
 .stats__costos-hint { margin: 12px 18px 0; }
 
@@ -402,4 +418,42 @@
   .costos-cabecera { flex-direction: column; align-items: flex-start; }
   .costos-filtros { justify-content: flex-start; }
   .comp-fila { grid-template-columns: 92px 1fr 88px; gap: 8px; }
+}
+
+/* -- Barra de contexto global (Entorno + Área) -- */
+.stats-contexto { margin-bottom: 16px; }
+.stats-contexto .panel__head { margin-bottom: 4px; }
+.stats-contexto__controles {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 16px;
+  padding: 6px 18px 4px;
+}
+.stats-contexto__campo { display: flex; flex-direction: column; gap: 5px; min-width: 180px; }
+.stats-contexto__campo label { font-size: .78rem; font-weight: 700; color: var(--texto-suave); text-transform: uppercase; letter-spacing: .03em; }
+.stats-contexto__campo select { min-width: 180px; }
+.stats-contexto__ayuda { margin: 6px 18px 4px; }
+
+/* -- Pestañas principales Envíos / Respuestas -- */
+.stats-contenedor__contenido {
+  min-width: 0;
+  padding: 18px;
+}
+.stats-tabs-principales {
+  margin: 0;
+  padding: 4px;
+  background: var(--panel-2);
+  border: 1px solid var(--borde);
+  border-radius: 999px;
+}
+.stats-tabs-principales .stats-series-tab { color: var(--texto-suave); }
+.stats-tabs-principales .stats-series-tab.activo { color: #12382f; }
+.stats-vista > .panel { background: var(--panel-2); margin-bottom: 16px; }
+.stats-vista > .panel:last-child { margin-bottom: 0; }
+
+@media (max-width: 560px) {
+  .stats-contexto__campo { min-width: 0; width: 100%; }
+  .stats-contexto__campo select { min-width: 0; width: 100%; }
+  .stats-contenedor__contenido { padding: 12px; }
 }

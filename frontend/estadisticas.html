@@ -11,9 +11,9 @@
   <link rel="stylesheet" href="css/componentes.css?v=historial-carga1">
   <link rel="stylesheet" href="css/layout.css?v=navcolor1">
   <link rel="stylesheet" href="css/admin.css?v=tokens1">
-  <link rel="stylesheet" href="css/estadisticas.css?v=tabs-contenido-lateral1">
+  <link rel="stylesheet" href="css/estadisticas.css?v=panel-anidado1">
   <link rel="stylesheet" href="css/calendario.css?v=base1">
-  <link rel="stylesheet" href="css/refinamiento.css?v=tokens1">
+  <link rel="stylesheet" href="css/refinamiento.css?v=ancho-vistas1">
   <script src="js/tema.js?v=scrollbar1"></script>
 </head>
 <body data-pagina="estadisticas" data-seccion="administracion">
@@ -38,46 +38,54 @@
           </div>
         </div>
 
-        <section class="panel">
-          <div class="panel__head">
-            <h2>Mensajes enviados en <span id="nombreMes">este mes</span></h2>
-            <div class="panel__actions">
-              <label for="selAreaEst">Base/área:</label>
-              <select id="selAreaEst" class="badge badge--select" aria-label="Base o área">
-                <option value="">Producción · todas las áreas</option>
+        <!-- Alcance global: alimenta todos los paneles de la página. -->
+        <section class="panel stats-contexto">
+          <div class="panel__head"><h2>Alcance</h2></div>
+          <div class="stats-contexto__controles">
+            <div class="stats-contexto__campo">
+              <label for="selEntornoEst">Entorno</label>
+              <select id="selEntornoEst" class="badge badge--select">
+                <option value="produccion">Producción</option>
                 <option value="desarrollo">Desarrollo</option>
               </select>
-              <button id="btnActualizarEstadisticas" class="btn btn--ghost" type="button">Actualizar</button>
             </div>
-          </div>
-
-          <div class="hero-grid">
-            <div class="hero-num-wrap">
-              <span class="hero-num" id="enviadosMes">&mdash;</span>
-              <span class="hero-sub">mensajes enviados este mes &middot; producci&oacute;n</span>
-            </div>
-          </div>
-
-          <div class="stats" id="statsMes"></div>
-        </section>
-
-        <section class="panel">
-          <div class="panel__head">
-            <h2>Pacientes por respuesta o interés</h2>
-            <div class="panel__actions">
-              <label for="selTipoPacientes">Ver por:</label>
-              <select id="selTipoPacientes" class="badge badge--select" aria-label="Ver pacientes por">
-                <option value="respuesta">Respuesta</option>
-                <option value="interes">Interés</option>
+            <div class="stats-contexto__campo" id="campoAreaEst">
+              <label for="selAreaEst">Área</label>
+              <select id="selAreaEst" class="badge badge--select">
+                <option value="">Todas las &aacute;reas</option>
               </select>
             </div>
+            <button id="btnActualizarEstadisticas" class="btn btn--ghost" type="button">Actualizar</button>
           </div>
-          <p class="field__hint stats__respuestas-hint" id="hintRespuestas">Estado actual de los pacientes de producci&oacute;n <strong>a los que ya se les envi&oacute; un mensaje</strong>. Usa el filtro para comparar respuestas o inter&eacute;s. Sin una se&ntilde;al expl&iacute;cita de inter&eacute;s o rechazo de la oferta quedan «Sin clasificar». En <a href="historial.html">Historial</a> puedes ver qui&eacute;nes son.</p>
-          <p id="webhookSalud" class="webhook-salud" hidden></p>
-          <div id="respuestasPacientes"></div>
+          <p class="field__hint stats-contexto__ayuda">Todos los paneles usan este alcance. Producci&oacute;n suma todas las &aacute;reas salvo que elijas una; Desarrollo es la base de pruebas. Tu selecci&oacute;n se recuerda.</p>
         </section>
 
-        <section class="panel" id="panelSeriesEst">
+        <section class="panel stats-contenedor" aria-label="Estadísticas de envíos y respuestas">
+          <div class="panel__head">
+            <h2>Estadísticas</h2>
+            <div class="stats-series-tabs stats-tabs-principales" id="statsTabs" role="tablist" aria-label="Tipo de estadística">
+              <button type="button" class="stats-series-tab activo" id="statsTabEnvios" data-stab="envios" role="tab" aria-controls="stabEnvios" aria-selected="true">Env&iacute;os</button>
+              <button type="button" class="stats-series-tab" id="statsTabRespuestas" data-stab="respuestas" role="tab" aria-controls="stabRespuestas" aria-selected="false" tabindex="-1">Respuestas</button>
+            </div>
+          </div>
+          <div class="stats-contenedor__contenido">
+
+        <!-- ================= PESTAÑA: ENVÍOS ================= -->
+        <div id="stabEnvios" class="stats-vista" role="tabpanel" aria-labelledby="statsTabEnvios">
+          <section class="panel">
+            <div class="panel__head">
+              <h2>Env&iacute;os de <span id="nombreMes">este mes</span></h2>
+            </div>
+            <div class="hero-grid">
+              <div class="hero-num-wrap">
+                <span class="hero-num" id="enviadosMes">&mdash;</span>
+                <span class="hero-sub">mensajes enviados este mes</span>
+              </div>
+            </div>
+            <div class="stats" id="statsMes"></div>
+          </section>
+
+          <section class="panel" id="panelSeriesEst">
           <div class="panel__head">
             <h2>Actividad de mensajes</h2>
             <div class="stats-series-tabs" id="seriesTabs" role="tablist" aria-label="Vista de estadísticas">
@@ -87,7 +95,7 @@
           </div>
           <div class="stats-series__filtro-capa">
           <div class="stats-series__filtro">
-            <span>Períodos</span>
+            <span>Per&iacute;odos</span>
             <div class="costos-fecha-grupo">
               <button id="abrirCalendarioCostos" class="btn btn--ghost costos-calendario-abrir" type="button"
                       aria-expanded="false" aria-controls="calendarioCostos" aria-haspopup="dialog">
@@ -158,9 +166,38 @@
           </div>
         </section>
 
-        <section class="panel">
-          <div class="panel__head"><h2>Total hist&oacute;rico</h2></div>
-          <div class="stats" id="statsTotal"></div>
+          <section class="panel">
+            <div class="panel__head"><h2>Total hist&oacute;rico</h2></div>
+            <div class="stats" id="statsTotal"></div>
+          </section>
+        </div>
+
+        <!-- ================= PESTAÑA: RESPUESTAS ================= -->
+        <div id="stabRespuestas" class="stats-vista" role="tabpanel" aria-labelledby="statsTabRespuestas" hidden>
+          <section class="panel">
+            <div class="panel__head">
+              <h2>Respuestas de <span id="nombreMesResp">este mes</span></h2>
+            </div>
+            <div class="stats" id="statsRespMes"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel__head">
+              <h2>Clasificaci&oacute;n actual de pacientes</h2>
+              <div class="panel__actions">
+                <label for="selTipoPacientes">Ver por:</label>
+                <select id="selTipoPacientes" class="badge badge--select" aria-label="Ver pacientes por">
+                  <option value="respuesta">Respuesta</option>
+                  <option value="interes">Inter&eacute;s</option>
+                </select>
+              </div>
+            </div>
+            <p class="field__hint stats__respuestas-hint" id="hintRespuestas">Estado actual de los pacientes a los que ya se les envi&oacute; un mensaje.</p>
+            <p id="webhookSalud" class="webhook-salud" hidden></p>
+            <div id="respuestasPacientes"></div>
+          </section>
+        </div>
+          </div>
         </section>
 
       </main>
@@ -171,7 +208,7 @@
 
   <script src="js/layout.js?v=permisos-acciones1"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/estadisticas.js?v=simulados1"></script>
+  <script src="js/estadisticas.js?v=alcance1"></script>
   <script>
     if (window.snwCargarEstadisticas) window.snwCargarEstadisticas();
   </script>
