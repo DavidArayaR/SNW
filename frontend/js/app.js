@@ -3625,11 +3625,11 @@ function renderProgramados() {
     `<div class="pag-grupo">` +
       `<span class="pag-info">Página ${pagina} de ${paginas} · ${total} envío${total === 1 ? "" : "s"}</span>` +
       `<span class="pag-fila pag-navegacion">` +
-        `<button type="button" class="btn btn--ghost" data-pag="prim" title="Primera página" aria-label="Primera página"${pagina <= 1 ? " disabled" : ""}>&lt;&lt;</button>` +
-        `<button type="button" class="btn btn--ghost" data-pag="ant" title="Página anterior" aria-label="Página anterior"${pagina <= 1 ? " disabled" : ""}>&lt;</button>` +
+        `<button type="button" class="btn btn--ghost" data-pag="prim" title="Primera página" aria-label="Primera página"${pagina <= 1 ? " disabled" : ""}><i class="fa-solid fa-angles-left" aria-hidden="true"></i></button>` +
+        `<button type="button" class="btn btn--ghost" data-pag="ant" title="Página anterior" aria-label="Página anterior"${pagina <= 1 ? " disabled" : ""}><i class="fa-solid fa-angle-left" aria-hidden="true"></i></button>` +
         `<input class="pag-ir" data-pag-ir type="number" min="1" max="${paginas}" step="1" inputmode="numeric" placeholder="..." value="${pagina}" aria-label="Ir a la página, de 1 a ${paginas}"${paginas === 1 ? " disabled" : ""}>` +
-        `<button type="button" class="btn btn--ghost" data-pag="sig" title="Página siguiente" aria-label="Página siguiente"${pagina >= paginas ? " disabled" : ""}>&gt;</button>` +
-        `<button type="button" class="btn btn--ghost" data-pag="ult" title="Última página" aria-label="Última página"${pagina >= paginas ? " disabled" : ""}>&gt;&gt;</button>` +
+        `<button type="button" class="btn btn--ghost" data-pag="sig" title="Página siguiente" aria-label="Página siguiente"${pagina >= paginas ? " disabled" : ""}><i class="fa-solid fa-angle-right" aria-hidden="true"></i></button>` +
+        `<button type="button" class="btn btn--ghost" data-pag="ult" title="Última página" aria-label="Última página"${pagina >= paginas ? " disabled" : ""}><i class="fa-solid fa-angles-right" aria-hidden="true"></i></button>` +
       `</span>` +
     `</div>` +
     `<div class="prog-lista-scroll">${parte.map(progItemHtml).join("")}</div>`;
