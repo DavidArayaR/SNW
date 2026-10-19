@@ -68,7 +68,7 @@ const ENVIO_ESTADO_LABEL = {
 };
 
 // Paginación de las tablas «Envíos realizados» y «Actividad»: igual que en
-// Pacientes —paginador arriba con flechas, info y «Por página» (10 a 100)—
+// Pacientes —paginador arriba con navegación completa, info y «Por página» (10 a 100)—
 // y tabla scrolleable con header fijo.
 const PAGE_SIZES = [10, 25, 50, 100];
 
@@ -87,9 +87,12 @@ function renderPaginado(contenedor, lista, renderTabla, vacioTxt, sizeKey) {
   contenedor.innerHTML =
     `<div class="pag-grupo">` +
       `<span class="pag-info">Página ${pagina} de ${paginas} · ${total} registro${total === 1 ? "" : "s"}</span>` +
-      `<span class="pag-fila">` +
-        `<button type="button" class="btn btn--ghost" data-pag="ant" title="Página anterior" aria-label="Página anterior"${pagina <= 1 ? " disabled" : ""}><i class="fa-solid fa-chevron-left"></i></button>` +
-        `<button type="button" class="btn btn--ghost" data-pag="sig" title="Página siguiente" aria-label="Página siguiente"${pagina >= paginas ? " disabled" : ""}><i class="fa-solid fa-chevron-right"></i></button>` +
+      `<span class="pag-fila pag-navegacion">` +
+        `<button type="button" class="btn btn--ghost" data-pag="prim" title="Primera página" aria-label="Primera página"${pagina <= 1 ? " disabled" : ""}>&lt;&lt;</button>` +
+        `<button type="button" class="btn btn--ghost" data-pag="ant" title="Página anterior" aria-label="Página anterior"${pagina <= 1 ? " disabled" : ""}>&lt;</button>` +
+        `<input class="pag-ir" data-pag-ir type="number" min="1" max="${paginas}" step="1" inputmode="numeric" placeholder="..." value="${pagina}" aria-label="Ir a la página, de 1 a ${paginas}"${paginas === 1 ? " disabled" : ""}>` +
+        `<button type="button" class="btn btn--ghost" data-pag="sig" title="Página siguiente" aria-label="Página siguiente"${pagina >= paginas ? " disabled" : ""}>&gt;</button>` +
+        `<button type="button" class="btn btn--ghost" data-pag="ult" title="Última página" aria-label="Última página"${pagina >= paginas ? " disabled" : ""}>&gt;&gt;</button>` +
       `</span>` +
       `<span class="pag-fila">` +
         `<label class="pag-label">Por página:</label>` +
@@ -103,9 +106,22 @@ function renderPaginado(contenedor, lista, renderTabla, vacioTxt, sizeKey) {
       : `<p class="usr-envios__vacio">${vacioTxt}</p>`);
   contenedor.querySelectorAll("[data-pag]").forEach((b) =>
     b.addEventListener("click", () => {
-      contenedor._pagina = pagina + (b.dataset.pag === "sig" ? 1 : -1);
+      const destino = { prim: 1, ant: pagina - 1, sig: pagina + 1, ult: paginas }[b.dataset.pag];
+      contenedor._pagina = Math.max(1, Math.min(paginas, destino || pagina));
       repaginar();
     }));
+  const irPagina = contenedor.querySelector("[data-pag-ir]");
+  const confirmarPagina = () => {
+    const destino = Number(irPagina.value);
+    if (!Number.isSafeInteger(destino) || destino < 1) { irPagina.value = String(pagina); return; }
+    contenedor._pagina = Math.min(paginas, destino);
+    repaginar();
+  };
+  irPagina.addEventListener("focus", () => irPagina.select());
+  irPagina.addEventListener("change", confirmarPagina);
+  irPagina.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); confirmarPagina(); }
+  });
   const selTam = contenedor.querySelector("[data-pagesize]");
   if (selTam) selTam.addEventListener("change", () => {
     contenedor._pageSize = Math.min(100, Math.max(10, Number(selTam.value) || 10));

@@ -81,7 +81,7 @@
   flex-wrap: wrap;
 }
 
-/* Grupo de paginación dentro de la barra: info + Anterior/Siguiente +
+/* Grupo de paginación dentro de la barra: info + navegación completa +
    Por página, todo en la misma fila del buscador. */
 .pag-grupo {
   display: flex;
@@ -96,6 +96,30 @@
   gap: 8px;
   flex-wrap: nowrap;
 }
+.pag-grupo .pag-navegacion { gap: 4px; }
+.pag-navegacion .btn {
+  min-width: 36px;
+  padding-inline: 7px;
+  white-space: nowrap;
+}
+.pag-ir {
+  width: 54px;
+  min-width: 54px;
+  height: 40px;
+  padding: 4px;
+  border: 1px solid var(--borde);
+  border-radius: 9px;
+  background: var(--surface-2);
+  color: var(--texto);
+  font: inherit;
+  font-weight: 700;
+  text-align: center;
+  appearance: textfield;
+}
+.pag-ir::-webkit-outer-spin-button,
+.pag-ir::-webkit-inner-spin-button { appearance: none; margin: 0; }
+.pag-ir:focus-visible { outline: 2px solid var(--verde); outline-offset: 2px; }
+.pag-ir:disabled { opacity: .55; cursor: not-allowed; }
 .pag-info {
   font-size: .9rem;
   font-weight: 700;

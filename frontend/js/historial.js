@@ -288,14 +288,36 @@ if (selBaseHist) selBaseHist.addEventListener("change", () => {
   cargar(false, false, true);
 });
 
+const pagPrimHist = $("#pagPrimHist");
 const pagAntHist = $("#pagAntHist");
-if (pagAntHist) pagAntHist.addEventListener("click", () => {
-  if (paginaHist > 1) { paginaHist -= 1; cargar(true, false, true); }
-});
 const pagSigHist = $("#pagSigHist");
-if (pagSigHist) pagSigHist.addEventListener("click", () => {
-  if (paginaHist < totalPaginasHist(totalHistorial)) { paginaHist += 1; cargar(true, false, true); }
-});
+const pagUltHist = $("#pagUltHist");
+const pagIrHist = $("#pagIrHist");
+function irPaginaHist(valor) {
+  const numero = Number(valor);
+  if (!Number.isSafeInteger(numero) || numero < 1) {
+    if (pagIrHist) pagIrHist.value = String(paginaHist);
+    return;
+  }
+  const destino = Math.min(numero, totalPaginasHist(totalHistorial));
+  if (destino === paginaHist) {
+    if (pagIrHist) pagIrHist.value = String(paginaHist);
+    return;
+  }
+  paginaHist = destino;
+  cargar(true, false, true);
+}
+if (pagPrimHist) pagPrimHist.addEventListener("click", () => irPaginaHist(1));
+if (pagAntHist) pagAntHist.addEventListener("click", () => irPaginaHist(paginaHist - 1));
+if (pagSigHist) pagSigHist.addEventListener("click", () => irPaginaHist(paginaHist + 1));
+if (pagUltHist) pagUltHist.addEventListener("click", () => irPaginaHist(totalPaginasHist(totalHistorial)));
+if (pagIrHist) {
+  pagIrHist.addEventListener("focus", () => pagIrHist.select());
+  pagIrHist.addEventListener("change", () => irPaginaHist(pagIrHist.value));
+  pagIrHist.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); irPaginaHist(pagIrHist.value); pagIrHist.blur(); }
+  });
+}
 const selPageSizeHist = $("#selPageSizeHist");
 if (selPageSizeHist) {
   selPageSizeHist.value = String(pageSizeHist);
@@ -343,8 +365,11 @@ async function cargar(mantenerPagina = false, mostrarFeedback = false, mostrarCa
     contadorEl.textContent = "Actualizando…";
     statsEl.innerHTML = "";
     $("#pagInfoHist").textContent = "Actualizando…";
+    $("#pagPrimHist").disabled = true;
     $("#pagAntHist").disabled = true;
+    $("#pagIrHist").disabled = true;
     $("#pagSigHist").disabled = true;
+    $("#pagUltHist").disabled = true;
   }
   try {
     const base = (selBaseHist && selBaseHist.value) || "todos";
@@ -395,6 +420,7 @@ async function cargar(mantenerPagina = false, mostrarFeedback = false, mostrarCa
       vacioEl.hidden = true;
     }
     if (mostrarCarga || !mantenerPagina) toast("Error al conectar con el servidor.", "error");
+    pintarPaginadorHist(totalHistorial);
   } finally {
     if (secuencia === cargaHistSecuencia) {
       controlCargaHistorial = null;
@@ -412,14 +438,25 @@ function totalPaginasHist(n) {
 
 function pintarPaginadorHist(total) {
   const info = $("#pagInfoHist");
-  const btnAnt = $("#pagAntHist");
-  const btnSig = $("#pagSigHist");
+  const btnPrim = pagPrimHist;
+  const btnAnt = pagAntHist;
+  const inpIr = pagIrHist;
+  const btnSig = pagSigHist;
+  const btnUlt = pagUltHist;
   const selTam = $("#selPageSizeHist");
   if (!info && !btnAnt && !btnSig && !selTam) return; // HTML antiguo en caché
   const paginas = totalPaginasHist(total);
   if (info) info.textContent = `Página ${paginaHist} de ${paginas} · ${total} envío${total === 1 ? "" : "s"}`;
+  if (btnPrim) btnPrim.disabled = paginaHist <= 1;
   if (btnAnt) btnAnt.disabled = paginaHist <= 1;
+  if (inpIr) {
+    inpIr.max = String(paginas);
+    inpIr.value = String(paginaHist);
+    inpIr.disabled = paginas <= 1;
+    inpIr.setAttribute("aria-label", `Ir a la página (1 a ${paginas})`);
+  }
   if (btnSig) btnSig.disabled = paginaHist >= paginas;
+  if (btnUlt) btnUlt.disabled = paginaHist >= paginas;
   if (selTam) selTam.value = String(pageSizeHist);
 }
 

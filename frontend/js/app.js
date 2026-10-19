@@ -3400,8 +3400,6 @@ async function cargarProgramados(mostrarFeedback = false) {
     if (!res.ok) throw new Error();
     programados = await res.json();
     progsPrev = new Map(programados.map((p) => [p.id, p.estado]));
-    const listaProg = $("#listaProgramados");
-    if (listaProg) listaProg._pagina = 1;
     renderProgramados();
     if (mostrarFeedback) toast("Envíos programados actualizados correctamente.");
   } catch {
@@ -3605,7 +3603,7 @@ async function toggleDestinatariosProg(id, btn) {
   }
 }
 
-// Paginador de 3 por página (la lista no crece más que eso) + scroll.
+// Paginador de 3 por página + scroll.
 function renderProgramados() {
   const lista = $("#listaProgramados");
   if (!lista) return;
@@ -3626,9 +3624,12 @@ function renderProgramados() {
   lista.innerHTML =
     `<div class="pag-grupo">` +
       `<span class="pag-info">Página ${pagina} de ${paginas} · ${total} envío${total === 1 ? "" : "s"}</span>` +
-      `<span class="pag-fila">` +
-        `<button type="button" class="btn btn--ghost" data-pag="ant" title="Página anterior" aria-label="Página anterior"${pagina <= 1 ? " disabled" : ""}><i class="fa-solid fa-chevron-left"></i></button>` +
-        `<button type="button" class="btn btn--ghost" data-pag="sig" title="Página siguiente" aria-label="Página siguiente"${pagina >= paginas ? " disabled" : ""}><i class="fa-solid fa-chevron-right"></i></button>` +
+      `<span class="pag-fila pag-navegacion">` +
+        `<button type="button" class="btn btn--ghost" data-pag="prim" title="Primera página" aria-label="Primera página"${pagina <= 1 ? " disabled" : ""}>&lt;&lt;</button>` +
+        `<button type="button" class="btn btn--ghost" data-pag="ant" title="Página anterior" aria-label="Página anterior"${pagina <= 1 ? " disabled" : ""}>&lt;</button>` +
+        `<input class="pag-ir" data-pag-ir type="number" min="1" max="${paginas}" step="1" inputmode="numeric" placeholder="..." value="${pagina}" aria-label="Ir a la página, de 1 a ${paginas}"${paginas === 1 ? " disabled" : ""}>` +
+        `<button type="button" class="btn btn--ghost" data-pag="sig" title="Página siguiente" aria-label="Página siguiente"${pagina >= paginas ? " disabled" : ""}>&gt;</button>` +
+        `<button type="button" class="btn btn--ghost" data-pag="ult" title="Última página" aria-label="Última página"${pagina >= paginas ? " disabled" : ""}>&gt;&gt;</button>` +
       `</span>` +
     `</div>` +
     `<div class="prog-lista-scroll">${parte.map(progItemHtml).join("")}</div>`;
@@ -3735,7 +3736,10 @@ if (listaProgEl) listaProgEl.addEventListener("click", (e) => {
   const bPag = e.target.closest("[data-pag]");
   if (bPag) {
     const lista = $("#listaProgramados");
-    lista._pagina = (lista._pagina || 1) + (bPag.dataset.pag === "sig" ? 1 : -1);
+    const paginas = Math.max(1, Math.ceil(programados.length / 3));
+    const pagina = lista._pagina || 1;
+    const destino = { prim: 1, ant: pagina - 1, sig: pagina + 1, ult: paginas }[bPag.dataset.pag];
+    lista._pagina = Math.max(1, Math.min(paginas, destino || pagina));
     renderProgramados();
     return;
   }
@@ -3756,6 +3760,33 @@ if (listaProgEl) listaProgEl.addEventListener("click", (e) => {
     $("#progRechazoMotivo").focus();
   }
 });
+
+function confirmarPaginaProgramados() {
+  const campo = listaProgEl.querySelector("[data-pag-ir]");
+  if (!campo) return;
+  const paginas = Math.max(1, Math.ceil(programados.length / 3));
+  const destino = Number(campo.value);
+  if (!Number.isSafeInteger(destino) || destino < 1) {
+    campo.value = String(listaProgEl._pagina || 1);
+    return;
+  }
+  listaProgEl._pagina = Math.min(paginas, destino);
+  renderProgramados();
+}
+if (listaProgEl) {
+  listaProgEl.addEventListener("focusin", (e) => {
+    if (e.target.matches("[data-pag-ir]")) e.target.select();
+  });
+  listaProgEl.addEventListener("change", (e) => {
+    if (e.target.matches("[data-pag-ir]")) confirmarPaginaProgramados();
+  });
+  listaProgEl.addEventListener("keydown", (e) => {
+    if (e.target.matches("[data-pag-ir]") && e.key === "Enter") {
+      e.preventDefault();
+      confirmarPaginaProgramados();
+    }
+  });
+}
 
 $("#btnCancelarProgRechazar").addEventListener("click", () => {
   progRechazarId = null;

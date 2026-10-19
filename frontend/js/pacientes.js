@@ -44,14 +44,25 @@ function itemsPaginaPac(visibles) {
 
 function pintarPaginadorPac(total) {
   const info = $("#pagInfoPac");
+  const btnPrim = $("#pagPrimPac");
   const btnAnt = $("#pagAntPac");
+  const inpIr = $("#pagIrPac");
   const btnSig = $("#pagSigPac");
+  const btnUlt = $("#pagUltPac");
   const selTam = $("#selPageSizePac");
   if (!info && !btnAnt && !btnSig && !selTam) return; // HTML antiguo en caché
   const paginas = totalPaginasPac(total);
   if (info) info.textContent = `Página ${paginaPac} de ${paginas} · ${total} paciente${total === 1 ? "" : "s"}`;
+  if (btnPrim) btnPrim.disabled = paginaPac <= 1;
   if (btnAnt) btnAnt.disabled = paginaPac <= 1;
+  if (inpIr) {
+    inpIr.max = String(paginas);
+    inpIr.value = String(paginaPac);
+    inpIr.disabled = paginas <= 1;
+    inpIr.setAttribute("aria-label", `Ir a la página (1 a ${paginas})`);
+  }
   if (btnSig) btnSig.disabled = paginaPac >= paginas;
+  if (btnUlt) btnUlt.disabled = paginaPac >= paginas;
   if (selTam && selTam.value !== String(pageSizePac)) selTam.value = String(pageSizePac);
 }
 
@@ -742,17 +753,39 @@ statsEl.addEventListener("click", (e) => {
 
 window.snwConCooldown($("#btnActualizar"), () => cargar(true));
 
-// --- Paginación: Anterior/Siguiente y tamaño de página (10–100) ------------
+// --- Paginación: extremos, pasos, salto directo y tamaño (10–100) -----------
+const pagPrimPac = $("#pagPrimPac");
 const pagAntPac = $("#pagAntPac");
 const pagSigPac = $("#pagSigPac");
+const pagUltPac = $("#pagUltPac");
+const pagIrPac = $("#pagIrPac");
 const selPageSizePac = $("#selPageSizePac");
 if (selPageSizePac) selPageSizePac.value = String(pageSizePac);
-if (pagAntPac) pagAntPac.addEventListener("click", () => {
-  if (paginaPac > 1) { paginaPac -= 1; cargar(); }
-});
-if (pagSigPac) pagSigPac.addEventListener("click", () => {
-  if (paginaPac < totalPaginasPac(totalPacientesFiltrados)) { paginaPac += 1; cargar(); }
-});
+function irPaginaPac(valor) {
+  const numero = Number(valor);
+  if (!Number.isSafeInteger(numero) || numero < 1) {
+    if (pagIrPac) pagIrPac.value = String(paginaPac);
+    return;
+  }
+  const destino = Math.min(numero, totalPaginasPac(totalPacientesFiltrados));
+  if (destino === paginaPac) {
+    if (pagIrPac) pagIrPac.value = String(paginaPac);
+    return;
+  }
+  paginaPac = destino;
+  cargar();
+}
+if (pagPrimPac) pagPrimPac.addEventListener("click", () => irPaginaPac(1));
+if (pagAntPac) pagAntPac.addEventListener("click", () => irPaginaPac(paginaPac - 1));
+if (pagSigPac) pagSigPac.addEventListener("click", () => irPaginaPac(paginaPac + 1));
+if (pagUltPac) pagUltPac.addEventListener("click", () => irPaginaPac(totalPaginasPac(totalPacientesFiltrados)));
+if (pagIrPac) {
+  pagIrPac.addEventListener("focus", () => pagIrPac.select());
+  pagIrPac.addEventListener("change", () => irPaginaPac(pagIrPac.value));
+  pagIrPac.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); irPaginaPac(pagIrPac.value); pagIrPac.blur(); }
+  });
+}
 if (selPageSizePac) selPageSizePac.addEventListener("change", () => {
   pageSizePac = Math.min(100, Math.max(10, Number(selPageSizePac.value) || 10));
   localStorage.setItem("snw_page_size_pac", String(pageSizePac));
