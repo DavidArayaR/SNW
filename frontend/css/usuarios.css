@@ -188,6 +188,8 @@
 .usr-perm input { width: 16px; height: 16px; accent-color: var(--verde); flex-shrink: 0; }
 .usr-perm input:disabled { cursor: not-allowed; }
 .usr-perm--off { color: var(--texto-suave); }
+.usr-perm-envio { border: 1px solid var(--borde); border-radius: 10px; padding: 8px 11px; }
+.usr-perm--confirmacion { margin-left: 24px; font-size: .8rem; color: var(--texto-suave); }
 
 .usr-total-nota {
   font-size: .84rem;

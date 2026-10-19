@@ -41,7 +41,7 @@ class HistorialOrigenTests(unittest.TestCase):
         self.assertIn("/etiquetas?ambiente=", script)
         self.assertIn('previas.filter((e) => e !== "requiere_revision")', script)
 
-    def test_etiquetas_solo_para_respuesta_y_autor_del_csv(self):
+    def test_etiquetas_solo_para_respuesta_y_cuenta_con_permiso(self):
         body = main.EtiquetasRespuestaIn(etiquetas=["consulta", "requiere_revision"])
         conexion = MagicMock()
         cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
@@ -50,7 +50,6 @@ class HistorialOrigenTests(unittest.TestCase):
                       ambiente="produccion", area_id=None, sesion={"usuario": "autor"})
         with patch.object(main, "tiene_permiso", return_value=True), \
              patch.object(main, "_resolver_tabla_pacientes", return_value=("pacientes_prod", None)), \
-             patch.object(main, "_ids_csv_propios", return_value={4}), \
              patch.object(main, "_cond_tabla_log_segura", return_value=("", ())), \
              patch.object(main, "conectar", return_value=conexion), \
              patch.object(main, "auditoria_registrar") as auditar:
@@ -60,9 +59,7 @@ class HistorialOrigenTests(unittest.TestCase):
         self.assertIn("INSERT INTO respuesta_etiquetas", cur.execute.call_args_list[1].args[0])
         self.assertEqual(cur.execute.call_args_list[1].args[1][1], '["consulta"]')
         auditar.assert_called_once()
-        with patch.object(main, "tiene_permiso", return_value=True), \
-             patch.object(main, "_resolver_tabla_pacientes", return_value=("pacientes_prod", None)), \
-             patch.object(main, "_ids_csv_propios", return_value=set()):
+        with patch.object(main, "tiene_permiso", return_value=False):
             with self.assertRaises(HTTPException) as error:
                 main.etiquetar_mensaje_paciente(**kwargs)
         self.assertEqual(error.exception.status_code, 403)
@@ -77,7 +74,6 @@ class HistorialOrigenTests(unittest.TestCase):
         cur.fetchone.return_value = {"id": 17}
         with patch.object(main, "tiene_permiso", return_value=True), \
              patch.object(main, "_resolver_tabla_pacientes", return_value=("pacientes_prod", None)), \
-             patch.object(main, "_ids_csv_propios", return_value={4}), \
              patch.object(main, "_cond_tabla_log_segura", return_value=("", ())), \
              patch.object(main, "conectar", return_value=conexion), \
              patch.object(main, "auditoria_registrar"):

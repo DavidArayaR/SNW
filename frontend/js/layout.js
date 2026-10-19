@@ -164,7 +164,7 @@
     { pagina: "inicio",       href: "index.html",        icono: "fa-house",             texto: "Inicio" },
     { pagina: "mensajeria",   href: "mensajeria.html",   icono: "fa-paper-plane",       texto: "Mensajería", perm: "mensajeria" },
     { pagina: "historial",    href: "historial.html",    icono: "fa-clock-rotate-left", texto: "Historial", perm: "historial" },
-    { pagina: "pacientes",    href: "pacientes.html",    icono: "fa-database",          texto: "Base de datos", perm: "mensajeria", soloNoPriv: true },
+    { pagina: "pacientes",    href: "pacientes.html",    icono: "fa-database",          texto: "Base de datos", perms: ["mensajeria", "csv_subir", "pacientes_ver_datos"], soloNoPriv: true },
   ];
 
   // Submenú de administración (desplegable): solo admin/dev.
@@ -205,7 +205,7 @@
   };
 
   const itemsBase = LINKS_BASE
-    .filter((l) => (!l.perm || puede(l.perm)) && (!l.priv || ES_PRIV) && (!l.dev || ES_DEV) && (!l.soloNoPriv || !ES_PRIV))
+    .filter((l) => (!l.perm || puede(l.perm)) && (!l.perms || l.perms.some(puede)) && (!l.priv || ES_PRIV) && (!l.dev || ES_DEV) && (!l.soloNoPriv || !ES_PRIV))
     .map((l) => pintarEnlace(l, true))
     .join("");
 

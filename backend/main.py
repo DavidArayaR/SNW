@@ -350,6 +350,13 @@ def tiene_permiso(sesion: dict, permiso: str) -> bool:
     return permiso in (sesion.get("permisos") or [])
 
 
+def _envio_requiere_confirmacion(sesion: dict, tipo: str, ambiente: str) -> bool:
+    """La confirmación se omite solo con autorización directa explícita."""
+    if ambiente != "produccion":
+        return False
+    return not tiene_permiso(sesion, f"envio_{tipo}_directo")
+
+
 def exigir(*permisos: str):
     """Dependencia FastAPI: exige al menos uno de los permisos indicados."""
     def dep(sesion: dict = Depends(sesion_actual)) -> dict:
@@ -411,32 +418,6 @@ def _exigir_base_desarrollo(sesion: dict, ambiente: str, area_id: int | None = N
         raise HTTPException(403, detail="La base de desarrollo es exclusiva de administradores y desarrolladores.")
 
 
-def _ids_csv_propios(tabla: str, ids: list[int], sesion: dict) -> set[int]:
-    """Acceso completo solo a las filas incorporadas por esta cuenta vía CSV
-    o mediante el formulario de alta individual.
-    Un error o una carga anterior sin autor registrado nunca concede acceso."""
-    uid = servicio_areas.usuario_id_por_correo(sesion.get("usuario", ""))
-    ids = list({int(pid) for pid in ids if pid is not None})
-    if not uid or not ids:
-        return set()
-    propios: set[int] = set()
-    try:
-        with conectar() as conn, conn.cursor() as cur:
-            for inicio in range(0, len(ids), 500):
-                lote = ids[inicio:inicio + 500]
-                ph = ", ".join("%s" for _ in lote)
-                cur.execute(
-                    "SELECT paciente_id FROM paciente_csv_accesos"
-                    f" WHERE tabla_pacientes = %s AND usuario_id = %s AND paciente_id IN ({ph})",
-                    (tabla, uid, *lote),
-                )
-                propios.update(int(r["paciente_id"]) for r in cur.fetchall())
-    except Exception as e:
-        log_error("_ids_csv_propios", e)
-        return set()
-    return propios
-
-
 def _iniciales_paciente(nombre: str | None) -> str:
     letras = [next((c for c in parte if c.isalpha()), "")
               for parte in (nombre or "").split()]
@@ -460,11 +441,11 @@ def _ocultar_datos_paciente(fila: dict) -> None:
 
 
 def _rechazados_visibles(rechazados: list[dict], tabla: str, sesion: dict) -> list[dict]:
-    propios = _ids_csv_propios(tabla, [r.get("id") for r in rechazados], sesion)
+    puede_ver_datos = tiene_permiso(sesion, "pacientes_ver_datos")
     salida = []
     for r in rechazados:
         visible = dict(r)
-        if r.get("id") not in propios:
+        if not puede_ver_datos:
             visible["nombre"] = _iniciales_paciente(r.get("nombre"))
             visible["telefono"] = _telefono_paciente_oculto(r.get("telefono"))
         salida.append(visible)
@@ -843,6 +824,9 @@ def actualizar_usuario(usuario: str, body: UsuarioUpdIn, sesion: dict = Depends(
     nuevos_permisos = None
     if body.permisos is not None:
         nuevos_permisos = [p for p in body.permisos if p in PERMISOS_VALIDOS]
+        for tipo in ("envio_manual", "envio_programado"):
+            if tipo not in nuevos_permisos and f"{tipo}_directo" in nuevos_permisos:
+                nuevos_permisos.remove(f"{tipo}_directo")
         # "Administrar tarifas y costos" necesita "Estadísticas".
         if "tarifas_editar" in nuevos_permisos and "estadisticas" not in nuevos_permisos:
             nuevos_permisos.append("estadisticas")
@@ -1194,14 +1178,14 @@ async def importar_pacientes_csv(area_id: int, archivo: UploadFile = File(...),
                                  sesion: dict = Depends(sesion_actual)):
     """Carga pacientes vía CSV en la tabla de la area.
 
-    Admin/dev (acceso global) o cuentas con permiso de mensajería Y el rol de
+    Admin/dev (acceso global) o cuentas con permiso de subir CSV Y el rol de
     la area asignado.
     """
     esp = servicio_areas.obtener_area(area_id)
     if not esp:
         raise HTTPException(404, detail="Área no encontrada.")
     privilegiado = _es_privilegiado(sesion)
-    if not privilegiado and not tiene_permiso(sesion, "mensajeria"):
+    if not privilegiado and not tiene_permiso(sesion, "csv_subir"):
         raise HTTPException(403, detail="No tienes permiso para cargar pacientes.")
     uid = servicio_areas.usuario_id_por_correo(sesion.get("usuario", ""))
     if not servicio_areas.puede_acceder_area(privilegiado, uid, area_id):
@@ -1554,8 +1538,7 @@ def _tabla_lectura_pacientes(sesion: dict, ambiente: str, area_id: int | None) -
 def _presentar_filas_pacientes(filas: list[dict], t: str, ambiente: str,
                                esp: dict | None, sesion: dict) -> list[dict]:
     """Aplica la misma visibilidad y máscara tanto a la lectura completa como a la paginada."""
-    propios = _ids_csv_propios(t, [f["id"] for f in filas], sesion)
-    puede_ver_todos_dev = t == "pacientes_dev" and _es_privilegiado(sesion)
+    puede_ver_datos = tiene_permiso(sesion, "pacientes_ver_datos")
     numeros_editables = _numeros_prueba_editables("produccion" if esp else ambiente)
     numeros_prueba_prod = _numeros_prueba_editables("produccion") if t == "pacientes_dev" else set()
     for f in filas:
@@ -1563,7 +1546,7 @@ def _presentar_filas_pacientes(filas: list[dict], t: str, ambiente: str,
         f["autorizado_prueba"] = t == "pacientes_dev" and f["editable"]
         if t == "pacientes_dev":
             f["autorizado_prueba_prod"] = _es_numero_prueba_editable(f.get("telefono"), numeros_prueba_prod)
-        f["datos_completos"] = puede_ver_todos_dev or f["id"] in propios
+        f["datos_completos"] = puede_ver_datos
         if not f["datos_completos"]:
             _ocultar_datos_paciente(f)
         fecha = f.pop("fecha_actualizacion", None)
@@ -1623,17 +1606,7 @@ def _filtro_pagina_pacientes(t: str, ambiente: str, sesion: dict, q: str,
         condiciones.append(f"{ex_interes if interes == 'interesado' else ex_no_interes} = 1")
     if q.strip():
         texto = q.strip().lower()
-        uid = servicio_areas.usuario_id_por_correo(sesion.get("usuario", ""))
-        if t == "pacientes_dev" and _es_privilegiado(sesion):
-            acceso = "1"
-            args_acceso = ()
-        elif uid:
-            acceso = ("EXISTS (SELECT 1 FROM paciente_csv_accesos a"
-                      " WHERE a.tabla_pacientes = %s AND a.usuario_id = %s AND a.paciente_id = p.id)")
-            args_acceso = (t, uid)
-        else:
-            acceso = "0"
-            args_acceso = ()
+        acceso = "1" if tiene_permiso(sesion, "pacientes_ver_datos") else "0"
         iniciales = "CONCAT(LEFT(p.nombre, 1), '. ', LEFT(p.apellido, 1), '.')"
         telefono_oculto = ("CASE WHEN p.telefono REGEXP "
                            "'^([+]569[0-9]{8}|569[0-9]{8}|56[0-9]{8}|9[0-9]{7,8})$'"
@@ -1643,7 +1616,7 @@ def _filtro_pagina_pacientes(t: str, ambiente: str, sesion: dict, q: str,
             " OR LOCATE(%s, LOWER(p.telefono)) > 0))"
             f" OR (NOT ({acceso}) AND (LOCATE(%s, LOWER({iniciales})) > 0"
             f" OR LOCATE(%s, LOWER({telefono_oculto})) > 0)))")
-        valores.extend((*args_acceso, texto, texto, *args_acceso, texto, texto))
+        valores.extend((texto, texto, texto, texto))
     return (" WHERE " + " AND ".join(condiciones) if condiciones else ""), tuple(valores)
 
 
@@ -1966,9 +1939,7 @@ def actualizar_paciente(paciente_id: int, body: EstadoPacienteIn,
         )
         fila = cur.fetchone()
         fila["editable"] = _es_numero_prueba_editable(fila.get("telefono"), numeros_editables)
-        fila["datos_completos"] = (
-            t == "pacientes_dev" and _es_privilegiado(sesion)
-        ) or paciente_id in _ids_csv_propios(t, [paciente_id], sesion)
+        fila["datos_completos"] = tiene_permiso(sesion, "pacientes_ver_datos")
         if not fila["datos_completos"]:
             _ocultar_datos_paciente(fila)
         fecha = fila.pop("fecha_actualizacion", None)
@@ -2047,9 +2018,7 @@ def actualizar_respuesta_paciente(paciente_id: int, body: RespuestaIn,
     # La baja manual se replica solo donde este número también sea de prueba.
     if body.respuesta == "baja":
         fila["otras_bases"] = _propagar_baja_otras_bases(t, fila.get("telefono"), ambiente)
-    fila["datos_completos"] = (
-        t == "pacientes_dev" and _es_privilegiado(sesion)
-    ) or paciente_id in _ids_csv_propios(t, [paciente_id], sesion)
+    fila["datos_completos"] = tiene_permiso(sesion, "pacientes_ver_datos")
     if not fila["datos_completos"]:
         _ocultar_datos_paciente(fila)
     return fila
@@ -2095,8 +2064,8 @@ def etiquetar_mensaje_paciente(paciente_id: int, mensaje_id: int, body: Etiqueta
     if area_id is None and not (tiene_permiso(sesion, "historial") or tiene_permiso(sesion, "pacientes")):
         raise HTTPException(403, detail="No tienes permiso para acceder a esta sección.")
     tabla, esp = _resolver_tabla_pacientes(sesion, ambiente, area_id)
-    if paciente_id not in _ids_csv_propios(tabla, [paciente_id], sesion):
-        raise HTTPException(403, detail="Solo quien incorporó a este paciente puede etiquetar sus mensajes.")
+    if not tiene_permiso(sesion, "pacientes_ver_datos"):
+        raise HTTPException(403, detail="No tienes permiso para etiquetar mensajes de pacientes.")
     cond_log, args_log = _cond_tabla_log_segura(tabla if esp else None, ambiente)
     with conectar(ambiente) as conn, conn.cursor() as cur:
         cur.execute(
@@ -2124,7 +2093,9 @@ def etiquetar_mensaje_paciente(paciente_id: int, mensaje_id: int, body: Etiqueta
 def mensajes_paciente(paciente_id: int, ambiente: str = Query("produccion"),
                       area_id: int | None = Query(None),
                       sesion: dict = Depends(sesion_actual)):
-    """Los mensajes completos solo están disponibles para quien incorporó al paciente."""
+    """Mensajes completos para cuentas con permiso y acceso a la base/área."""
+    if not tiene_permiso(sesion, "pacientes_ver_datos"):
+        raise HTTPException(403, detail="No tienes permiso para ver datos completos de pacientes.")
     if area_id is not None:
         t, _esp = _resolver_tabla_pacientes(sesion, ambiente, area_id)
     else:
@@ -2150,8 +2121,6 @@ def mensajes_paciente(paciente_id: int, ambiente: str = Query("produccion"),
         pac = cur.fetchone()
         if not pac:
             raise HTTPException(404, detail="Paciente no encontrado")
-        if paciente_id not in _ids_csv_propios(t, [paciente_id], sesion):
-            raise HTTPException(403, detail="Solo quien incorporó a este paciente puede ver sus mensajes.")
         cond_log, args_log = _cond_tabla_log_segura(t if _esp else None, ambiente)
         cur.execute(
             "SELECT id, fecha_hora, mensaje, plantilla_clave, estado_envio, descripcion_error"
@@ -3986,21 +3955,16 @@ def obtener_call_center_log(sesion: dict = Depends(exigir("call_center_registro"
                 args or None,
             )
             contadores = {r["n"]: int(r["c"] or 0) for r in cur.fetchall() if r["n"]}
-            propios_por_tabla = {
-                tabla: _ids_csv_propios(tabla, [r.get("paciente_id") for r in filas
-                                                 if r.get("base_datos") == tabla], sesion)
-                for tabla in {r.get("base_datos") for r in filas if r.get("base_datos")}
-            }
+            puede_ver_datos = tiene_permiso(sesion, "pacientes_ver_datos")
             for r in filas:
                 r["fecha"] = r.pop("fecha_hora").strftime("%d-%m-%Y %H:%M")
                 r["automatico"] = bool(r["automatico"])
-                propio = r.get("paciente_id") in propios_por_tabla.get(r.get("base_datos"), set())
                 vista = r.pop("vista_mensaje", None)
                 try:
-                    r["vista_mensaje"] = json.loads(vista) if propio and vista else None
+                    r["vista_mensaje"] = json.loads(vista) if puede_ver_datos and vista else None
                 except (TypeError, ValueError):
                     r["vista_mensaje"] = None
-                if not propio:
+                if not puede_ver_datos:
                     r["nombre_paciente"] = _iniciales_paciente(r.get("nombre_paciente"))
                     r["numero_paciente"] = _telefono_paciente_oculto(r.get("numero_paciente"))
                     r["descripcion_error"] = None
@@ -4012,21 +3976,15 @@ def obtener_call_center_log(sesion: dict = Depends(exigir("call_center_registro"
                 + (f" WHERE {filtro_area}" if filtro_area else "")
                 + " ORDER BY id DESC LIMIT 100", args or None)
             solicitudes = cur.fetchall()
-            propios_derivacion = {
-                tabla: _ids_csv_propios(tabla, [r.get("paciente_id") for r in solicitudes
-                                            if r.get("base_datos") == tabla], sesion)
-                for tabla in {r.get("base_datos") for r in solicitudes if r.get("base_datos")}
-            }
             for d in solicitudes:
-                propio = d.get("paciente_id") in propios_derivacion.get(d.get("base_datos"), set())
                 derivaciones.append({
                     "id": d["id"], "motivos": d["motivos"].split(","),
                     "estado": d["estado"], "numero_call_center": d.get("numero_call_center"),
                     "base_datos": d.get("base_datos"),
                     "fecha": d["creado"].strftime("%d-%m-%Y %H:%M"),
-                    "telefono": d["telefono"] if propio else _telefono_paciente_oculto(d["telefono"]),
-                    "mensaje": d["mensaje_original"] if propio else "Consulta protegida: solo quien cargó el CSV puede verla.",
-                    "puede_reintentar": propio and d["estado"] == "error",
+                    "telefono": d["telefono"] if puede_ver_datos else _telefono_paciente_oculto(d["telefono"]),
+                    "mensaje": d["mensaje_original"] if puede_ver_datos else "Consulta protegida: requiere permiso para ver datos de pacientes.",
+                    "puede_reintentar": puede_ver_datos and d["estado"] == "error",
                 })
     except Exception as e:
         log_error("obtener_call_center_log", e)
@@ -4037,16 +3995,20 @@ def obtener_call_center_log(sesion: dict = Depends(exigir("call_center_registro"
 
 def reintentar_derivacion_call_center(
         derivacion_id: int, sesion: dict = Depends(exigir("call_center_registro"))):
-    """Permite al propietario recuperar un aviso fallido, sin crear otro caso."""
+    """Recupera un aviso fallido dentro del área autorizada."""
+    if not tiene_permiso(sesion, "pacientes_ver_datos"):
+        raise HTTPException(403, detail="No tienes permiso para ver datos de pacientes.")
     with conectar() as conn, conn.cursor() as cur:
         cur.execute("SELECT paciente_id, base_datos, estado FROM call_center_derivaciones"
                     " WHERE id = %s FOR UPDATE", (derivacion_id,))
         fila = cur.fetchone()
         if not fila:
             raise HTTPException(404, detail="Derivación no encontrada.")
-        if fila["paciente_id"] not in _ids_csv_propios(
-                fila["base_datos"], [fila["paciente_id"]], sesion):
-            raise HTTPException(403, detail="Solo quien cargó el CSV puede reintentar esta derivación.")
+        if not _es_privilegiado(sesion):
+            permitidas = {e["nombre_tabla_base"] for e in servicio_areas.listar_areas()
+                          if e["id"] in set(sesion.get("area_ids") or [])}
+            if fila.get("base_datos") not in permitidas:
+                raise HTTPException(403, detail="No tienes acceso a esta área.")
         if fila["estado"] != "error":
             raise HTTPException(409, detail="Solo se pueden reintentar derivaciones con error.")
         cur.execute("UPDATE call_center_derivaciones SET estado = 'pendiente'"
@@ -5126,6 +5088,8 @@ def _procesar_job(job_id: str) -> None:
 
 def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
                   sesion: dict = Depends(exigir("mensajeria"))):
+    if not tiene_permiso(sesion, "envio_manual"):
+        raise HTTPException(403, detail="No tienes permiso para crear envíos manuales.")
     try:
         amb = entorno_valido(body.ambiente)
     except ValueError:
@@ -5355,9 +5319,9 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
                 "rechazados": _rechazados_visibles(rechazados, t_esp or nombre_base(amb), sesion),
                 "requiere_confirmacion": False, "envio_id": envio_id}
 
-    # En producción se requiere confirmación por correo del supervisor, salvo
-    # que la cuenta tenga el permiso de envío directo en producción.
-    if amb == "produccion" and not tiene_permiso(sesion, "envio_produccion"):
+    # En producción se requiere confirmación salvo permiso explícito para
+    # crear envíos manuales directos (admin/dev lo tienen implícito).
+    if _envio_requiere_confirmacion(sesion, "manual", amb):
         token = uuid.uuid4().hex
         envio_id = crear_envio_batch(t_esp or nombre_base(amb), plantilla["clave"], plantilla["nombre"],
                                      len(destinatarios) + len(rechazados), amb,
@@ -6110,6 +6074,8 @@ def _exigir_prog_decisor(sesion: dict, f: dict) -> None:
 
 
 def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeria"))):
+    if not tiene_permiso(sesion, "envio_programado"):
+        raise HTTPException(403, detail="No tienes permiso para crear envíos programados.")
     try:
         cuando = datetime.datetime.strptime((body.programado_para or "").strip(), "%Y-%m-%dT%H:%M")
     except ValueError:
@@ -6207,10 +6173,9 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
         if int((cur.fetchone() or {}).get("n") or 0) >= MAX_PROG_ACTIVOS_POR_CREADOR:
             raise HTTPException(429, detail="Tienes demasiados envíos programados pendientes: cancela alguno.")
 
-    # Admin/dev/supervisor crean directo aprobado; el usuario requiere
-    # aprobación de un superior (queda pendiente + correo a supervisores).
-    rol = sesion.get("rol") or ""
-    directo = _es_privilegiado(sesion) or rol == "supervisor"
+    # El permiso de creación directa decide si necesita aprobación de un
+    # superior. Admin/dev siempre tienen ese permiso implícito.
+    directo = not _envio_requiere_confirmacion(sesion, "programado", amb)
     estado = "aprobado" if directo else "pendiente"
     token = None if directo else uuid.uuid4().hex
 
@@ -6379,10 +6344,9 @@ def destinatarios_programado(prog_id: int, sesion: dict = Depends(exigir("mensaj
     if not _prog_es_base_desarrollo(f):
         raise HTTPException(403, detail="Los preelegidos solo se pueden ver en la base de desarrollo.")
     destinatarios = _prog_destinatarios(prog_id)
-    propios = _ids_csv_propios(f.get("tabla") or "pacientes_dev",
-                              [d["id"] for d in destinatarios], sesion)
+    puede_ver_datos = tiene_permiso(sesion, "pacientes_ver_datos")
     for d in destinatarios:
-        if d["id"] not in propios:
+        if not puede_ver_datos:
             d["nombre"] = _iniciales_paciente(d.get("nombre"))
             d["telefono"] = _telefono_paciente_oculto(d.get("telefono"))
     return {"id": f["id"], "total": len(destinatarios), "destinatarios": destinatarios}
@@ -7232,14 +7196,14 @@ def detalle_historial(envio_id: str, ambiente: str = Query("produccion"),
     with conectar(ambiente) as conn, conn.cursor() as cur:
         cur.execute(sql, (*args_r, envio_id))
         filas = cur.fetchall()
-    propios = _ids_csv_propios(t, [f.get("paciente_id") for f in filas], sesion)
+    puede_ver_datos = tiene_permiso(sesion, "pacientes_ver_datos")
     for f in filas:
         f["fecha"] = f.pop("fecha_hora").strftime("%d-%m-%Y %H:%M")
         f["interesado"] = bool(f.get("interesado"))
         msg = (f.get("mensaje_respuesta") or "").strip()
         f["mensaje_respuesta"] = msg
         f["respuesta_interes"] = bool(msg) and es_mensaje_interes(msg)
-        f["datos_completos"] = f.get("paciente_id") in propios
+        f["datos_completos"] = puede_ver_datos
         if not f["datos_completos"]:
             f["nombre_paciente"] = _iniciales_paciente(f.get("nombre_paciente"))
             f["numero_telefono"] = _telefono_paciente_oculto(f.get("numero_telefono"))

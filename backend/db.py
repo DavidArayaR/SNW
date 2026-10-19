@@ -53,6 +53,26 @@ AMBIENTES = {"desarrollo", "produccion"}
 TABLAS_PACIENTES = {"desarrollo": "pacientes_dev", "produccion": "pacientes_prod"}
 
 
+def _migrar_permisos_envios_legacy(permisos: str, rol: str) -> str:
+    """Conserva capacidades antiguas sin reotorgarlas tras la migración única."""
+    anteriores = [p for p in (permisos or "").split(",") if p]
+    nuevos = list(dict.fromkeys(p for p in anteriores if p != "envio_produccion"))
+    def agregar(permiso):
+        if permiso not in nuevos:
+            nuevos.append(permiso)
+    if "mensajeria" in anteriores:
+        for permiso in ("csv_subir", "envio_manual", "envio_programado"):
+            agregar(permiso)
+    # No otorgar acceso ampliado a PII durante la migración: antes solo se
+    # podían ver datos completos de los pacientes cargados por la propia cuenta.
+    if "envio_produccion" in anteriores:
+        agregar("envio_manual_directo")
+        agregar("envio_programado_directo")
+    elif rol == "supervisor" and "envio_programado" in nuevos:
+        agregar("envio_programado_directo")
+    return ",".join(nuevos)
+
+
 # ---------------------------------------------------------------------------
 # TODA la configuración vive en la tabla `configuracion` (clave/valor) y se
 # edita desde la página de Configuración. En .env quedan solo las credenciales
@@ -487,7 +507,8 @@ def asegurar_tabla_config() -> None:
             except Exception as e:
                 log_error("migrar_whatsapp_avisos_unicos", e)
             _sembrar_usuarios(cur)
-            # Solo la cuenta que incorporó un paciente vía CSV puede ver sus datos completos.
+            # Conserva la procedencia de cada carga CSV para auditoría; la
+            # visibilidad de datos se controla por permiso y área, no por autor.
             cur.execute(
                 "CREATE TABLE IF NOT EXISTS paciente_csv_accesos ("
                 "  tabla_pacientes VARCHAR(64) NOT NULL,"
@@ -705,6 +726,23 @@ def asegurar_tabla_config() -> None:
                 if not (cur.fetchone() or {}).get("n"):
                     cur.execute(f"ALTER TABLE {_ht} ADD INDEX {_hidx} (area_id)")
 
+            # Migración única: separar creación y aprobación por tipo de envío
+            # sin quitar capacidades a las cuentas que ya las tenían. El
+            # marcador evita volver a otorgar permisos que después se revoquen.
+            cur.execute("SELECT valor FROM configuracion WHERE clave = %s FOR UPDATE",
+                        ("permisos_envios_v2",))
+            if not cur.fetchone():
+                cur.execute("SELECT usuario, rol, permisos FROM usuarios"
+                            " WHERE rol NOT IN ('administrador', 'desarrollador')")
+                for cuenta in cur.fetchall():
+                    anteriores = cuenta.get("permisos") or ""
+                    nuevos = _migrar_permisos_envios_legacy(anteriores, cuenta.get("rol"))
+                    if nuevos != anteriores:
+                        cur.execute("UPDATE usuarios SET permisos = %s WHERE usuario = %s",
+                                    (nuevos, cuenta["usuario"]))
+                cur.execute("INSERT INTO configuracion (clave, valor) VALUES (%s, '1')",
+                            ("permisos_envios_v2",))
+
             # Estadísticas (y costos) son exclusivas de admin/dev: se retiran
             # esos permisos de las cuentas no privilegiadas que los tuvieran.
             cur.execute(
@@ -739,7 +777,9 @@ MAX_DESARROLLADORES = 4
 #                            asignado, paciente) en la página de Historial.
 PERMISOS_VALIDOS = (
     "pacientes", "mensajeria", "historial", "estadisticas",
-    "plantillas_editar", "envio_produccion", "tarifas_editar",
+    "plantillas_editar", "csv_subir", "pacientes_ver_datos",
+    "envio_manual", "envio_manual_directo",
+    "envio_programado", "envio_programado_directo", "tarifas_editar",
     "call_center", "call_center_registro",
 )
 PERMISOS_BASICOS = ["mensajeria", "historial", "plantillas_editar"]

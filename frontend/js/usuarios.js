@@ -18,12 +18,15 @@ const PERM_LABEL = {
   mensajeria: "Mensajería",
   historial: "Historial",
   plantillas_editar: "Editar plantillas",
-  envio_produccion: "Enviar en producción sin confirmación",
+  csv_subir: "Subir CSV",
+  pacientes_ver_datos: "Ver datos de pacientes (Historial y Base de datos)",
+  envio_manual: "Crear envíos manuales",
+  envio_programado: "Crear envíos programados",
   call_center_registro: "Ver registro de respuestas de call center",
 };
 const _EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/;
 const PERM_PAGINAS = ["mensajeria", "historial"];
-const PERM_ACCIONES = ["plantillas_editar", "envio_produccion", "call_center_registro"];
+const PERM_ACCIONES = ["plantillas_editar", "csv_subir", "pacientes_ver_datos", "call_center_registro"];
 const PERMISOS_BASICOS = ["mensajeria", "historial", "plantillas_editar"];
 const ROL_LABEL = { usuario: "Usuario", supervisor: "Supervisor", administrador: "Administrador", desarrollador: "Desarrollador" };
 const ROLES_TOTALES = ["administrador", "desarrollador"];
@@ -245,7 +248,19 @@ function permisosCheckboxes(rol, permisos, editable) {
         `<input type="checkbox" data-perm="${k}"${on ? " checked" : ""}${editable ? "" : " disabled"}>` +
         `<span>${esc(PERM_LABEL[k] || k)}</span></label>`;
     }).join("");
-  return `<div class="usr-perms">${bloque("Páginas", PERM_PAGINAS)}${bloque("Acciones", PERM_ACCIONES)}</div>`;
+  const envios = ["envio_manual", "envio_programado"].map((k) => {
+    const on = set.has(k);
+    const directo = set.has(`${k}_directo`);
+    return `<div class="usr-perm-envio">` +
+      `<label class="usr-perm${on ? "" : " usr-perm--off"}">` +
+        `<input type="checkbox" data-perm="${k}"${on ? " checked" : ""}${editable ? "" : " disabled"}>` +
+        `<span>${esc(PERM_LABEL[k])}</span></label>` +
+      `<label class="usr-perm usr-perm--confirmacion">` +
+        `<input type="checkbox" data-requiere-confirmacion="${k}"${directo ? "" : " checked"}${editable && on ? "" : " disabled"}>` +
+        `<span>Necesita confirmación</span></label></div>`;
+  }).join("");
+  return `<div class="usr-perms">${bloque("Páginas", PERM_PAGINAS)}${bloque("Acciones", PERM_ACCIONES)}` +
+    `<div class="usr-perms__grupo">Envíos</div>${envios}</div>`;
 }
 
 function rolControl(u) {
@@ -393,6 +408,12 @@ function renderDetalle() {
 
   // La auditoría se carga solo al abrir su pestaña (carga diferida).
   const card = detalleEl.querySelector(".usr-card");
+  card.addEventListener("change", (e) => {
+    if (e.target.matches('[data-perm="envio_manual"], [data-perm="envio_programado"]')) {
+      const confirmacion = card.querySelector(`[data-requiere-confirmacion="${e.target.dataset.perm}"]`);
+      if (confirmacion) confirmacion.disabled = !e.target.checked;
+    }
+  });
   posicionarIndicadorTabsUsr();
   if (tabUsr === "auditoria") cargarAuditoriaPanel(card, u.usuario);
 
@@ -403,7 +424,10 @@ function renderDetalle() {
     selRol.addEventListener("change", () => {
       const nuevoRol = selRol.value;
       let permisos = u.permisos || [];
-      if (nuevoRol === "usuario" && u.rol !== "usuario") permisos = PERMISOS_BASICOS;
+      if (ROLES_TOTALES.indexOf(nuevoRol) === -1 &&
+          (ROLES_TOTALES.indexOf(u.rol) !== -1 || (nuevoRol === "usuario" && u.rol !== "usuario"))) {
+        permisos = PERMISOS_BASICOS;
+      }
       detalleEl.querySelector("#permWrap").innerHTML =
         permisosCheckboxes(nuevoRol, permisos, u.editable);
     });
@@ -431,6 +455,11 @@ async function guardar(card) {
   const casillas = card.querySelectorAll("[data-perm]");
   if (casillas.length) {
     cuerpo.permisos = [...casillas].filter((c) => c.checked).map((c) => c.dataset.perm);
+    for (const tipo of ["envio_manual", "envio_programado"]) {
+      const crear = card.querySelector(`[data-perm="${tipo}"]`);
+      const confirmar = card.querySelector(`[data-requiere-confirmacion="${tipo}"]`);
+      if (crear?.checked && confirmar && !confirmar.checked) cuerpo.permisos.push(`${tipo}_directo`);
+    }
   }
   const chkActivo = card.querySelector("[data-activo]");
   if (chkActivo) cuerpo.activo = chkActivo.checked;

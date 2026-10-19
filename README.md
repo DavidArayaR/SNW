@@ -336,7 +336,7 @@ Reglas del editor:
 |---|---|---|
 | POST | `/api/auth/login` | `{usuario, clave}` → `{token, rol, nombre, permisos}`. 403 si la cuenta está desactivada (`activo=false`) |
 | GET | `/api/auth/invitacion/{token}` | Verifica un enlace de invitación (48 h) → `{ok, correo}`. Usado por `registro.html` para mostrar el correo al que se le manda la invitación |
-| POST | `/api/auth/activar` | Último paso de una invitación `{token, clave}`. `clave` ≥ 8 con minúscula, mayúscula y número. Nace con rol `usuario` y permisos básicos (`mensajeria`, `historial`) |
+| POST | `/api/auth/activar` | Último paso de una invitación `{token, clave}`. `clave` ≥ 8 con minúscula, mayúscula y número. Nace con rol `usuario` y permisos básicos (`mensajeria`, `historial`, `plantillas_editar`); carga CSV, datos completos y creación de envíos requieren concesión adicional |
 | GET | `/api/auth/me` | Rol, permisos, areas asignadas y `correo_recuperacion` vigentes de la sesión (el frontend lo usa para refrescarse si un admin cambió los permisos) |
 | PUT | `/api/auth/clave` | Cambiar **la propia** contraseña estando dentro: `{clave_actual, clave_nueva}`. Valida la actual y la fuerza de la nueva (botón «Mi cuenta» de la barra lateral); si la cuenta tiene correo de recuperación, le manda un aviso de confirmación |
 | PUT | `/api/auth/correo-recuperacion` | Define a qué correo llega el enlace de «Olvidé mi contraseña» y el aviso de cambio de contraseña: `{correo}`. **Sin campo en la interfaz** (se quitó de «Mi cuenta»); solo queda como endpoint. 409 si el correo es el usuario de otra cuenta |
@@ -367,7 +367,7 @@ contraseña?» en el login (`/api/auth/olvide`) — mismo mecanismo, pero autose
 | Método | Endpoint | Descripción |
 |---|---|---|
 | GET | `/api/pacientes?q=&ambiente=&area=` | Lista con respuesta y error del último `log_envios`. Con `area` lee la tabla `pacientes_<slug>` (403 si no está asignada) |
-| POST | `/api/pacientes/prueba` | (admin/dev) Agrega nombre, apellido y celular solo a `pacientes_dev`, sin autorizar automáticamente envíos. Rechaza duplicados y teléfonos suprimidos. El alta queda auditada y la cuenta creadora conserva acceso a los datos completos de esa fila |
+| POST | `/api/pacientes/prueba` | (admin/dev) Agrega nombre, apellido y celular solo a `pacientes_dev`, sin autorizar automáticamente envíos. Rechaza duplicados y teléfonos suprimidos. El alta queda auditada; los datos completos requieren `pacientes_ver_datos` (implícito para admin/dev) |
 | POST | `/api/pacientes/prueba/{id}/autorizar` | (admin/dev) Botón de la tabla para añadir el celular existente a `numeros_prueba_dev` y `numeros_prueba_prod` en una transacción. Es idempotente, completa cualquiera de las listas que falte y queda auditado. Al primer arranque con esta versión, los números que ya estaban en desarrollo se copian una sola vez a la lista de producción; no se vuelven a añadir si después se retiran deliberadamente |
 | DELETE | `/api/pacientes/prueba/{id}/autorizar` | (admin/dev) Quita el celular de ambas listas de prueba de forma idempotente y auditada; conserva el registro del paciente en desarrollo |
 | PUT | `/api/pacientes/{id}?ambiente=&area=` | Cambiar `estado` (`pendiente`/`enviado`/`error`) de **un** paciente |
@@ -432,7 +432,7 @@ tiene template de Meta (va como texto libre, ventana de 24 h). No hay gestión d
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/call-center/log` | (permiso `call_center_registro`) `{entradas, contadores}` — últimas 200 respuestas de call center y usos históricos exitosos por número. Para cuentas no privilegiadas, filas y contadores se limitan a sus áreas. Los datos completos del paciente se muestran solo a quien subió su CSV |
+| GET | `/api/call-center/log` | (permiso `call_center_registro`) `{entradas, contadores}` — últimas 200 respuestas de call center y usos históricos exitosos por número. Para cuentas no privilegiadas, filas y contadores se limitan a sus áreas. Los datos completos del paciente requieren además `pacientes_ver_datos` |
 
 ### Envíos
 
@@ -497,7 +497,7 @@ Cada especialidad vive en **una sola tabla** `pacientes_<slug>` dentro de `snw_b
 | PUT | `/api/areas/{id}` | (admin / dev) `{nombre_visible}` — renombra especialidad y rol; la tabla física **no** cambia |
 | POST | `/api/areas/{id}/roles` | (admin / dev) `{usuario}` — asigna a la cuenta el rol de la especialidad |
 | DELETE | `/api/areas/{id}/roles/{usuario}` | (admin / dev) — retira el rol de la especialidad |
-| POST | `/api/areas/{id}/pacientes/csv` | Carga un bloque CSV (`nombre, apellido, telefono`, UTF-8, máx. 5 MB por petición) en la tabla del área; normaliza a `+569XXXXXXXX` e informa `{procesados, insertados, duplicados, rechazados, errores}`. La página divide el archivo en bloques secuenciales de hasta 2 MB **o 2.000 filas**, lo que ocurra primero, y usa `fila_inicial` para conservar el número de fila de los errores. Cada bloque confirmado queda guardado: si la carga se interrumpe, puede reintentarse el archivo sin duplicar pacientes. Admin/dev o cuentas con permiso de mensajería y el rol asignado |
+| POST | `/api/areas/{id}/pacientes/csv` | Carga un bloque CSV (`nombre, apellido, telefono`, UTF-8, máx. 5 MB por petición) en la tabla del área; normaliza a `+569XXXXXXXX` e informa `{procesados, insertados, duplicados, rechazados, errores}`. La página divide el archivo en bloques secuenciales de hasta 2 MB **o 2.000 filas**, lo que ocurra primero, y usa `fila_inicial` para conservar el número de fila de los errores. Cada bloque confirmado queda guardado: si la carga se interrumpe, puede reintentarse el archivo sin duplicar pacientes. Admin/dev o cuentas con permiso `csv_subir` y el área asignada |
 | DELETE | `/api/areas/{id}/pacientes/{pid}` | (admin / dev) Borra UN registro de la tabla (más sus filas de log propias) |
 | DELETE | `/api/areas/{id}/tabla` | (admin / dev) Elimina la especialidad entera: tabla, rol, asignaciones y registro. El historial de envíos se conserva. Las tablas legacy (`pacientes_dev`/`pacientes_prod`) no se pueden borrar |
 
@@ -817,16 +817,16 @@ propagar como error 500.
   más abajo).
   `POST /api/notificaciones/enviar` sigue existiendo como el único punto de envío, usado
   por Mensajería, y comparte confirmación, job y progreso con el resto de ese flujo.
-- **Producción**: si quien envía **no** tiene el permiso `envio_produccion`, se genera un
+- **Producción**: crear un envío manual requiere `envio_manual`; si quien envía **no** tiene `envio_manual_directo`, se genera un
   correo de confirmación al supervisor con el **costo aproximado del envío en grande y rojo**
   (nº de mensajes × tarifa vigente de Meta para la categoría de la plantilla, **total
   redondeado hacia arriba**) y botones **Confirmar** y **Rechazar** (con comentario); el
   envío no arranca hasta que se confirma. El asunto y el cuerpo del correo indican el
   nombre y el correo de la cuenta que solicitó el envío. Un envío rechazado queda en el **Historial**
   con estado `rechazado` y el comentario del supervisor (ya no se borra). Con el permiso
-  `envio_produccion` (implícito para admin/dev) el envío en producción sale directo, sin correo.
+  `envio_manual_directo` (implícito para admin/dev) el envío en producción sale directo, sin correo.
 - **Desarrollo**: envío directo, restringido a los números de `numeros_prueba_dev`;
-  sin el permiso `envio_produccion`, con `entorno = desarrollo` la petición nunca
+  con `entorno = desarrollo` la petición nunca
   puede apuntar a producción aunque lo pida.
 - **Motor intercambiable** (`metodo_envio`): `simulado` (no envía nada real, solo
   registra en consola) o `api_oficial` (WhatsApp Business Cloud API).
@@ -892,7 +892,18 @@ lectura y no depende de si la cuenta se puede editar. También pagina de a **10 
 **Permisos** (campo `permisos` de la tabla; los roles privilegiados los tienen todos de forma implícita):
 
 - Páginas: `mensajeria`, `historial`
-- Acciones: `plantillas_editar`, `envio_produccion` (enviar en producción sin confirmación del supervisor), `call_center_registro` (ver el registro de respuestas de call center en el Historial)
+- Acciones: `plantillas_editar`, `csv_subir` (carga CSV en áreas asignadas),
+  `pacientes_ver_datos` (datos completos de pacientes de las bases/áreas a las
+  que la cuenta tiene acceso, en Base de datos e Historial, sin depender de
+  quién subió el CSV), `envio_manual` y `envio_programado`
+  (creación independiente), `call_center_registro` (registro de call center).
+  Cada permiso de creación tiene su casilla «Necesita confirmación»: al
+  desmarcarla se concede `envio_manual_directo` o `envio_programado_directo`.
+  La confirmación solo se aplica en producción; admin/dev tienen envío directo.
+  Los permisos antiguos de carga y creación se migran una sola vez. El nuevo
+  acceso completo a datos **no se concede automáticamente** a cuentas no
+  privilegiadas: debe otorgarse de forma explícita. Las cuentas nuevas también
+  deben recibir explícitamente los permisos de carga y creación de envíos.
 
 **Pacientes**, **Estadísticas** y **Configuración** ya no son permisos asignables: las tres
 pestañas viven dentro de `administracion.html`, exclusiva de los roles
@@ -984,9 +995,10 @@ claro** de la sidebar, o con el botón flotante en la portada y el login (págin
   badges de aprobación interna («⏳ Por aprobar»/«Rechazada») con botones de aprobar (con
   confirmación) y rechazar (con motivo) para admin/dev/supervisor, y envío directo a todos los
   pendientes con selector único de base de datos. Sin el permiso `plantillas_editar` el editor queda de solo lectura; las ajenas también (solo su creador las edita, salvo admin/dev).
-- **Cargar base de datos** (`carga.html`, permiso `mensajeria`): cualquier cuenta sube un CSV
-  (`nombre, apellido, telefono`, UTF-8, 5 MB) a una de sus áreas asignadas, con
-  informe de insertados/duplicados/rechazados. Sin áreas se le indica pedir una.
+- **Cargar base de datos** (`pacientes.html`, permiso `csv_subir`): una cuenta autorizada
+  sube un CSV (`nombre, apellido, telefono`, UTF-8, bloques de hasta 5 MB) a una
+  de sus áreas asignadas, con informe de insertados/duplicados/rechazados.
+  Sin áreas se le indica pedir una.
 - **Administración** (rol admin/desarrollador): ya no es una página con pestañas — son
   5 páginas propias (`usuarios.html`, `pacientes.html`, `areas.html`,
   `estadisticas.html`, `configuracion.html`; `administracion.html` solo redirige a

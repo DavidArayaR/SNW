@@ -283,11 +283,11 @@ class IntencionesCallCenterTests(unittest.TestCase):
         self.assertEqual(urllib.parse.unquote(enlace.split("text=", 1)[1]),
                          "Hola, esta es mi consulta: ¿Tienen horas mañana?")
 
-    def test_vista_de_aviso_solo_se_entrega_al_dueno_del_csv(self):
+    def test_vista_de_aviso_se_entrega_solo_con_permiso_de_datos(self):
         import main
         vista = '{"texto":"Aviso privado","boton_texto":"Ir al call center","mensaje_preparado":"Consulta privada"}'
 
-        def consultar(propios):
+        def consultar(permisos):
             conn = MagicMock()
             cur = conn.__enter__.return_value.cursor.return_value.__enter__.return_value
             cur.fetchall.side_effect = [[{
@@ -298,12 +298,12 @@ class IntencionesCallCenterTests(unittest.TestCase):
                 "vista_mensaje": vista, "fecha_hora": datetime(2026, 10, 16, 12, 0),
             }], [], []]
             with patch.object(main, "conectar", return_value=conn), \
-                 patch.object(main, "_es_privilegiado", return_value=True), \
-                 patch.object(main, "_ids_csv_propios", return_value=propios):
-                return main.obtener_call_center_log({"usuario": "operador"})["entradas"][0]
+                 patch.object(main, "_es_privilegiado", return_value=True):
+                return main.obtener_call_center_log({"rol": "usuario", "usuario": "operador",
+                    "permisos": permisos})["entradas"][0]
 
-        self.assertEqual(consultar({2})["vista_mensaje"]["texto"], "Aviso privado")
-        self.assertIsNone(consultar(set())["vista_mensaje"])
+        self.assertEqual(consultar(["pacientes_ver_datos"])["vista_mensaje"]["texto"], "Aviso privado")
+        self.assertIsNone(consultar([])["vista_mensaje"])
 
     def test_despacho_guarda_la_vista_del_boton_realmente_preparado(self):
         import main
@@ -327,16 +327,16 @@ class IntencionesCallCenterTests(unittest.TestCase):
             "mensaje_preparado": "Hola, esta es mi consulta",
         })
 
-    def test_reintento_restringido_a_propietario_del_csv(self):
+    def test_reintento_requiere_permiso_de_datos(self):
         import main
         conn = MagicMock()
         cur = conn.__enter__.return_value.cursor.return_value.__enter__.return_value
         cur.fetchone.return_value = {"paciente_id": 2, "base_datos": "pacientes_prod", "estado": "error"}
         with patch.object(main, "conectar", return_value=conn), \
-             patch.object(main, "_ids_csv_propios", return_value=set()), \
              patch.object(main.threading, "Timer") as timer:
             with self.assertRaises(HTTPException) as error:
-                main.reintentar_derivacion_call_center(7, {"usuario": "otro"})
+                main.reintentar_derivacion_call_center(7, {"rol": "usuario", "usuario": "otro",
+                    "permisos": ["call_center_registro"]})
         self.assertEqual(error.exception.status_code, 403)
         timer.assert_not_called()
 

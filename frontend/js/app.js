@@ -686,7 +686,7 @@ function actualizarPasosProg() {
   const modo = selModo?.value || "";
   if (inpPorcentaje) inpPorcentaje.disabled = !paso3Listo || modo !== "porcentaje" || progSinCupo;
   if (inpL) inpL.disabled = !paso3Listo || progSinCupo || !modo || modo === "porcentaje";
-  if (btn) btn.disabled = !paso4Listo || progCreando || progSinCupo;
+  if (btn) btn.disabled = !paso4Listo || progCreando || progSinCupo || !window.snwPuede?.("envio_programado");
   actualizarCostoProg();
 }
 
@@ -2190,7 +2190,12 @@ function refrescarAvisoDevConf() {
 // Aviso rojo: en producción esta cuenta envía directo, sin confirmación de supervisor.
 function refrescarAvisoAdminConf() {
   const box = $("#confAvisoAdmin");
-  const puedeProd = window.snwPuede && window.snwPuede("envio_produccion");
+  if (!window.snwPuede?.("envio_manual")) {
+    box.hidden = false;
+    box.textContent = "No tienes permiso para crear envíos manuales.";
+    return;
+  }
+  const puedeProd = window.snwPuede && window.snwPuede("envio_manual_directo");
   const modoEsp = modoAreaConf();
   const destinoProd = baseSeleccionadaConf() === "produccion" || modoEsp;
   const esAdminProduccion = puedeProd && destinoProd;
@@ -2198,7 +2203,7 @@ function refrescarAvisoAdminConf() {
   box.hidden = !(esAdminProduccion || requiereConf);
   if (esAdminProduccion) {
     box.textContent =
-      "Logeado como admin: se envía directamente sin confirmación de supervisor.";
+      "Este envío saldrá directamente, sin confirmación del supervisor.";
   } else if (requiereConf) {
     box.textContent = modoEsp
       ? "Este envío pedirá confirmación por correo al supervisor."
@@ -2242,7 +2247,7 @@ function actualizarPasosManual() {
   $("#selLimiteModoConf").disabled = !puedeElegirLimite || envioEnCursoConf;
   $("#limiteRangeConf").disabled = !puedeElegirLimite || modo !== "porcentaje" || envioEnCursoConf;
   $("#limiteNumConf").disabled = !puedeElegirLimite || modo !== "cantidad" || envioEnCursoConf;
-  $("#btnLanzarConf").disabled = !listo3 || envioEnCursoConf;
+  $("#btnLanzarConf").disabled = !listo3 || envioEnCursoConf || !window.snwPuede?.("envio_manual");
 }
 
 function actualizarCostoManual() {
@@ -2480,6 +2485,7 @@ modalRechazadoConfEl.addEventListener("click", (e) => {
 });
 
 $("#btnLanzarConf").addEventListener("click", () => {
+  if (!window.snwPuede?.("envio_manual")) return;
   const nombre = $("#confNombre").textContent || "plantilla";
   const dest = limiteEnvioConf();
   if (dest == null) return;
@@ -2497,6 +2503,7 @@ $("#modalIniciarConf").addEventListener("click", (e) => {
   if (e.target.id === "modalIniciarConf") $("#modalIniciarConf").hidden = true;
 });
 $("#btnConfirmarIniciarConf").addEventListener("click", async () => {
+  if (!window.snwPuede?.("envio_manual")) return;
   const limiteSeleccionado = limiteEnvioConf();
   if (limiteSeleccionado == null) {
     $("#modalIniciarConf").hidden = true;
@@ -2511,7 +2518,7 @@ $("#btnConfirmarIniciarConf").addEventListener("click", async () => {
   const espera = document.getElementById("modalEspera");
   const mensajeEspera = document.getElementById("mensajeEsperaConf");
   const requiereSupervisorPrevisto = ambienteEnvioConf() === "produccion" &&
-    !(window.snwPuede && window.snwPuede("envio_produccion"));
+    !(window.snwPuede && window.snwPuede("envio_manual_directo"));
   if (requiereSupervisorPrevisto && espera) {
     if (mensajeEspera) mensajeEspera.textContent = "Enviando la solicitud al supervisor...";
     const linkEl = document.getElementById("linkConfirmacionEsperaMsg");
@@ -2892,6 +2899,12 @@ function posicionarIndicadorTabsMsg() {
 }
 
 function pintarTabsMsg() {
+  const avisoProg = $("#progConfirmacionAviso");
+  if (avisoProg) avisoProg.textContent = !window.snwPuede?.("envio_programado")
+    ? "No tienes permiso para crear envíos programados."
+    : window.snwPuede?.("envio_programado_directo")
+      ? "El envío se ejecutará en la fecha indicada, sin aprobación previa."
+      : "El envío quedará pendiente de confirmación del supervisor antes de ejecutarse.";
   document.querySelectorAll("[data-msgtab]").forEach((b) =>
     b.classList.toggle("activo", b.dataset.msgtab === tabMsg));
   posicionarIndicadorTabsMsg();
@@ -3642,6 +3655,7 @@ function bloquearFilaProg(id, bloquear) {
 }
 
 async function programarEnvio() {
+  if (!window.snwPuede?.("envio_programado")) return;
   if (progCreando) return;
   const selBase = $("#selProgBase");
   const inpF = $("#inpProgFecha");

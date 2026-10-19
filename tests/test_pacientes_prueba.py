@@ -82,8 +82,7 @@ class PacientesPruebaTests(unittest.TestCase):
              patch.object(main, "_pacientes_baja_bloqueada", return_value=set()), \
              patch.object(main, "_cond_tabla_log_segura", return_value=("", ())), \
              patch.object(main, "expr_select_pacientes", return_value="p.id"), \
-             patch.object(main, "from_pacientes", return_value=" FROM pacientes_dev p"), \
-             patch.object(main, "_ids_csv_propios", return_value=set()):
+             patch.object(main, "from_pacientes", return_value=" FROM pacientes_dev p"):
             resultado = main.actualizar_respuesta_paciente(
                 27, main.RespuestaIn(respuesta="respondio"), ambiente="desarrollo",
                 area_id=None, sesion=self.dev)
@@ -234,7 +233,6 @@ class PacientesPruebaTests(unittest.TestCase):
         with patch.object(main, "conectar", return_value=db), \
                 patch.object(main, "expr_select_pacientes", return_value="p.*"), \
                 patch.object(main, "from_pacientes", return_value=" FROM pacientes_dev p"), \
-                patch.object(main, "_ids_csv_propios", return_value={1, 2, 3, 4}), \
                 patch.object(main, "_numeros_prueba_editables",
                              return_value={"+56922222222", "+56944444444"}):
             filas = main.listar_pacientes(q=None, ambiente="desarrollo", area_id=None,

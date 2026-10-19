@@ -229,7 +229,7 @@ function aplicarModoBase() {
   if (avisoLegacy) avisoLegacy.hidden = esArea || !PUEDE_GESTIONAR_PAC;
 
   const puedeCargarArea = !!window.snwEsPrivilegiado ||
-    (!!window.snwPuede && window.snwPuede("mensajeria"));
+    (!!window.snwPuede && window.snwPuede("csv_subir"));
   const btnSubir = $("#btnSubirCsv");
   const btnVaciar = $("#btnVaciarBase");
   const btnEliminarTabla = $("#btnEliminarTablaPac");
@@ -238,7 +238,7 @@ function aplicarModoBase() {
   // Sin áreas no hay nada que gestionar; con tabla general tampoco.
   const puedeOperar = esArea && puedeCargarArea;
   if (btnSubir) btnSubir.disabled = !puedeOperar;
-  if (btnVaciar) btnVaciar.disabled = !puedeOperar;
+  if (btnVaciar) btnVaciar.disabled = !esArea || !(!!window.snwEsPrivilegiado || window.snwPuede?.("mensajeria"));
   if (inpCsv) inpCsv.disabled = !puedeOperar;
   if (lblCsv) lblCsv.classList.toggle("is-disabled", !puedeOperar);
   if (btnEliminarTabla) btnEliminarTabla.hidden = !PUEDE_ELIMINAR_TABLA;
@@ -1236,6 +1236,7 @@ function acumularInformeCsv(total, parcial) {
 }
 
 if (btnSubirCsv) btnSubirCsv.addEventListener("click", async () => {
+  if (!window.snwPuede?.("csv_subir")) return toast("No tienes permiso para subir CSV.", "error");
   const esp = espPacId();
   if (esp == null) return toast("Elige un área como base de datos.", "error");
   if (!archivoElegido) return toast("Elige un archivo CSV.", "error");

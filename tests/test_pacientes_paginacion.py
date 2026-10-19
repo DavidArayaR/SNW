@@ -82,31 +82,43 @@ class PacientesPaginacionTests(unittest.TestCase):
         self.assertIn("CASE WHEN p.telefono IN (%s) THEN 0 ELSE 1 END",
                       cur.execute.call_args_list[-2].args[0])
 
-    def test_busqueda_no_usa_datos_completos_de_pacientes_ajenos(self):
+    def test_busqueda_respeta_permiso_de_datos_completos(self):
         with patch.object(main, "_expresiones_filtro_pacientes",
-                          return_value=("p.estado", "p.respuesta_manual", "p.interesado", "p.no_interesado")), \
-                patch.object(main.servicio_areas, "usuario_id_por_correo", return_value=4):
+                          return_value=("p.estado", "p.respuesta_manual", "p.interesado", "p.no_interesado")):
             sql, args = main._filtro_pagina_pacientes(
                 "pacientes_test", "produccion", {"usuario": "operador@test", "rol": "usuario"},
                 "93921740", "todos", "todas", "todos")
-        self.assertIn("EXISTS (SELECT 1 FROM paciente_csv_accesos", sql)
-        self.assertIn("NOT (EXISTS", sql)
+        self.assertNotIn("paciente_csv_accesos", sql)
+        self.assertIn("NOT (0)", sql)
         self.assertIn("LOWER(CONCAT(LEFT(p.nombre", sql)
-        self.assertEqual(args, ("pacientes_test", 4, "93921740", "93921740",
-                                "pacientes_test", 4, "93921740", "93921740"))
+        self.assertEqual(args, ("93921740",) * 4)
+        sql_con_permiso, _ = main._filtro_pagina_pacientes(
+            "pacientes_test", "produccion",
+            {"usuario": "operador@test", "rol": "usuario", "permisos": ["pacientes_ver_datos"]},
+            "93921740", "todos", "todas", "todos")
+        self.assertIn("(1 AND", sql_con_permiso)
 
-    def test_pagina_conserva_mascara_de_datos_ajenos(self):
+    def test_pagina_oculta_datos_sin_permiso(self):
         fila = {"id": 9, "nombre": "Ana", "apellido": "Sol",
                 "telefono": "+56993921740", "fecha_actualizacion": None,
                 "ultima_respuesta_fecha": None, "ultimo_mensaje_recibido": "Privado"}
-        with patch.object(main, "_ids_csv_propios", return_value=set()), \
-                patch.object(main, "_numeros_prueba_editables", return_value=set()):
+        with patch.object(main, "_numeros_prueba_editables", return_value=set()):
             main._presentar_filas_pacientes([fila], "pacientes_test", "produccion", None,
                                            {"rol": "usuario"})
         self.assertFalse(fila["datos_completos"])
         self.assertEqual(fila["nombre"], "A. S.")
         self.assertEqual(fila["telefono"], "+569 **** *740")
         self.assertIsNone(fila["ultimo_mensaje_recibido"])
+
+    def test_pagina_muestra_datos_con_permiso_sin_depender_del_csv(self):
+        fila = {"id": 9, "nombre": "Ana", "apellido": "Sol", "telefono": "+56993921740",
+                "fecha_actualizacion": None, "ultima_respuesta_fecha": None}
+        with patch.object(main, "_numeros_prueba_editables", return_value=set()):
+            main._presentar_filas_pacientes([fila], "pacientes_test", "produccion", None,
+                {"rol": "usuario", "permisos": ["pacientes_ver_datos"]})
+        self.assertTrue(fila["datos_completos"])
+        self.assertEqual(fila["nombre"], "Ana")
+        self.assertEqual(fila["telefono"], "+56993921740")
 
 
 if __name__ == "__main__":
