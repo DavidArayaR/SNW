@@ -211,6 +211,7 @@ async function cargar(mostrarFeedback = false) {
     if (mostrarFeedback) toast("Usuarios actualizados correctamente.");
   } catch (e) {
     console.error("[usuarios.js cargar()]", e);
+    if (detalleEl) detalleEl.innerHTML = '<p class="usuarios-cargando usuarios-cargando--error">No se pudieron cargar las cuentas.</p>';
     toast("No se pudieron cargar las cuentas.", "error");
   }
 }

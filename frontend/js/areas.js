@@ -271,28 +271,67 @@ async function asignar(card, attrSel) {
   }
 }
 
-async function eliminarTabla(card) {
+let timerDelArea = null;
+let areaAEliminar = null; // {id, nombre, tabla, total} a la espera de confirmación
+
+function cerrarModalDelArea() {
+  if (timerDelArea) { clearInterval(timerDelArea); timerDelArea = null; }
+  areaAEliminar = null;
+  const m = $("#modalEliminarTablaArea");
+  if (m) m.hidden = true;
+}
+
+function eliminarTabla(card) {
   const id = Number(card.dataset.id);
   const esp = (estado.lista || []).find((x) => x.id === id);
   if (!esp) return;
   const total = esp.total_pacientes ?? "?";
-  if (!confirm(
-    `¿Eliminar DEFINITIVAMENTE el área «${esp.nombre_visible}»?\n\n` +
-    `Se borra la tabla ${esp.nombre_tabla_base} (${total} pacientes), su rol y sus ` +
-    `asignaciones. El historial de envíos se conserva.\n\nEsta acción no se puede deshacer.`
-  )) return;
+  areaAEliminar = { id, nombre: esp.nombre_visible, tabla: esp.nombre_tabla_base, total };
+  $("#areaDelNombre").textContent = esp.nombre_visible;
+  $("#areaDelTabla").textContent = esp.nombre_tabla_base;
+  $("#areaDelTotal").textContent = String(total);
+  // Cuenta regresiva de 10 s antes de habilitar Confirmar (mismo criterio
+  // que la eliminación de tabla en Pacientes).
+  const btnConf = $("#btnConfirmarDelArea");
+  const btnCanc = $("#btnCancelarDelArea");
+  btnConf.disabled = true;
+  let restantes = 10;
+  btnConf.textContent = `Confirmar (${restantes})`;
+  if (timerDelArea) clearInterval(timerDelArea);
+  timerDelArea = setInterval(() => {
+    restantes -= 1;
+    if (restantes <= 0) {
+      clearInterval(timerDelArea);
+      timerDelArea = null;
+      btnConf.disabled = false;
+      btnConf.textContent = "Confirmar";
+    } else {
+      btnConf.textContent = `Confirmar (${restantes})`;
+    }
+  }, 1000);
+  btnCanc.disabled = false;
+  $("#modalEliminarTablaArea").hidden = false;
+}
+
+async function confirmarEliminarTablaArea() {
+  if (!areaAEliminar) { cerrarModalDelArea(); return; }
+  const { id, tabla } = areaAEliminar;
+  const btnConf = $("#btnConfirmarDelArea");
+  btnConf.disabled = true;
   try {
     const r = await fetch(`api/areas/${id}/tabla`, {
       method: "DELETE", headers: authHeaders(),
     });
     if (r.status === 401) { window.snwSesionExpirada(); return; }
     if (!r.ok) throw new Error(`Error ${r.status}`);
-    toast(`Tabla ${esp.nombre_tabla_base} eliminada.`);
+    toast(`Tabla ${tabla} eliminada.`);
     seleccion = null;
     yaCargada = false;
+    cerrarModalDelArea();
     await cargar();
   } catch (e) {
-    console.error("[areas.js eliminarTabla()]", e);
+    console.error("[areas.js confirmarEliminarTablaArea()]", e);
+    cerrarModalDelArea();
     toast(e.message || "No se pudo eliminar.", "error");
   }
 }
@@ -335,6 +374,13 @@ $("#btnConfirmarQuitar").addEventListener("click", async () => {
 async function retirar(card, correo) {
   pedirQuitar(Number(card.dataset.id), correo);
 }
+
+// Modal de eliminación de tabla del área (cuenta regresiva de 10 s).
+$("#btnCancelarDelArea").addEventListener("click", cerrarModalDelArea);
+$("#modalEliminarTablaArea").addEventListener("click", (e) => {
+  if (e.target.id === "modalEliminarTablaArea") cerrarModalDelArea();
+});
+$("#btnConfirmarDelArea").addEventListener("click", confirmarEliminarTablaArea);
 
 async function crear(nombre, modo) {
   const r = await fetch("api/areas", {

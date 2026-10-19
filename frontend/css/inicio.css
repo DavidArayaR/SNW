@@ -130,7 +130,34 @@ code {
 .pasos li strong { color: var(--texto); }
 section.info + section.info, .info-cards { margin-top: 18px; }
 footer { text-align: center; color: var(--texto-suave); font-size: .82rem; padding: 8px 20px 34px; }
+
+/* ---- Dashboard operativo (solo con sesión; ver js/inicio-dashboard.js) ---- */
+body.inicio-sesion main { margin-top: 24px; }
+.dash-saludo { margin: 0 0 18px; }
+.dash-saludo h1 { margin: 0 0 4px; font-size: 1.4rem; letter-spacing: -.01em; }
+.dash-sub { margin: 0; color: var(--texto-suave); font-size: .92rem; }
+.dash-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.dash-panel { display: flex; flex-direction: column; }
+.dash-panel .panel__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.dash-cuerpo { padding: 2px 18px 16px; min-height: 64px; }
+.dash-item {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  padding: 9px 0; border-bottom: 1px solid var(--linea); font-size: .9rem;
+}
+.dash-item:last-child { border-bottom: 0; }
+.dash-item__main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.dash-item__der { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; flex-shrink: 0; }
+.dash-item__meta { color: var(--texto-suave); font-size: .78rem; }
+.dash-vacio { display: block; padding: 18px 0; text-align: center; color: var(--texto-suave); font-size: .88rem; }
+.dash-tono--ok { background: var(--ok-bg); color: var(--ok-fg); border: 1px solid var(--ok-bd); }
+.dash-tono--warn { background: var(--warn-bg); color: var(--warn-fg); border: 1px solid var(--warn-bd); }
+.dash-tono--danger { background: var(--danger-bg); color: var(--danger-fg); border: 1px solid var(--danger-bd); }
+.dash-tono--info { background: var(--info-bg); color: var(--info-fg); border: 1px solid var(--info-bd); }
+.dash-tono--neutral { background: var(--neutral-bg); color: var(--neutral-fg); border: 1px solid var(--neutral-bd); }
+.dash-acciones { display: flex; flex-wrap: wrap; gap: 10px; padding-top: 6px; }
+.dash-accion i { margin-right: 7px; }
 @media (max-width: 640px) {
   .hero { padding: 40px 18px 52px; }
   .hero h1 { font-size: 1.5rem; }
+  .dash-item__der { flex-direction: row; align-items: baseline; gap: 8px; }
 }

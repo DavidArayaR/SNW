@@ -88,6 +88,13 @@
   --toast-bg: #2b3a34;
   --toast-fg: #ffffff;
   --radio: 12px;
+  /* Radios de referencia: tarjeta (.panel, .modal__card) y control
+     (.field input, .btn). --radio (12px) se conserva como alias legacy. */
+  --radio-card: 14px;
+  --radio-control: 10px;
+  /* Botón destructivo de confirmación (cancelar un envío, etc.). */
+  --btn-confirmar-cancelacion-bg: #b23b37;
+  --btn-confirmar-cancelacion-fg: #ffffff;
 }
 
 :root[data-tema="oscuro"] {
@@ -140,6 +147,8 @@
   --overlay: rgba(0, 0, 0, .62);
   --toast-bg: #0f1614;
   --toast-fg: #e6efeb;
+  --btn-confirmar-cancelacion-bg: #c77d79;
+  --btn-confirmar-cancelacion-fg: #1f1212;
 }
 
 /* Transición suave al cambiar de modo */

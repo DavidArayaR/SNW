@@ -11,9 +11,9 @@
   --nav-activo-fondo: var(--fondo);
 }
 :root[data-tema="oscuro"] { --sidebar-contorno: #86d2bd; }
-/* En Inicio, el seleccionado continúa visualmente el hero verde que ocupa el contenido. */
-body[data-pagina="inicio"] { --nav-activo-fondo: #337d6c; }
-body[data-pagina="inicio"].inicio-hero-superado { --nav-activo-fondo: var(--fondo); }
+/* En Inicio el activo usa siempre el fondo normal. El tono que acompañaba al
+   hero público se reserva solo a la portada sin sesión (.sin-sidebar); con
+   sesión, Inicio muestra el panel operativo y no debe teñirse de verde. */
 
 /* Cascarón: sidebar fija + columna de contenido desplazada */
 .app-shell {

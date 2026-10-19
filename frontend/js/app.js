@@ -1948,6 +1948,21 @@ function setConsultandoEstado(consultando, boton, textoConsultando) {
 
 let ambienteConf = localStorage.getItem("snw_ambiente_admin") || localStorage.getItem("snw_ambiente") || "desarrollo";
 let entornoGlobal = null;
+// Motor de envío global (api_oficial | simulado), leído de /api/configuracion.
+// Se muestra en la tarjeta de envío manual para distinguirlo explícitamente.
+let motorEnvio = null;
+const etiquetaMotor = () =>
+  motorEnvio === "api_oficial" ? "API oficial" : motorEnvio === "simulado" ? "Simulado" : null;
+// Muestra el motor activo junto al resumen de costos del envío manual.
+function pintarMotorEnvio() {
+  const el = $("#confMotor");
+  if (!el) return;
+  const etiqueta = etiquetaMotor();
+  if (!etiqueta) { el.hidden = true; return; }
+  el.innerHTML = `<i class="fa-solid fa-gauge-high"></i> Motor de envío: <strong>${etiqueta}</strong>` +
+    (motorEnvio === "simulado" ? " (los mensajes no salen a WhatsApp real)" : "");
+  el.hidden = false;
+}
 let timerPollingConf = null;
 let envioEnCursoConf = false;
 let jobIdActualConf = null;
@@ -1990,6 +2005,10 @@ fetch("api/configuracion", { headers: authHeaders(), cache: "no-store" })
     }
     if (cfg && cfg.entorno) {
       entornoGlobal = cfg.entorno;
+    }
+    if (cfg && cfg.metodo_envio) {
+      motorEnvio = cfg.metodo_envio;
+      pintarMotorEnvio();
     }
     if (cfg && cfg.entorno && cfg.entorno !== ambienteConf) {
       ambienteConf = cfg.entorno;
@@ -2544,7 +2563,7 @@ $("#btnConfirmarIniciarConf").addEventListener("click", async () => {
             clearInterval(poll);
             window.removeEventListener("beforeunload", beforeUnload);
             espera.hidden = true;
-            alert("Envío confirmado por supervisor");
+            toast("Envío confirmado por supervisor", "ok");
             await new Promise((res) => setTimeout(res, 1500));
             cambiarTabMsg("envios");
             $("#confProgreso").hidden = false;
@@ -2847,6 +2866,12 @@ if (btnSincronizarMeta) {
 /* ---------- Tabs de Mensajería ---------- */
 let tabMsg = localStorage.getItem("snw_tab_msg") || "plantillas";
 if (["plantillas", "envios", "programados"].indexOf(tabMsg) === -1) tabMsg = "plantillas";
+// Deep-link desde la sidebar: ?tab= tiene prioridad sobre lo recordado.
+const tabUrl = new URLSearchParams(location.search).get("tab");
+if (tabUrl && ["plantillas", "envios", "programados"].indexOf(tabUrl) !== -1) {
+  tabMsg = tabUrl;
+  try { localStorage.setItem("snw_tab_msg", tabMsg); } catch { /* sin almacenamiento */ }
+}
 let tplSelId = null; // plantilla seleccionada (persiste entre tabs y recargas)
 
 function guardarSelTpl() {

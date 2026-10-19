@@ -99,16 +99,16 @@ button, input, textarea, select { font-family: inherit; }
   --bs-btn-active-bg: var(--danger-bg);
 }
 .btn--confirmar-cancelacion {
-  --ui-button-outline: #b23b37;
-  --bs-btn-bg: #b23b37;
-  --bs-btn-hover-bg: #b23b37;
-  --bs-btn-active-bg: #b23b37;
-  --bs-btn-disabled-bg: #b23b37;
-  --bs-btn-color: #fff;
-  --bs-btn-hover-color: #fff;
-  --bs-btn-active-color: #fff;
-  --bs-btn-disabled-color: #fff;
-  color: #fff;
+  --ui-button-outline: var(--btn-confirmar-cancelacion-bg);
+  --bs-btn-bg: var(--btn-confirmar-cancelacion-bg);
+  --bs-btn-hover-bg: var(--btn-confirmar-cancelacion-bg);
+  --bs-btn-active-bg: var(--btn-confirmar-cancelacion-bg);
+  --bs-btn-disabled-bg: var(--btn-confirmar-cancelacion-bg);
+  --bs-btn-color: var(--btn-confirmar-cancelacion-fg);
+  --bs-btn-hover-color: var(--btn-confirmar-cancelacion-fg);
+  --bs-btn-active-color: var(--btn-confirmar-cancelacion-fg);
+  --bs-btn-disabled-color: var(--btn-confirmar-cancelacion-fg);
+  color: var(--btn-confirmar-cancelacion-fg);
 }
 .btn--login, .btn--registro { --ui-button-outline: #fff; }
 

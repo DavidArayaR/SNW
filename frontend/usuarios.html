@@ -6,13 +6,13 @@
   <title>SNW &middot; Usuarios</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
-  <link rel="stylesheet" href="css/tema.css?v=scrollbar1">
+  <link rel="stylesheet" href="css/tema.css?v=tokens1">
   <link rel="stylesheet" href="css/styles.css">
   <link rel="stylesheet" href="css/componentes.css?v=inlinecss1">
-  <link rel="stylesheet" href="css/layout.css?v=scrollbar1">
-  <link rel="stylesheet" href="css/admin.css?v=inlinecss1">
-  <link rel="stylesheet" href="css/usuarios.css?v=reset-modal1">
-  <link rel="stylesheet" href="css/refinamiento.css?v=frontend4">
+  <link rel="stylesheet" href="css/layout.css?v=navcolor1">
+  <link rel="stylesheet" href="css/admin.css?v=tokens1">
+  <link rel="stylesheet" href="css/usuarios.css?v=loading1">
+  <link rel="stylesheet" href="css/refinamiento.css?v=tokens1">
   <script src="js/tema.js?v=scrollbar1"></script>
 </head>
 <body data-pagina="usuarios" data-seccion="administracion">
@@ -65,7 +65,7 @@
             <label for="selUsuario">Cuenta</label>
             <select id="selUsuario"></select>
           </div>
-          <div id="detalle" class="usr-detalle"></div>
+          <div id="detalle" class="usr-detalle"><p class="usuarios-cargando" role="status" aria-busy="true"><span class="tabla-cargando__rueda"></span> Cargando cuentas…</p></div>
           <p id="vacio" class="tabla-vacia usuarios__vacio" hidden>No hay cuentas registradas.</p>
         </section>
 
@@ -103,9 +103,9 @@
 
   <div id="toast" class="toast"></div>
 
-  <script src="js/layout.js?v=navcurve7"></script>
+  <script src="js/layout.js?v=navcolor1"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/usuarios.js?v=reset-modal1"></script>
+  <script src="js/usuarios.js?v=loading1"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>

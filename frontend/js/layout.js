@@ -160,31 +160,9 @@
     shellEl.classList.add("sidebar-colapsada");
   }
 
-  // En Inicio, el botón activo acompaña el color del hero mientras esa franja
-  // siga visible debajo de la topbar; al pasarla, se funde con el fondo normal.
-  if (PAGINA === "inicio") {
-    const heroInicio = document.querySelector(".hero");
-    const topbarInicio = document.querySelector(".app-topbar");
-    if (heroInicio && topbarInicio) {
-      let frameHeroInicio = 0;
-      const actualizarColorActivoInicio = () => {
-        if (frameHeroInicio) return;
-        frameHeroInicio = window.requestAnimationFrame(() => {
-          frameHeroInicio = 0;
-          const heroPasado = heroInicio.getBoundingClientRect().bottom <=
-            topbarInicio.getBoundingClientRect().bottom + 32;
-          document.body.classList.toggle("inicio-hero-superado", heroPasado);
-        });
-      };
-      actualizarColorActivoInicio();
-      window.addEventListener("scroll", actualizarColorActivoInicio, { passive: true });
-      window.addEventListener("resize", actualizarColorActivoInicio);
-    }
-  }
-
   const LINKS_BASE = [
     { pagina: "inicio",       href: "index.html",        icono: "fa-house",             texto: "Inicio" },
-    { pagina: "mensajeria",   href: "mensajeria.html",   icono: "fa-paper-plane",       texto: "Mensajería y plantillas", perm: "mensajeria" },
+    { pagina: "mensajeria",   href: "mensajeria.html",   icono: "fa-paper-plane",       texto: "Mensajería", perm: "mensajeria" },
     { pagina: "historial",    href: "historial.html",    icono: "fa-clock-rotate-left", texto: "Historial", perm: "historial" },
     { pagina: "pacientes",    href: "pacientes.html",    icono: "fa-database",          texto: "Base de datos", perm: "mensajeria", soloNoPriv: true },
   ];
@@ -204,11 +182,26 @@
     `<path class="nav-curve__fill" d="M210 63 A15 15 0 0 1 225 78 L226 78 L226 63 Z"/>` +
     `<path class="nav-curve__stroke" d="M225 2 A15 15 0 0 1 210 17 H24 A23 23 0 0 0 1 40 A23 23 0 0 0 24 63 H210 A15 15 0 0 1 225 78"/></svg>`;
 
-  const pintarEnlace = (l, conCurvas = false) => {
-    const activo = l.pagina === PAGINA;
+  const pintarEnlace = (l, conCurvas = false, activoForzado = null) => {
+    const activo = activoForzado !== null ? activoForzado : (l.pagina === PAGINA);
     return `<li class="nav-item${activo ? " active" : ""}">` +
       `<a class="nav-link${activo ? " active" : ""}" href="${l.href}" title="${l.texto}">` +
       `<i class="fa-solid ${l.icono}"></i><span>${l.texto}</span></a>${conCurvas ? CURVAS_NAV : ""}</li>`;
+  };
+
+  // Bloque desplegable de Administración: un botón padre con CURVAS_NAV +
+  // lista hija plegable. Devuelve "" si ningún hijo es visible para la cuenta.
+  const pintarSubmenu = ({ id, texto, icono, items, activo }) => {
+    const hijos = items
+      .filter((l) => (!l.perm || puede(l.perm)) && (!l.dev || ES_DEV))
+      .map((l) => pintarEnlace(l, false, l.pagina === PAGINA))
+      .join("");
+    if (!hijos) return "";
+    return `<li class="nav-item${activo ? " active" : ""}">` +
+      `<button type="button" class="nav-link sidebar__admin-toggle${activo ? " active" : ""}" id="btn${id}" aria-expanded="false" title="${texto}">` +
+      `<i class="fa-solid ${icono}"></i><span>${texto}</span>` +
+      `<i class="fa-solid fa-chevron-down sidebar__admin-flecha"></i></button>${CURVAS_NAV}</li>` +
+      `<li class="nav-subnav-wrap"><ul class="sidebar__subnav" id="subnav${id}">${hijos}</ul></li>`;
   };
 
   const itemsBase = LINKS_BASE
@@ -216,19 +209,9 @@
     .map((l) => pintarEnlace(l, true))
     .join("");
 
-  let bloqueAdmin = "";
-  if (ES_PRIV) {
-    const itemsSub = LINKS_ADMIN_SUB
-      .filter((l) => (!l.dev || ES_DEV))
-      .map((l) => pintarEnlace(l))
-      .join("");
-    bloqueAdmin =
-      `<li class="nav-item${ES_PAG_ADMIN ? " active" : ""}">` +
-      `<button type="button" class="nav-link sidebar__admin-toggle${ES_PAG_ADMIN ? " active" : ""}" id="btnAdminToggle" aria-expanded="false" title="Administración">` +
-      `<i class="fa-solid fa-user-shield"></i><span>Administración</span>` +
-      `<i class="fa-solid fa-chevron-down sidebar__admin-flecha"></i></button>${CURVAS_NAV}</li>` +
-      `<li class="nav-subnav-wrap"><ul class="sidebar__subnav" id="subnavAdmin">${itemsSub}</ul></li>`;
-  }
+  const bloqueAdmin = ES_PRIV
+    ? pintarSubmenu({ id: "Admin", texto: "Administración", icono: "fa-user-shield", items: LINKS_ADMIN_SUB, activo: ES_PAG_ADMIN })
+    : "";
 
   const items = itemsBase + bloqueAdmin;
 
@@ -272,26 +255,32 @@
 
     // Submenú desplegable de Administración (estado recordado entre sesiones;
     // siempre abierto al entrar a una página de administración).
-    const btnAdminToggle = document.getElementById("btnAdminToggle");
-    const subnavAdmin = document.getElementById("subnavAdmin");
-    if (btnAdminToggle && subnavAdmin) {
-      const pintarAdmin = (abierto) => {
-        btnAdminToggle.setAttribute("aria-expanded", String(abierto));
-        subnavAdmin.hidden = !abierto;
-        try { localStorage.setItem("snw_admin_open", abierto ? "1" : "0"); } catch (e) { /* sin almacenamiento */ }
+    // Submenús desplegables (Mensajería y Administración): estado recordado
+    // entre sesiones; siempre abierto al entrar a una página del grupo.
+    const atarSubmenu = (btnId, subnavId, lsKey, abiertoPorDefecto) => {
+      const btn = document.getElementById(btnId);
+      const subnav = document.getElementById(subnavId);
+      if (!btn || !subnav) return;
+      const abrir = (abierto) => {
+        btn.setAttribute("aria-expanded", String(abierto));
+        subnav.hidden = !abierto;
+        try { localStorage.setItem(lsKey, abierto ? "1" : "0"); } catch (e) { /* sin almacenamiento */ }
       };
-      pintarAdmin(ES_PAG_ADMIN || localStorage.getItem("snw_admin_open") === "1");
-      btnAdminToggle.addEventListener("click", (e) => {
+      let guardado = null;
+      try { guardado = localStorage.getItem(lsKey); } catch (e) { /* sin almacenamiento */ }
+      abrir(abiertoPorDefecto || guardado === "1");
+      btn.addEventListener("click", (e) => {
         e.preventDefault();
         e.stopPropagation();
-        const abierto = subnavAdmin.hidden;
-        pintarAdmin(abierto);
+        const abierto = subnav.hidden;
+        abrir(abierto);
         if (abierto && (window.matchMedia("(max-width: 991.98px)").matches ||
             shell?.classList.contains("sidebar-colapsada"))) {
-          window.requestAnimationFrame(() => subnavAdmin.scrollIntoView({ block: "nearest" }));
+          window.requestAnimationFrame(() => subnav.scrollIntoView({ block: "nearest" }));
         }
       });
-    }
+    };
+    atarSubmenu("btnAdmin", "subnavAdmin", "snw_admin_open", ES_PAG_ADMIN);
 
     const btnTema = document.getElementById("btnTema");
     const pintarTema = () => {

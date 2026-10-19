@@ -734,6 +734,9 @@ function renderCostos(d) {
       : "agrupadas por separado; cifra estimada"}`]);
   }
   if (t.excluidos) filasResumen.push(["Sin categoría de facturación", `${num(t.excluidos)} · no incluidos en el costo`]);
+  // El motor simulado no deja message_id y por eso no se factura; el backend
+  // ya calcula cuántos hubo en el período y aquí se hace explícito.
+  if (t.simulados) filasResumen.push(["Envíos simulados", `${num(t.simulados)} · no facturables (motor simulado)`]);
   $("#costosTotal").innerHTML = `<table><caption>Resumen del período seleccionado</caption><thead><tr><th scope="col">Concepto</th><th scope="col">Cantidad o costo</th></tr></thead><tbody>${filasResumen.map(([concepto, valor]) =>
     `<tr><th scope="row">${escaparHtml(concepto)}</th><td>${escaparHtml(valor)}</td></tr>`).join("")}</tbody></table>`;
 
