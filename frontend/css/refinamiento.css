@@ -181,3 +181,15 @@ body.pagina-auth {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }
+
+/* Las vistas de trabajo aprovechan el ancho que queda junto a la sidebar.
+   Se mantienen el padding lateral y las grillas responsive de cada página. */
+.app-main > .layout {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+}
+body[data-pagina="inicio"].inicio-sesion .app-main > main {
+  width: 100%;
+  max-width: none;
+}
