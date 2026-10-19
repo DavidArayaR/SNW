@@ -225,11 +225,23 @@
     </div>
   </div>
 
+  <div id="modalCancelarProgreso" class="modal" hidden>
+    <div class="modal__card modal__card--cancelar" role="dialog" aria-modal="true" aria-labelledby="tituloCancelarProgreso">
+      <h3 id="tituloCancelarProgreso">Cancelar envío</h3>
+      <p>¿Seguro que quieres cancelar este envío?</p>
+      <p class="modal__nota-secundaria">Los mensajes ya enviados no se pueden recuperar.</p>
+      <div class="modal__actions modal__actions--centradas">
+        <button type="button" class="btn btn--ghost" id="btnNoCancelarProgreso">No, continuar</button>
+        <button type="button" class="btn btn--primary btn--confirmar-cancelacion" id="btnConfirmarCancelarProgreso">Sí, cancelar</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toast" class="toast"></div>
 
   <script src="js/layout.js?v=permisos-acciones1"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/historial.js?v=paginador-cinco1"></script>
+  <script src="js/historial.js?v=pausa-envios1"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>

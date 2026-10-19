@@ -1969,6 +1969,16 @@ let envioEnCursoConf = false;
 let jobIdActualConf = null;
 let totalActualConf = 0;
 let hechosActualConf = 0;
+let jobPausadoConf = false;
+let pausaPendienteConf = false;
+let pausadoAntesDeCancelarConf = false;
+
+function actualizarBotonPausaConf() {
+  const boton = $("#btnPausarConf");
+  boton.hidden = !envioEnCursoConf || !jobIdActualConf || !window.snwPuede?.("envios_cancelar");
+  boton.disabled = pausaPendienteConf || !$("#modalCancelarConf").hidden;
+  boton.textContent = jobPausadoConf ? "Reanudar" : "Pausar";
+}
 
 let confPlantillaId = null; // plantilla de la card de envío (puede diferir del editor)
 let maxManualConf = 0;
@@ -1982,6 +1992,7 @@ let consultaManualConf = 0;
 const CONTROLES_ENVIO_CONF = ["btnLanzarConf", "selBaseConf", "selLimiteModoConf", "limiteRangeConf", "limiteNumConf"];
 function setBloqueoEnvioConf(bloquear) {
   envioEnCursoConf = bloquear;
+  actualizarBotonPausaConf();
   CONTROLES_ENVIO_CONF.forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.disabled = bloquear;
@@ -2421,26 +2432,67 @@ async function actualizarResumenConf() {
   }
 }
 
-$("#btnCancelarConf").addEventListener("click", () => {
+$("#btnPausarConf").addEventListener("click", async () => {
+  if (!jobIdActualConf || pausaPendienteConf) return;
+  const jobId = jobIdActualConf;
+  const pausar = !jobPausadoConf;
+  pausaPendienteConf = true;
+  actualizarBotonPausaConf();
+  try {
+    const estado = await cambiarPausaJobConf(jobId, pausar);
+    if (jobIdActualConf === jobId) {
+      jobPausadoConf = estado === "pausado";
+      $("#progresoTextoConf").textContent = jobPausadoConf ? "Envío pausado." : "Enviando mensajes...";
+      toast(jobPausadoConf ? "Envío pausado." : "Envío reanudado.", "ok");
+    }
+  } catch (err) {
+    toast(err.message || "No se pudo cambiar el estado del envío.", "error");
+  } finally {
+    pausaPendienteConf = false;
+    actualizarBotonPausaConf();
+  }
+});
+
+$("#btnCancelarConf").addEventListener("click", async () => {
   const enProgreso = envioEnCursoConf && jobIdActualConf;
   if (enProgreso) {
     clearInterval(timerPollingConf);
+    pausadoAntesDeCancelarConf = jobPausadoConf;
+    if (!jobPausadoConf) {
+      try {
+        await cambiarPausaJobConf(jobIdActualConf, true);
+        jobPausadoConf = true;
+      } catch (err) {
+        toast(err.message || "No se pudo pausar el envío.", "error");
+        seguirProgresoConf(jobIdActualConf, totalActualConf);
+        return;
+      }
+    }
     const restantes = Math.max(0, totalActualConf - hechosActualConf);
     $("#mensajeCancelarConf").textContent =
       `¿Seguro que quieres cancelar el envío de ${restantes} mensaje(s) restante(s)?`;
     $("#btnNoCancelarConf").disabled = false;
+    $("#btnNoCancelarConf").textContent = pausadoAntesDeCancelarConf ? "No, mantener pausado" : "No, continuar";
     $("#btnConfirmarCancelarConf").disabled = false;
     $("#modalCancelarConf").hidden = false;
-    pausarJobConf(jobIdActualConf);
+    actualizarBotonPausaConf();
     return;
   }
   // Sin envío en curso: se comporta como limpiar la card.
   cancelarEdicion();
 });
-$("#btnNoCancelarConf").addEventListener("click", () => {
+$("#btnNoCancelarConf").addEventListener("click", async () => {
   $("#modalCancelarConf").hidden = true;
   if (jobIdActualConf) {
-    reanudarJobConf(jobIdActualConf);
+    if (!pausadoAntesDeCancelarConf) {
+      try {
+        await cambiarPausaJobConf(jobIdActualConf, false);
+        jobPausadoConf = false;
+      } catch (err) {
+        toast(err.message || "No se pudo reanudar el envío.", "error");
+      }
+    }
+    actualizarBotonPausaConf();
     seguirProgresoConf(jobIdActualConf, totalActualConf);
   }
 });
@@ -2469,7 +2521,18 @@ $("#btnConfirmarCancelarConf").addEventListener("click", async () => {
     resetearCardEnvio();
   } else {
     toast("No se pudo cancelar el envío.", "error");
-    if (jobIdActualConf) seguirProgresoConf(jobIdActualConf, totalActualConf);
+    if (jobIdActualConf) {
+      if (!pausadoAntesDeCancelarConf) {
+        try {
+          await cambiarPausaJobConf(jobIdActualConf, false);
+          jobPausadoConf = false;
+        } catch (err) {
+          toast(err.message || "El envío quedó pausado. Puedes reanudarlo.", "error");
+        }
+      }
+      actualizarBotonPausaConf();
+      seguirProgresoConf(jobIdActualConf, totalActualConf);
+    }
   }
 });
 $("#btnCerrarConf").addEventListener("click", () => {
@@ -2477,6 +2540,9 @@ $("#btnCerrarConf").addEventListener("click", () => {
   clearInterval(timerPollingConf);
   // Si había un envío en curso, el trabajo sigue en el servidor (se ve en Historial).
   if (envioEnCursoConf) setBloqueoEnvioConf(false);
+  jobIdActualConf = null;
+  jobPausadoConf = false;
+  actualizarBotonPausaConf();
   resetearCardEnvio();
 });
 $("#btnCerrarRechazoConf").addEventListener("click", () => ($("#modalRechazadoConf").hidden = true));
@@ -2637,18 +2703,19 @@ function pintarRechazadosConf(rechazados) {
   ul.hidden = visibles.length === 0;
 }
 
-async function pausarJobConf(jobId) {
-  try {
-    await fetch(`api/notificaciones/jobs/${jobId}/pausa`, { method: "POST", headers: authHeaders() });
-  } catch {}
-}
-async function reanudarJobConf(jobId) {
-  try {
-    await fetch(`api/notificaciones/jobs/${jobId}/reanudar`, { method: "POST", headers: authHeaders() });
-  } catch {}
+async function cambiarPausaJobConf(jobId, pausar) {
+  const accion = pausar ? "pausa" : "reanudar";
+  const res = await fetch(`api/notificaciones/jobs/${encodeURIComponent(jobId)}/${accion}`, {
+    method: "POST", headers: authHeaders(),
+  });
+  if (res.status === 401) { window.snwSesionExpirada(); throw new Error("Sesión expirada."); }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) throw new Error(data.detail || "No se pudo cambiar el estado del envío.");
+  return data.estado;
 }
 
 function seguirProgresoConf(jobId, total) {
+  actualizarBotonPausaConf();
   clearInterval(timerPollingConf);
   timerPollingConf = setInterval(async () => {
     try {
@@ -2659,6 +2726,11 @@ function seguirProgresoConf(jobId, total) {
       if (res.status === 401) { window.snwSesionExpirada(); return; }
       if (!res.ok) throw new Error();
       const job = await res.json();
+      if (jobIdActualConf !== jobId) return;
+      if (!pausaPendienteConf && $("#modalCancelarConf").hidden) {
+        jobPausadoConf = !!job.pausado || job.estado === "pausado";
+        actualizarBotonPausaConf();
+      }
 
       const hechos = job.enviados + job.fallidos;
       hechosActualConf = hechos;
@@ -2667,7 +2739,7 @@ function seguirProgresoConf(jobId, total) {
       $("#progresoTextoConf").textContent =
         job.estado === "completado"
           ? "Envío finalizado."
-          : `Enviando mensajes... (${hechos}/${total})`;
+          : jobPausadoConf ? `Envío pausado (${hechos}/${total}).` : `Enviando mensajes... (${hechos}/${total})`;
 
       if (job.estado === "completado" || job.estado === "error" || job.estado === "cancelado") {
         clearInterval(timerPollingConf);
@@ -2679,6 +2751,8 @@ function seguirProgresoConf(jobId, total) {
         finalizarConf(msg, job.estado !== "completado");
         setBloqueoEnvioConf(false);
         jobIdActualConf = null;
+        jobPausadoConf = false;
+        actualizarBotonPausaConf();
         totalActualConf = 0;
         hechosActualConf = 0;
         cargar();
@@ -2698,6 +2772,8 @@ function finalizarConf(mensaje, esError) {
   $("#btnCerrarConf").disabled = false;
   $("#btnLanzarConf").hidden = true;
   setBloqueoEnvioConf(false);
+  jobPausadoConf = false;
+  actualizarBotonPausaConf();
   toast(mensaje, esError ? "error" : "ok");
 }
 

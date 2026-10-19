@@ -5045,6 +5045,18 @@ def _procesar_job(job_id: str) -> None:
                                 area_id=esp_id, tabla_pacientes=t_esp)
             continue
 
+        # La pausa también se respeta si llegó durante una espera de cuota o
+        # las comprobaciones del destinatario, justo antes de llamar al canal.
+        while job.get("pausado") and not job.get("cancelado"):
+            job["estado"] = "pausado"
+            time.sleep(0.5)
+        if job.get("cancelado"):
+            job["actual"] = ""
+            job["estado"] = "cancelado"
+            job["detalle"] = job.get("cancelado_motivo") or "Cancelado por el usuario"
+            actualizar_envio_batch(envio_id, amb, enviados=job["enviados"], fallidos=job["fallidos"], estado="cancelado")
+            break
+        job["estado"] = "en_proceso"
         try:
             resultado = canal.enviar(d["telefono"], d["mensaje"], plantilla=plantilla_datos, variables=d.get("variables"))
             # Unificar: (ok, message_id, error) o (ok, error) según el motor
@@ -5737,6 +5749,7 @@ def envios_en_progreso(sesion: dict = Depends(exigir("mensajeria"))):
         items.append({
             "origen": "programado", "id": f["id"], "job_id": f.get("job_id") or "",
             "puede_cancelar": pc["puede_cancelar"],
+            "puede_pausar": bool(vivo and _puede_controlar_job(sesion, vivo)),
             "plantilla": f.get("plantilla_nombre") or "", "estado": estado,
             "total": total, "enviados": enviados, "fallidos": fallidos,
             "quien_envio": f.get("creador_nombre") or f.get("creador") or "",
@@ -5761,6 +5774,7 @@ def envios_en_progreso(sesion: dict = Depends(exigir("mensajeria"))):
         items.append({
             "origen": "manual", "id": None, "job_id": job_id,
             "puede_cancelar": _puede_controlar_job(sesion, job),
+            "puede_pausar": _puede_controlar_job(sesion, job),
             "plantilla": (job.get("plantilla") or {}).get("nombre") or "",
             "estado": job.get("estado"),
             "total": job.get("total", 0), "enviados": job.get("enviados", 0),
@@ -5799,30 +5813,34 @@ def cancelar_job(job_id: str, sesion: dict = Depends(exigir("envios_cancelar")))
 
 
 def pausar_job(job_id: str, sesion: dict = Depends(exigir("envios_cancelar"))):
-    job = JOBS.get(job_id)
-    if job is None:
-        raise HTTPException(404, detail="Envío no encontrado")
-    if not _puede_controlar_job(sesion, job):
-        raise HTTPException(403, detail="No puedes pausar este envío.")
-    if job.get("ambiente") == "desarrollo" and job.get("area_id") is None:
-        _exigir_base_desarrollo(sesion, "desarrollo")
-    if job.get("estado") in ("completado", "cancelado", "error"):
-        return {"ok": False, "estado": job.get("estado"), "detail": "El envío ya finalizó"}
-    job["pausado"] = True
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+        if job is None:
+            raise HTTPException(404, detail="Envío no encontrado")
+        if not _puede_controlar_job(sesion, job):
+            raise HTTPException(403, detail="No puedes pausar este envío.")
+        if job.get("ambiente") == "desarrollo" and job.get("area_id") is None:
+            _exigir_base_desarrollo(sesion, "desarrollo")
+        if job.get("estado") in ("completado", "cancelado", "error"):
+            return {"ok": False, "estado": job.get("estado"), "detail": "El envío ya finalizó"}
+        job["pausado"] = True
+        job["estado"] = "pausado"
     return {"ok": True, "estado": "pausado"}
 
 
 def reanudar_job(job_id: str, sesion: dict = Depends(exigir("envios_cancelar"))):
-    job = JOBS.get(job_id)
-    if job is None:
-        raise HTTPException(404, detail="Envío no encontrado")
-    if not _puede_controlar_job(sesion, job):
-        raise HTTPException(403, detail="No puedes reanudar este envío.")
-    if job.get("ambiente") == "desarrollo" and job.get("area_id") is None:
-        _exigir_base_desarrollo(sesion, "desarrollo")
-    if job.get("estado") in ("completado", "cancelado", "error"):
-        return {"ok": False, "estado": job.get("estado"), "detail": "El envío ya finalizó"}
-    job["pausado"] = False
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+        if job is None:
+            raise HTTPException(404, detail="Envío no encontrado")
+        if not _puede_controlar_job(sesion, job):
+            raise HTTPException(403, detail="No puedes reanudar este envío.")
+        if job.get("ambiente") == "desarrollo" and job.get("area_id") is None:
+            _exigir_base_desarrollo(sesion, "desarrollo")
+        if job.get("estado") in ("completado", "cancelado", "error"):
+            return {"ok": False, "estado": job.get("estado"), "detail": "El envío ya finalizó"}
+        job["pausado"] = False
+        job["estado"] = "en_proceso"
     return {"ok": True, "estado": "en_proceso"}
 
 

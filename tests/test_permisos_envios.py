@@ -64,6 +64,49 @@ class PermisosEnviosTests(unittest.TestCase):
         self.assertFalse(main._puede_controlar_job({**sesion, "usuario": "otro@ejemplo.cl"}, job))
         self.assertFalse(main._puede_controlar_job({**sesion, "permisos": ["mensajeria"]}, job))
 
+    def test_pausar_y_reanudar_job_actualiza_estado_sin_cancelar(self):
+        sesion = {"rol": "usuario", "usuario": "dueno@ejemplo.cl", "area_ids": [9],
+                  "permisos": ["mensajeria", "envios_cancelar"]}
+        job = {"usuario": "dueno@ejemplo.cl", "area_id": 9, "ambiente": "produccion",
+               "estado": "en_proceso", "pausado": False, "cancelado": False}
+        main.app.dependency_overrides[main.sesion_actual] = lambda: sesion
+        try:
+            with patch.dict(main.JOBS, {"job-pausa-prueba": job}):
+                cliente = TestClient(main.app)
+                pausa = cliente.post("/api/notificaciones/jobs/job-pausa-prueba/pausa")
+                self.assertEqual(pausa.status_code, 200)
+                self.assertEqual(pausa.json()["estado"], "pausado")
+                self.assertTrue(job["pausado"])
+                self.assertEqual(job["estado"], "pausado")
+                self.assertFalse(job["cancelado"])
+                reanuda = cliente.post("/api/notificaciones/jobs/job-pausa-prueba/reanudar")
+                self.assertEqual(reanuda.status_code, 200)
+                self.assertEqual(reanuda.json()["estado"], "en_proceso")
+                self.assertFalse(job["pausado"])
+                self.assertEqual(job["estado"], "en_proceso")
+        finally:
+            main.app.dependency_overrides.clear()
+
+    def test_pausar_job_ajeno_o_finalizado_no_procede(self):
+        sesion = {"rol": "usuario", "usuario": "otro@ejemplo.cl", "area_ids": [9],
+                  "permisos": ["mensajeria", "envios_cancelar"]}
+        job = {"usuario": "dueno@ejemplo.cl", "area_id": 9, "ambiente": "produccion",
+               "estado": "en_proceso", "pausado": False}
+        main.app.dependency_overrides[main.sesion_actual] = lambda: sesion
+        try:
+            with patch.dict(main.JOBS, {"job-pausa-ajeno": job}):
+                cliente = TestClient(main.app)
+                self.assertEqual(cliente.post("/api/notificaciones/jobs/job-pausa-ajeno/pausa").status_code, 403)
+                self.assertFalse(job["pausado"])
+                sesion["usuario"] = "dueno@ejemplo.cl"
+                job["estado"] = "completado"
+                respuesta = cliente.post("/api/notificaciones/jobs/job-pausa-ajeno/pausa")
+                self.assertEqual(respuesta.status_code, 200)
+                self.assertFalse(respuesta.json()["ok"])
+                self.assertFalse(job["pausado"])
+        finally:
+            main.app.dependency_overrides.clear()
+
     def test_decidir_programado_requiere_permiso_y_area(self):
         f = {"area_id": 9}
         sesion = {"rol": "supervisor", "area_ids": [9], "permisos": ["envios_decidir"]}

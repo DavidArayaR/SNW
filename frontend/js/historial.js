@@ -50,6 +50,7 @@ function progEnProgresoHtml(it) {
     : (it.programado_para ? `<div class="prog-item__meta">Programado para ${escaparHtml(it.programado_para)}</div>` : "");
   const cancelaJob = it.job_id && it.puede_cancelar;
   const cancelaProg = !it.job_id && it.origen === "programado" && it.puede_cancelar && it.id != null;
+  const controlaPausa = it.job_id && it.puede_pausar && ["en_proceso", "pausado"].includes(it.estado);
   return `<div class="prog-item" data-prog-item="${it.origen}-${it.id ?? it.job_id}">` +
     `<div class="prog-item__cab">` +
       `<span class="prog-origen prog-origen--${it.origen}">${it.origen === "manual" ? "Manual" : "Programado"}</span>` +
@@ -60,8 +61,11 @@ function progEnProgresoHtml(it) {
       (it.quien_aprobo ? ` · aprobado por ${escaparHtml(it.quien_aprobo)}` : "") +
       (it.area ? ` · ${escaparHtml(it.area)}` : (it.base ? ` · ${escaparHtml(it.base)}` : "")) +
     `</div>` + barra +
-    ((cancelaJob || cancelaProg)
+    ((controlaPausa || cancelaJob || cancelaProg)
       ? `<div class="prog-item__acciones">` +
+        (controlaPausa
+          ? `<button type="button" class="btn btn--sm btn--ghost" data-pausa-job="${escaparHtml(it.job_id)}" data-pausado="${it.estado === "pausado"}">${it.estado === "pausado" ? "Reanudar" : "Pausar"}</button>`
+          : "") +
         (cancelaJob
           ? `<button type="button" class="btn btn--sm btn--danger-ghost" data-cancel-job="${escaparHtml(it.job_id)}">Cancelar envío</button>`
           : `<button type="button" class="btn btn--sm btn--danger-ghost" data-cancel-prog="${it.id}">Cancelar envío</button>`) +
@@ -84,6 +88,24 @@ async function cancelarEnProgreso(url, btn) {
   } catch (err) {
     console.error("[historial.js cancelarEnProgreso()]", err);
     toast(err.message || "No se pudo cancelar.", "error");
+    btn.disabled = false;
+  }
+}
+
+async function cambiarPausaEnProgreso(btn) {
+  btn.disabled = true;
+  const pausar = btn.dataset.pausado !== "true";
+  try {
+    const r = await fetch(`api/notificaciones/jobs/${encodeURIComponent(btn.dataset.pausaJob)}/${pausar ? "pausa" : "reanudar"}`, {
+      method: "POST", headers: authHeaders(), cache: "no-store",
+    });
+    if (r.status === 401) { window.snwSesionExpirada(); return; }
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data.ok) throw new Error(data.detail || "No se pudo cambiar el estado del envío.");
+    toast(pausar ? "Envío pausado." : "Envío reanudado.", "ok");
+    await cargarEnProgreso();
+  } catch (err) {
+    toast(err.message || "No se pudo cambiar el estado del envío.", "error");
     btn.disabled = false;
   }
 }
@@ -205,13 +227,31 @@ document.addEventListener("visibilitychange", () => {
 });
 
 document.addEventListener("click", (e) => {
+  const pausa = e.target.closest("#listaEnProgreso [data-pausa-job]");
   const bj = e.target.closest("#listaEnProgreso [data-cancel-job]");
   const bp = e.target.closest("#listaEnProgreso [data-cancel-prog]");
-  if (bj) {
-    cancelarEnProgreso(`api/notificaciones/jobs/${encodeURIComponent(bj.dataset.cancelJob)}/cancelar`, bj);
-  } else if (bp) {
-    cancelarEnProgreso(`api/notificaciones/programados/${bp.dataset.cancelProg}/cancelar`, bp);
+  if (pausa) {
+    cambiarPausaEnProgreso(pausa);
+  } else if (bj || bp) {
+    const boton = bj || bp;
+    const modal = $("#modalCancelarProgreso");
+    modal.dataset.urlCancelar = bj
+      ? `api/notificaciones/jobs/${encodeURIComponent(bj.dataset.cancelJob)}/cancelar`
+      : `api/notificaciones/programados/${encodeURIComponent(bp.dataset.cancelProg)}/cancelar`;
+    modal._botonCancelar = boton;
+    modal.hidden = false;
   }
+});
+
+$("#btnNoCancelarProgreso").addEventListener("click", () => {
+  $("#modalCancelarProgreso").hidden = true;
+});
+$("#btnConfirmarCancelarProgreso").addEventListener("click", async () => {
+  const modal = $("#modalCancelarProgreso");
+  const boton = modal._botonCancelar;
+  const url = modal.dataset.urlCancelar;
+  modal.hidden = true;
+  if (boton && url) await cancelarEnProgreso(url, boton);
 });
 let ambienteDetalle = "produccion";
 let areaDetalle = null; // area del envío abierto (para sus mensajes)
