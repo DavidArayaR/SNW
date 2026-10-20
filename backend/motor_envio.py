@@ -23,8 +23,8 @@ class MotorSimulado:
 class MotorApiOficial:
     nombre = "api_oficial"
 
-    def __init__(self):
-        self.servicio = WhatsAppService()
+    def __init__(self, phone_number_id: str | None = None):
+        self.servicio = WhatsAppService(phone_number_id=phone_number_id)
 
     def disponible(self) -> bool:
         return self.servicio.configurada()
@@ -57,6 +57,8 @@ _MOTORES = {
 }
 
 
-def obtener_canal(config: dict):
+def obtener_canal(config: dict, phone_number_id: str | None = None):
     clase = _MOTORES.get(config.get("metodo_envio", "simulado"))
+    if clase is MotorApiOficial:
+        return clase(phone_number_id)
     return clase() if clase else None

@@ -68,6 +68,7 @@ function escaparHtml(valor) {
 let areasEst = [];
 const selEntornoEst = $("#selEntornoEst");
 const selAreaEst = $("#selAreaEst");
+const selCentroEst = $("#selCentroEst");
 const campoAreaEst = $("#campoAreaEst");
 
 function entornoEst() {
@@ -81,9 +82,11 @@ function areaEstActual() {
 }
 
 function qsEspEst() {
-  if (entornoEst() === "desarrollo") return "&base=desarrollo";
+  const centro = selCentroEst?.value || "todos";
+  const qsCentro = centro !== "todos" ? `&centro=${encodeURIComponent(centro)}` : "";
+  if (entornoEst() === "desarrollo") return `&base=desarrollo${qsCentro}`;
   const esp = areaEstActual();
-  return esp ? `&area_id=${esp}` : "";
+  return (esp ? `&area_id=${esp}` : "") + qsCentro;
 }
 
 function nombreAreaEst() {
@@ -142,6 +145,24 @@ if (selAreaEst) selAreaEst.addEventListener("change", () => {
   cerrarCalendarioCostos();
   recargarTodo();
 });
+
+if (selCentroEst) {
+  fetch("api/whatsapp/centros", { headers: authHeaders(), cache: "no-store" })
+    .then((r) => r.ok ? r.json() : [])
+    .then((centros) => {
+      selCentroEst.innerHTML = '<option value="todos">Todos los centros</option>' +
+        centros.map((c) => `<option value="${escaparHtml(c.codigo)}">${escaparHtml(c.nombre)}</option>`).join("");
+      const anterior = localStorage.getItem("snw_centro_est") || "todos";
+      if (centros.some((c) => c.codigo === anterior)) selCentroEst.value = anterior;
+      if (selCentroEst.value !== "todos") recargarTodo();
+    }).catch(() => {});
+  selCentroEst.addEventListener("change", () => {
+    localStorage.setItem("snw_centro_est", selCentroEst.value);
+    limpiarFiltroCalendarioCostos();
+    cerrarCalendarioCostos();
+    recargarTodo();
+  });
+}
 
 async function recargarTodo() {
   const cargas = [cargar(), cargarEnvios(granEnvios)];

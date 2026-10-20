@@ -64,8 +64,8 @@ class EstadisticasAreaTests(unittest.TestCase):
         self.assertIn("base_datos = 'pacientes_dev'", cursor.consultas[0][0])
         self.assertIn("tabla_pacientes = 'pacientes_dev'", cursor.consultas[2][0])
         self.assertIn("base_datos = 'pacientes_dev'", cursor.consultas[3][0])
-        respuestas.assert_called_once_with("desarrollo", tabla=None)
-        interes.assert_called_once_with("desarrollo", tabla=None)
+        respuestas.assert_called_once_with("desarrollo", tabla=None, centro_codigo=None)
+        interes.assert_called_once_with("desarrollo", tabla=None, centro_codigo=None)
 
     def test_calendario_desarrollo_solo_tiene_sus_envios(self):
         cursor = CursorFalso(filas=(
@@ -203,7 +203,7 @@ class EstadisticasAreaTests(unittest.TestCase):
         registros = [params for sql, params in conexion.consultas if sql.startswith("INSERT INTO log_envios")]
         self.assertEqual(resultado, "registrada")
         self.assertEqual(conexion.commits, 1)
-        self.assertEqual([(r[0], r[-2], r[-1]) for r in registros],
+        self.assertEqual([(r[0], r[6], r[7]) for r in registros],
                          [(1, None, "pacientes_prod"), (2, 9, "pacientes_test")])
         etiquetas = [params for sql, params in conexion.consultas
                      if sql.startswith("INSERT IGNORE INTO respuesta_etiquetas")]

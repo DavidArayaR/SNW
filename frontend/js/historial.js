@@ -60,6 +60,7 @@ function progEnProgresoHtml(it) {
       (it.quien_envio ? `por ${escaparHtml(it.quien_envio)}` : "") +
       (it.quien_aprobo ? ` · aprobado por ${escaparHtml(it.quien_aprobo)}` : "") +
       (it.area ? ` · ${escaparHtml(it.area)}` : (it.base ? ` · ${escaparHtml(it.base)}` : "")) +
+      (it.centro ? ` · ${escaparHtml(it.centro)} (${escaparHtml(it.numero_emisor || "—")})` : "") +
     `</div>` + barra +
     ((controlaPausa || cancelaJob || cancelaProg)
       ? `<div class="prog-item__acciones">` +
@@ -175,6 +176,8 @@ async function cargarEnProgreso(mostrarFeedback = false) {
     cargar(true);
   }
   firmaProgreso = firma;
+  const centroActivo = $("#selCentroHist")?.value || "todos";
+  if (centroActivo !== "todos") items = items.filter((it) => it.centro_codigo === centroActivo);
   // La cadencia sigue a la lista: rápida con envíos vivos, lenta si no hay nada.
   if (hayProgresoVivo !== !!items.length) {
     hayProgresoVivo = !!items.length;
@@ -262,6 +265,28 @@ let pacienteMsgActual = null; // { id, ambiente, interesado }
 let basesHist = [];
 const selBaseHist = $("#selBaseHist");
 const selOrigenHist = $("#selOrigenHist");
+const selCentroHist = $("#selCentroHist");
+if (selCentroHist) {
+  fetch("api/whatsapp/centros", { headers: authHeaders(), cache: "no-store" })
+    .then((r) => r.ok ? r.json() : [])
+    .then((centros) => {
+      selCentroHist.innerHTML = '<option value="todos">Todos los centros</option>' +
+        centros.map((c) => `<option value="${escaparHtml(c.codigo)}">${escaparHtml(c.nombre)}</option>`).join("");
+      const guardado = localStorage.getItem("snw_centro_historial") || "todos";
+      if (centros.some((c) => c.codigo === guardado)) {
+        selCentroHist.value = guardado;
+        cargar(false, false, true);
+        cargarEnProgreso();
+      }
+    })
+    .catch(() => {});
+  selCentroHist.addEventListener("change", () => {
+    localStorage.setItem("snw_centro_historial", selCentroHist.value);
+    paginaHist = 1;
+    cargar(false, false, true);
+    cargarEnProgreso();
+  });
+}
 if (selBaseHist) {
   selBaseHist.value = localStorage.getItem("snw_base_historial") || "todos";
 }
@@ -415,9 +440,10 @@ async function cargar(mantenerPagina = false, mostrarFeedback = false, mostrarCa
     const base = (selBaseHist && selBaseHist.value) || "todos";
     const params = new URLSearchParams(base !== "todos" ? { tabla: base } : { ambiente: "todos" });
     params.set("origen", (selOrigenHist && selOrigenHist.value) || "todos");
+    params.set("centro", (selCentroHist && selCentroHist.value) || "todos");
     params.set("q", filtro.trim().slice(0, 100));
     params.set("limite", String(pageSizeHist));
-    const claveConsulta = `${base}|${params.get("origen")}|${params.get("q")}`;
+    const claveConsulta = `${base}|${params.get("origen")}|${params.get("centro")}|${params.get("q")}`;
     const requiereTotal = claveConsulta !== consultaHistorialAnterior || mostrarFeedback;
     params.set("incluir_total", String(requiereTotal));
     let respuesta;
@@ -531,6 +557,8 @@ function render() {
     tr.innerHTML =
       `<td class="campo-fecha">${escaparHtml(r.fecha)}</td>` +
       `<td><span class="badge badge--origen">${r.origen === "programado" ? "Programado" : "Manual"}</span></td>` +
+      `<td>${escaparHtml(r.centro || "Emisor histórico no identificado")}` +
+        `<small class="texto-suave">${escaparHtml(r.numero_emisor || "")}</small></td>` +
       `<td><span class="badge badge--db">${escaparHtml(r.base_datos ?? "—")}</span></td>` +
       `<td>${escaparHtml(r.plantilla_nombre ?? r.plantilla_clave ?? "—")}${notaRechazo}</td>` +
       `<td><span class="estado-envio estado-envio--${escaparHtml(estado)}">${escaparHtml(estadoLabel)}</span></td>` +
@@ -600,9 +628,10 @@ async function cargarDetalle() {
 
 function abrirDetalle(envio, detalle) {
   const plantilla = envio?.plantilla_nombre ?? envio?.plantilla_clave ?? "";
+  const centro = envio?.centro || "Emisor histórico no identificado";
   $("#detalleTitulo").textContent = plantilla
-    ? `Pacientes del envío · ${plantilla}`
-    : "Pacientes del envío";
+    ? `Pacientes del envío · ${plantilla} · ${centro}${envio?.numero_emisor ? ` (${envio.numero_emisor})` : ""}`
+    : `Pacientes del envío · ${centro}`;
 
   const body = $("#detalleBody");
   body.innerHTML = "";

@@ -555,6 +555,10 @@ class EndpointPruebaPlantillaTests(unittest.TestCase):
         self.cliente = TestClient(app)
         main._pruebas_plantilla_ultima.clear()
         main._pruebas_plantilla_en_curso.clear()
+        emisor = patch.object(main, "_exigir_centro_envio", return_value={
+            "codigo": "SMPT", "phoneNumberId": "123456789", "phoneNumber": "+56900000001"})
+        emisor.start()
+        self.addCleanup(emisor.stop)
 
     def _config(self, clave, *args):
         return {"entorno": "desarrollo", "metodo_envio": "api_oficial"}.get(clave, "")
@@ -586,7 +590,7 @@ class EndpointPruebaPlantillaTests(unittest.TestCase):
              patch.object(main, "auditoria_registrar") as auditoria, \
              patch.object(main, "conectar", side_effect=AssertionError("No debe consultar campañas")):
             respuesta = self.cliente.post("/api/plantillas/7/prueba", json={
-                "telefono": TELEFONO, "ejemplos": {"nombre": "Ana"}})
+                "telefono": TELEFONO, "centro": "SMPT", "ejemplos": {"nombre": "Ana"}})
         self.assertEqual(respuesta.status_code, 200)
         self.assertEqual(respuesta.json()["message_id"], "wamid-prueba")
         self.assertEqual(enviar.await_count, 1)
@@ -594,13 +598,17 @@ class EndpointPruebaPlantillaTests(unittest.TestCase):
         self.assertTrue(enviar.await_args.kwargs["es_prueba"])
         auditoria.assert_called_once()
 
+    def test_prueba_requiere_elegir_centro(self):
+        respuesta = self.cliente.post("/api/plantillas/7/prueba", json={"telefono": TELEFONO})
+        self.assertEqual(respuesta.status_code, 422)
+
     def test_rechaza_destinatario_no_autorizado(self):
         with patch.object(main, "leer_plantillas", return_value=[PLANTILLA]), \
              patch.object(main, "config_get", side_effect=self._config), \
              patch.object(main, "_numeros_prueba_editables", return_value={TELEFONO}), \
              patch.object(main.WhatsAppService, "enviar", new_callable=AsyncMock) as enviar:
             respuesta = self.cliente.post("/api/plantillas/7/prueba", json={
-                "telefono": "+56999998888", "ejemplos": {"nombre": "Ana"}})
+                "telefono": "+56999998888", "centro": "SMPT", "ejemplos": {"nombre": "Ana"}})
         self.assertEqual(respuesta.status_code, 403)
         enviar.assert_not_awaited()
 
@@ -609,7 +617,7 @@ class EndpointPruebaPlantillaTests(unittest.TestCase):
         with patch.object(main, "leer_plantillas", return_value=[pendiente]), \
              patch.object(main.WhatsAppService, "enviar", new_callable=AsyncMock) as enviar:
             respuesta = self.cliente.post("/api/plantillas/7/prueba", json={
-                "telefono": TELEFONO})
+                "telefono": TELEFONO, "centro": "SMPT"})
         self.assertEqual(respuesta.status_code, 400)
         enviar.assert_not_awaited()
 
@@ -621,8 +629,8 @@ class EndpointPruebaPlantillaTests(unittest.TestCase):
              patch.object(main.WhatsAppService, "enviar", new_callable=AsyncMock,
                           return_value=(True, "wamid-prueba", None, "sent")) as enviar, \
              patch.object(main, "auditoria_registrar"):
-            primera = self.cliente.post("/api/plantillas/7/prueba", json={"telefono": TELEFONO})
-            segunda = self.cliente.post("/api/plantillas/7/prueba", json={"telefono": TELEFONO})
+            primera = self.cliente.post("/api/plantillas/7/prueba", json={"telefono": TELEFONO, "centro": "SMPT"})
+            segunda = self.cliente.post("/api/plantillas/7/prueba", json={"telefono": TELEFONO, "centro": "SMPT"})
         self.assertEqual(primera.status_code, 200)
         self.assertEqual(segunda.status_code, 429)
         restantes = int(segunda.headers["Retry-After"])
@@ -632,12 +640,12 @@ class EndpointPruebaPlantillaTests(unittest.TestCase):
         self.assertEqual(enviar.await_count, 1)
 
     def test_aviso_indica_tiempo_restante_y_singular(self):
-        main._pruebas_plantilla_ultima[(7, TELEFONO)] = main.time.monotonic() - 29.5
+        main._pruebas_plantilla_ultima[(7, TELEFONO, "SMPT")] = main.time.monotonic() - 29.5
         with patch.object(main, "leer_plantillas", return_value=[PLANTILLA]), \
              patch.object(main, "config_get", side_effect=self._config), \
              patch.object(main, "_numeros_prueba_editables", return_value={TELEFONO}), \
              patch.object(main.WhatsAppService, "configurada", return_value=True):
-            respuesta = self.cliente.post("/api/plantillas/7/prueba", json={"telefono": TELEFONO})
+            respuesta = self.cliente.post("/api/plantillas/7/prueba", json={"telefono": TELEFONO, "centro": "SMPT"})
         self.assertEqual(respuesta.status_code, 429)
         self.assertEqual(respuesta.headers["Retry-After"], "1")
         self.assertEqual(respuesta.json()["detail"], "Espera 1 segundo antes de repetir esta prueba.")
@@ -651,7 +659,7 @@ class EndpointPruebaPlantillaTests(unittest.TestCase):
                           return_value=(False, None, "Plantilla no aprobada", "failed")), \
              patch.object(main, "auditoria_registrar") as auditoria, \
              patch.object(main, "log_error"):
-            respuesta = self.cliente.post("/api/plantillas/7/prueba", json={"telefono": TELEFONO})
+            respuesta = self.cliente.post("/api/plantillas/7/prueba", json={"telefono": TELEFONO, "centro": "SMPT"})
         self.assertEqual(respuesta.status_code, 502)
         self.assertIn("Plantilla no aprobada", respuesta.json()["detail"])
         auditoria.assert_not_called()

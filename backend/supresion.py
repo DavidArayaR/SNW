@@ -130,6 +130,9 @@ def solicitar_eliminacion(telefono: str) -> str:
     if not tel:
         raise ValueError("Teléfono inválido para eliminación")
     huella = huella_telefono(tel)
+    from whatsapp_channels import emisor_webhook_actual
+    phone_id_origen = ((emisor_webhook_actual() or {}).get("phoneNumberId")
+                       or (config_get("wa_phone_id") or "").strip())
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO supresion_telefonos (huella, telefono_pendiente, wa_phone_id)"
@@ -137,7 +140,7 @@ def solicitar_eliminacion(telefono: str) -> str:
             " ON DUPLICATE KEY UPDATE"
             " telefono_pendiente = IF(estado IN ('completo','exento'), NULL, VALUES(telefono_pendiente)),"
             " wa_phone_id = IF(estado IN ('completo','exento'), wa_phone_id, VALUES(wa_phone_id))",
-            (huella, tel, (config_get("wa_phone_id") or "").strip()),
+            (huella, tel, phone_id_origen),
         )
         cur.execute("SELECT estado FROM supresion_telefonos WHERE huella = %s", (huella,))
         exento = (cur.fetchone() or {}).get("estado") == "exento"
@@ -289,6 +292,8 @@ def _limpiar_datos(cur, telefono: str) -> tuple[int, int]:
     for row in cur.fetchall():
         if normalizar_telefono(row.get("telefono") or "") == telefono:
             cur.execute("DELETE FROM call_center_derivaciones WHERE id = %s", (row["id"],))
+    cur.execute("DELETE FROM crm_derivaciones_pendientes WHERE telefono = %s", (telefono,))
+    cur.execute("DELETE FROM whatsapp_conversaciones_mensajes WHERE telefono_paciente = %s", (telefono,))
     cur.execute("DELETE FROM call_center_prueba_interes WHERE telefono = %s", (telefono,))
     cur.execute("SELECT telefono, tipo FROM whatsapp_avisos_unicos")
     for row in cur.fetchall():
@@ -360,7 +365,12 @@ def procesar_pendiente(huella: str) -> bool:
         fila = cur.fetchone()
     try:
         telefono = (fila or {}).get("telefono_pendiente")
-        if not telefono or not _bloquear_en_meta(telefono, fila.get("wa_phone_id") or ""):
+        from whatsapp_channels import listar_canales
+        canales = [c for c in listar_canales() if c["configured"]]
+        ids = list(dict.fromkeys(c["phoneNumberId"] for c in canales))
+        if not ids and fila.get("wa_phone_id"):
+            ids = [fila["wa_phone_id"]]  # compatibilidad con instalaciones antiguas
+        if not telefono or not ids or not all(_bloquear_en_meta(telefono, pid) for pid in ids):
             return False
         # Se conserva la huella y una constancia sin PII; se elimina el número crudo.
         with conectar() as conn, conn.cursor() as cur:

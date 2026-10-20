@@ -229,7 +229,7 @@ class IntencionesCallCenterTests(unittest.TestCase):
                 main._programar_call_center_auto("+56912345678", "wamid.1")
             self.assertEqual(timer.call_count, 2)
             self.assertEqual(timer.call_args_list[0].kwargs["args"],
-                             ("+56912345678", "wamid.1"))
+                             (main._enviar_call_center_auto, "+56912345678", "wamid.1"))
         finally:
             main._cc_auto_pendientes.clear()
 

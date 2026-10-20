@@ -21,6 +21,7 @@ function toast(msg, tipo = "ok") {
 toastEl.addEventListener("click", () => toastEl.classList.remove("visible"));
 
 const cont = $("#secciones");
+let centrosConfig = [];
 let valores = {};          // valor guardado (servidor)
 let estadoSupresion = {};  // solo conteos; nunca teléfonos ni huellas
 let campos = {};           // clave -> { def, input }
@@ -192,6 +193,7 @@ async function cargar() {
     if (!res.ok) throw new Error();
     const d = await res.json();
     valores = d.valores || {};
+    centrosConfig = d.centros || [];
     estadoSupresion = d.supresion || {};
     render(d.secciones || []);
   } catch {
@@ -208,9 +210,17 @@ function render(secciones) {
   for (const s of secciones) {
     const panel = document.createElement("section");
     panel.className = "panel config-seccion";
+    if (s.id.startsWith("centro_")) panel.dataset.centro = s.id.slice(7).toUpperCase();
     panel.innerHTML =
       `<div class="panel__head"><h2><i class="${s.marca ? "fa-brands" : "fa-solid"} ${s.icono || "fa-gear"}"></i> ${escaparHtml(s.titulo)}</h2></div>` +
       `<div class="config-campos"></div>`;
+    if (s.id.startsWith("centro_")) {
+      const centro = centrosConfig.find((c) => c.codigo.toLowerCase() === s.id.slice(7));
+      const estado = document.createElement("span");
+      estado.className = `config-centro-estado ${centro?.configured ? "config-centro-estado--ok" : "config-centro-estado--pendiente"}`;
+      estado.textContent = centro?.configured ? "Configurado" : `Pendiente${centro?.problemas?.length ? ` · ${centro.problemas.join(", ")}` : ""}`;
+      panel.querySelector(".panel__head").appendChild(estado);
+    }
     const grid = panel.querySelector(".config-campos");
     const pendientes = Number(estadoSupresion.pendientes || 0) +
       Number(estadoSupresion.procesando || 0);
@@ -381,6 +391,17 @@ async function guardar() {
     if (res.status === 401) { window.snwSesionExpirada(); return; }
     if (!res.ok) throw new Error(d.detail || "No se pudo guardar");
     valores = d.valores || valores;
+    centrosConfig = d.centros || centrosConfig;
+    for (const panel of cont.querySelectorAll(".config-seccion")) {
+      const codigo = panel.dataset.centro;
+      if (!codigo) continue;
+      const centro = centrosConfig.find((c) => c.codigo === codigo);
+      const estado = panel.querySelector(".config-centro-estado");
+      if (estado) {
+        estado.className = `config-centro-estado ${centro?.configured ? "config-centro-estado--ok" : "config-centro-estado--pendiente"}`;
+        estado.textContent = centro?.configured ? "Configurado" : `Pendiente${centro?.problemas?.length ? ` · ${centro.problemas.join(", ")}` : ""}`;
+      }
+    }
 
     // Reflejar los valores normalizados por el servidor.
     for (const clave of Object.keys(campos)) {

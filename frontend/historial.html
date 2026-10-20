@@ -58,6 +58,10 @@
           <option value="manual">Manuales</option>
           <option value="programado">Programados</option>
         </select>
+        <label for="selCentroHist">Centro emisor:</label>
+        <select id="selCentroHist" class="badge badge--select" aria-label="Centro emisor">
+          <option value="todos">Todos los centros</option>
+        </select>
         <input type="search" id="buscador" placeholder="Buscar por base de datos o plantilla..." maxlength="100" autocomplete="off">
         <span id="contador" class="contador-sel"></span>
         <span class="pag-grupo">
@@ -93,6 +97,7 @@
             <tr>
               <th>Fecha</th>
               <th>Tipo</th>
+              <th>Centro emisor</th>
               <th>Base de datos</th>
               <th>Plantilla</th>
               <th>Estado</th>
@@ -242,7 +247,7 @@
 
   <script src="js/layout.js?v=permisos-acciones1"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/historial.js?v=pausa-envios1"></script>
+  <script src="js/historial.js?v=centros1"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>

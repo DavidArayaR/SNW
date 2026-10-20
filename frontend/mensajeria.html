@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="css/styles.css?v=carga-plantillas1">
   <link rel="stylesheet" href="css/componentes.css?v=paginador-cinco1">
   <link rel="stylesheet" href="css/layout.css?v=navcolor1">
-  <link rel="stylesheet" href="css/mensajeria.css?v=chrome2">
+  <link rel="stylesheet" href="css/mensajeria.css?v=centros1">
   <link rel="stylesheet" href="css/calendario.css?v=base1">
   <link rel="stylesheet" href="css/calendario-programados.css?v=programados2">
   <link rel="stylesheet" href="css/refinamiento.css?v=merge-frontend1">
@@ -183,6 +183,8 @@
               <label for="inpEjemploNombre">Nombre de ejemplo<input id="inpEjemploNombre" type="text" value="David" maxlength="80" autocomplete="off"></label>
               <label for="inpEjemploApellido">Apellido de ejemplo<input id="inpEjemploApellido" type="text" value="Araya" maxlength="80" autocomplete="off"></label>
             </div>
+            <label for="selCentroPrueba">Centro emisor de la prueba</label>
+            <select id="selCentroPrueba"><option value="">— Seleccione centro emisor —</option></select>
             <label for="selNumeroPrueba">Enviar prueba a un número autorizado</label>
             <div class="preview-prueba__acciones">
               <select id="selNumeroPrueba"><option value="">— Seleccione número de prueba —</option></select>
@@ -260,8 +262,18 @@
                 <p class="prog-disponibles-base" id="confDestinatarios">Contando pacientes...</p>
               </div>
             </div>
-            <div class="prog-paso" id="filaLimiteConf">
+            <div class="prog-paso" id="pasoManualCentro">
               <span class="prog-paso__num">3</span>
+              <div class="field">
+                <label for="selCentroConf">Centro / Número de WhatsApp emisor</label>
+                <select id="selCentroConf" required aria-describedby="centroErrorConf">
+                  <option value="">— Seleccione centro emisor —</option>
+                </select>
+                <p id="centroErrorConf" class="limite-error" role="alert" hidden></p>
+              </div>
+            </div>
+            <div class="prog-paso" id="filaLimiteConf">
+              <span class="prog-paso__num">4</span>
               <div class="field">
                 <p class="field__hint prog-limite-nota" id="limiteNotaConf" hidden></p>
                 <label for="selLimiteModoConf">Cómo quieres definir la cantidad</label>
@@ -351,8 +363,18 @@
               <p class="prog-disponibles-base" id="progDisponiblesBase" hidden></p>
             </div>
           </div>
-          <div class="prog-paso" id="pasoProg3">
+          <div class="prog-paso" id="pasoProgCentro">
             <span class="prog-paso__num">3</span>
+            <div class="field">
+              <label for="selProgCentro">Centro / Número de WhatsApp emisor</label>
+              <select id="selProgCentro" required aria-describedby="progCentroError">
+                <option value="">— Seleccione centro emisor —</option>
+              </select>
+              <p id="progCentroError" class="limite-error" role="alert" hidden></p>
+            </div>
+          </div>
+          <div class="prog-paso" id="pasoProg3">
+            <span class="prog-paso__num">4</span>
             <div class="field">
               <label>Fecha y hora (hora del servidor)</label>
               <input type="hidden" id="inpProgFecha" disabled>
@@ -403,7 +425,7 @@
             </div>
           </div>
           <div class="prog-paso" id="pasoProg4">
-            <span class="prog-paso__num">4</span>
+            <span class="prog-paso__num">5</span>
             <div class="field">
               <p class="field__hint prog-limite-nota" id="progLimiteNota" hidden></p>
               <label for="selProgLimiteModo">Cómo quieres definir la cantidad</label>
@@ -562,7 +584,7 @@
   <script src="js/layout.js?v=permisos-acciones1"></script>
   <script src="js/pass-toggle.js"></script>
   <script src="js/plantilla-ia.js?v=sin-confirmacion1"></script>
-  <script src="js/app.js?v=encabezado-exclusivo1"></script>
+  <script src="js/app.js?v=centros-emisores1"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>

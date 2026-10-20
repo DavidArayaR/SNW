@@ -8,6 +8,7 @@ import pymysql
 from dotenv import load_dotenv
 from legacy_config_secrets import leer_credencial_antigua
 from telefono import normalizar_telefono
+from whatsapp_channels import CENTROS, claves_centro
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
@@ -188,6 +189,39 @@ CONFIG_DEFAULTS = {
     # 100000 / ilimitado. 0 = sin control. Ajústalo al tier real de la cuenta.
     "wa_messaging_limit_24h": "2000",
 }
+for _centro in CENTROS:
+    for _clave in claves_centro(_centro):
+        CONFIG_DEFAULTS[_clave] = ""
+
+_CLAVES_CENTRO_ANTIGUAS = {
+    "SMPT_WSP_PHONE_NUMER": "SMPT_WSP_PHONE_NUMBER",
+    "SMPT_WSP_PHONE_NUMER_ID": "SMPT_WSP_PHONE_NUMBER_ID",
+    "MS_WSP_CRM_PHONE_NUMER": "MS_WSP_PHONE_NUMBER",
+    "MS_WSP_CRM_PHONE_NUMER_ID": "MS_WSP_PHONE_NUMBER_ID",
+    "PS_WSP_CRM_PHONE_NUMER": "PS_WSP_PHONE_NUMBER",
+    "PS_WSP_CRM_PHONE_NUMER_ID": "PS_WSP_PHONE_NUMBER_ID",
+    "CP_WSP_CRM_PHONE_NUMER": "CP_WSP_PHONE_NUMBER",
+    "CP_WSP_CRM_PHONE_NUMER_ID": "CP_WSP_PHONE_NUMBER_ID",
+}
+
+
+def _migrar_claves_centro(cur) -> None:
+    """Traslada claves mal escritas sin pisar datos ni borrar conflictos."""
+    claves = tuple(_CLAVES_CENTRO_ANTIGUAS)
+    cur.execute("SELECT clave, valor FROM configuracion WHERE clave IN ("
+                + ", ".join("%s" for _ in claves) + ") FOR UPDATE", claves)
+    for fila in cur.fetchall():
+        vieja = fila["clave"]
+        nueva = _CLAVES_CENTRO_ANTIGUAS[vieja]
+        valor = (fila.get("valor") or "").strip()
+        cur.execute("SELECT valor FROM configuracion WHERE clave = %s FOR UPDATE", (nueva,))
+        actual = ((cur.fetchone() or {}).get("valor") or "").strip()
+        if actual and valor and actual != valor:
+            log_error(f"Migración de {vieja}: conflicto con {nueva}; conservadas ambas claves")
+            continue
+        if valor and not actual:
+            cur.execute("UPDATE configuracion SET valor = %s WHERE clave = %s", (valor, nueva))
+        cur.execute("DELETE FROM configuracion WHERE clave = %s", (vieja,))
 
 _config_cache: dict | None = None
 
@@ -209,6 +243,7 @@ def asegurar_tabla_config() -> None:
                     "INSERT IGNORE INTO configuracion (clave, valor) VALUES (%s, %s)",
                     (clave, valor),
                 )
+            _migrar_claves_centro(cur)
             cur.execute(
                 "CREATE TABLE IF NOT EXISTS gemini_cuotas ("
                 "  usuario_hash CHAR(64) NOT NULL,"
@@ -363,12 +398,24 @@ def asegurar_tabla_config() -> None:
                 " base_datos VARCHAR(50) DEFAULT NULL,"
                 " paciente_id INT DEFAULT NULL,"
                 " aviso_id VARCHAR(255) DEFAULT NULL,"
+                " centro_codigo VARCHAR(8) DEFAULT NULL,"
+                " wa_phone_id VARCHAR(64) DEFAULT NULL,"
                 " creado DATETIME DEFAULT CURRENT_TIMESTAMP,"
                 " actualizado DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
                 " INDEX idx_telefono_estado (telefono, estado, creado),"
                 " INDEX idx_creado (creado)"
                 ") CHARACTER SET utf8mb4"
             )
+            cur.execute(
+                "SELECT COLUMN_NAME FROM information_schema.COLUMNS"
+                " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'call_center_derivaciones'"
+                " AND COLUMN_NAME IN ('centro_codigo','wa_phone_id')"
+            )
+            _cols_derivacion = {r["COLUMN_NAME"] for r in cur.fetchall()}
+            if "centro_codigo" not in _cols_derivacion:
+                cur.execute("ALTER TABLE call_center_derivaciones ADD COLUMN centro_codigo VARCHAR(8) NULL")
+            if "wa_phone_id" not in _cols_derivacion:
+                cur.execute("ALTER TABLE call_center_derivaciones ADD COLUMN wa_phone_id VARCHAR(64) NULL")
             cur.execute(
                 "CREATE TABLE IF NOT EXISTS call_center_derivacion_mensajes ("
                 " mensaje_id VARCHAR(255) PRIMARY KEY,"
@@ -377,6 +424,44 @@ def asegurar_tabla_config() -> None:
                 " INDEX idx_derivacion (derivacion_id),"
                 " FOREIGN KEY (derivacion_id) REFERENCES call_center_derivaciones(id)"
                 " ON DELETE CASCADE"
+                ") CHARACTER SET utf8mb4"
+            )
+            # Cola local para la futura integración CRM. No se despacha nada
+            # fuera de SNW hasta que exista contrato de API y autorización.
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS crm_derivaciones_pendientes ("
+                " id BIGINT AUTO_INCREMENT PRIMARY KEY,"
+                " mensaje_id VARCHAR(255) NOT NULL UNIQUE,"
+                " telefono VARCHAR(20) NOT NULL,"
+                " mensaje TEXT NOT NULL,"
+                " motivos VARCHAR(255) NOT NULL,"
+                " centro_codigo VARCHAR(8) NOT NULL,"
+                " wa_phone_id VARCHAR(64) NOT NULL,"
+                " numero_emisor VARCHAR(20) NOT NULL,"
+                " estado VARCHAR(20) NOT NULL DEFAULT 'pendiente',"
+                " creado DATETIME DEFAULT CURRENT_TIMESTAMP,"
+                " INDEX idx_crm_centro_estado (centro_codigo, estado, creado)"
+                ") CHARACTER SET utf8mb4"
+            )
+            cur.execute(
+                "SELECT COLUMN_NAME FROM information_schema.COLUMNS"
+                " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'crm_derivaciones_pendientes'"
+                " AND COLUMN_NAME = 'numero_emisor'"
+            )
+            if not cur.fetchone():
+                cur.execute("ALTER TABLE crm_derivaciones_pendientes"
+                            " ADD COLUMN numero_emisor VARCHAR(20) NOT NULL DEFAULT ''")
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS whatsapp_conversaciones_mensajes ("
+                " mensaje_id VARCHAR(255) PRIMARY KEY,"
+                " centro_codigo VARCHAR(8) NOT NULL,"
+                " wa_phone_id VARCHAR(64) NOT NULL,"
+                " numero_emisor VARCHAR(20) NOT NULL,"
+                " telefono_paciente VARCHAR(20) NOT NULL,"
+                " tipo VARCHAR(30) NOT NULL,"
+                " texto TEXT NULL,"
+                " recibido DATETIME DEFAULT CURRENT_TIMESTAMP,"
+                " INDEX idx_conversacion (wa_phone_id, telefono_paciente, recibido)"
                 ") CHARACTER SET utf8mb4"
             )
             # Cuentas de la aplicación (antes en data/usuarios.json).
@@ -641,6 +726,26 @@ def asegurar_tabla_config() -> None:
                 cur.execute("ALTER TABLE log_envios ADD COLUMN wa_phone_id VARCHAR(64) NULL")
             if "entregado_en" not in cols_facturacion:
                 cur.execute("ALTER TABLE log_envios ADD COLUMN entregado_en DATETIME NULL")
+
+            # Emisor histórico: NULL en filas anteriores (nunca se infiere a
+            # partir de la configuración actual, que puede cambiar).
+            for tabla in ("envios", "envios_programados", "log_envios"):
+                cur.execute("SELECT COUNT(*) AS n FROM information_schema.TABLES"
+                            " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s", (tabla,))
+                if not (cur.fetchone() or {}).get("n"):
+                    continue
+                cur.execute(
+                    "SELECT COLUMN_NAME FROM information_schema.COLUMNS"
+                    " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s"
+                    " AND COLUMN_NAME IN ('centro_codigo','wa_phone_id','numero_emisor')",
+                    (tabla,),
+                )
+                presentes = {fila["COLUMN_NAME"] for fila in cur.fetchall()}
+                for columna, tipo in (("centro_codigo", "VARCHAR(8)"),
+                                      ("wa_phone_id", "VARCHAR(64)"),
+                                      ("numero_emisor", "VARCHAR(32)")):
+                    if columna not in presentes:
+                        cur.execute(f"ALTER TABLE {tabla} ADD COLUMN {columna} {tipo} NULL")
 
             # Un envío rechazado por el supervisor queda en el historial con su
             # comentario, en vez de borrarse.

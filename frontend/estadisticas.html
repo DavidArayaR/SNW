@@ -56,6 +56,12 @@
                 <option value="">Todas las &aacute;reas</option>
               </select>
             </div>
+            <div class="stats-contexto__campo">
+              <label for="selCentroEst">Centro emisor</label>
+              <select id="selCentroEst" class="badge badge--select">
+                <option value="todos">Todos los centros</option>
+              </select>
+            </div>
             <button id="btnActualizarEstadisticas" class="btn btn--ghost" type="button">Actualizar</button>
           </div>
           <p class="field__hint stats-contexto__ayuda">Todos los paneles usan este alcance. Producci&oacute;n suma todas las &aacute;reas salvo que elijas una; Desarrollo es la base de pruebas. Tu selecci&oacute;n se recuerda.</p>
@@ -209,7 +215,7 @@
 
   <script src="js/layout.js?v=permisos-acciones1"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/estadisticas.js?v=alcance1"></script>
+  <script src="js/estadisticas.js?v=centros1"></script>
   <script>
     if (window.snwCargarEstadisticas) window.snwCargarEstadisticas();
   </script>

@@ -21,6 +21,7 @@ from datetime import datetime
 import httpx
 
 from db import conectar, config_get, log_error, tabla_pacientes
+from whatsapp_channels import CENTROS, EMISOR_WEBHOOK, listar_canales, resolver_phone_id
 from corpus_respuestas import guardar_mensaje_completo
 from intenciones_call_center import clasificar, patrones_configurados
 from plantilla_media import obtener_media, ruta_media
@@ -222,6 +223,7 @@ al_detectar_baja = None
 # de bienvenida de vuelta.
 al_detectar_retractacion = None
 al_detectar_insulto = None
+al_derivar_crm = None
 
 # Texto exacto de los 3 botones de respuesta rápida que se agregan a toda
 # plantilla normal (no de call center). Los presses de estos botones se
@@ -497,13 +499,18 @@ class WhatsAppService:
 
     # Se leen de la tabla `configuracion` en cada acceso, para que un cambio
     # (p. ej. rotar el token) surta efecto sin reconstruir el servicio.
+    def __init__(self, phone_number_id: str | None = None):
+        self._phone_number_id = phone_number_id
+
     @property
     def token(self) -> str:
         return (config_get("wa_token") or "").strip()
 
     @property
     def phone_number_id(self) -> str:
-        return (config_get("wa_phone_id") or "").strip()
+        # Ninguna operación de envío puede caer silenciosamente en el emisor
+        # global antiguo. Cada campaña o prueba entrega un ID explícito.
+        return (self._phone_number_id or "").strip()
 
     @property
     def waba_id(self) -> str:
@@ -978,12 +985,52 @@ class WhatsAppService:
                 if campo == "message_template_status_update":
                     accion.append(f"template_{valor.get('event', '?')}")
                     continue
-                if valor.get("messages"):
-                    accion += self._procesar_mensajes(valor)
-                if valor.get("statuses"):
-                    accion += self._procesar_estados(valor)
+                phone_id = str((valor.get("metadata") or {}).get("phone_number_id") or "").strip()
+                if len([c for c in listar_canales() if c["phoneNumberId"] == phone_id]) > 1:
+                    accion.append("emisor_duplicado")
+                    continue
+                emisor = resolver_phone_id(phone_id)
+                if not emisor or not emisor.get("phoneNumber"):
+                    emisor = self._emisor_historico(phone_id)
+                if not emisor or not emisor.get("phoneNumber"):
+                    # Nunca registrar respuestas ni emitir avisos por un número
+                    # desconocido: el fallback global mezclaría centros.
+                    accion.append("emisor_desconocido")
+                    continue
+                token = EMISOR_WEBHOOK.set(emisor)
+                try:
+                    if valor.get("messages"):
+                        accion += self._procesar_mensajes(valor)
+                    if valor.get("statuses"):
+                        accion += self._procesar_estados(valor)
+                finally:
+                    EMISOR_WEBHOOK.reset(token)
         self._guardar_evento(body)
         return accion
+
+    @staticmethod
+    def _emisor_historico(phone_id: str) -> dict | None:
+        """Conserva respuestas del canal retirado si el historial lo identifica."""
+        if not phone_id:
+            return None
+        try:
+            with conectar() as conn, conn.cursor() as cur:
+                cur.execute(
+                    "SELECT centro_codigo, numero_emisor FROM log_envios"
+                    " WHERE wa_phone_id = %s AND centro_codigo IS NOT NULL"
+                    " AND numero_emisor IS NOT NULL ORDER BY id DESC LIMIT 20",
+                    (phone_id,),
+                )
+                filas = cur.fetchall() or []
+            codigos = {r["centro_codigo"] for r in filas if r.get("centro_codigo") in CENTROS}
+            if len(codigos) == 1:
+                codigo = codigos.pop()
+                return {"codigo": codigo, "nombre": CENTROS[codigo],
+                        "phoneNumber": filas[0]["numero_emisor"],
+                        "phoneNumberId": phone_id, "configured": False}
+        except Exception as exc:
+            log_error("_emisor_historico", exc)
+        return None
 
     def _procesar_mensajes(self, valor: dict) -> list[str]:
         """Mensajes entrantes del cliente (respuestas, bajas, etc.).
@@ -1026,10 +1073,15 @@ class WhatsAppService:
                 # nunca se copia el archivo ni su identificador de Meta.
                 pie = (mensaje.get(tipo) or {}).get("caption", "") if tipo in (
                     "image", "video", "document") else ""
+                if not self._guardar_mensaje_entrante(mensaje, telefono, pie):
+                    continue
                 if not es_solicitud_eliminar(pie):
                     self._guardar_corpus_respuesta(pie, telefono)
                 continue
             cuerpo = texto or extra
+            if not self._guardar_mensaje_entrante(mensaje, telefono, cuerpo):
+                acciones.append("mensaje_duplicado")
+                continue
 
             if es_solicitud_eliminar(texto) or es_solicitud_eliminar(extra):
                 if numero_prueba:
@@ -1141,6 +1193,8 @@ class WhatsAppService:
                 self._registrar_interes(telefono)
                 hubo_interes = True
                 acciones.append("interes_boton")
+                if callable(al_derivar_crm):
+                    al_derivar_crm(telefono, cuerpo, mensaje.get("id"), ("INTERES",))
                 if callable(al_detectar_interes):
                     try:
                         if numero_prueba:
@@ -1166,6 +1220,8 @@ class WhatsAppService:
                 self._registrar_interes(telefono)
                 hubo_interes = True
                 acciones.append("interes")
+                if callable(al_derivar_crm):
+                    al_derivar_crm(telefono, cuerpo, mensaje.get("id"), ("INTERES",))
                 if callable(al_detectar_interes):
                     try:
                         if numero_prueba:
@@ -1234,6 +1290,32 @@ class WhatsAppService:
         return acciones
 
     # ---------- Persistencia de eventos ----------
+    @staticmethod
+    def _guardar_mensaje_entrante(mensaje: dict, telefono: str, texto: str) -> bool:
+        """Una fila lógica por ID de Meta y por emisor, aun sin campaña previa."""
+        emisor = EMISOR_WEBHOOK.get()
+        if not emisor:
+            return True  # llamadas internas/compatibilidad de pruebas antiguas
+        mensaje_id = str(mensaje.get("id") or "").strip()
+        if not mensaje_id:
+            return False
+        try:
+            with conectar() as conn, conn.cursor() as cur:
+                cur.execute(
+                    "INSERT IGNORE INTO whatsapp_conversaciones_mensajes"
+                    " (mensaje_id, centro_codigo, wa_phone_id, numero_emisor,"
+                    " telefono_paciente, tipo, texto) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                    (mensaje_id[:255], emisor["codigo"], emisor["phoneNumberId"],
+                     emisor["phoneNumber"], telefono, str(mensaje.get("type") or "")[:30],
+                     (texto or "")[:2000]),
+                )
+                nuevo = cur.rowcount == 1
+                conn.commit()
+                return nuevo
+        except Exception as exc:
+            log_error("_guardar_mensaje_entrante", exc)
+            return False  # sin deduplicación fiable no enviar respuestas automáticas
+
     def _evento_duplicado(self, body: dict) -> bool:
         try:
             with conectar("desarrollo") as conn, conn.cursor() as cur:
@@ -1344,6 +1426,26 @@ class WhatsAppService:
                 pacientes = self._pacientes_con_tel(cur, telefono)
                 if not pacientes:
                     return "sin_cliente"
+                emisor = EMISOR_WEBHOOK.get()
+                if emisor:
+                    cur.execute(
+                        "SELECT COALESCE(le.tabla_pacientes, e.base_datos) AS tabla_pacientes,"
+                        " le.paciente_id FROM log_envios le"
+                        " LEFT JOIN envios e ON e.id = le.envio_id"
+                        " WHERE le.wa_phone_id = %s AND le.numero_telefono = %s"
+                        " AND le.plantilla_clave NOT IN ('respuesta','call_center',"
+                        " 'baja_aviso','retractacion_aviso','ajuste_manual')"
+                        " ORDER BY le.id DESC LIMIT 1",
+                        (emisor["phoneNumberId"], telefono),
+                    )
+                    origen = cur.fetchone() or {}
+                    if origen:
+                        pacientes = [p for p in pacientes if p["tabla"] == origen.get("tabla_pacientes")
+                                     and p["id"] == origen.get("paciente_id")]
+                    elif len(pacientes) > 1:
+                        # Conversación directa sin campaña: se conservó arriba,
+                        # pero no se atribuye arbitrariamente a una base.
+                        return "sin_base_inequivoca"
                 for p in pacientes:
                     if not automatica:
                         cur.execute(f"UPDATE {p['tabla']} SET estado = 'enviado' WHERE {match}", (telefono,))
@@ -1360,15 +1462,18 @@ class WhatsAppService:
                     # El mismo teléfono puede estar en varias bases. Cada una
                     # necesita su propia señal para la ficha y estadísticas.
                     esp = servicio_areas.area_por_tabla(p["tabla"])
+                    emisor = EMISOR_WEBHOOK.get()
                     cur.execute(
                         "INSERT INTO log_envios (envio_id, paciente_id, nombre_paciente, numero_telefono,"
                         " mensaje, plantilla_clave, estado_envio, respuesta, descripcion_error,"
-                        " area_id, tabla_pacientes)"
-                        " VALUES (NULL, %s, %s, %s, %s, 'respuesta', 'enviado', %s, %s, %s, %s)",
+                        " area_id, tabla_pacientes, centro_codigo, wa_phone_id, numero_emisor)"
+                        " VALUES (NULL, %s, %s, %s, %s, 'respuesta', 'enviado', %s, %s, %s, %s, %s, %s, %s)",
                         (p["id"], p["nombre"], p["telefono"], (texto or "")[:2000],
                          "pendiente" if automatica else "respondio",
                          automatica if automatica else None,
-                         esp["id"] if esp else None, p["tabla"]),
+                         esp["id"] if esp else None, p["tabla"],
+                         (emisor or {}).get("codigo"), (emisor or {}).get("phoneNumberId"),
+                         (emisor or {}).get("phoneNumber")),
                     )
                     respuesta_id = cur.lastrowid
                     try:
@@ -1614,6 +1719,9 @@ class WhatsAppService:
 
     def _actualizar_estado(self, message_id: str, estado: str, detalle_error: str | None = None,
                            timestamp: str | None = None) -> None:
+        emisor = EMISOR_WEBHOOK.get()
+        filtro_emisor = " AND (wa_phone_id = %s OR wa_phone_id IS NULL)" if emisor else ""
+        args_emisor = (emisor["phoneNumberId"],) if emisor else ()
         entrega = None
         if estado in ("delivered", "read"):
             try:
@@ -1630,19 +1738,21 @@ class WhatsAppService:
                         " WHEN estado_whatsapp = 'read' AND %s = 'delivered'"
                         " THEN estado_whatsapp ELSE %s END,"
                         " entregado_en = COALESCE(entregado_en, %s)"
-                        " WHERE whatsapp_message_id = %s",
-                        (estado, estado, estado, entrega, message_id),
+                        " WHERE whatsapp_message_id = %s" + filtro_emisor,
+                        (estado, estado, estado, entrega, message_id, *args_emisor),
                     )
                     if estado == "sent":
                         cur.execute(
                             "UPDATE log_envios SET estado_envio = 'enviado'"
-                            " WHERE whatsapp_message_id = %s", (message_id,)
+                            " WHERE whatsapp_message_id = %s" + filtro_emisor,
+                            (message_id, *args_emisor),
                         )
                     if estado == "failed":
                         cur.execute(
                             "UPDATE log_envios SET estado_envio = 'error',"
                             " descripcion_error = COALESCE(%s, descripcion_error)"
-                            " WHERE whatsapp_message_id = %s", (detalle_error[:255] if detalle_error else None, message_id)
+                            " WHERE whatsapp_message_id = %s" + filtro_emisor,
+                            (detalle_error[:255] if detalle_error else None, message_id, *args_emisor)
                         )
                     conn.commit()
             except Exception as e:

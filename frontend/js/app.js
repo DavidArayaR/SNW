@@ -42,6 +42,53 @@ function nombreArea(id) {
 
 const $ = (sel) => document.querySelector(sel);
 
+let centrosEmisores = [];
+function centroElegido(id) {
+  return centrosEmisores.find((c) => c.codigo === $(id)?.value && c.configured) || null;
+}
+function pintarCentrosEmisores() {
+  for (const id of ["#selCentroConf", "#selProgCentro", "#selCentroPrueba"]) {
+    const selector = $(id);
+    if (!selector) continue;
+    const anterior = selector.value;
+    selector.replaceChildren(new Option("— Seleccione centro emisor —", ""));
+    for (const centro of centrosEmisores) {
+      const estado = centro.configured
+        ? centro.phoneNumber
+        : `Pendiente: ${centro.problemas.join(", ")}`;
+      const opcion = new Option(`${centro.nombre} — ${estado}`, centro.codigo);
+      opcion.disabled = !centro.configured;
+      selector.add(opcion);
+    }
+    selector.value = centrosEmisores.some((c) => c.codigo === anterior && c.configured) ? anterior : "";
+    const error = $(id === "#selCentroConf" ? "#centroErrorConf" : "#progCentroError");
+    if (error) {
+      error.hidden = centrosEmisores.some((c) => c.configured);
+      error.textContent = error.hidden ? "" : "No hay centros emisores configurados. Revisa Configuración.";
+    }
+  }
+  actualizarPasosManual();
+  actualizarPasosProg();
+  actualizarEstadoBotonPrueba();
+}
+async function cargarCentrosEmisores() {
+  try {
+    const res = await fetch("api/whatsapp/centros", { headers: authHeaders(), cache: "no-store" });
+    if (!res.ok) throw new Error("No se pudieron consultar los centros emisores.");
+    centrosEmisores = await res.json();
+    pintarCentrosEmisores();
+  } catch (error) {
+    for (const id of ["#centroErrorConf", "#progCentroError"]) {
+      const aviso = $(id);
+      if (aviso) { aviso.hidden = false; aviso.textContent = error.message; }
+    }
+  }
+}
+cargarCentrosEmisores();
+$("#selCentroConf")?.addEventListener("change", () => { actualizarPasosManual(); actualizarResumenConf(); });
+$("#selProgCentro")?.addEventListener("change", () => { actualizarPasosProg(); cargarCupoProg(true); });
+$("#selCentroPrueba")?.addEventListener("change", actualizarEstadoBotonPrueba);
+
 const listaEl = $("#listaPlantillas");
 const cargandoPlantillasEl = $("#cargandoPlantillas");
 const cargandoPlantillasTextoEl = $("#cargandoPlantillasTexto");
@@ -670,24 +717,26 @@ function actualizarPasosProg() {
   const btn = document.getElementById("btnProgramar");
   const paso1 = !!p;
   const paso2 = paso1 && selA && !!selA.value;
-  const paso3Listo = !!(paso2 && inpF && fechaProgValida(inpF.value));
+  const pasoCentro = !!(paso2 && centroElegido("#selProgCentro"));
+  const paso3Listo = !!(pasoCentro && inpF && fechaProgValida(inpF.value));
   const paso4Listo = !!(paso3Listo && limiteProgElegido());
-  for (const [id, listo] of [["pasoProg1", paso1], ["pasoProg2", paso2], ["pasoProg3", paso3Listo], ["pasoProg4", paso4Listo]]) {
+  for (const [id, listo] of [["pasoProg1", paso1], ["pasoProg2", paso2], ["pasoProgCentro", pasoCentro], ["pasoProg3", paso3Listo], ["pasoProg4", paso4Listo]]) {
     const el = document.getElementById(id);
     if (el) el.classList.toggle("prog-paso--listo", !!listo);
   }
   if (selA) selA.disabled = !paso1;
-  if (inpF) inpF.disabled = !paso2;
+  $("#selProgCentro").disabled = !paso2 || progCreando;
+  if (inpF) inpF.disabled = !pasoCentro;
   const btnDia = document.getElementById("btnProgDia");
   const btnHora = document.getElementById("btnProgHora");
   const inpHora = document.getElementById("inpProgHora");
-  if (btnDia) btnDia.disabled = !paso2;
-  if (btnHora) btnHora.disabled = !paso2 || !diaProgSeleccionado;
-  if (inpHora) inpHora.disabled = !paso2 || !diaProgSeleccionado;
+  if (btnDia) btnDia.disabled = !pasoCentro;
+  if (btnHora) btnHora.disabled = !pasoCentro || !diaProgSeleccionado;
+  if (inpHora) inpHora.disabled = !pasoCentro || !diaProgSeleccionado;
   const fechaError = document.getElementById("progFechaError");
-  if (fechaError) fechaError.hidden = !inpF?.value || paso3Listo || !paso2;
-  if (!paso2) cerrarCalendarioProg();
-  if (!paso2 || !diaProgSeleccionado) cerrarSelectorHoraProg();
+  if (fechaError) fechaError.hidden = !inpF?.value || paso3Listo || !pasoCentro;
+  if (!pasoCentro) cerrarCalendarioProg();
+  if (!pasoCentro || !diaProgSeleccionado) cerrarSelectorHoraProg();
   if (selModo) selModo.disabled = !paso3Listo || progSinCupo;
   const modo = selModo?.value || "";
   if (inpPorcentaje) inpPorcentaje.disabled = !paso3Listo || modo !== "porcentaje" || progSinCupo;
@@ -701,7 +750,7 @@ function actualizarCostoProg() {
   const cantidad = limiteProgElegido() ? Number($("#inpProgLimite").value) : null;
   const base = $("#selProgBase")?.value || "";
   const fecha = $("#inpProgFecha")?.value.slice(0, 10) || "";
-  const costo = base && fecha && progCupoKey === `${base}|${fecha}|${tplSelId || ""}`
+  const costo = base && fecha && progCupoKey === `${base}|${fecha}|${tplSelId || ""}|${$("#selProgCentro")?.value || ""}`
     ? progCupo?.costo : null;
   pintarCostoEstimado(
     "filaCostoProg", "progCosto", "progCostoDetalle", costo, modo, cantidad
@@ -824,7 +873,7 @@ function ejemplosPreview() {
 
 function actualizarEstadoBotonPrueba() {
   btnEnviarPrueba.disabled = enviandoPrueba || !puedeEnviarPrueba || !activaId ||
-    !selNumeroPrueba.value || hayCambios() || subiendoEncabezado;
+    !selNumeroPrueba.value || !centroElegido("#selCentroPrueba") || hayCambios() || subiendoEncabezado;
 }
 
 function mostrarValidaciones(errores, avisos) {
@@ -929,14 +978,15 @@ btnEnviarPrueba.addEventListener("click", async () => {
     return toast("Corrige la vista previa y guarda la plantilla antes de probarla.", "error");
   }
   const telefono = selNumeroPrueba.value;
-  if (!telefono || !confirm(`¿Enviar una sola prueba de «${inpNombre.value}» a ${telefono}?`)) return;
+  const centro = centroElegido("#selCentroPrueba");
+  if (!telefono || !centro || !confirm(`¿Enviar una sola prueba de «${inpNombre.value}» desde ${centro.nombre} (${centro.phoneNumber}) a ${telefono}?`)) return;
   enviandoPrueba = true;
   estadoEnvioPrueba.textContent = "Enviando prueba a Meta…";
   actualizarEstadoBotonPrueba();
   try {
     const res = await fetch(`${API_URL}/${activaId}/prueba`, {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ telefono, ejemplos: ejemplosPreview() }),
+      body: JSON.stringify({ telefono, centro: centro.codigo, ejemplos: ejemplosPreview() }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.detail || `Error ${res.status}`);
@@ -2046,7 +2096,7 @@ let consultaManualConf = 0;
 
 // Solo se bloquean los controles de envío de la card: el resto (tabs, lista,
 // programar, otras bases) sigue usable para lanzar otro envío en paralelo.
-const CONTROLES_ENVIO_CONF = ["btnLanzarConf", "selBaseConf", "selLimiteModoConf", "limiteRangeConf", "limiteNumConf"];
+const CONTROLES_ENVIO_CONF = ["btnLanzarConf", "selBaseConf", "selCentroConf", "selLimiteModoConf", "limiteRangeConf", "limiteNumConf"];
 function setBloqueoEnvioConf(bloquear) {
   envioEnCursoConf = bloquear;
   actualizarBotonPausaConf();
@@ -2194,6 +2244,7 @@ function resetearCardEnvio() {
   disponiblesMetaManualConf = null;
   tarifaCostoManualConf = null;
   $("#selLimiteModoConf").value = "";
+  $("#selCentroConf").value = "";
   $("#limiteNumConf").value = "";
   modoVacia();
   guardarSelTpl();
@@ -2305,14 +2356,16 @@ function actualizarPasosManual() {
   const modo = $("#selLimiteModoConf")?.value || "";
   const listo1 = !!plantilla;
   const listo2 = listo1 && !!base;
-  const puedeElegirLimite = listo2 && maxManualConf > 0;
+  const listoCentro = !!(listo2 && centroElegido("#selCentroConf"));
+  const puedeElegirLimite = listoCentro && maxManualConf > 0;
   const listo3 = puedeElegirLimite && limiteEnvioConf() != null;
-  for (const [id, listo] of [["pasoManual1", listo1], ["pasoManual2", listo2], ["filaLimiteConf", listo3]]) {
+  for (const [id, listo] of [["pasoManual1", listo1], ["pasoManual2", listo2], ["pasoManualCentro", listoCentro], ["filaLimiteConf", listo3]]) {
     const paso = document.getElementById(id);
     if (paso) paso.classList.toggle("prog-paso--listo", listo);
   }
   const selBase = $("#selBaseConf");
   if (selBase) selBase.disabled = !listo1 || envioEnCursoConf;
+  $("#selCentroConf").disabled = !listo2 || envioEnCursoConf;
   $("#selLimiteModoConf").disabled = !puedeElegirLimite || envioEnCursoConf;
   $("#limiteRangeConf").disabled = !puedeElegirLimite || modo !== "porcentaje" || envioEnCursoConf;
   $("#limiteNumConf").disabled = !puedeElegirLimite || modo !== "cantidad" || envioEnCursoConf;
@@ -2460,6 +2513,7 @@ async function actualizarResumenConf() {
   try {
     const espId = areaEnvioId();
     const cuerpoEnvio = { plantilla_id: confPlantillaId, ambiente: ambienteEnvioConf() };
+    cuerpoEnvio.centro = $("#selCentroConf")?.value || null;
     if (espId != null) cuerpoEnvio.area_id = espId;
     const res = await fetch("api/notificaciones/destinatarios", {
       method: "POST",
@@ -2613,11 +2667,13 @@ $("#btnLanzarConf").addEventListener("click", () => {
   const nombre = $("#confNombre").textContent || "plantilla";
   const dest = limiteEnvioConf();
   if (dest == null) return;
+  const centro = centroElegido("#selCentroConf");
+  if (!centro) { toast("Selecciona un centro emisor configurado.", "error"); return; }
   const baseEl = $("#selBaseConf");
   const base = baseEl && baseEl.selectedOptions.length
     ? baseEl.selectedOptions[0].textContent : "";
   $("#mensajeIniciarConf").textContent =
-    `¿Iniciar el envío de "${nombre}" para hasta ${dest} paciente(s)${base ? ` de ${base}` : ""}?`;
+    `¿Iniciar el envío de "${nombre}" para hasta ${dest} paciente(s)${base ? ` de ${base}` : ""} desde ${centro.nombre} (${centro.phoneNumber})?`;
   $("#modalIniciarConf").hidden = false;
 });
 $("#btnNoIniciarConf").addEventListener("click", () => {
@@ -2652,7 +2708,9 @@ $("#btnConfirmarIniciarConf").addEventListener("click", async () => {
 
   try {
     if (!confPlantillaId) throw new Error("Elige una plantilla primero.");
-    const cuerpo = { plantilla_id: confPlantillaId, ambiente: ambienteEnvioConf() };
+    const centro = centroElegido("#selCentroConf");
+    if (!centro) throw new Error("Selecciona un centro emisor configurado.");
+    const cuerpo = { plantilla_id: confPlantillaId, ambiente: ambienteEnvioConf(), centro: centro.codigo };
     const espIdLanzar = areaEnvioId();
     if (espIdLanzar != null) cuerpo.area_id = espIdLanzar;
     cuerpo.limite = limiteSeleccionado;
@@ -3250,7 +3308,7 @@ async function cargarCupoProg(forzar = false) {
   const areaId = base.startsWith("esp:") ? Number(base.slice(4)) : "";
   const ambiente = areaId ? "produccion" : base;
   const fecha = $("#inpProgFecha")?.value.slice(0, 10) || "";
-  const key = `${base}|${fecha}|${tplSelId || ""}`;
+  const key = `${base}|${fecha}|${tplSelId || ""}|${$("#selProgCentro")?.value || ""}`;
   if (!forzar && key === progCupoKey) { aplicarCupoProg(); return; }
   const consulta = ++progCupoConsulta;
   progCupoKey = key;
@@ -3260,6 +3318,7 @@ async function cargarCupoProg(forzar = false) {
   if (!base) return;
   try {
     const cuerpo = { ambiente, prevision_programado: true };
+    cuerpo.centro = $("#selProgCentro")?.value || null;
     if (areaId) cuerpo.area_id = areaId;
     if (fecha) cuerpo.fecha = fecha;
     if (tplSelId) cuerpo.plantilla_id = tplSelId;
@@ -3731,6 +3790,8 @@ function progItemHtml(p) {
     `<span>${escaparHtml(p.plantilla || "-")} · Base: ${etiquetaBase}</span>${fechaProg}</div>` +
     `<div class="prog-item__meta">` +
     (p.creado ? `Creado ${escaparHtml(p.creado)}` : "") +
+    ` · Emisor: ${escaparHtml(p.centro || "Emisor histórico no identificado")}` +
+    (p.numero_emisor ? ` (${escaparHtml(p.numero_emisor)})` : "") +
     (p.limite ? ` · límite ${p.limite}` : "") +
     (p.creador_nombre ? ` · por ${escaparHtml(p.creador_nombre)}` : "") + decided + `</div>` +
     motivo + costo + listaDest +
@@ -3812,6 +3873,8 @@ async function programarEnvio() {
   const ambiente = areaId != null ? "produccion" : base;
   const tpl = (plantillas || []).find((x) => x.id === tplSelId);
   if (!base) { toast("Elige la base de datos.", "error"); return; }
+  const centro = centroElegido("#selProgCentro");
+  if (!centro) { toast("Selecciona un centro emisor configurado.", "error"); return; }
   if (!tpl) { toast("Elige una plantilla de la lista de la izquierda.", "error"); return; }
   if (!inpF || !inpF.value) { toast("Elige fecha y hora.", "error"); return; }
   if (!fechaProgValida(inpF.value)) {
@@ -3832,7 +3895,7 @@ async function programarEnvio() {
     const res = await fetch("api/notificaciones/programados", {
       method: "POST",
       headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ ambiente, ...(areaId != null ? { area_id: areaId } : {}), plantilla_id: tpl.id, programado_para: inpF.value, limite }),
+      body: JSON.stringify({ ambiente, ...(areaId != null ? { area_id: areaId } : {}), plantilla_id: tpl.id, centro: centro.codigo, programado_para: inpF.value, limite }),
     });
     const data = await res.json().catch(() => ({}));
     if (res.status === 401) { window.snwSesionExpirada(); return; }

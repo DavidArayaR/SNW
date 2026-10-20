@@ -1,5 +1,6 @@
 ﻿import asyncio
 import datetime
+import contextvars
 import csv as _csv
 import hashlib
 import math
@@ -45,6 +46,8 @@ from db import (
     auditoria_registrar, auditoria_listar,
 )
 from motor_envio import obtener_canal
+from whatsapp_channels import (CENTROS, claves_centro, listar_canales, resolver_centro,
+                               resolver_phone_id, emisor_webhook_actual)
 import whatsapp_service
 from plantilla_media import (MAX_MEDIA_BYTES, descargar_media_meta, guardar_media,
                             guardar_media_importada, obtener_media, ruta_media)
@@ -2325,6 +2328,47 @@ def _cc_datos_envio(pac: dict, ambiente: str, consulta: str = "") -> tuple[str, 
     return texto, datos, numero
 
 
+def _emisor_para_respuesta(telefono: str, tabla: str | None = None) -> dict | None:
+    """Emisor del webhook o del último envío al paciente, nunca el global."""
+    actual = emisor_webhook_actual()
+    if actual:
+        vigente = resolver_phone_id(actual.get("phoneNumberId"))
+        return vigente if vigente and vigente["configured"] else None
+    try:
+        with conectar() as conn, conn.cursor() as cur:
+            sql = ("SELECT wa_phone_id FROM log_envios WHERE numero_telefono = %s"
+                   " AND wa_phone_id IS NOT NULL")
+            args = [telefono]
+            if tabla:
+                sql += " AND tabla_pacientes = %s"
+                args.append(tabla)
+            cur.execute(sql + " ORDER BY id DESC LIMIT 1", tuple(args))
+            fila = cur.fetchone() or {}
+        canal = resolver_phone_id(fila.get("wa_phone_id"))
+        return canal if canal and canal["configured"] else None
+    except Exception as exc:
+        log_error("_emisor_para_respuesta", exc)
+        return None
+
+
+def _tabla_ultimo_envio_emisor(telefono: str) -> str | None:
+    emisor = emisor_webhook_actual()
+    if not emisor:
+        return None
+    try:
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT COALESCE(l.tabla_pacientes, e.base_datos) AS tabla_pacientes"
+                " FROM log_envios l JOIN envios e ON e.id = l.envio_id"
+                " WHERE l.wa_phone_id = %s AND l.numero_telefono = %s"
+                " ORDER BY l.id DESC LIMIT 1", (emisor["phoneNumberId"], telefono),
+            )
+            return (cur.fetchone() or {}).get("tabla_pacientes")
+    except Exception as exc:
+        log_error("_tabla_ultimo_envio_emisor", exc)
+        return None
+
+
 def _despachar_call_center(pac: dict, ambiente: str, tabla: str | None = None,
                            consulta: str = "") -> dict:
     """Envía el mensaje fijo de call center a un paciente y lo registra en el
@@ -2350,7 +2394,10 @@ def _despachar_call_center(pac: dict, ambiente: str, tabla: str | None = None,
         _esp_cc = servicio_areas.area_por_tabla(tabla)
         esp_id = _esp_cc["id"] if _esp_cc else None
 
-    canal = obtener_canal(cfg)
+    emisor = _emisor_para_respuesta(telefono, tabla or tabla_pacientes(ambiente))
+    if cfg.get("metodo_envio") == "api_oficial" and not emisor:
+        return {"ok": False, "error": "No se pudo identificar el número emisor", "telefono": telefono}
+    canal = obtener_canal(cfg, (emisor or {}).get("phoneNumberId"))
     try:
         resultado = canal.enviar(telefono, texto, plantilla=datos_plantilla)
     except Exception as e:
@@ -2368,7 +2415,7 @@ def _despachar_call_center(pac: dict, ambiente: str, tabla: str | None = None,
     registrar_historial(pac.get("id"), nombre, telefono, CALL_CENTER_CLAVE, texto,
                         "enviado" if ok else "error", error, ambiente=ambiente,
                         whatsapp_message_id=message_id,
-                        area_id=esp_id, tabla_pacientes=tabla)
+                        area_id=esp_id, tabla_pacientes=tabla, emisor=emisor)
     if numero_cc:
         cta = datos_plantilla.get("cta") or {}
         vista = {"texto": texto, "boton_texto": cta.get("texto") or "",
@@ -2417,6 +2464,10 @@ def _enviar_call_center_auto(tel: str, mensaje_prueba_id: str | None = None) -> 
         objetivos = [("produccion", None), ("desarrollo", None)]
         for _e in servicio_areas.listar_tablas_areas():
             objetivos.append(("produccion", _e["nombre_tabla_base"]))
+        tabla_origen = _tabla_ultimo_envio_emisor(tel)
+        if tabla_origen:
+            objetivos = [(amb, tabla) for amb, tabla in objetivos
+                         if (tabla or tabla_pacientes(amb)) == tabla_origen]
         for amb, t_esp in objetivos:
             try:
                 t = t_esp or tabla_pacientes(amb)
@@ -2460,8 +2511,7 @@ def _enviar_call_center_auto(tel: str, mensaje_prueba_id: str | None = None) -> 
                 res = _despachar_call_center(pac, amb, tabla=t_esp)
                 if res.get("ok"):
                     print("[CALL-CENTER auto] respuesta enviada", flush=True)
-                    if prueba_por_mensaje:
-                        return  # Un único aviso por mensaje, aunque esté en varias bases.
+                    return  # Una sola respuesta por mensaje y centro, aunque esté en varias bases.
                 else:
                     log_error(f"_enviar_call_center_auto({t}): {res.get('error')}")
             except Exception as e:
@@ -2497,8 +2547,9 @@ def _programar_call_center_auto(telefono: str, mensaje_id: str | None = None) ->
         if clave_pendiente in _cc_auto_pendientes:
             return
         _cc_auto_pendientes.add(clave_pendiente)
-    timer = threading.Timer(CALL_CENTER_AUTO_SEGUNDOS, _enviar_call_center_auto,
-                            args=(tel, mensaje_id if prueba else None))
+    contexto = contextvars.copy_context()
+    timer = threading.Timer(CALL_CENTER_AUTO_SEGUNDOS, contexto.run,
+                            args=(_enviar_call_center_auto, tel, mensaje_id if prueba else None))
     timer.daemon = True
     timer.start()
 
@@ -2555,6 +2606,10 @@ def _registrar_derivacion_consulta(telefono: str, texto: str, mensaje_id: str,
     tel = normalizar_telefono(telefono) or telefono
     if esta_suprimido(tel):
         return "suprimida"
+    # Una consulta entrante directa también debe quedar pendiente para el CRM,
+    # incluso si el teléfono todavía no figura en ninguna base de pacientes.
+    _encolar_derivacion_crm(tel, texto, mensaje_id, motivos)
+    emisor = emisor_webhook_actual()
     nueva = False
     with conectar() as conn, conn.cursor() as cur:
         cur.execute("SELECT derivacion_id FROM call_center_derivacion_mensajes"
@@ -2567,8 +2622,9 @@ def _registrar_derivacion_consulta(telefono: str, texto: str, mensaje_id: str,
             cur.execute(
                 "SELECT id, estado FROM call_center_derivaciones"
                 " WHERE telefono = %s AND estado IN ('pendiente','notificado','error')"
+                " AND centro_codigo <=> %s"
                 " AND creado >= NOW() - INTERVAL 30 MINUTE"
-                " ORDER BY id DESC LIMIT 1 FOR UPDATE", (tel,))
+                " ORDER BY id DESC LIMIT 1 FOR UPDATE", (tel, (emisor or {}).get("codigo")))
             anterior = cur.fetchone()
         if anterior:
             derivacion_id = anterior["id"]
@@ -2580,14 +2636,16 @@ def _registrar_derivacion_consulta(telefono: str, texto: str, mensaje_id: str,
             pacientes = WhatsAppService()._pacientes_con_tel(cur, tel)
             if not pacientes:
                 return "sin_paciente"
-            pac = next((p for p in pacientes if p["tabla"] not in
+            tabla_origen = _tabla_ultimo_envio_emisor(tel) if emisor else None
+            pac = next((p for p in pacientes if p["tabla"] == tabla_origen), None) or next((p for p in pacientes if p["tabla"] not in
                         (tabla_pacientes("desarrollo"), tabla_pacientes("produccion"))),
                        pacientes[-1])
             cur.execute(
                 "INSERT INTO call_center_derivaciones"
-                " (telefono, mensaje_original, motivos, base_datos, paciente_id)"
-                " VALUES (%s, %s, %s, %s, %s)",
-                (tel, texto[:2000], ",".join(motivos), pac["tabla"], pac["id"]))
+                " (telefono, mensaje_original, motivos, base_datos, paciente_id, centro_codigo, wa_phone_id)"
+                " VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                (tel, texto[:2000], ",".join(motivos), pac["tabla"], pac["id"],
+                 (emisor or {}).get("codigo"), (emisor or {}).get("phoneNumberId")))
             derivacion_id = cur.lastrowid
             nueva = True
         cur.execute("INSERT INTO call_center_derivacion_mensajes"
@@ -2595,13 +2653,35 @@ def _registrar_derivacion_consulta(telefono: str, texto: str, mensaje_id: str,
                     (mensaje_id[:255], derivacion_id))
         conn.commit()
     if nueva:
-        timer = threading.Timer(0, _enviar_derivacion_consulta, args=(derivacion_id,))
+        contexto = contextvars.copy_context()
+        timer = threading.Timer(0, contexto.run, args=(_enviar_derivacion_consulta, derivacion_id))
         timer.daemon = True
         timer.start()
     return "nueva" if nueva else "reutilizada"
 
 
+def _encolar_derivacion_crm(telefono: str, texto: str, mensaje_id: str,
+                           motivos: tuple[str, ...]) -> None:
+    """Registra la derivación; no envía datos fuera de SNW sin contrato CRM."""
+    emisor = emisor_webhook_actual()
+    if not emisor or not emisor.get("phoneNumberId"):
+        return
+    try:
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT IGNORE INTO crm_derivaciones_pendientes"
+                " (mensaje_id, telefono, mensaje, motivos, centro_codigo, wa_phone_id, numero_emisor)"
+                " VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                (mensaje_id[:255], telefono, texto[:2000], ",".join(motivos),
+                 emisor["codigo"], emisor["phoneNumberId"], emisor["phoneNumber"]),
+            )
+            conn.commit()
+    except Exception as exc:
+        log_error("_encolar_derivacion_crm", exc)
+
+
 whatsapp_service.al_detectar_consulta = _registrar_derivacion_consulta
+whatsapp_service.al_derivar_crm = _encolar_derivacion_crm
 
 
 _MENSAJE_BAJA_DESPEDIDA = (
@@ -2708,7 +2788,10 @@ def _enviar_mensaje_directo(telefono_evento: str, texto: str, clave_log: str,
             if entorno_valido(amb) == "desarrollo" and tel not in set(cfg.get("numeros_autorizados", [])):
                 continue
             nombre = " ".join(x for x in [pac.get("nombre"), pac.get("apellido")] if x)
-            canal = obtener_canal(cfg)
+            emisor = _emisor_para_respuesta(tel, t)
+            if cfg.get("metodo_envio") == "api_oficial" and not emisor:
+                return False
+            canal = obtener_canal(cfg, (emisor or {}).get("phoneNumberId"))
             try:
                 resultado = (canal.enviar(tel, texto, plantilla=plantilla) if plantilla
                              else canal.enviar(tel, texto))
@@ -2725,7 +2808,7 @@ def _enviar_mensaje_directo(telefono_evento: str, texto: str, clave_log: str,
             registrar_historial(pac.get("id"), nombre, tel, clave_log, texto,
                                 "enviado" if ok else "error", error, ambiente=amb,
                                 whatsapp_message_id=message_id,
-                                area_id=area_id, tabla_pacientes=t)
+                                area_id=area_id, tabla_pacientes=t, emisor=emisor)
             return bool(ok and canal.nombre == "api_oficial")
         except Exception as e:
             log_error(f"_enviar_mensaje_directo({amb}, {t})", e)
@@ -2783,7 +2866,8 @@ def _programar_aviso(fn, telefono: str) -> None:
     por dentro, que no se puede anidar en un loop ya corriendo. Igual que el
     auto-envío de call center (_programar_call_center_auto), se despacha en
     un hilo aparte para salir del event loop."""
-    timer = threading.Timer(0, fn, args=(telefono,))
+    contexto = contextvars.copy_context()
+    timer = threading.Timer(0, contexto.run, args=(fn, telefono))
     timer.daemon = True
     timer.start()
 
@@ -3519,12 +3603,14 @@ def enviar_prueba_plantilla(plantilla_id: int, body: PruebaPlantillaIn,
         raise HTTPException(403, detail="Elige un número de prueba autorizado en Configuración.")
     if (config_get("metodo_envio") or "").strip() != "api_oficial":
         raise HTTPException(400, detail="Activa api_oficial para enviar una prueba real.")
-    if not WhatsAppService().configurada():
-        raise HTTPException(400, detail="Configura el token y el Phone number ID de Meta antes de probar.")
+    emisor = _exigir_centro_envio(body.centro)
+    servicio_wa = WhatsAppService(phone_number_id=emisor["phoneNumberId"])
+    if not servicio_wa.configurada():
+        raise HTTPException(400, detail="Configura el token y el número emisor de Meta antes de probar.")
     vista = presentar_plantilla(plantilla, body.ejemplos)
     if vista["errores"]:
         raise HTTPException(400, detail=" ".join(vista["errores"]))
-    llave = (plantilla_id, telefono)
+    llave = (plantilla_id, telefono, emisor["codigo"])
     with _pruebas_plantilla_lock:
         if llave in _pruebas_plantilla_en_curso:
             raise HTTPException(429, detail="Ya hay una prueba en curso para este número. Espera a que termine.")
@@ -3538,7 +3624,7 @@ def enviar_prueba_plantilla(plantilla_id: int, body: PruebaPlantillaIn,
             )
         _pruebas_plantilla_en_curso.add(llave)
     try:
-        ok, message_id, error, _ = asyncio.run(WhatsAppService().enviar(
+        ok, message_id, error, _ = asyncio.run(servicio_wa.enviar(
             telefono, vista["cuerpo"], plantilla=plantilla,
             variables=vista["ejemplos"], es_prueba=True))
         if not ok:
@@ -3551,7 +3637,7 @@ def enviar_prueba_plantilla(plantilla_id: int, body: PruebaPlantillaIn,
                                 plantilla.get("clave", ""), "Prueba unitaria aceptada por Meta")
         except Exception as exc:
             log_error(f"Prueba de plantilla {plantilla_id}: no se pudo auditar", exc)
-        return {"ok": True, "message_id": message_id,
+        return {"ok": True, "message_id": message_id, "centro": emisor["codigo"],
                 "mensaje": "Meta aceptó la prueba. Confirma su recepción en el teléfono."}
     except HTTPException:
         raise
@@ -4211,7 +4297,6 @@ _CONFIG_SECCIONES = [
         "id": "whatsapp", "titulo": "WhatsApp · Meta Cloud API", "icono": "fa-whatsapp", "marca": True,
         "campos": [
             {"clave": "wa_token", "etiqueta": "Access token", "tipo": "password"},
-            {"clave": "wa_phone_id", "etiqueta": "Phone number ID", "tipo": "text"},
             {"clave": "wa_business_account_id", "etiqueta": "WhatsApp Business Account ID (WABA)", "tipo": "text"},
             {"clave": "wa_app_id", "etiqueta": "App ID de Meta", "tipo": "text",
              "ayuda": "Necesario para registrar plantillas con imagen o GIF de encabezado."},
@@ -4303,6 +4388,18 @@ _CONFIG_ENUM = {
     "metodo_envio": ("simulado", "api_oficial"),
 }
 
+for _codigo, _nombre in CENTROS.items():
+    _numero, _identificador = claves_centro(_codigo)
+    _CONFIG_SECCIONES.append({
+        "id": f"centro_{_codigo.lower()}", "titulo": f"WhatsApp · {_nombre}",
+        "icono": "fa-whatsapp", "marca": True, "campos": [
+            {"clave": _numero, "etiqueta": "Número visible", "tipo": "text",
+             "ayuda": "Con código de país, sin espacios. Puede quedar vacío mientras se configura."},
+            {"clave": _identificador, "etiqueta": "Phone Number ID de Meta", "tipo": "text",
+             "ayuda": "Identificador numérico de este número en la WABA compartida."},
+        ],
+    })
+
 
 def _config_valores() -> dict:
     cfg = config_all()
@@ -4313,8 +4410,14 @@ def _config_valores() -> dict:
 def obtener_configuracion_completa(sesion: dict = Depends(solo_dev)):
     """Configuración completa, disponible solo para desarrolladores."""
     return {"secciones": _CONFIG_SECCIONES, "valores": _config_valores(),
+            "centros": listar_canales(),
             "groq_api_key_configurada": bool(config_get("groq_api_key")),
             "supresion": resumen_supresion()}
+
+
+def listar_centros_whatsapp(sesion: dict = Depends(sesion_actual)):
+    """Canales visibles para elegir emisor; nunca incluye el token compartido."""
+    return listar_canales()
 
 
 def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends(solo_dev)):
@@ -4366,9 +4469,16 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
                 raise HTTPException(422, detail="La clave de Groq es demasiado extensa.")
         cambios[clave] = v
 
+    if any(clave in cambios for codigo in CENTROS for clave in claves_centro(codigo)):
+        estado = {**config_all(), **cambios}
+        for canal in listar_canales(estado):
+            invalidos = [p for p in canal["problemas"] if "inválido" in p or "duplicado" in p]
+            if invalidos:
+                raise HTTPException(422, detail=f"{canal['nombre']}: {', '.join(invalidos)}")
+
     if cambios:
         config_set(cambios)
-    return {"valores": _config_valores(),
+    return {"valores": _config_valores(), "centros": listar_canales(),
             "groq_api_key_configurada": bool(config_get("groq_api_key"))}
 
 
@@ -4378,7 +4488,8 @@ def probar_api_wa(body: PruebaWAIn, sesion: dict = Depends(solo_dev)):
     if cfg["metodo_envio"] != "api_oficial":
         raise HTTPException(400, detail="El método de envío no está en 'api_oficial' (cámbialo en Configuración)")
 
-    canal = obtener_canal(cfg)
+    emisor = _exigir_centro_envio(body.centro)
+    canal = obtener_canal(cfg, emisor["phoneNumberId"])
     if canal is None or not canal.disponible():
         raise HTTPException(
             400,
@@ -4416,7 +4527,7 @@ def _limite_mensajeria_tier() -> int:
         return 0
 
 
-def _uso_mensajeria_24h() -> int:
+def _uso_mensajeria_24h(phone_id: str | None = None) -> int:
     """Usuarios ÚNICOS a los que el negocio escribió (mensajes iniciados por el
     negocio) en las últimas 24 h. Es lo que Meta cuenta para el messaging limit.
     `log_envios` es una tabla compartida, así que el conteo no depende del entorno."""
@@ -4428,8 +4539,9 @@ def _uso_mensajeria_24h() -> int:
                 "  FROM log_envios"
                 " WHERE estado_envio = 'enviado'"
                 "   AND fecha_hora >= (NOW() - INTERVAL 24 HOUR)"
-                "   AND COALESCE(plantilla_clave, '') NOT IN (" + marcadores + ")",
-                _CLAVES_NO_CUENTAN_LIMITE,
+                "   AND COALESCE(plantilla_clave, '') NOT IN (" + marcadores + ")"
+                + (" AND wa_phone_id = %s" if phone_id else ""),
+                (*_CLAVES_NO_CUENTAN_LIMITE, *((phone_id,) if phone_id else ())),
             )
             fila = cur.fetchone() or {}
             return int(fila.get("n") or 0)
@@ -4449,26 +4561,26 @@ def _estado_limite_mensajeria() -> dict:
     }
 
 
-def _limite_mensajeria_actual() -> dict | None:
+def _limite_mensajeria_actual(phone_id: str | None = None) -> dict | None:
     """Cupo de messaging limit de Meta (compartido por entorno). None si no hay
     límite configurado. `disponibles` = usuarios únicos que aún se pueden
     contactar dentro de la ventana de 24 h."""
     tier = _limite_mensajeria_tier()
     if not tier:
         return None
-    usados = _uso_mensajeria_24h()
+    usados = _uso_mensajeria_24h(phone_id)
     return {"tier": tier, "usados_24h": usados, "disponibles": max(0, tier - usados)}
 
 
-def _limite_mensajeria_info(amb: str) -> dict | None:
+def _limite_mensajeria_info(amb: str, phone_id: str | None = None) -> dict | None:
     """Info del cupo para APLICARLO (enforcement): solo producción con la API
     oficial. None en cualquier otro caso."""
     if amb != "produccion" or config_get("metodo_envio", "").strip() != "api_oficial":
         return None
-    return _limite_mensajeria_actual()
+    return _limite_mensajeria_actual(phone_id)
 
 
-def _limite_mensajeria_fecha(fecha: datetime.date) -> dict | None:
+def _limite_mensajeria_fecha(fecha: datetime.date, phone_id: str | None = None) -> dict | None:
     """Cupo de Meta previsto para una fecha: envíos realizados ese día más
     destinatarios únicos reservados en otros programados activos."""
     tier = _limite_mensajeria_tier()
@@ -4486,8 +4598,8 @@ def _limite_mensajeria_fecha(fecha: datetime.date) -> dict | None:
                 f"SELECT COUNT(DISTINCT {sent_tel}) AS n FROM log_envios "
                 "WHERE estado_envio = 'enviado' AND DATE(fecha_hora) = %s "
                 "AND COALESCE(plantilla_clave, '') NOT IN (" + marcadores + ") "
-                f"AND {sent_tel} <> ''",
-                (fecha, *_CLAVES_NO_CUENTAN_LIMITE),
+                f"AND {sent_tel} <> ''" + (" AND wa_phone_id = %s" if phone_id else ""),
+                (fecha, *_CLAVES_NO_CUENTAN_LIMITE, *((phone_id,) if phone_id else ())),
             )
             enviados = int((cur.fetchone() or {}).get("n") or 0)
             cur.execute(
@@ -4496,13 +4608,16 @@ def _limite_mensajeria_fecha(fecha: datetime.date) -> dict | None:
                 "JOIN envios_programados ep ON ep.id = pd.prog_id "
                 "WHERE DATE(ep.programado_para) = %s "
                 "AND ep.estado IN (%s, %s, %s) "
+                + ("AND ep.wa_phone_id = %s " if phone_id else "") +
                 f"AND {reserved_tel} <> '' "
                 f"AND NOT EXISTS (SELECT 1 FROM log_envios le WHERE le.estado_envio = 'enviado' "
                 "AND DATE(le.fecha_hora) = %s "
                 "AND COALESCE(le.plantilla_clave, '') NOT IN (" + marcadores + ") "
+                + ("AND le.wa_phone_id = %s " if phone_id else "") +
                 f"AND BINARY {normalizar_sql.format(campo='le.numero_telefono')} = "
                 f"BINARY {reserved_tel})",
-                (fecha, *estados, fecha, *_CLAVES_NO_CUENTAN_LIMITE),
+                (fecha, *estados, *((phone_id,) if phone_id else ()), fecha,
+                 *_CLAVES_NO_CUENTAN_LIMITE, *((phone_id,) if phone_id else ())),
             )
             reservados = int((cur.fetchone() or {}).get("n") or 0)
     except Exception as e:
@@ -4521,13 +4636,13 @@ def _limite_mensajeria_fecha(fecha: datetime.date) -> dict | None:
     }
 
 
-def _limite_mensajeria_aviso(amb: str) -> dict | None:
+def _limite_mensajeria_aviso(amb: str, phone_id: str | None = None) -> dict | None:
     """Info del cupo para MOSTRARLO. En producción se muestra siempre que aplique
     (API oficial); en desarrollo solo si el límite diario ya se alcanzó, para
     poder indicarlo sin bloquear el envío."""
     if config_get("metodo_envio", "").strip() != "api_oficial":
         return None
-    info = _limite_mensajeria_actual()
+    info = _limite_mensajeria_actual(phone_id)
     if not info:
         return None
     if amb == "desarrollo":
@@ -4876,7 +4991,7 @@ def actualizar_telefono(paciente_id: int, telefono: str, ambiente: str, tabla: s
 
 def registrar_historial(paciente_id, nombre, telefono, clave_plantilla, mensaje, estado, error=None,
                         ambiente="produccion", envio_id=None, whatsapp_message_id=None,
-                        area_id=None, tabla_pacientes=None) -> None:
+                        area_id=None, tabla_pacientes=None, emisor: dict | None = None) -> None:
     try:
         with conectar(ambiente) as conn, conn.cursor() as cur:
             cols = columnas_tabla("log_envios", ambiente)
@@ -4886,7 +5001,13 @@ def registrar_historial(paciente_id, nombre, telefono, clave_plantilla, mensaje,
                 extra_val = (area_id, tabla_pacientes)
             if "wa_phone_id" in cols:
                 extra_col += ", wa_phone_id"
-                extra_val += ((config_get("wa_phone_id") or "").strip() if whatsapp_message_id else None,)
+                extra_val += (emisor.get("phoneNumberId") if emisor and whatsapp_message_id else None,)
+            if "centro_codigo" in cols:
+                extra_col += ", centro_codigo"
+                extra_val += ((emisor or {}).get("codigo"),)
+            if "numero_emisor" in cols:
+                extra_col += ", numero_emisor"
+                extra_val += ((emisor or {}).get("phoneNumber"),)
             extra_placeholders = ", ".join("%s" for _ in extra_val)
             cur.execute(
                 "INSERT INTO log_envios (envio_id, paciente_id, nombre_paciente, numero_telefono, mensaje,"
@@ -4903,7 +5024,8 @@ def registrar_historial(paciente_id, nombre, telefono, clave_plantilla, mensaje,
 
 
 def crear_envio_batch(base_datos, plantilla_clave, plantilla_nombre, total, ambiente, usuario: str = "",
-                      area_id=None, tabla_pacientes=None, programado_id=None) -> int | None:
+                      area_id=None, tabla_pacientes=None, programado_id=None,
+                      emisor: dict | None = None) -> int | None:
     try:
         with conectar(ambiente) as conn, conn.cursor() as cur:
             cols = columnas_tabla("envios", ambiente)
@@ -4914,6 +5036,12 @@ def crear_envio_batch(base_datos, plantilla_clave, plantilla_nombre, total, ambi
             if "programado_id" in cols:
                 extra_col += ", programado_id"
                 extra_val += (programado_id,)
+            for columna, valor in (("centro_codigo", (emisor or {}).get("codigo")),
+                                   ("wa_phone_id", (emisor or {}).get("phoneNumberId")),
+                                   ("numero_emisor", (emisor or {}).get("phoneNumber"))):
+                if columna in cols:
+                    extra_col += f", {columna}"
+                    extra_val += (valor,)
             placeholders = ", ".join("%s" for _ in extra_val)
             cur.execute(
                 "INSERT INTO envios (base_datos, plantilla_clave, plantilla_nombre, total_pacientes, estado, usuario"
@@ -4964,6 +5092,32 @@ def procesar_job(job_id: str) -> None:
             job["detalle"] = f"Error interno del envío: {e}"
 
 
+def _exigir_centro_envio(codigo: str | None) -> dict:
+    if not codigo:
+        raise HTTPException(422, detail="Selecciona el centro y número de WhatsApp emisor.")
+    try:
+        canal = resolver_centro(codigo)
+    except ValueError:
+        raise HTTPException(422, detail="Centro emisor desconocido.")
+    if not canal["configured"]:
+        raise HTTPException(409, detail=f"{canal['nombre']}: {', '.join(canal['problemas'])}.")
+    if (config_get("metodo_envio") or "").strip() == "api_oficial":
+        if not (config_get("wa_token") or "").strip() or not (config_get("wa_business_account_id") or "").strip():
+            raise HTTPException(409, detail="Falta el token o la WABA compartida de Meta.")
+    return canal
+
+
+def _emisor_vigente(emisor: dict | None) -> bool:
+    if not emisor:
+        return False
+    try:
+        actual = resolver_centro(emisor.get("codigo"))
+    except ValueError:
+        return False
+    return bool(actual["configured"] and actual["phoneNumberId"] == emisor.get("phoneNumberId")
+                and actual["phoneNumber"] == emisor.get("phoneNumber"))
+
+
 def _paciente_habilitado_antes_de_enviar(paciente_id: int, telefono: str,
                                           ambiente: str, tabla: str) -> bool:
     """Revalida una cohorte congelada justo antes del envío (baja o borrado)."""
@@ -4984,7 +5138,13 @@ def _procesar_job(job_id: str) -> None:
     t_esp = job.get("tabla_area")
     esp_id = job.get("area_id")
     cfg = leer_config()
-    canal = obtener_canal(cfg)
+    emisor = job.get("emisor") or {}
+    if not _emisor_vigente(emisor):
+        job["estado"] = "error"
+        job["detalle"] = "El número emisor cambió o dejó de estar disponible. Revisa el centro antes de reintentar."
+        actualizar_envio_batch(job.get("envio_id"), amb, estado="error")
+        return
+    canal = obtener_canal(cfg, emisor.get("phoneNumberId"))
     clave = job.get("plantilla", {}).get("clave")
     plantilla_datos = job.get("plantilla")
     envio_id = job.get("envio_id")
@@ -4997,7 +5157,7 @@ def _procesar_job(job_id: str) -> None:
                                 d["mensaje"], "error",
                                 f"Canal no disponible: {canal.nombre if canal else 'desconocido'}",
                                 ambiente=amb, envio_id=envio_id,
-                                area_id=esp_id, tabla_pacientes=t_esp)
+                                area_id=esp_id, tabla_pacientes=t_esp, emisor=emisor)
         actualizar_envio_batch(envio_id, amb, fallidos=len(job["destinatarios"]))
         job["estado"] = "error"
         job["detalle"] = f"Canal de envío no disponible ({cfg.get('metodo_envio')})"
@@ -5015,7 +5175,7 @@ def _procesar_job(job_id: str) -> None:
             registrar_historial(d["id"], d["nombre"], d["telefono"], clave,
                                 d["mensaje"], "error", bloqueo_base,
                                 ambiente=amb, envio_id=envio_id,
-                                area_id=esp_id, tabla_pacientes=t_esp)
+                                area_id=esp_id, tabla_pacientes=t_esp, emisor=emisor)
         job["estado"] = "error"
         job["actual"] = ""
         job["detalle"] = bloqueo_base
@@ -5075,7 +5235,7 @@ def _procesar_job(job_id: str) -> None:
             registrar_historial(d["id"], d["nombre"], d["telefono"], clave,
                                 d["mensaje"], "error", bloqueo_numero,
                                 ambiente=amb, envio_id=envio_id,
-                                area_id=esp_id, tabla_pacientes=t_esp)
+                                area_id=esp_id, tabla_pacientes=t_esp, emisor=emisor)
             continue
 
         # La pausa también se respeta si llegó durante una espera de cuota o
@@ -5090,6 +5250,11 @@ def _procesar_job(job_id: str) -> None:
             actualizar_envio_batch(envio_id, amb, enviados=job["enviados"], fallidos=job["fallidos"], estado="cancelado")
             break
         job["estado"] = "en_proceso"
+        if not _emisor_vigente(emisor):
+            job["estado"] = "error"
+            job["detalle"] = "El número emisor cambió durante el envío. Se detuvo el lote."
+            actualizar_envio_batch(envio_id, amb, estado="error")
+            break
         try:
             resultado = canal.enviar(d["telefono"], d["mensaje"], plantilla=plantilla_datos, variables=d.get("variables"))
             # Unificar: (ok, message_id, error) o (ok, error) según el motor
@@ -5123,13 +5288,13 @@ def _procesar_job(job_id: str) -> None:
                             d["mensaje"], "enviado" if ok else "error", error,
                             ambiente=amb, envio_id=envio_id,
                             whatsapp_message_id=message_id,
-                            area_id=esp_id, tabla_pacientes=t_esp)
+                            area_id=esp_id, tabla_pacientes=t_esp, emisor=emisor)
 
         if i < total - 1 and intervalo > 0:
             time.sleep(intervalo)
 
     job["actual"] = ""
-    if job.get("estado") != "cancelado":
+    if job.get("estado") not in ("cancelado", "error"):
         job["estado"] = "completado"
         actualizar_envio_batch(envio_id, amb, enviados=job["enviados"], fallidos=job["fallidos"])
 
@@ -5138,6 +5303,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
                   sesion: dict = Depends(exigir("mensajeria"))):
     if not tiene_permiso(sesion, "envio_manual"):
         raise HTTPException(403, detail="No tienes permiso para crear envíos manuales.")
+    emisor = _exigir_centro_envio(body.centro)
     try:
         amb = entorno_valido(body.ambiente)
     except ValueError:
@@ -5326,7 +5492,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
     # cupo diario: si el lote es mayor que los usuarios que quedan disponibles,
     # se recorta (el resto queda pendiente para más adelante).
     aviso_limite = None
-    info_limite = _limite_mensajeria_info(amb)
+    info_limite = _limite_mensajeria_info(amb, emisor["phoneNumberId"])
     if info_limite:
         tier = info_limite["tier"]
         usados = info_limite["usados_24h"]
@@ -5354,7 +5520,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
                                          usuario=sesion.get("usuario", ""),
                                          area_id=(esp["id"] if esp else None),
                                          tabla_pacientes=t_esp,
-                                         programado_id=sesion.get("programado_id"))
+                                         programado_id=sesion.get("programado_id"), emisor=emisor)
             if envio_id:
                 actualizar_envio_batch(envio_id, amb, invalidos=len(rechazados))
                 for r in rechazados:
@@ -5375,8 +5541,9 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
                                      len(destinatarios) + len(rechazados), amb,
                                      usuario=sesion.get("usuario", ""),
                                      area_id=(esp["id"] if esp else None),
-                                     tabla_pacientes=t_esp)
+                                     tabla_pacientes=t_esp, emisor=emisor)
         PENDIENTES[token] = {
+            "emisor": emisor,
             "ambiente": amb,
             "base": base_job,
             "area_id": (esp["id"] if esp else None),
@@ -5433,7 +5600,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
                                  usuario=sesion.get("usuario", ""),
                                  area_id=(esp["id"] if esp else None),
                                  tabla_pacientes=t_esp,
-                                 programado_id=sesion.get("programado_id"))
+                                 programado_id=sesion.get("programado_id"), emisor=emisor)
     if envio_id:
         actualizar_envio_batch(envio_id, amb, invalidos=len(rechazados))
         for r in rechazados:
@@ -5452,6 +5619,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         if job_en_curso is not None:
             raise _error_envio_en_curso(job_en_curso)
         JOBS[job_id] = {
+            "emisor": emisor,
             "estado": "en_proceso",
             "total": len(destinatarios),
             "enviados": 0,
@@ -5567,6 +5735,8 @@ def confirmar_envio(token: str, background_tasks: BackgroundTasks):
         return HTMLResponse(f"<html><body style='font-family:Arial; text-align:center; padding:40px;'><h2>Este envío ya fue confirmado</h2><p>Job: {pend.get('job_id')}</p></body></html>")
     if pend["estado"] == "rechazado":
         return HTMLResponse("<html><body style='font-family:Arial; text-align:center; padding:40px;'><h2>Este envío ya fue rechazado</h2></body></html>")
+    if not _emisor_vigente(pend.get("emisor")):
+        return HTMLResponse("<html><body><h2>Envío bloqueado</h2><p>El número emisor cambió o dejó de estar disponible. Crea un nuevo envío.</p></body></html>", status_code=409)
     if pend["ambiente"] == "desarrollo" and pend.get("area_id") is None:
         cuenta = usuario_buscar((pend.get("usuario") or "").strip().lower()) or {}
         if cuenta.get("rol") not in ROLES_PRIVILEGIADOS:
@@ -5598,6 +5768,7 @@ def confirmar_envio(token: str, background_tasks: BackgroundTasks):
 """, status_code=409)
         pend["job_id"] = job_id
         JOBS[job_id] = {
+            "emisor": pend.get("emisor"),
             "estado": "en_proceso",
             "total": len(pend["destinatarios"]),
             "enviados": 0,
@@ -5635,6 +5806,7 @@ class DestinosIn(BaseModel):
     area_id: int | None = None
     fecha: str | None = None
     prevision_programado: bool = False
+    centro: str | None = None
 
 
 def _contar_elegibles_tabla(t: str, amb_q: str, amb: str) -> tuple[int, int]:
@@ -5698,13 +5870,17 @@ def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensaj
     aplica_limite_meta = (
         amb == "produccion" and config_get("metodo_envio", "").strip() == "api_oficial"
     )
-    info_limite = None if body.prevision_programado else _limite_mensajeria_aviso(amb)
+    emisor_preview = resolver_centro(body.centro) if body.centro in CENTROS else None
+    phone_id_preview = (emisor_preview or {}).get("phoneNumberId")
+    info_limite = (None if body.prevision_programado or not phone_id_preview
+                   else _limite_mensajeria_aviso(amb, phone_id_preview))
     if body.fecha:
         try:
             fecha_cupo = datetime.date.fromisoformat(body.fecha)
         except ValueError:
             raise HTTPException(422, detail="Fecha inválida para calcular el límite diario.")
-        info_fecha = _limite_mensajeria_fecha(fecha_cupo) if aplica_limite_meta else None
+        info_fecha = (_limite_mensajeria_fecha(fecha_cupo, phone_id_preview)
+                      if aplica_limite_meta and phone_id_preview else None)
         if info_fecha is not None:
             info_limite = info_fecha
 
@@ -5781,6 +5957,9 @@ def envios_en_progreso(sesion: dict = Depends(exigir("mensajeria"))):
         pc = _prog_a_respuesta(f, sesion)
         items.append({
             "origen": "programado", "id": f["id"], "job_id": f.get("job_id") or "",
+            "centro_codigo": f.get("centro_codigo"),
+            "centro": CENTROS.get(f.get("centro_codigo"), "Emisor histórico no identificado"),
+            "numero_emisor": f.get("numero_emisor"),
             "puede_cancelar": pc["puede_cancelar"],
             "puede_pausar": bool(vivo and _puede_controlar_job(sesion, vivo)),
             "plantilla": f.get("plantilla_nombre") or "", "estado": estado,
@@ -5806,6 +5985,9 @@ def envios_en_progreso(sesion: dict = Depends(exigir("mensajeria"))):
             continue
         items.append({
             "origen": "manual", "id": None, "job_id": job_id,
+            "centro_codigo": (job.get("emisor") or {}).get("codigo"),
+            "centro": (job.get("emisor") or {}).get("nombre") or "Emisor histórico no identificado",
+            "numero_emisor": (job.get("emisor") or {}).get("phoneNumber"),
             "puede_cancelar": _puede_controlar_job(sesion, job),
             "puede_pausar": _puede_controlar_job(sesion, job),
             "plantilla": (job.get("plantilla") or {}).get("nombre") or "",
@@ -5894,6 +6076,7 @@ class ProgCrearIn(BaseModel):
     plantilla_id: int
     programado_para: str  # "YYYY-MM-DDTHH:MM" (hora del servidor)
     limite: int
+    centro: str | None = None
 
 
 # --- Destinatarios preelegidos de cada programado ---------------------------
@@ -6083,6 +6266,9 @@ def _prog_a_respuesta(f: dict, sesion: dict, preelegidos: int | None = None) -> 
                                      elegibles=preelegidos)
     return {
         "id": f["id"], "area_id": f.get("area_id"),
+        "centro_codigo": f.get("centro_codigo"),
+        "centro": CENTROS.get(f.get("centro_codigo"), "Emisor histórico no identificado"),
+        "numero_emisor": f.get("numero_emisor"),
         "area": (esp.get("nombre_visible") if esp else ""),
         "tabla": f.get("tabla") or "", "ambiente": f.get("ambiente") or "produccion",
         "plantilla_id": f.get("plantilla_id"), "plantilla": f.get("plantilla_nombre") or "",
@@ -6155,6 +6341,7 @@ def _correos_supervisores_decisores(area_id: int) -> list[str]:
 def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeria"))):
     if not tiene_permiso(sesion, "envio_programado"):
         raise HTTPException(403, detail="No tienes permiso para crear envíos programados.")
+    emisor = _exigir_centro_envio(body.centro)
     try:
         cuando = datetime.datetime.strptime((body.programado_para or "").strip(), "%Y-%m-%dT%H:%M")
     except ValueError:
@@ -6201,7 +6388,7 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
                           else "pacientes pendientes")
     info_limite = None
     if amb == "produccion" and config_get("metodo_envio", "").strip() == "api_oficial":
-        info_limite = _limite_mensajeria_fecha(cuando.date())
+        info_limite = _limite_mensajeria_fecha(cuando.date(), emisor["phoneNumberId"])
     if info_limite and info_limite["disponibles"] <= 0:
         raise HTTPException(429, detail=(
             f"Límite diario de WhatsApp alcanzado para {cuando:%d/%m/%Y}: "
@@ -6280,11 +6467,13 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
                 f"se complete."))
         cur.execute(
             "INSERT INTO envios_programados (area_id, tabla, ambiente, plantilla_id, plantilla_nombre,"
-            " limite, programado_para, estado, creador, creador_nombre, decidido_por, token)"
-            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            " limite, programado_para, estado, creador, creador_nombre, decidido_por, token,"
+            " centro_codigo, wa_phone_id, numero_emisor)"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
             (esp["id"] if esp else None, tabla, amb, plantilla["id"], plantilla.get("nombre") or "",
              limite, cuando.strftime("%Y-%m-%d %H:%M"), estado, creador,
-             (sesion.get("nombre") or "Usuario"), (creador if directo else ""), token),
+             (sesion.get("nombre") or "Usuario"), (creador if directo else ""), token,
+             emisor["codigo"], emisor["phoneNumberId"], emisor["phoneNumber"]),
         )
         prog_id = cur.lastrowid
         cur.executemany(
@@ -6696,6 +6885,14 @@ def _ejecutar_programado(f: dict) -> None:
     administrador, pero el envío queda atribuido a quien lo programó."""
     from schemas import EnvioIn
 
+    emisor = {"codigo": f.get("centro_codigo"), "phoneNumberId": f.get("wa_phone_id"),
+              "phoneNumber": f.get("numero_emisor")}
+    if not _emisor_vigente(emisor):
+        motivo = "El número emisor cambió o dejó de estar configurado. Reprograma y confirma el emisor."
+        _marcar_prog(f["id"], "error", motivo)
+        _avisar_creador_prog(f, motivo)
+        return
+
     amb_prog = f.get("ambiente") or "produccion"
     if _prog_es_base_desarrollo(f):
         cuenta = usuario_buscar((f.get("creador") or "").strip().lower()) or {}
@@ -6720,7 +6917,7 @@ def _ejecutar_programado(f: dict) -> None:
         return
     # Si ese día no queda cupo de Meta, no se manda nada: se avisa al creador
     # con cuántos hay disponibles y queda con el motivo a la vista.
-    info_limite = _limite_mensajeria_info(amb_prog)
+    info_limite = _limite_mensajeria_info(amb_prog, emisor["phoneNumberId"])
     if info_limite and info_limite["disponibles"] <= 0:
         motivo = _motivo_cupo_meta(f, info_limite)
         _marcar_prog(f["id"], "error", motivo)
@@ -6760,6 +6957,7 @@ def _ejecutar_programado(f: dict) -> None:
         area_id=f.get("area_id"),
         limite=len(vivos),
         pacientes=[p["id"] for p in vivos],
+        centro=emisor["codigo"],
     )
     sesion_sistema = {
         "usuario": f.get("creador") or "sistema",
@@ -6785,7 +6983,7 @@ def _ejecutar_programado(f: dict) -> None:
         if e.status_code == 429:
             # El cupo se agotó justo al lanzar: tampoco se reintenta en bucle,
             # se avisa al creador y queda con el motivo a la vista.
-            info = _limite_mensajeria_actual() or {"tier": 0, "usados_24h": 0, "disponibles": 0}
+            info = _limite_mensajeria_actual(emisor["phoneNumberId"]) or {"tier": 0, "usados_24h": 0, "disponibles": 0}
             motivo = _motivo_cupo_meta(f, info)
             _marcar_prog(f["id"], "error", motivo)
             _avisar_creador_prog(f, motivo)
@@ -6864,7 +7062,11 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
                      area_id: int | None = Query(None),
                      tabla: str | None = Query(None),
                      origen: str = Query("todos"),
+                     centro: str = Query("todos"),
                      sesion: dict = Depends(exigir("historial"))):
+    centro = centro if isinstance(centro, str) else "todos"
+    if centro != "todos" and centro not in CENTROS:
+        raise HTTPException(422, detail="Centro emisor inválido.")
     if origen not in ("todos", "manual", "programado"):
         raise HTTPException(422, detail="Tipo de envío inválido.")
     if not tabla and ambiente == "desarrollo":
@@ -6879,9 +7081,12 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
                   if "programado_id" in cols_env else "NULL AS programado_creado")
     sql = ("SELECT id, base_datos, plantilla_clave, plantilla_nombre, total_pacientes,"
            f" enviados, fallidos, invalidos, estado, {com_col}, {esp_col}, {tab_col},"
-           f" {prog_col}, {prog_fecha}, fecha_hora FROM envios")
+           f" {prog_col}, {prog_fecha}, centro_codigo, numero_emisor, fecha_hora FROM envios")
     condiciones: list[str] = []
     args: list = []
+    if centro != "todos":
+        condiciones.append("centro_codigo = %s")
+        args.append(centro)
 
     if origen != "todos":
         if "programado_id" in cols_env:
@@ -6977,6 +7182,8 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
                 continue
             if area_id is not None and g.get("area_id") != int(area_id):
                 continue
+            if centro != "todos" and g.get("centro_codigo") != centro:
+                continue
             if q and q.strip():
                 qq = q.strip().lower()
                 if qq not in (g.get("tabla") or "").lower() \
@@ -6999,6 +7206,7 @@ def _presentar_historial(filas: list[dict], sesion: dict, limite: int | None = N
                  for jid, j in JOBS.items()
                  if j.get("estado") in ESTADOS_ENVIO_EN_CURSO and j.get("envio_id")}
     for f in filas:
+        f["centro"] = CENTROS.get(f.get("centro_codigo"), "Emisor histórico no identificado")
         orden = f.pop("_orden", None)
         if f.pop("_sin_lote", False):
             pc = _prog_a_respuesta(f, sesion)
@@ -7039,10 +7247,12 @@ def _presentar_historial(filas: list[dict], sesion: dict, limite: int | None = N
 
 def _fuentes_historial_pagina(sesion: dict, ambiente: str, area_id: int | None,
                              tabla: str | None, origen: str, q: str,
-                             cols_env: set[str]) -> tuple[str, tuple]:
+                             cols_env: set[str], centro: str = "todos") -> tuple[str, tuple]:
     """Une solo claves/fechas visibles; los detalles se buscan tras paginar."""
     if origen not in ("todos", "manual", "programado"):
         raise HTTPException(422, detail="Tipo de envío inválido.")
+    if centro != "todos" and centro not in CENTROS:
+        raise HTTPException(422, detail="Centro emisor inválido.")
     if not tabla and ambiente == "desarrollo":
         _exigir_base_desarrollo(sesion, ambiente)
     if tabla:
@@ -7075,6 +7285,9 @@ def _fuentes_historial_pagina(sesion: dict, ambiente: str, area_id: int | None,
             cond_e.append("e.programado_id IS NULL")
         elif origen == "programado":
             cond_e.append("e.programado_id IS NOT NULL")
+        if centro != "todos":
+            cond_e.append("e.centro_codigo = %s")
+            args_e.append(centro)
         if tabla:
             cond_e.append("e.base_datos = %s")
             args_e.append(tabla)
@@ -7108,6 +7321,9 @@ def _fuentes_historial_pagina(sesion: dict, ambiente: str, area_id: int | None,
 
     if origen != "manual":
         cond_p, args_p = [], []
+        if centro != "todos":
+            cond_p.append("p.centro_codigo = %s")
+            args_p.append(centro)
         if "programado_id" in cols_env:
             cond_p.append("NOT EXISTS (SELECT 1 FROM envios e WHERE e.programado_id = p.id)")
         if tabla:
@@ -7148,12 +7364,14 @@ def listar_historial_pagina(q: str = Query("", max_length=100),
                            area_id: int | None = Query(None),
                            tabla: str | None = Query(None),
                            origen: str = Query("todos"),
+                           centro: str = Query("todos"),
                            pagina: int = Query(1, ge=1, le=1000000),
                            limite: int = Query(10, ge=10, le=100),
                            incluir_total: bool = Query(True),
                            sesion: dict = Depends(exigir("historial"))):
     cols_env = columnas_tabla("envios", "produccion")
-    union, args = _fuentes_historial_pagina(sesion, ambiente, area_id, tabla, origen, q, cols_env)
+    centro = centro if isinstance(centro, str) else "todos"
+    union, args = _fuentes_historial_pagina(sesion, ambiente, area_id, tabla, origen, q, cols_env, centro)
     with conectar() as conn, conn.cursor() as cur:
         total = None
         if incluir_total:
@@ -7177,7 +7395,7 @@ def listar_historial_pagina(q: str = Query("", max_length=100),
             marcadores = ", ".join("%s" for _ in ids_e)
             cur.execute("SELECT id, base_datos, plantilla_clave, plantilla_nombre, total_pacientes,"
                         f" enviados, fallidos, invalidos, estado, {com_col}, {esp_col}, {tab_col},"
-                        f" {prog_col}, {prog_fecha}, fecha_hora FROM envios"
+                        f" {prog_col}, {prog_fecha}, centro_codigo, numero_emisor, fecha_hora FROM envios"
                         f" WHERE id IN ({marcadores})", tuple(ids_e))
             for f in cur.fetchall() or []:
                 fecha = f.pop("fecha_hora")
@@ -7346,7 +7564,8 @@ def actualizar_respuesta(registro_id: int, body: EstadoPacienteIn,
     return {"ok": True}
 
 
-def _pacientes_por_respuesta(ambiente: str, tabla: str | None = None) -> dict:
+def _pacientes_por_respuesta(ambiente: str, tabla: str | None = None,
+                             centro_codigo: str | None = None) -> dict:
     """Cuántos pacientes hay en cada estado de respuesta de WhatsApp
     (pendiente / respondió / baja), usando la señal 'pegajosa'.
 
@@ -7361,10 +7580,19 @@ def _pacientes_por_respuesta(ambiente: str, tabla: str | None = None) -> dict:
                                       tiene_interes=columna_existe(t, "interesado", ambiente)
                                       and columna_existe(t, "no_interesado", ambiente))
     where = " WHERE p.estado = 'enviado'" if columna_existe(t, "estado", ambiente) else ""
+    parametros = ()
+    if centro_codigo:
+        condicion = "l.tabla_pacientes = %s" if tabla else "l.tabla_pacientes IS NULL"
+        where += (" AND " if where else " WHERE ") + (
+            "EXISTS (SELECT 1 FROM log_envios l WHERE l.paciente_id = p.id"
+            " AND l.centro_codigo = %s AND l.estado_envio = 'enviado'"
+            f" AND {condicion})")
+        parametros = (centro_codigo, t) if tabla else (centro_codigo,)
     base = {"pendiente": 0, "respondio": 0, "baja": 0}
     try:
         with conectar(ambiente) as conn, conn.cursor() as cur:
-            cur.execute(f"SELECT {re_expr} AS r, COUNT(*) AS n FROM {t} p{where} GROUP BY r")
+            cur.execute(f"SELECT {re_expr} AS r, COUNT(*) AS n FROM {t} p{where} GROUP BY r",
+                        parametros or None)
             for row in cur.fetchall():
                 if row["r"] in base:
                     base[row["r"]] = int(row["n"] or 0)
@@ -7374,7 +7602,8 @@ def _pacientes_por_respuesta(ambiente: str, tabla: str | None = None) -> dict:
     return base
 
 
-def _pacientes_por_interes(ambiente: str, tabla: str | None = None) -> dict:
+def _pacientes_por_interes(ambiente: str, tabla: str | None = None,
+                           centro_codigo: str | None = None) -> dict:
     """Interés explícito de pacientes con un envío realizado; quienes no han
     expresado interés ni rechazo quedan sin clasificar, no como no interesados."""
     t = tabla or tabla_pacientes(ambiente)
@@ -7387,10 +7616,19 @@ def _pacientes_por_interes(ambiente: str, tabla: str | None = None) -> dict:
         "ELSE 'sin_clasificar' END"
     )
     where = " WHERE p.estado = 'enviado'" if "estado" in columnas else ""
+    parametros = ()
+    if centro_codigo:
+        condicion = "l.tabla_pacientes = %s" if tabla else "l.tabla_pacientes IS NULL"
+        where += (" AND " if where else " WHERE ") + (
+            "EXISTS (SELECT 1 FROM log_envios l WHERE l.paciente_id = p.id"
+            " AND l.centro_codigo = %s AND l.estado_envio = 'enviado'"
+            f" AND {condicion})")
+        parametros = (centro_codigo, t) if tabla else (centro_codigo,)
     base = {"interesado": 0, "no_interesado": 0, "sin_clasificar": 0}
     try:
         with conectar(ambiente) as conn, conn.cursor() as cur:
-            cur.execute(f"SELECT {estado} AS categoria, COUNT(*) AS n FROM {t} p{where} GROUP BY categoria")
+            cur.execute(f"SELECT {estado} AS categoria, COUNT(*) AS n FROM {t} p{where} GROUP BY categoria",
+                        parametros or None)
             for row in cur.fetchall():
                 if row["categoria"] in base:
                     base[row["categoria"]] = int(row["n"] or 0)
@@ -7454,9 +7692,15 @@ def _alcance_estadisticas(sesion: dict, area_id: int | None, base: str):
 
 
 def estadisticas(area_id: int | None = Query(None), base: str = "produccion",
+                 centro: str = Query("todos"),
                  sesion: dict = Depends(solo_admin)):
     """Resumen de producción/área o de la base de desarrollo."""
     alcance, _, filtro_esp, args_esp, esp = _alcance_estadisticas(sesion, area_id, base)
+    centro = centro if isinstance(centro, str) else "todos"
+    if centro != "todos" and centro not in CENTROS:
+        raise HTTPException(422, detail="Centro emisor inválido.")
+    filtro_centro = " AND centro_codigo = %s" if centro != "todos" else ""
+    args_centro = (centro,) if filtro_centro else ()
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT"
@@ -7468,13 +7712,13 @@ def estadisticas(area_id: int | None = Query(None), base: str = "produccion",
             " FROM log_envios"
             " WHERE fecha_hora >= DATE_FORMAT(CURDATE(), %s)"
             f"   AND {alcance}"
-            f"{filtro_esp}",
-            ("%Y-%m-01", *args_esp),
+            f"{filtro_esp}{filtro_centro}",
+            ("%Y-%m-01", *args_esp, *args_centro),
         )
         mes = cur.fetchone() or {}
 
-        cur.execute(f"SELECT COUNT(*) AS n FROM log_envios WHERE estado_envio = 'enviado' AND {alcance}{filtro_esp}",
-                    args_esp or None)
+        cur.execute(f"SELECT COUNT(*) AS n FROM log_envios WHERE estado_envio = 'enviado' AND {alcance}{filtro_esp}{filtro_centro}",
+                    (*args_esp, *args_centro) or None)
         total_enviados = int((cur.fetchone() or {}).get("n", 0))
         # Las respuestas entrantes tienen envio_id NULL: se filtran por tabla.
         # Se cuentan teléfonos únicos para evitar duplicar varias réplicas en
@@ -7491,11 +7735,11 @@ def estadisticas(area_id: int | None = Query(None), base: str = "produccion",
             f" AND ((envio_id IS NOT NULL AND {alcance})"
             " OR (envio_id IS NULL AND plantilla_clave = 'respuesta'"
             f" AND {filtro_respuesta_sin_lote}))"
-            f"{filtro_esp}"
+            f"{filtro_esp}{filtro_centro}"
         )
-        respuestas_args = ("%Y-%m-01", *args_esp)
+        respuestas_args = ("%Y-%m-01", *args_esp, *args_centro)
         tabla_area = esp["nombre_tabla_base"] if esp else None
-        if (tabla_area and servicio_areas.tabla_valida(tabla_area)
+        if (centro == "todos" and tabla_area and servicio_areas.tabla_valida(tabla_area)
                 and {"interesado", "interes_fecha"} <= columnas_tabla(tabla_area, "produccion")):
             # Antes se guardaba la respuesta solo en la primera base que
             # contenía el teléfono. La fecha de interés permite reconocer las
@@ -7513,18 +7757,21 @@ def estadisticas(area_id: int | None = Query(None), base: str = "produccion",
         respondio_mes = int((cur.fetchone() or {}).get("n", 0))
         if base == "desarrollo":
             cur.execute("SELECT COUNT(*) AS n FROM envios"
-                        " WHERE base_datos = 'pacientes_dev' AND area_id IS NULL")
+                        " WHERE base_datos = 'pacientes_dev' AND area_id IS NULL" + filtro_centro,
+                        args_centro or None)
         elif esp:
             cur.execute(
                 "SELECT COUNT(*) AS n FROM envios e WHERE e.base_datos <> 'pacientes_dev'"
                 " AND (e.area_id = %s OR EXISTS (SELECT 1 FROM log_envios le"
-                " WHERE le.envio_id = e.id AND le.area_id = %s))",
-                (esp["id"], esp["id"]),
+                " WHERE le.envio_id = e.id AND le.area_id = %s))" +
+                (" AND e.centro_codigo = %s" if filtro_centro else ""),
+                (esp["id"], esp["id"], *args_centro),
             )
         else:
             cur.execute(
                 "SELECT COUNT(*) AS n FROM envios WHERE base_datos <> 'pacientes_dev'"
-                " AND (base_datos = 'pacientes_prod' OR area_id IS NOT NULL)"
+                " AND (base_datos = 'pacientes_prod' OR area_id IS NOT NULL)" + filtro_centro,
+                args_centro or None,
             )
         total_batches = int((cur.fetchone() or {}).get("n", 0))
 
@@ -7539,9 +7786,11 @@ def estadisticas(area_id: int | None = Query(None), base: str = "produccion",
         }
 
     enviados_mes = int(mes.get("enviados") or 0)
+    centro_estadisticas = centro if centro != "todos" else None
     return {
         "mes": time.strftime("%Y-%m"),
         "base": base,
+        "centro": centro,
         "area": ({"id": esp["id"], "nombre_visible": esp["nombre_visible"]} if esp else None),
         "enviados_mes": enviados_mes,
         "fallidos_mes": int(mes.get("fallidos") or 0),
@@ -7551,15 +7800,16 @@ def estadisticas(area_id: int | None = Query(None), base: str = "produccion",
         "total_enviados_historico": total_enviados,
         "total_batches": total_batches,
         "pacientes_por_respuesta": _pacientes_por_respuesta(
-            base, tabla=(esp["nombre_tabla_base"] if esp else None)),
+            base, tabla=(esp["nombre_tabla_base"] if esp else None), centro_codigo=centro_estadisticas),
         "pacientes_por_interes": _pacientes_por_interes(
-            base, tabla=(esp["nombre_tabla_base"] if esp else None)),
+            base, tabla=(esp["nombre_tabla_base"] if esp else None), centro_codigo=centro_estadisticas),
         "webhook": webhook,
     }
 
 
 def estadisticas_envios(granularidad: str = Query("mes"), area_id: int | None = Query(None),
                         base: str = "produccion",
+                        centro: str = Query("todos"),
                         periodos: str | None = Query(None),
                         sesion: dict = Depends(solo_admin)):
     """Mensajes enviados agrupados por periodo (para el gráfico de barras)."""
@@ -7570,6 +7820,11 @@ def estadisticas_envios(granularidad: str = Query("mes"), area_id: int | None = 
     except ValueError as exc:
         raise HTTPException(400, detail=str(exc)) from exc
     alcance, _, filtro_esp, args_esp, esp = _alcance_estadisticas(sesion, area_id, base)
+    centro = centro if isinstance(centro, str) else "todos"
+    if centro != "todos" and centro not in CENTROS:
+        raise HTTPException(422, detail="Centro emisor inválido.")
+    filtro_centro = " AND centro_codigo = %s" if centro != "todos" else ""
+    args_centro = (centro,) if filtro_centro else ()
     # Con selección explícita se incluyen también fechas fuera de la ventana
     # por defecto. El formato se pasa como parámetro para evitar que PyMySQL
     # interprete sus signos de porcentaje al procesar el IN.
@@ -7583,16 +7838,16 @@ def estadisticas_envios(granularidad: str = Query("mes"), area_id: int | None = 
     marcadores = ", ".join("%s" for _ in seleccion)
     filtro_periodos = (f" AND DATE_FORMAT(fecha_hora, %s) IN ({marcadores})"
                        if seleccion else "")
-    parametros = (fmt, *(args_esp or ()),
+    parametros = (fmt, *(args_esp or ()), *args_centro,
                   *((fmt, *sorted(seleccion)) if seleccion else ()))
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT DISTINCT DATE_FORMAT(fecha_hora, %s) AS dia FROM log_envios"
             " WHERE estado_envio = 'enviado'"
             f"   AND {alcance}"
-            f"{filtro_esp}"
+            f"{filtro_esp}{filtro_centro}"
             " ORDER BY dia",
-            ("%Y-%m-%d", *args_esp),
+            ("%Y-%m-%d", *args_esp, *args_centro),
         )
         dias_disponibles = [r["dia"] for r in cur.fetchall() if r.get("dia")]
         meses_disponibles = sorted({dia[:7] for dia in dias_disponibles})
@@ -7603,7 +7858,7 @@ def estadisticas_envios(granularidad: str = Query("mes"), area_id: int | None = 
             " WHERE estado_envio = 'enviado'"
             f"{filtro_fecha}"
             f"   AND {alcance}"
-            f"{filtro_esp}"
+            f"{filtro_esp}{filtro_centro}"
             f"{filtro_periodos}"
             " GROUP BY periodo ORDER BY periodo",
             parametros,
@@ -7613,6 +7868,7 @@ def estadisticas_envios(granularidad: str = Query("mes"), area_id: int | None = 
     return {
         "granularidad": granularidad,
         "base": base,
+        "centro": centro,
         "area": ({"id": esp["id"], "nombre_visible": esp["nombre_visible"]} if esp else None),
         "periodos": sorted(seleccion),
         "anios_disponibles": anios_disponibles,
@@ -7990,6 +8246,7 @@ def _categorias_por_clave() -> dict:
 
 def estadisticas_costos(granularidad: str = Query("mes"), area_id: int | None = Query(None),
                         base: str = "produccion",
+                        centro: str = Query("todos"),
                         categoria: str | None = Query(None),
                         fecha: str | None = Query(None),
                         periodos: str | None = Query(None),
@@ -8023,6 +8280,11 @@ def estadisticas_costos(granularidad: str = Query("mes"), area_id: int | None = 
                        if seleccion else "")
     valores_periodos = tuple(sorted(seleccion))
     _, alcance_costos, filtro_esp, args_esp, esp = _alcance_estadisticas(sesion, area_id, base)
+    centro = centro if isinstance(centro, str) else "todos"
+    if centro != "todos" and centro not in CENTROS:
+        raise HTTPException(422, detail="Centro emisor inválido.")
+    filtro_centro = " AND centro_codigo = %s" if centro != "todos" else ""
+    args_centro = (centro,) if filtro_centro else ()
 
     moneda = _moneda_cuenta()
     tarifas = _tarifas_guardadas(moneda) or _tarifas_guardadas("USD")
@@ -8040,10 +8302,10 @@ def estadisticas_costos(granularidad: str = Query("mes"), area_id: int | None = 
             " WHERE estado_envio = 'enviado'"
             "   AND plantilla_clave NOT IN ('respuesta', 'ajuste_manual')"
             f"   AND {alcance_costos}"
-            f"{filtro_esp}"
+            f"{filtro_esp}{filtro_centro}"
             f"{filtro_periodos}"
             " GROUP BY periodo, plantilla_clave ORDER BY periodo",
-            (fmt, *args_esp, *((fmt, *valores_periodos) if seleccion else ())),
+            (fmt, *args_esp, *args_centro, *((fmt, *valores_periodos) if seleccion else ())),
         )
         crudo = cur.fetchall()
         # El cupo gratuito se calcula con producción Y desarrollo juntos,
@@ -8051,7 +8313,7 @@ def estadisticas_costos(granularidad: str = Query("mes"), area_id: int | None = 
         if claves_servicio and tiene_msgid:
             marcadores = ", ".join("%s" for _ in claves_servicio)
             cur.execute(
-                "SELECT le.id, le.wa_phone_id, le.area_id, le.envio_id, le.tabla_pacientes,"
+                "SELECT le.id, le.wa_phone_id, le.centro_codigo, le.area_id, le.envio_id, le.tabla_pacientes,"
                 " COALESCE(le.entregado_en, le.fecha_hora) AS fecha_entrega,"
                 " (SELECT e.area_id FROM envios e WHERE e.id = le.envio_id) AS area_lote,"
                 " (SELECT e.base_datos FROM envios e WHERE e.id = le.envio_id) AS base_lote"
@@ -8063,6 +8325,9 @@ def estadisticas_costos(granularidad: str = Query("mes"), area_id: int | None = 
                 tuple(claves_servicio),
             )
             entregas_servicio = list(cur.fetchall())
+            # La asignación gratuito/pagado se calcula primero sobre todos los
+            # emisores y después se filtra para no reiniciar la cuota al cambiar
+            # de vista. Un número comercial tiene su propio cupo mensual.
         else:
             entregas_servicio = []
 
@@ -8112,6 +8377,8 @@ def estadisticas_costos(granularidad: str = Query("mes"), area_id: int | None = 
 
     if categoria in (None, "service"):
         for r, gratis in clasificar_entregas_servicio(entregas_servicio):
+            if centro != "todos" and r.get("centro_codigo") != centro:
+                continue
             es_dev = (r.get("base_lote") == "pacientes_dev" or
                       (not r.get("base_lote") and r.get("tabla_pacientes") == "pacientes_dev"))
             if (base == "desarrollo") != es_dev:

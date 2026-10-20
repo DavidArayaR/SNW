@@ -42,6 +42,7 @@ class GenerarPlantillaIAIn(BaseModel):
 
 class PruebaPlantillaIn(BaseModel):
     telefono: str
+    centro: str
     ejemplos: dict[str, str] | None = None
 
 
@@ -51,6 +52,7 @@ class EnvioIn(BaseModel):
     ambiente: str | None = None
     limite: int | None = None
     area_id: int | None = None
+    centro: str | None = None
 
 
 class ConfigIn(BaseModel):
@@ -124,6 +126,7 @@ class ConfigTodoIn(BaseModel):
 
 class PruebaWAIn(BaseModel):
     telefono: str
+    centro: str
     mensaje: str = "Mensaje de prueba del sistema SNW"
 
 

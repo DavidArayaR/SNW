@@ -18,6 +18,46 @@ con la **WhatsApp Business Cloud API** de Meta (v26.0).
 | Correo | SMTP (configurable en la tabla `configuracion`) — confirmación de envíos en producción y recuperación de contraseña |
 | Configuración | Tabla `configuracion` en MySQL (todo salvo credenciales de BD, que van en `.env`) |
 
+## Cuatro números emisores de WhatsApp
+
+SNW admite cuatro centros: `SMPT` (Salud Mental Para Todos), `MS` (Centro Mentalidad Saludable),
+`PS` (PROSALUD) y `CP` (Centro Psiquiatrico Huerfanos). En **Configuración**, un desarrollador
+debe completar para cada centro el número visible y su *Phone Number ID* de Meta. Las ocho claves
+son `SMPT_WSP_PHONE_NUMBER`, `SMPT_WSP_PHONE_NUMBER_ID`, `MS_WSP_PHONE_NUMBER`,
+`MS_WSP_PHONE_NUMBER_ID`, `PS_WSP_PHONE_NUMBER`, `PS_WSP_PHONE_NUMBER_ID`,
+`CP_WSP_PHONE_NUMBER` y `CP_WSP_PHONE_NUMBER_ID`. Pueden quedar vacías hasta que se active
+cada centro; un centro incompleto o duplicado no puede seleccionarse para enviar.
+
+Los cuatro números comparten una WABA y el token `wa_token` actual. Antes de utilizar cada uno,
+verifique en Meta que ese token tenga permiso de envío, que el número esté conectado al webhook
+y que las plantillas estén aprobadas para la WABA. SNW no prueba la autorización del token sobre
+un número hasta que se efectúa un envío de prueba explícito. El antiguo `wa_phone_id` se conserva
+solo por compatibilidad histórica; no se utiliza como alternativa automática en envíos nuevos.
+La migración de claves antiguas `PHONE_NUMER` se ejecuta al iniciar: copia valores no conflictivos;
+ante dos valores distintos conserva ambas claves e informa el conflicto en el registro del servidor.
+
+Los formularios manuales, programados y de prueba de plantilla exigen elegir el centro emisor.
+Los lotes conservan código, Phone Number ID y número visible. Un programado se detiene si esa
+configuración cambia antes de ejecutarse: debe revisarse y programarse de nuevo. Los registros
+antiguos sin emisor conocido aparecen como «Emisor histórico no identificado».
+
+El webhook identifica el centro por `metadata.phone_number_id`, registra un mensaje lógico por
+ID de Meta y no atribuye a otro centro un número desconocido. Las consultas o intereses que
+requieren atención humana se guardan en `crm_derivaciones_pendientes`, con estado `pendiente`.
+**Aún no se envían al CRM externo**: faltan su URL, autenticación y contrato de eventos. Cuando
+estén definidos, el integrador podrá consumir esa cola de forma idempotente; no debe enviar
+respuestas desde otro número. La solicitud `ELIMINAR` retira también las conversaciones y
+derivaciones pendientes del paciente. El bloqueo en Meta se intenta para cada emisor configurado.
+
+Historial y Estadísticas incluyen un filtro de centro. Los costos de mensajes de servicio
+conservan la cuota gratuita mensual por *Phone Number ID*, incluso cuando se consulta un solo
+centro. Los datos históricos sin emisor no se asignan retrospectivamente. El estado actual
+de interés/baja del paciente es global en las tablas existentes: al filtrar por centro se
+limita a pacientes contactados por ese emisor, pero su estado actual puede reflejar una
+interacción posterior con otro centro. Las respuestas entrantes y las cifras de mensajes sí
+se registran por número receptor. Una separación completa del estado por conversación
+requiere una migración adicional del modelo de pacientes.
+
 ## Estructura
 
 ```
