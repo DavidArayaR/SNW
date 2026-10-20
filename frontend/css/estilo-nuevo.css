@@ -1,0 +1,154 @@
+/* Adaptación del lenguaje visual de /nuevo/ para las páginas existentes.
+   No cambia anchos de página, columnas, alturas de tablas ni comportamiento. */
+:is(body[data-pagina="inicio"], body[data-pagina="historial"], body[data-seccion="administracion"], body.pagina-auth) {
+  --panel: #fff;
+  --panel-2: #f6faf8;
+  --surface-2: #f4f8f6;
+  --surface-3: #e8efec;
+  --hover: #eaf3ef;
+  --linea: #e6ede9;
+  --borde: #dde6e2;
+  --texto: #35423d;
+  --texto-suave: #6d7c75;
+  --verde: #3f9d88;
+  --verde-oscuro: #2f7d6b;
+  --brand-tint: #e4f1ec;
+  --brand-tint-bd: #c2dbd2;
+  --brand-tint-fg: #2f7d6b;
+  --btn-primary-bg: #34786a;
+  --btn-primary-fg: #fff;
+  --btn-ghost-fg: #35423d;
+  --btn-danger-bg: #bd4a4a;
+  --btn-danger-fg: #fff;
+  --sombra: 0 1px 2px rgb(30 50 42 / .06), 0 6px 18px rgb(30 50 42 / .05);
+  --ui-shadow: var(--sombra);
+}
+:root[data-tema="oscuro"] :is(body[data-pagina="inicio"], body[data-pagina="historial"], body[data-seccion="administracion"], body.pagina-auth) {
+  --panel: #1c2421;
+  --panel-2: #222b28;
+  --surface-2: #26302c;
+  --surface-3: #2d3834;
+  --hover: #2a3531;
+  --linea: #2e3a36;
+  --borde: #384540;
+  --texto: #e3ebe7;
+  --texto-suave: #9fb0a9;
+  --verde: #57c2a8;
+  --verde-oscuro: #7ad3bd;
+  --brand-tint: #22362f;
+  --brand-tint-bd: #34553f;
+  --brand-tint-fg: #8ad8c3;
+  --btn-primary-bg: #4bb89e;
+  --btn-primary-fg: #0e1c18;
+  --btn-ghost-fg: #e3ebe7;
+  --btn-danger-bg: #d98484;
+  --btn-danger-fg: #241010;
+  --sombra: 0 1px 2px rgb(0 0 0 / .3), 0 6px 18px rgb(0 0 0 / .28);
+  --ui-shadow: var(--sombra);
+}
+
+/* Tarjetas, cabeceras y superficies de datos. */
+:is(body[data-pagina="inicio"], body[data-pagina="historial"], body[data-seccion="administracion"]) .panel {
+  min-width: 0;
+  border: 1px solid var(--borde);
+  border-radius: 16px;
+  background: var(--panel);
+  box-shadow: var(--sombra);
+}
+:is(body[data-pagina="inicio"], body[data-pagina="historial"], body[data-seccion="administracion"]) .panel__head {
+  padding: 16px 20px;
+  border-bottom-color: var(--linea);
+}
+:is(body[data-pagina="inicio"], body[data-pagina="historial"], body[data-seccion="administracion"]) .panel__head h2 {
+  font-size: 1rem;
+  line-height: 1.3;
+}
+:is(body[data-pagina="inicio"], body[data-pagina="historial"], body[data-seccion="administracion"]) .modal__card {
+  border: 1px solid var(--borde);
+  border-radius: 16px;
+  background: var(--panel);
+  box-shadow: 0 8px 30px rgb(30 50 42 / .12);
+}
+:is(body[data-pagina="inicio"], body[data-pagina="historial"], body[data-seccion="administracion"]) :is(.usr-card, .tarifa-card, .dash-stat) {
+  border: 1px solid var(--borde);
+  border-radius: 12px;
+  background: var(--panel-2);
+}
+:is(body[data-pagina="inicio"], body[data-pagina="historial"], body[data-seccion="administracion"]) .tabla-wrap thead th {
+  background: var(--panel-2);
+  color: var(--texto-suave);
+  border-bottom-color: var(--linea);
+}
+:is(body[data-pagina="inicio"], body[data-pagina="historial"], body[data-seccion="administracion"]) .tabla-wrap tbody td {
+  border-bottom-color: var(--linea);
+}
+:is(body[data-pagina="inicio"], body[data-pagina="historial"], body[data-seccion="administracion"]) .tabla-wrap tbody tr:hover {
+  background: var(--hover);
+}
+
+/* Controles: misma forma compacta de /nuevo/, conservando foco y errores. */
+:is(body[data-pagina="inicio"], body[data-pagina="historial"], body[data-seccion="administracion"]) .btn {
+  min-height: 40px;
+  border-radius: 8px;
+  font-size: .875rem;
+  font-weight: 650;
+}
+:is(body[data-pagina="inicio"], body[data-pagina="historial"], body[data-seccion="administracion"]) .btn--primary:hover:not(:disabled) {
+  background: var(--btn-primary-bg);
+  filter: brightness(.94);
+}
+:is(body[data-pagina="inicio"], body[data-pagina="historial"], body[data-seccion="administracion"]) .btn--ghost:hover:not(:disabled) {
+  background: var(--hover);
+  border-color: var(--verde);
+}
+:is(body[data-pagina="inicio"], body[data-pagina="historial"], body[data-seccion="administracion"]) .btn:not(:disabled):not(.disabled):hover:not(:focus-visible) {
+  outline: none;
+}
+:is(body[data-pagina="inicio"], body[data-pagina="historial"], body[data-seccion="administracion"]) .field :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="hidden"]), select, textarea),
+:is(body[data-pagina="inicio"], body[data-pagina="historial"], body[data-seccion="administracion"]) :is(.panel__actions, .usr-selector, .toolbar-pacientes) select {
+  min-height: 42px;
+  border: 1.5px solid var(--borde);
+  border-radius: 8px;
+  background-color: var(--surface-2);
+  color: var(--texto);
+  font-size: .9rem;
+}
+:is(body[data-pagina="inicio"], body[data-pagina="historial"], body[data-seccion="administracion"]) .field > label {
+  margin-bottom: 6px;
+  font-size: .82rem;
+  font-weight: 650;
+}
+:is(body[data-pagina="inicio"], body[data-pagina="historial"], body[data-seccion="administracion"]) .field :is(input, select, textarea):focus-visible {
+  outline: 2px solid var(--verde);
+  outline-offset: 2px;
+}
+:is(body[data-pagina="inicio"], body[data-pagina="historial"], body[data-seccion="administracion"]) .field :is(input, select, textarea):disabled {
+  background-color: var(--surface-3);
+}
+
+/* Portada e ingreso: conservar sus contenedores y su jerarquía propia. */
+body[data-pagina="inicio"] :is(section.info, .info-card) {
+  border: 1px solid var(--borde);
+  border-radius: 16px;
+  background: var(--panel);
+  box-shadow: var(--sombra);
+}
+body.pagina-auth .card {
+  border: 1px solid var(--borde);
+  border-radius: 16px;
+  box-shadow: 0 8px 30px rgb(0 0 0 / .18);
+}
+body.pagina-auth input {
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+body.pagina-auth input:focus-visible {
+  outline: 2px solid var(--verde);
+  outline-offset: 2px;
+}
+body.pagina-auth form > button[type="submit"] { border-radius: 8px; }
+body.pagina-auth form > button[type="submit"]:hover:not(:focus-visible) { outline: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  :is(body[data-pagina="inicio"], body[data-pagina="historial"], body[data-seccion="administracion"], body.pagina-auth) :is(.btn, .panel) { transition: none; }
+}
