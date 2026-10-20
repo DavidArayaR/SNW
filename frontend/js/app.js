@@ -83,6 +83,8 @@ const btnDescartarIA = $("#btnDescartarIA");
 let solicitudIA = null;
 let cierrePanelIATimer = null;
 const inpEncabezadoMedia = $("#inpEncabezadoMedia");
+const inpEncabezadoTexto = $("#inpEncabezadoTexto");
+const inpPieTexto = $("#inpPieTexto");
 const btnQuitarEncabezado = $("#btnQuitarEncabezado");
 const estadoEncabezado = $("#estadoEncabezado");
 const previewMedia = $("#previewMedia");
@@ -441,11 +443,11 @@ async function revisarPlantillasEnSegundoPlano() {
   }
 }
 
-async function crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezado_media_id, ejemplos) {
+async function crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezado_media_id, encabezado_texto, pie_texto, ejemplos) {
   const res = await fetch(API_URL, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ clave: slug(nombre), nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezado_media_id, ejemplos }),
+    body: JSON.stringify({ clave: slug(nombre), nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezado_media_id, encabezado_texto, pie_texto, ejemplos }),
   });
   if (res.status === 401) { window.snwSesionExpirada(); return Promise.reject(new Error("Sesión expirada")); }
   const data = await res.json().catch(() => ({}));
@@ -453,11 +455,11 @@ async function crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_te
   return data;
 }
 
-async function actualizarPlantilla(id, nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezado_media_id, ejemplos) {
+async function actualizarPlantilla(id, nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezado_media_id, encabezado_texto, pie_texto, ejemplos) {
   const res = await fetch(`${API_URL}/${id}`, {
     method: "PUT",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezado_media_id, ejemplos }),
+    body: JSON.stringify({ nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezado_media_id, encabezado_texto, pie_texto, ejemplos }),
   });
   if (res.status === 401) { window.snwSesionExpirada(); return Promise.reject(new Error("Sesión expirada")); }
   const data = await res.json().catch(() => ({}));
@@ -864,7 +866,9 @@ async function consultarPreview(solicitud) {
     const res = await fetch(`${API_URL}/previsualizar`, {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ plantilla_id: activaId, texto: inpMensaje.value,
-        encabezado_media_id: encabezadoMediaId, ejemplos: ejemplosPreview() }),
+        encabezado_media_id: encabezadoMediaId,
+        encabezado_texto: inpEncabezadoTexto.value.trim(),
+        pie_texto: inpPieTexto.value.trim(), ejemplos: ejemplosPreview() }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.detail || `Error ${res.status}`);
@@ -983,9 +987,16 @@ function establecerEncabezado(mediaId) {
       : "Encabezado listo. Puedes quitarlo o reemplazarlo.")
     : "JPG, PNG o GIF, máximo 3,5 MB. Los GIF se convierten a video para Meta.";
   mostrarEncabezadoGuardado(encabezadoMediaId);
+  if (formEl.style.display !== "none") actualizarBloqueoCampos();
   actualizarEstadoBotonGuardar();
   actualizarPreview();
 }
+
+inpEncabezadoTexto.addEventListener("input", () => {
+  actualizarBloqueoCampos();
+  refrescarEditor();
+});
+inpPieTexto.addEventListener("input", refrescarEditor);
 
 inpEncabezadoMedia.addEventListener("change", async () => {
   const archivo = inpEncabezadoMedia.files[0];
@@ -1057,7 +1068,7 @@ function refrescarEditor() {
 if (inpArea) inpArea.addEventListener("change", refrescarEditor);
 
 function estadoActualEditor() {
-  return JSON.stringify([inpNombre.value, inpMensaje.value, valTemplate(), valTemplateLang(), valTemplateCategoria(), inpArea ? inpArea.value : "", encabezadoMediaId]);
+  return JSON.stringify([inpNombre.value, inpMensaje.value, valTemplate(), valTemplateLang(), valTemplateCategoria(), inpArea ? inpArea.value : "", encabezadoMediaId, inpEncabezadoTexto.value, inpPieTexto.value]);
 }
 
 function marcarSnapshot() {
@@ -1325,7 +1336,9 @@ function actualizarBloqueoCampos() {
   inpEjemploNombre.disabled = false;
   inpEjemploApellido.disabled = false;
   selNumeroPrueba.disabled = false;
-  inpEncabezadoMedia.disabled = false;
+  inpEncabezadoTexto.disabled = !!encabezadoMediaId;
+  inpPieTexto.disabled = false;
+  inpEncabezadoMedia.disabled = !!inpEncabezadoTexto.value.trim();
   btnQuitarEncabezado.disabled = false;
   inpNombre.disabled = esExistente;
   inpNombre.title = esExistente
@@ -1369,6 +1382,8 @@ function abrir(id) {
   tituloForm.textContent = (PUEDE_EDITAR_PLANTILLAS && esPlantillaEditable(p)) ? `Editando: ${p.nombre}` : p.nombre;
   inpNombre.value = p.nombre;
   inpMensaje.value = p.texto;
+  inpEncabezadoTexto.value = p.encabezado_texto || "";
+  inpPieTexto.value = p.pie_texto || "";
   inpEjemploNombre.value = "David";
   inpEjemploApellido.value = "Araya";
   establecerEncabezado(p.encabezado_media_id);
@@ -1425,6 +1440,8 @@ function modoNueva() {
   tituloForm.textContent = "Nueva plantilla";
   inpNombre.value = "";
   inpMensaje.value = "";
+  inpEncabezadoTexto.value = "";
+  inpPieTexto.value = "";
   inpEjemploNombre.value = "David";
   inpEjemploApellido.value = "Araya";
   establecerEncabezado(null);
@@ -1707,11 +1724,11 @@ formEl.addEventListener("submit", async (e) => {
     }
     let fila;
     if (activaId) {
-      fila = await actualizarPlantilla(activaId, nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezadoMediaId, ejemplosPreview());
+      fila = await actualizarPlantilla(activaId, nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezadoMediaId, inpEncabezadoTexto.value.trim(), inpPieTexto.value.trim(), ejemplosPreview());
       const i = plantillas.findIndex((x) => x.id === activaId);
       if (i >= 0) plantillas[i] = fila;
     } else {
-      fila = await crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezadoMediaId, ejemplosPreview());
+      fila = await crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezadoMediaId, inpEncabezadoTexto.value.trim(), inpPieTexto.value.trim(), ejemplosPreview());
       plantillas.push(fila);
     }
     setGuardando(false);

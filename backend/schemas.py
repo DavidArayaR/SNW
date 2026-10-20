@@ -15,6 +15,8 @@ class PlantillaIn(BaseModel):
     whatsapp_template_categoria: str | None = None
     area_id: int | None = None
     encabezado_media_id: str | None = None
+    encabezado_texto: str | None = None
+    pie_texto: str | None = None
     ejemplos: dict[str, str] | None = None
 
 
@@ -29,6 +31,8 @@ class PlantillaPreviaIn(BaseModel):
     plantilla_id: int | None = None
     texto: str
     encabezado_media_id: str | None = None
+    encabezado_texto: str | None = None
+    pie_texto: str | None = None
     ejemplos: dict[str, str] | None = None
 
 

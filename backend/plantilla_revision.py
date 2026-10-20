@@ -10,6 +10,8 @@ from plantilla_media import MAX_MEDIA_BYTES, obtener_media, ruta_media
 
 EJEMPLOS = {"nombre": "David", "apellido": "Araya"}
 MAX_CUERPO = 1024
+MAX_ENCABEZADO = 60
+MAX_PIE = 60
 BOTONES_FIJOS = ["Me interesa", "No me interesa", "Dar de baja"]
 _VARIABLE = re.compile(r"\{([^{}]+)\}")
 
@@ -114,16 +116,24 @@ def presentar_plantilla(plantilla: dict, ejemplos: dict | None = None) -> dict:
         botones_normalizados.append({"tipo": tipo, "texto": etiqueta,
                                      "url": boton.get("url") if tipo == "url" else None})
     media_id = plantilla.get("encabezado_media_id")
+    encabezado_texto = (plantilla.get("encabezado_texto") or "").strip()
+    pie_texto = (plantilla.get("pie_texto") or "").strip()
     encabezado = None
     formato_esperado = (plantilla.get("whatsapp_header_format") or "").upper()
     if formato_esperado in ("IMAGE", "VIDEO") and not media_id:
         errores.append("La plantilla de Meta tiene encabezado multimedia, pero falta el archivo local.")
     if formato_esperado and formato_esperado not in ("TEXT", "IMAGE", "VIDEO"):
         errores.append("El formato de encabezado de Meta no es compatible con esta vista previa.")
-    if plantilla.get("encabezado_texto") and not media_id:
-        encabezado = {"tipo": "texto", "texto": plantilla["encabezado_texto"]}
-        if "{{" in plantilla["encabezado_texto"]:
-            errores.append("El encabezado de texto tiene variables de Meta sin ejemplo local.")
+    if len(encabezado_texto) > MAX_ENCABEZADO:
+        errores.append(f"El encabezado supera el máximo de {MAX_ENCABEZADO} caracteres.")
+    if len(pie_texto) > MAX_PIE:
+        errores.append(f"El pie supera el máximo de {MAX_PIE} caracteres.")
+    if media_id and encabezado_texto:
+        errores.append("Elige un encabezado de texto o multimedia, no ambos.")
+    if any(c in encabezado_texto + pie_texto for c in "{}\r\n"):
+        errores.append("El encabezado y el pie no admiten variables ni saltos de línea.")
+    if encabezado_texto and not media_id:
+        encabezado = {"tipo": "texto", "texto": encabezado_texto}
     if media_id:
         try:
             media = obtener_media(media_id)
@@ -141,7 +151,7 @@ def presentar_plantilla(plantilla: dict, ejemplos: dict | None = None) -> dict:
     if media_id and not plantilla.get("encabezado_meta_registrado"):
         avisos.append("El encabezado aún debe registrarse y aprobarse en Meta antes del envío.")
 
-    return {"cuerpo": cuerpo, "pie": plantilla.get("pie_texto") or "",
+    return {"cuerpo": cuerpo, "pie": pie_texto,
             "variables": variables, "ejemplos": valores,
             "encabezado": encabezado, "botones": botones_normalizados,
             "errores": list(dict.fromkeys(errores)), "avisos": avisos}

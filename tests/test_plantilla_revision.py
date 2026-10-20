@@ -17,7 +17,7 @@ import main
 import plantilla_media
 from plantilla_revision import componentes_para_vista, presentar_plantilla, variables_del_cuerpo
 from routes import plantillas as rutas_plantillas
-from whatsapp_service import WhatsAppApiClient
+from whatsapp_service import WhatsAppApiClient, WhatsAppService
 
 
 PLANTILLA = {
@@ -81,6 +81,84 @@ class PresentacionPlantillaTests(unittest.TestCase):
         with self.assertRaises(HTTPException) as error:
             main._exigir_revision_valida({"texto": "Hola {nombre}"}, {"nombre": ""})
         self.assertEqual(error.exception.status_code, 400)
+
+    def test_encabezado_y_pie_editables_se_previsualizan_y_validan(self):
+        vista = presentar_plantilla({"texto": "Hola", "encabezado_texto": "Promoción",
+                                    "pie_texto": "Salud Mental"})
+        self.assertEqual(vista["encabezado"], {"tipo": "texto", "texto": "Promoción"})
+        self.assertEqual(vista["pie"], "Salud Mental")
+        self.assertFalse(vista["errores"])
+        errores = presentar_plantilla({"texto": "Hola", "encabezado_texto": "x" * 61,
+                                      "pie_texto": "{nombre}"})["errores"]
+        self.assertTrue(any("60 caracteres" in error for error in errores))
+        self.assertTrue(any("variables" in error for error in errores))
+
+
+class ComponentesMetaEditablesTests(unittest.TestCase):
+    def test_creacion_envia_encabezado_y_pie_a_meta(self):
+        configuracion = {"wa_token": "token-test", "wa_phone_id": "phone-test",
+                         "wa_business_account_id": "waba-test"}
+        with patch("whatsapp_service.config_get", side_effect=lambda clave, *args: configuracion.get(clave, "")), \
+             patch.object(WhatsAppApiClient, "crear_template", new_callable=AsyncMock,
+                          return_value={"id": "meta-7", "status": "PENDING"}) as crear:
+            resultado = WhatsAppService().crear_template_meta(
+                "saludo", "Hola", "es", "MARKETING", encabezado_texto="Oferta",
+                pie_texto="Notificaciones SNW")
+        self.assertTrue(resultado["ok"])
+        componentes = crear.await_args.args[1]["components"]
+        self.assertEqual([c["type"] for c in componentes],
+                         ["HEADER", "BODY", "FOOTER", "BUTTONS"])
+        self.assertEqual(componentes[0], {"type": "HEADER", "format": "TEXT", "text": "Oferta"})
+        self.assertEqual(componentes[2]["text"], "Notificaciones SNW")
+
+    def test_edicion_reenvia_encabezado_y_pie_a_meta(self):
+        configuracion = {"wa_token": "token-test", "wa_phone_id": "phone-test"}
+        with patch("whatsapp_service.config_get", side_effect=lambda clave, *args: configuracion.get(clave, "")), \
+             patch.object(WhatsAppApiClient, "obtener_template", new_callable=AsyncMock,
+                          return_value={"category": "MARKETING"}), \
+             patch.object(WhatsAppApiClient, "editar_template", new_callable=AsyncMock,
+                          return_value={"status": "PENDING"}) as editar:
+            resultado = WhatsAppService().editar_template_meta(
+                "meta-7", "Hola", "MARKETING", encabezado_texto="Nueva oferta",
+                pie_texto="Nuevo pie")
+        self.assertTrue(resultado["ok"])
+        componentes = editar.await_args.args[1]["components"]
+        self.assertEqual(componentes[0]["text"], "Nueva oferta")
+        self.assertEqual(componentes[2]["text"], "Nuevo pie")
+
+    def test_previsualizacion_conserva_componentes_existentes_si_no_se_envian(self):
+        app = FastAPI()
+        app.include_router(rutas_plantillas.registrar(vars(main)))
+        app.dependency_overrides[main.sesion_actual] = lambda: SESION
+        plantilla = {**PLANTILLA, "encabezado_texto": "Oferta",
+                    "pie_texto": "Notificaciones SNW", "whatsapp_header_format": "TEXT"}
+        with patch.object(main, "leer_plantillas", return_value=[plantilla]):
+            respuesta = TestClient(app).post("/api/plantillas/previsualizar", json={
+                "plantilla_id": 7, "texto": plantilla["texto"]})
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(respuesta.json()["encabezado"]["texto"], "Oferta")
+        self.assertEqual(respuesta.json()["pie"], "Notificaciones SNW")
+        self.assertNotIn("Estos cambios requieren guardar", " ".join(respuesta.json()["avisos"]))
+
+    def test_actualizacion_guarda_y_registra_encabezado_y_pie(self):
+        app = FastAPI()
+        app.include_router(rutas_plantillas.registrar(vars(main)))
+        app.dependency_overrides[main.sesion_actual] = lambda: SESION
+        plantilla = {**PLANTILLA, "whatsapp_template_lang": "es",
+                    "whatsapp_template_categoria": "MARKETING", "whatsapp_template_id": "meta-7"}
+        with patch.object(main, "leer_plantillas", return_value=[plantilla]), \
+             patch.object(main, "escribir_plantillas") as escribir, \
+             patch.object(main, "_registrar_template_meta", side_effect=lambda p, *args: p) as registrar:
+            respuesta = TestClient(app).put("/api/plantillas/7", json={
+                "nombre": "Saludo", "texto": plantilla["texto"],
+                "whatsapp_template_lang": "es", "whatsapp_template_categoria": "MARKETING",
+                "encabezado_texto": "Oferta", "pie_texto": "Notificaciones SNW",
+                "ejemplos": {"nombre": "Ana"}})
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(plantilla["encabezado_texto"], "Oferta")
+        self.assertEqual(plantilla["pie_texto"], "Notificaciones SNW")
+        registrar.assert_called_once()
+        escribir.assert_called_once()
 
 
 class EstadoMetaPlantillaTests(unittest.TestCase):

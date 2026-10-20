@@ -566,7 +566,9 @@ class WhatsAppService:
         return texto_meta, ejemplo
 
     def crear_template_meta(self, nombre: str, texto: str, lang: str = "es",
-                            category: str = "UTILITY", media_id: str | None = None) -> dict:
+                            category: str = "UTILITY", media_id: str | None = None,
+                            encabezado_texto: str | None = None,
+                            pie_texto: str | None = None) -> dict:
         """Crea el template en Meta. Devuelve {ok, template_id, status, error}.
 
         Los templates en Meta quedan en estado PENDING hasta ser aprobados."""
@@ -583,7 +585,11 @@ class WhatsAppService:
             encabezado = self._componente_encabezado_meta(media_id)
         except Exception as exc:
             return {"ok": False, "template_id": None, "status": None, "error": str(exc)}
+        if not encabezado and encabezado_texto:
+            encabezado = {"type": "HEADER", "format": "TEXT", "text": encabezado_texto.strip()}
         components = ([encabezado] if encabezado else []) + [componente_body]
+        if pie_texto:
+            components.append({"type": "FOOTER", "text": pie_texto.strip()})
         if category != "AUTHENTICATION":
             components.append({"type": "BUTTONS", "buttons": BOTONES_RESPUESTA})
 
@@ -605,7 +611,9 @@ class WhatsAppService:
         return {"ok": True, "template_id": tid, "status": status, "error": None}
 
     def editar_template_meta(self, template_id: str, texto: str, category: str = "UTILITY",
-                            media_id: str | None = None) -> dict:
+                            media_id: str | None = None,
+                            encabezado_texto: str | None = None,
+                            pie_texto: str | None = None) -> dict:
         """Edita un template ya existente en Meta usando su ID.
 
         Importante: Meta NO permite cambiar la categoría de un template ya
@@ -641,7 +649,11 @@ class WhatsAppService:
             encabezado = self._componente_encabezado_meta(media_id)
         except Exception as exc:
             return {"ok": False, "template_id": template_id, "status": None, "error": str(exc)}
+        if not encabezado and encabezado_texto:
+            encabezado = {"type": "HEADER", "format": "TEXT", "text": encabezado_texto.strip()}
         components = ([encabezado] if encabezado else []) + [componente_body]
+        if pie_texto:
+            components.append({"type": "FOOTER", "text": pie_texto.strip()})
         if categoria_real != "AUTHENTICATION":
             components.append({"type": "BUTTONS", "buttons": BOTONES_RESPUESTA})
 
@@ -704,7 +716,9 @@ class WhatsAppService:
     def guardar_template_meta(self, nombre: str, texto: str, lang: str = "es",
                               category: str = "UTILITY",
                               template_id_conocido: str | None = None,
-                              media_id: str | None = None) -> dict:
+                              media_id: str | None = None,
+                              encabezado_texto: str | None = None,
+                              pie_texto: str | None = None) -> dict:
         """Crea el template en Meta, o lo edita si ya existe.
 
         Si no se pasa un template_id_conocido, primero intenta encontrarlo en
@@ -712,8 +726,10 @@ class WhatsAppService:
         localmente). Si lo encuentra, edita; si no, crea uno nuevo."""
         tid = template_id_conocido or self.id_template_meta(nombre, lang)
         if tid:
-            return self.editar_template_meta(tid, texto, category, media_id)
-        return self.crear_template_meta(nombre, texto, lang, category, media_id)
+            return self.editar_template_meta(tid, texto, category, media_id,
+                                             encabezado_texto, pie_texto)
+        return self.crear_template_meta(nombre, texto, lang, category, media_id,
+                                        encabezado_texto, pie_texto)
 
     def estado_template_meta(self, nombre_template: str, lang: str) -> dict:
         """Consulta en Meta el estado actual de un template por nombre + idioma.

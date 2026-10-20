@@ -133,12 +133,24 @@
         </div>
 
         <div class="field field--encabezado">
-          <label for="inpEncabezadoMedia">Encabezado multimedia (opcional)</label>
+          <label for="inpEncabezadoTexto">Encabezado de texto (opcional)</label>
+          <input type="text" id="inpEncabezadoTexto" maxlength="60" placeholder="Ej.: Una noticia para ti" autocomplete="off">
+          <p class="field__hint">Máximo 60 caracteres. Usa texto o multimedia, no ambos.</p>
+        </div>
+
+        <div class="field field--encabezado">
+          <label for="inpEncabezadoMedia">Encabezado multimedia (alternativa al texto)</label>
           <div class="encabezado-media__fila">
             <input type="file" id="inpEncabezadoMedia" accept="image/jpeg,image/png,image/gif,.jpg,.jpeg,.png,.gif">
             <button type="button" id="btnQuitarEncabezado" class="btn btn--ghost" hidden>Quitar</button>
           </div>
           <p id="estadoEncabezado" class="field__hint">JPG, PNG o GIF, máximo 3,5 MB. Los GIF se convierten a video para Meta.</p>
+        </div>
+
+        <div class="field">
+          <label for="inpPieTexto">Pie de plantilla (opcional)</label>
+          <input type="text" id="inpPieTexto" maxlength="60" placeholder="Ej.: Notificaciones SNW" autocomplete="off">
+          <p class="field__hint">Se muestra debajo del mensaje. Máximo 60 caracteres.</p>
         </div>
 
         <div class="preview-wrap">
@@ -544,7 +556,7 @@
   <script src="js/layout.js?v=permisos-acciones1"></script>
   <script src="js/pass-toggle.js"></script>
   <script src="js/plantilla-ia.js?v=sin-confirmacion1"></script>
-  <script src="js/app.js?v=preview-solo-editor1"></script>
+  <script src="js/app.js?v=encabezado-pie-editables1"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>
