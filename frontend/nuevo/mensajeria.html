@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SNW · Mensajería</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="/vendor/bootstrap/bootstrap.min.css">
+  <link rel="stylesheet" href="/css/tema.css">
+  <link rel="stylesheet" href="/css/layout.css">
+  <link rel="stylesheet" href="/nuevo/css/app.css">
+  <script src="/js/tema.js"></script>
+  <script>
+    try { if (localStorage.getItem("snw_tema") === "oscuro") document.documentElement.dataset.tema = "oscuro"; } catch (e) {}
+  </script>
+</head>
+<body data-pagina="mensajeria">
+
+  <div class="app-shell" id="appShell">
+    <nav class="sidebar" id="sidebar"></nav>
+    <div class="sidebar-backdrop"></div>
+
+    <div class="app-main">
+      <header class="app-topbar" id="appTopbar">
+        <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="Abrir men&uacute;">
+          <i class="fa-solid fa-bars"></i>
+        </button>
+        <span class="app-topbar__titulo">Mensajer&iacute;a</span>
+      </header>
+
+      <main class="contenido">
+        <div class="tabs" id="mtabs" role="tablist" aria-label="Secciones de mensajería">
+          <button type="button" class="activo" data-mtab="plantillas" role="tab" aria-selected="true" aria-controls="vistaPlantillas">Plantillas</button>
+          <button type="button" data-mtab="envios" role="tab" aria-selected="false" tabindex="-1" aria-controls="vistaEnvios">Env&iacute;o manual</button>
+          <button type="button" data-mtab="programados" role="tab" aria-selected="false" tabindex="-1" aria-controls="vistaProgramados">Programados</button>
+        </div>
+
+        <div class="split">
+          <!-- Lista compartida de plantillas -->
+          <section class="panel">
+            <div class="panel__head">
+              <h2>Plantillas</h2>
+              <button type="button" class="btn btn--primary btn--sm" id="btnNueva">+ Nueva</button>
+            </div>
+            <div class="panel__body">
+              <input type="search" class="input" id="buscarTpl" placeholder="Buscar plantilla&hellip;" aria-label="Buscar plantilla">
+            </div>
+            <div class="panel__body panel__body--flush">
+              <div id="listaPlantillas" class="lista" aria-live="polite"></div>
+            </div>
+          </section>
+
+          <!-- Panel activo -->
+          <div class="detalle">
+            <!-- ===== Plantillas: editor ===== -->
+            <div id="vistaPlantillas" class="vista" role="tabpanel">
+              <section class="panel">
+                <div class="panel__head">
+                  <h2 id="editorTitulo">Selecciona una plantilla</h2>
+                  <div class="panel__actions" id="editorEstados"></div>
+                </div>
+                <div class="panel__body">
+                  <div id="editorVacio" class="vacio">Elige una plantilla de la lista para verla o editarla.</div>
+                  <div id="editorCuerpo" class="editor-grid" hidden>
+                    <div class="field">
+                      <label for="edNombre">Nombre</label>
+                      <input type="text" class="input" id="edNombre" readonly>
+                    </div>
+                    <div class="field">
+                      <label for="edArea">&Aacute;rea</label>
+                      <input type="text" class="input" id="edArea" readonly>
+                    </div>
+                    <div class="field">
+                      <label>Mensaje</label>
+                      <div class="msg-preview" id="edMensaje"></div>
+                    </div>
+                    <dl class="kv" id="edMeta"></dl>
+                    <div class="row" id="editorAcciones"></div>
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            <!-- ===== Envío manual ===== -->
+            <div id="vistaEnvios" class="vista" role="tabpanel" hidden>
+              <section class="panel">
+                <div class="panel__head"><h2>Env&iacute;o manual</h2></div>
+                <div class="panel__body">
+                  <div id="envioVacio" class="vacio">Selecciona una plantilla de la lista para preparar un env&iacute;o.</div>
+                  <div id="envioCuerpo" class="editor-grid" hidden>
+                    <div class="field">
+                      <label>Plantilla seleccionada</label>
+                      <p id="envioPlantilla" style="font-weight:650">&mdash;</p>
+                    </div>
+                    <div class="field">
+                      <label for="envioBase">Base de datos</label>
+                      <select class="input" id="envioBase"></select>
+                    </div>
+                    <div class="field">
+                      <label for="envioLimite">L&iacute;mite de mensajes</label>
+                      <input type="number" class="input" id="envioLimite" min="1" placeholder="Dejar en blanco para todos">
+                      <p class="field__hint">Se enviar&aacute;n solo a los pacientes a&uacute;n pendientes de la base elegida.</p>
+                    </div>
+                    <div class="row">
+                      <button type="button" class="btn btn--ghost" id="envioLimpiar">Limpiar</button>
+                      <button type="button" class="btn btn--primary" id="envioIniciar">Iniciar env&iacute;o</button>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            <!-- ===== Programados ===== -->
+            <div id="vistaProgramados" class="vista" role="tabpanel" hidden>
+              <section class="panel">
+                <div class="panel__head">
+                  <h2>Env&iacute;os programados</h2>
+                  <button type="button" class="btn btn--ghost btn--sm" id="progActualizar">Actualizar</button>
+                </div>
+                <div class="panel__body panel__body--flush">
+                  <div id="listaProgramados" class="lista" aria-live="polite"></div>
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <script src="/js/layout.js"></script>
+  <script src="/nuevo/js/mensajeria.js"></script>
+</body>
+</html>

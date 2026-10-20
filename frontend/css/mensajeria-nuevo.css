@@ -1,0 +1,210 @@
+/* Adaptación de /nuevo/css/app.css a la Mensajería existente.
+   Solo cambia la presentación: app.js y sus flujos permanecen intactos. */
+body[data-pagina="mensajeria"] :is(.layout, .modal, .app-topbar .msg-tabs) {
+  --panel: #fff;
+  --panel-2: #f6faf8;
+  --surface-2: #f4f8f6;
+  --surface-3: #e8efec;
+  --hover: #eaf3ef;
+  --linea: #e6ede9;
+  --borde: #dde6e2;
+  --texto: #35423d;
+  --texto-suave: #6d7c75;
+  --verde: #3f9d88;
+  --verde-oscuro: #2f7d6b;
+  --btn-primary-bg: #34786a;
+  --btn-primary-fg: #fff;
+  --btn-primary-hover: #2c6759;
+  --btn-danger-bg: #bd4a4a;
+  --btn-danger-fg: #fff;
+  --brand-tint: #e4f1ec;
+  --brand-tint-bd: #c2dbd2;
+  --brand-tint-fg: #2f7d6b;
+  --sombra: 0 1px 2px rgba(30, 50, 42, .06), 0 6px 18px rgba(30, 50, 42, .05);
+}
+:root[data-tema="oscuro"] body[data-pagina="mensajeria"] :is(.layout, .modal, .app-topbar .msg-tabs) {
+  --panel: #1c2421;
+  --panel-2: #222b28;
+  --surface-2: #26302c;
+  --surface-3: #2d3834;
+  --hover: #2a3531;
+  --linea: #2e3a36;
+  --borde: #384540;
+  --texto: #e3ebe7;
+  --texto-suave: #9fb0a9;
+  --verde: #57c2a8;
+  --verde-oscuro: #7ad3bd;
+  --btn-primary-bg: #4bb89e;
+  --btn-primary-fg: #0e1c18;
+  --btn-primary-hover: #5cc7ad;
+  --btn-danger-bg: #d98484;
+  --btn-danger-fg: #241010;
+  --brand-tint: #22362f;
+  --brand-tint-bd: #34553f;
+  --brand-tint-fg: #8ad8c3;
+  --sombra: 0 1px 2px rgba(0, 0, 0, .3), 0 6px 18px rgba(0, 0, 0, .28);
+}
+
+body[data-pagina="mensajeria"] .layout {
+  width: 100%;
+  max-width: 1100px;
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap: 20px;
+  margin: 24px auto;
+  padding-inline: 20px;
+}
+body[data-pagina="mensajeria"] :is(#panelPlantillas, #panelEditor, #panelEnvio, .prog-columna > .panel) {
+  min-width: 0;
+  border: 1px solid var(--borde);
+  border-radius: 16px;
+  background: var(--panel);
+  box-shadow: var(--sombra);
+}
+body[data-pagina="mensajeria"] .panel__head {
+  padding: 16px 20px;
+  border-bottom-color: var(--linea);
+}
+body[data-pagina="mensajeria"] .panel__head h2 { font-size: 1rem; line-height: 1.3; }
+body[data-pagina="mensajeria"] #panelPlantillas .panel__head {
+  border-radius: 15px 15px 0 0;
+  background: var(--panel);
+}
+body[data-pagina="mensajeria"] #panelEditor form { padding: 20px; }
+body[data-pagina="mensajeria"] .card-envio { padding: 8px 20px 20px; }
+body[data-pagina="mensajeria"] .prog-form { padding: 18px 20px 20px; gap: 14px; }
+
+/* Lista de plantillas: misma jerarquía de filas que la lista de /nuevo/. */
+body[data-pagina="mensajeria"] .searchbox {
+  margin: 16px 20px 8px;
+  padding: 5px 12px;
+  border-radius: 8px;
+}
+body[data-pagina="mensajeria"] .filtro-area { margin: 4px 20px 12px; }
+body[data-pagina="mensajeria"] .tpl-list { padding: 0 0 8px; }
+body[data-pagina="mensajeria"] .tpl-item {
+  border: 0;
+  border-bottom: 1px solid var(--linea);
+  border-radius: 0;
+  padding: 12px 20px;
+  transition: background-color .12s ease;
+}
+body[data-pagina="mensajeria"] .tpl-item-wrap .tpl-item { padding-right: 42px; }
+body[data-pagina="mensajeria"] .tpl-item--activa {
+  background: var(--brand-tint);
+  box-shadow: inset 3px 0 0 var(--verde);
+}
+body[data-pagina="mensajeria"] .tpl-item__nombre { font-weight: 650; }
+body[data-pagina="mensajeria"] .tpl-item__vista { font-size: .76rem; }
+body[data-pagina="mensajeria"] .tpl-quitar {
+  top: 50%; right: 12px; transform: translateY(-50%);
+  background: var(--surface-3);
+}
+body[data-pagina="mensajeria"] .tpl-quitar:hover { background: var(--brand-tint-bd); }
+body[data-pagina="mensajeria"] .tpl-list__grupo { margin-inline: 16px; }
+
+/* Controles del editor y de los dos asistentes de envío. */
+body[data-pagina="mensajeria"] .field { margin-bottom: 16px; }
+body[data-pagina="mensajeria"] .field > label,
+body[data-pagina="mensajeria"] .prog-paso .field > label {
+  margin-bottom: 6px;
+  font-size: .82rem;
+  font-weight: 650;
+}
+body[data-pagina="mensajeria"] .field input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="hidden"]),
+body[data-pagina="mensajeria"] .field select,
+body[data-pagina="mensajeria"] .field textarea,
+body[data-pagina="mensajeria"] .prog-form input[type="number"],
+body[data-pagina="mensajeria"] .prog-form select,
+body[data-pagina="mensajeria"] #selNumeroPrueba {
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1.5px solid var(--borde);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--texto);
+  font-size: .9rem;
+}
+body[data-pagina="mensajeria"] :is(.field input, .field select, .field textarea, #selNumeroPrueba):focus-visible {
+  outline: 2px solid var(--verde);
+  outline-offset: 2px;
+}
+body[data-pagina="mensajeria"] .prog-paso {
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--borde);
+  border-radius: 12px;
+  background: var(--panel-2);
+}
+body[data-pagina="mensajeria"] .prog-paso--listo { border-color: var(--verde); }
+body[data-pagina="mensajeria"] .prog-paso__num { background: var(--surface-3); }
+body[data-pagina="mensajeria"] .prog-paso--listo .prog-paso__num {
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-fg);
+}
+body[data-pagina="mensajeria"] .prog-item {
+  border: 1px solid var(--borde);
+  border-radius: 12px;
+  background: var(--panel-2);
+}
+body[data-pagina="mensajeria"] .prog-tpl-elegida,
+body[data-pagina="mensajeria"] .preview-wrap,
+body[data-pagina="mensajeria"] .preview-prueba {
+  border-color: var(--borde);
+  border-radius: 12px;
+  background: var(--panel-2);
+}
+
+/* Botones y pestañas conservan sus acciones y animación existentes. */
+body[data-pagina="mensajeria"] .btn {
+  min-height: 40px;
+  padding: 9px 16px;
+  border-radius: 8px;
+  font-size: .875rem;
+  font-weight: 650;
+  text-decoration: none;
+}
+body[data-pagina="mensajeria"] .btn--primary:hover:not(:disabled) { background: var(--btn-primary-hover); }
+body[data-pagina="mensajeria"] .btn--ghost:hover:not(:disabled) {
+  background: var(--hover);
+  border-color: var(--verde);
+}
+body[data-pagina="mensajeria"] .btn:not(:disabled):not(.disabled):not(.is-disabled):hover:not(:focus-visible),
+body[data-pagina="mensajeria"] button:hover:not(:focus-visible) { outline: none; }
+body[data-pagina="mensajeria"] .app-topbar .msg-tabs {
+  background: var(--surface-2);
+  border-color: var(--borde);
+}
+body[data-pagina="mensajeria"] .app-topbar .msg-tabs::before {
+  background: var(--btn-primary-bg);
+  box-shadow: none;
+}
+body[data-pagina="mensajeria"] .app-topbar .msg-tab { color: var(--texto-suave); }
+body[data-pagina="mensajeria"] .app-topbar .msg-tab:hover:not(.activo) {
+  color: var(--verde-oscuro);
+  text-shadow: none;
+}
+body[data-pagina="mensajeria"] .app-topbar .msg-tab.activo,
+body[data-pagina="mensajeria"] .app-topbar .msg-tab.activo:hover {
+  color: var(--btn-primary-fg);
+  text-shadow: none;
+}
+
+body[data-pagina="mensajeria"] .modal__card {
+  border: 1px solid var(--borde);
+  border-radius: 16px;
+  background: var(--panel);
+  box-shadow: 0 8px 30px rgba(30, 50, 42, .12);
+}
+@media (max-width: 900px) {
+  body[data-pagina="mensajeria"] .layout { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 560px) {
+  body[data-pagina="mensajeria"] .layout { padding-inline: 16px; gap: 16px; }
+  body[data-pagina="mensajeria"] #panelEditor form,
+  body[data-pagina="mensajeria"] .prog-form { padding: 16px; }
+  body[data-pagina="mensajeria"] .card-envio { padding: 8px 16px 16px; }
+  body[data-pagina="mensajeria"] .panel__head { padding: 14px 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  body[data-pagina="mensajeria"] :is(.tpl-item, .btn) { transition: none; }
+}

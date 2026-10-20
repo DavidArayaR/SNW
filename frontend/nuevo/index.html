@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SNW · Inicio</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="/vendor/bootstrap/bootstrap.min.css">
+  <link rel="stylesheet" href="/css/tema.css">
+  <link rel="stylesheet" href="/css/layout.css">
+  <link rel="stylesheet" href="/nuevo/css/app.css">
+  <script src="/js/tema.js"></script>
+</head>
+<body data-pagina="inicio">
+
+  <div class="app-shell" id="appShell">
+    <nav class="sidebar" id="sidebar"></nav>
+    <div class="sidebar-backdrop"></div>
+
+    <div class="app-main">
+      <header class="app-topbar" id="appTopbar">
+        <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="Abrir men&uacute;">
+          <i class="fa-solid fa-bars"></i>
+        </button>
+        <span class="app-topbar__titulo">Inicio</span>
+      </header>
+
+      <main class="contenido">
+        <section class="panel">
+          <div class="panel__body">
+            <h1 id="saludo" style="font-size:1.5rem">Resumen operativo</h1>
+            <p class="muted" style="margin-top:4px">Estado de tus env&iacute;os, programados y actividad reciente.</p>
+            <div id="statsAdmin" class="stats" style="margin-top:18px" hidden></div>
+          </div>
+        </section>
+
+        <div class="grid-2">
+          <section class="panel">
+            <div class="panel__head">
+              <h2><i class="fa-solid fa-circle-play"></i> Env&iacute;os en curso</h2>
+              <a class="btn btn--ghost btn--sm" href="/historial.html">Ver historial</a>
+            </div>
+            <div class="panel__body panel__body--flush" id="enviosCurso"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel__head">
+              <h2><i class="fa-solid fa-calendar-check"></i> Programados</h2>
+              <a class="btn btn--ghost btn--sm" href="/mensajeria.html?tab=programados">Ver todos</a>
+            </div>
+            <div class="panel__body panel__body--flush" id="programados"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel__head">
+              <h2><i class="fa-solid fa-clock-rotate-left"></i> Historial reciente</h2>
+              <a class="btn btn--ghost btn--sm" href="/historial.html">Abrir</a>
+            </div>
+            <div class="panel__body panel__body--flush" id="historial"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel__head"><h2><i class="fa-solid fa-bolt"></i> Acciones r&aacute;pidas</h2></div>
+            <div class="panel__body">
+              <div class="row" id="acciones"></div>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <script src="/js/layout.js"></script>
+  <script src="/nuevo/js/inicio.js"></script>
+</body>
+</html>

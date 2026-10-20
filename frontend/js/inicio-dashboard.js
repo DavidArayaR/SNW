@@ -127,9 +127,32 @@
     ).join(""));
   }
 
+  // Franja de estadísticas (solo admin/dev): 5 métricas del estado de pacientes.
+  async function cargarStatsAdmin() {
+    if (!esPriv()) return;
+    const el = document.getElementById("statsAdmin");
+    if (!el) return;
+    try {
+      const r = await fetch("api/estadisticas", { headers: auth, cache: "no-store" });
+      if (r.status === 401) { window.snwSesionExpirada(); return; }
+      if (!r.ok) throw new Error();
+      const d = await r.json();
+      const porResp = d.pacientes_por_respuesta || {};
+      const porInteres = d.pacientes_por_interes || {};
+      el.hidden = false;
+      el.innerHTML =
+        '<div class="dash-stat dash-stat--info"><span class="dash-stat__label">Enviados este mes</span><span class="dash-stat__valor">' + nfmt(d.enviados_mes) + '</span></div>' +
+        '<div class="dash-stat dash-stat--neutral"><span class="dash-stat__label">Aún no responden</span><span class="dash-stat__valor">' + nfmt(porResp.pendiente) + '</span></div>' +
+        '<div class="dash-stat dash-stat--ok"><span class="dash-stat__label">Interesados</span><span class="dash-stat__valor">' + nfmt(porInteres.interesado) + '</span></div>' +
+        '<div class="dash-stat dash-stat--warn"><span class="dash-stat__label">No interesados</span><span class="dash-stat__valor">' + nfmt(porInteres.no_interesado) + '</span></div>' +
+        '<div class="dash-stat dash-stat--danger"><span class="dash-stat__label">Bajas</span><span class="dash-stat__valor">' + nfmt(porResp.baja) + '</span></div>';
+    } catch (e) { /* franja opcional */ }
+  }
+
   // Carga inicial en paralelo; cada panel maneja su error de forma aislada.
   cargarEnvios();
   cargarProgramados();
   cargarHistorial();
+  cargarStatsAdmin();
   pintarAcciones();
 })();

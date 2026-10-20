@@ -178,6 +178,71 @@ body.pagina-auth {
   .pagina-auth h1 { font-size: 1.25rem; }
 }
 
+/* ---- Chrome sidebar/topbar en gris algo más oscuro que el fondo (todas las páginas) ----
+   Sobreescribe el chrome verde de layout.css (refinamiento.css se carga al final).
+   El tono se deriva del --fondo hacia negro, así funciona en claro y oscuro.
+   Hover y seleccionado en verde; el seleccionado conserva su costura+curva. */
+:root { --chrome-fondo: color-mix(in srgb, var(--fondo) 90%, black); }
+:root[data-tema="oscuro"] { --chrome-fondo: color-mix(in srgb, var(--fondo) 68%, black); }
+
+.sidebar {
+  background: var(--chrome-fondo);
+  background-attachment: scroll;
+  color: var(--texto);
+}
+.sidebar::after { background: var(--sidebar-contorno); }
+.sidebar__brand { color: var(--texto); }
+.sidebar__brand i { color: var(--verde); }
+.sidebar__brand small { color: var(--texto-suave); opacity: 1; }
+.sidebar .nav-link { color: var(--texto); }
+/* Hover: solo letras e iconos en verde (sin rellenar el botón). */
+.sidebar .nav-link:hover > span,
+.sidebar .nav-link:hover > i { color: var(--verde-oscuro); -webkit-text-stroke: 0; text-shadow: none; }
+.sidebar__accion { color: var(--texto); }
+.sidebar__accion:hover > span,
+.sidebar__accion:hover > i { color: var(--verde-oscuro); -webkit-text-stroke: 0; text-shadow: none; }
+.sidebar__admin-flecha { color: var(--texto-suave); }
+.sidebar__subnav .nav-link { color: var(--texto); }
+
+.app-topbar {
+  background: var(--chrome-fondo);
+  background-attachment: scroll;
+}
+.app-topbar::after { background: var(--sidebar-contorno); }
+.app-topbar__titulo { color: var(--texto); }
+
+/* Esquina de unión topbar↔sidebar */
+.app-main::before { background: var(--chrome-fondo); }
+.app-main::after { border-color: var(--sidebar-contorno); }
+
+/* El seleccionado conserva su costura+curva originales (no se toca). */
+
+/* ============ Nuevo estilo de contenido (todas las páginas) ============ */
+/* Paneles: radio mayor y borde uniforme de 1px (se retira el doble grosor de
+   3px). Así el contenido coincide con el sistema nuevo de /nuevo/. */
+.panel {
+  border-radius: 16px;
+  border-top-width: 1px;
+  border-bottom-width: 1px;
+}
+.panel__head { padding: 16px 20px; }
+.panel__head h2 { font-weight: 650; letter-spacing: -.01em; }
+
+/* Encabezados de tabla más nítidos. */
+.tabla-wrap thead th {
+  font-size: .72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--texto-suave);
+}
+
+/* Botones: radio consistente salvo variantes con forma propia (píldoras). */
+body:not([data-seccion="administracion"]) .btn { border-radius: 8px; }
+
+/* Estados de dato coherentes con el nuevo look. */
+.tabla-vacia, .empty-state { color: var(--texto-suave); }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }

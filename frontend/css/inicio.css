@@ -136,6 +136,19 @@ body.inicio-sesion main { margin-top: 24px; }
 .dash-saludo { margin: 0 0 18px; }
 .dash-saludo h1 { margin: 0 0 4px; font-size: 1.4rem; letter-spacing: -.01em; }
 .dash-sub { margin: 0; color: var(--texto-suave); font-size: .92rem; }
+/* Franja de 5 métricas (estado de pacientes y envíos del mes). */
+.dash-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-top: 16px; }
+.dash-stat {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 14px 16px; border: 1px solid var(--borde); border-radius: 12px; background: var(--panel-2);
+}
+.dash-stat__label { font-size: .76rem; font-weight: 650; color: var(--texto-suave); }
+.dash-stat__valor { font-size: 1.6rem; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.dash-stat--info .dash-stat__valor { color: var(--info-fg); }
+.dash-stat--ok .dash-stat__valor { color: var(--ok-fg); }
+.dash-stat--warn .dash-stat__valor { color: var(--warn-fg); }
+.dash-stat--danger .dash-stat__valor { color: var(--danger-fg); }
+.dash-stat--neutral .dash-stat__valor { color: var(--neutral-fg); }
 .dash-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
 .dash-panel { display: flex; flex-direction: column; }
 .dash-panel .panel__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
