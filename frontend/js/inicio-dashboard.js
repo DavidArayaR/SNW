@@ -27,9 +27,10 @@
   }
 
   const cuerpo = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
-  const cargando = (id) => cuerpo(id, '<span class="dash-vacio">Cargando…</span>');
+  const cargando = (id) => cuerpo(id, '<div class="dash-cargando"><span class="dash-rueda" aria-hidden="true"></span>Cargando…</div>');
   const vacio = (id, txt) => cuerpo(id, '<span class="dash-vacio">' + esc(txt) + "</span>");
   const fallo = (id) => cuerpo(id, '<span class="dash-vacio">No se pudo cargar la información.</span>');
+  const tabla = (filas) => '<div class="tabla-wrap"><table class="dash-tabla"><tbody>' + filas + '</tbody></table></div>';
 
   // Estados explícitos: etiqueta textual + color semántico (tokens).
   const TONOS = { en_proceso: "info", pausado: "warn", pendiente: "warn", aprobado: "ok", enviando: "info", enviado: "ok", completado: "ok", cancelado: "neutral", rechazado: "danger", error: "danger" };
@@ -59,14 +60,12 @@
       if (!r.ok) throw new Error();
       const items = await r.json();
       if (!items.length) { vacio("dashEnvios", "Sin envíos en curso."); return; }
-      cuerpo("dashEnvios", items.slice(0, 5).map((it) =>
-        '<div class="dash-item">' +
-          '<span class="dash-item__main">' + esc(nombrePlantilla(it.plantilla)) +
-            '<span class="dash-item__meta">' + esc(it.area || it.base || "") + "</span></span>" +
-          '<span class="dash-item__der">' + badgeEstado(it.estado) +
-            '<span class="dash-item__meta">' + nfmt(it.enviados) + "/" + nfmt(it.total) + "</span></span>" +
-        "</div>"
-      ).join(""));
+      cuerpo("dashEnvios", tabla(items.slice(0, 5).map((it) =>
+        '<tr><td><strong>' + esc(nombrePlantilla(it.plantilla)) + '</strong>' +
+          '<span class="dash-item__meta">' + esc(it.area || it.base || "") + '</span></td>' +
+          '<td class="num">' + badgeEstado(it.estado) +
+          '<span class="dash-item__meta">' + nfmt(it.enviados) + '/' + nfmt(it.total) + '</span></td></tr>'
+      ).join("")));
     } catch (e) { fallo("dashEnvios"); }
   }
 
@@ -80,13 +79,11 @@
       const items = await r.json();
       const vivos = items.filter((p) => ["pendiente", "aprobado"].indexOf(p.estado) !== -1);
       if (!vivos.length) { vacio("dashProgramados", "Sin programados próximos."); return; }
-      cuerpo("dashProgramados", vivos.slice(0, 5).map((p) =>
-        '<div class="dash-item">' +
-          '<span class="dash-item__main">' + esc(p.plantilla || "—") +
-            '<span class="dash-item__meta">' + esc(fmtFecha(p.programado_para)) + "</span></span>" +
-          badgeEstado(p.estado) +
-        "</div>"
-      ).join(""));
+      cuerpo("dashProgramados", tabla(vivos.slice(0, 5).map((p) =>
+        '<tr><td><strong>' + esc(p.plantilla || "—") + '</strong>' +
+          '<span class="dash-item__meta">' + esc(fmtFecha(p.programado_para)) + '</span></td>' +
+          '<td class="num">' + badgeEstado(p.estado) + '</td></tr>'
+      ).join("")));
     } catch (e) { fallo("dashProgramados"); }
   }
 
@@ -101,14 +98,12 @@
       const data = await r.json();
       const regs = (data && data.registros) || [];
       if (!regs.length) { vacio("dashHistorial", "Aún no hay envíos registrados."); return; }
-      cuerpo("dashHistorial", regs.slice(0, 5).map((h) =>
-        '<div class="dash-item">' +
-          '<span class="dash-item__main">' + esc(h.plantilla_nombre || "—") +
-            '<span class="dash-item__meta">' + esc(fmtFecha(h.fecha)) + "</span></span>" +
-          '<span class="dash-item__der">' + badgeEstado(h.estado) +
-            '<span class="dash-item__meta">' + nfmt(h.enviados) + "/" + nfmt(h.total_pacientes) + "</span></span>" +
-        "</div>"
-      ).join(""));
+      cuerpo("dashHistorial", tabla(regs.slice(0, 5).map((h) =>
+        '<tr><td><strong>' + esc(h.plantilla_nombre || "—") + '</strong>' +
+          '<span class="dash-item__meta">' + esc(fmtFecha(h.fecha)) + '</span></td>' +
+          '<td class="num">' + badgeEstado(h.estado) +
+          '<span class="dash-item__meta">' + nfmt(h.enviados) + '/' + nfmt(h.total_pacientes) + '</span></td></tr>'
+      ).join("")));
     } catch (e) { fallo("dashHistorial"); }
   }
 

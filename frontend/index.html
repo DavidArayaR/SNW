@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="css/tema.css?v=tokens1">
   <link rel="stylesheet" href="css/styles.css">
   <link rel="stylesheet" href="css/layout.css?v=navcolor1">
-  <link rel="stylesheet" href="css/inicio.css?v=chrome2">
+  <link rel="stylesheet" href="css/inicio.css?v=dashboard-nuevo1">
   <link rel="stylesheet" href="css/refinamiento.css?v=chrome-all1">
   <link rel="stylesheet" href="css/estilo-nuevo.css?v=1">
   <script src="js/tema.js?v=scrollbar1"></script>
@@ -88,26 +88,28 @@
   </div>
 
   <div id="dashboardOperativo" hidden>
-    <section class="dash-saludo">
-      <h1 id="dashSaludo">Resumen operativo</h1>
-      <p class="dash-sub">Estado de tus env&iacute;os, programados y actividad reciente.</p>
-      <div id="statsAdmin" class="dash-stats" hidden></div>
+    <section class="panel dash-resumen">
+      <div class="panel__body">
+        <h1 id="dashSaludo">Resumen operativo</h1>
+        <p class="dash-sub">Estado de tus env&iacute;os, programados y actividad reciente.</p>
+        <div id="statsAdmin" class="dash-stats" hidden></div>
+      </div>
     </section>
     <div class="dash-grid">
       <section class="panel dash-panel">
-        <div class="panel__head"><h2>Env&iacute;os en curso</h2><a class="btn btn--ghost btn--sm" href="historial.html">Ver historial</a></div>
-        <div id="dashEnvios" class="dash-cuerpo"></div>
+        <div class="panel__head"><h2><i class="fa-solid fa-circle-play" aria-hidden="true"></i> Env&iacute;os en curso</h2><a class="btn btn--ghost btn--sm" href="historial.html">Ver historial</a></div>
+        <div id="dashEnvios" class="dash-cuerpo panel__body--flush"></div>
       </section>
       <section class="panel dash-panel">
-        <div class="panel__head"><h2>Programados</h2><a class="btn btn--ghost btn--sm" href="mensajeria.html?tab=programados">Ver todos</a></div>
-        <div id="dashProgramados" class="dash-cuerpo"></div>
+        <div class="panel__head"><h2><i class="fa-solid fa-calendar-check" aria-hidden="true"></i> Programados</h2><a class="btn btn--ghost btn--sm" href="mensajeria.html?tab=programados">Ver todos</a></div>
+        <div id="dashProgramados" class="dash-cuerpo panel__body--flush"></div>
       </section>
       <section class="panel dash-panel">
-        <div class="panel__head"><h2>Historial reciente</h2><a class="btn btn--ghost btn--sm" href="historial.html">Abrir</a></div>
-        <div id="dashHistorial" class="dash-cuerpo"></div>
+        <div class="panel__head"><h2><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> Historial reciente</h2><a class="btn btn--ghost btn--sm" href="historial.html">Abrir</a></div>
+        <div id="dashHistorial" class="dash-cuerpo panel__body--flush"></div>
       </section>
       <section class="panel dash-panel">
-        <div class="panel__head"><h2>Acciones r&aacute;pidas</h2></div>
+        <div class="panel__head"><h2><i class="fa-solid fa-bolt" aria-hidden="true"></i> Acciones r&aacute;pidas</h2></div>
         <div id="dashAcciones" class="dash-cuerpo dash-acciones"></div>
       </section>
     </div>
@@ -119,7 +121,7 @@
   </div>
 
   <script src="js/layout.js?v=navcolor1"></script>
-  <script src="js/inicio-dashboard.js?v=dash-stats1"></script>
+  <script src="js/inicio-dashboard.js?v=dashboard-nuevo1"></script>
   <script src="js/pass-toggle.js"></script>
 <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 <script>
