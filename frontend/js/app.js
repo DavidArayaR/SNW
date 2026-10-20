@@ -84,6 +84,9 @@ let solicitudIA = null;
 let cierrePanelIATimer = null;
 const inpEncabezadoMedia = $("#inpEncabezadoMedia");
 const inpEncabezadoTexto = $("#inpEncabezadoTexto");
+const checkEncabezadoMultimedia = $("#checkEncabezadoMultimedia");
+const grupoEncabezadoTexto = $("#grupoEncabezadoTexto");
+const grupoEncabezadoMedia = $("#grupoEncabezadoMedia");
 const inpPieTexto = $("#inpPieTexto");
 const btnQuitarEncabezado = $("#btnQuitarEncabezado");
 const estadoEncabezado = $("#estadoEncabezado");
@@ -866,8 +869,8 @@ async function consultarPreview(solicitud) {
     const res = await fetch(`${API_URL}/previsualizar`, {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ plantilla_id: activaId, texto: inpMensaje.value,
-        encabezado_media_id: encabezadoMediaId,
-        encabezado_texto: inpEncabezadoTexto.value.trim(),
+        encabezado_media_id: encabezadoMediaActivo(),
+        encabezado_texto: encabezadoTextoActivo(),
         pie_texto: inpPieTexto.value.trim(), ejemplos: ejemplosPreview() }),
     });
     const data = await res.json().catch(() => ({}));
@@ -961,6 +964,22 @@ function limpiarVistaEncabezado() {
   previewVideo.hidden = true;
 }
 
+function encabezadoMediaActivo() {
+  return checkEncabezadoMultimedia.checked ? encabezadoMediaId : null;
+}
+
+function encabezadoTextoActivo() {
+  return checkEncabezadoMultimedia.checked ? "" : inpEncabezadoTexto.value.trim();
+}
+
+function actualizarTipoEncabezado() {
+  grupoEncabezadoTexto.hidden = checkEncabezadoMultimedia.checked;
+  grupoEncabezadoMedia.hidden = !checkEncabezadoMultimedia.checked;
+  mostrarEncabezadoGuardado(encabezadoMediaActivo());
+  actualizarBloqueoCampos();
+  refrescarEditor();
+}
+
 async function mostrarEncabezadoGuardado(mediaId) {
   limpiarVistaEncabezado();
   if (!mediaId) return;
@@ -969,7 +988,7 @@ async function mostrarEncabezadoGuardado(mediaId) {
     const res = await fetch(`${API_URL}/media/${mediaId}`, { headers: authHeaders(), cache: "no-store" });
     if (!res.ok) return;
     const blob = await res.blob();
-    if (version !== versionPreviewMedia || encabezadoMediaId !== mediaId) return;
+    if (version !== versionPreviewMedia || encabezadoMediaActivo() !== mediaId) return;
     urlPreviewMedia = URL.createObjectURL(blob);
     const vista = blob.type === "video/mp4" ? previewVideo : previewMedia;
     vista.src = urlPreviewMedia;
@@ -986,11 +1005,13 @@ function establecerEncabezado(mediaId) {
       ? "Configura el App ID de Meta antes de guardar esta plantilla."
       : "Encabezado listo. Puedes quitarlo o reemplazarlo.")
     : "JPG, PNG o GIF, máximo 3,5 MB. Los GIF se convierten a video para Meta.";
-  mostrarEncabezadoGuardado(encabezadoMediaId);
+  mostrarEncabezadoGuardado(encabezadoMediaActivo());
   if (formEl.style.display !== "none") actualizarBloqueoCampos();
   actualizarEstadoBotonGuardar();
   actualizarPreview();
 }
+
+checkEncabezadoMultimedia.addEventListener("change", actualizarTipoEncabezado);
 
 inpEncabezadoTexto.addEventListener("input", () => {
   actualizarBloqueoCampos();
@@ -1007,6 +1028,7 @@ inpEncabezadoMedia.addEventListener("change", async () => {
     return toast("El encabezado debe pesar como máximo 3,5 MB.", "error");
   }
   subiendoEncabezado = true;
+  checkEncabezadoMultimedia.disabled = true;
   btnQuitarEncabezado.disabled = true;
   estadoEncabezado.textContent = "Preparando encabezado…";
   actualizarEstadoBotonGuardar();
@@ -1068,7 +1090,7 @@ function refrescarEditor() {
 if (inpArea) inpArea.addEventListener("change", refrescarEditor);
 
 function estadoActualEditor() {
-  return JSON.stringify([inpNombre.value, inpMensaje.value, valTemplate(), valTemplateLang(), valTemplateCategoria(), inpArea ? inpArea.value : "", encabezadoMediaId, inpEncabezadoTexto.value, inpPieTexto.value]);
+  return JSON.stringify([inpNombre.value, inpMensaje.value, valTemplate(), valTemplateLang(), valTemplateCategoria(), inpArea ? inpArea.value : "", encabezadoMediaActivo(), encabezadoTextoActivo(), inpPieTexto.value]);
 }
 
 function marcarSnapshot() {
@@ -1096,7 +1118,7 @@ function actualizarEstadoBotonGuardar() {
   const incompleto = !inpNombre.value.trim() || !inpMensaje.value.trim() ||
     ((window.snwRol || "") === "usuario" && !(inpArea && inpArea.value));
   btnGuardar.disabled = !hayCambios() || incompleto || subiendoEncabezado ||
-    (!soloCambioArea() && ((!!encabezadoMediaId && appIdMetaConfigurada === false) || validandoPreview || !!erroresPreview.length));
+    (!soloCambioArea() && ((!!encabezadoMediaActivo() && appIdMetaConfigurada === false) || validandoPreview || !!erroresPreview.length));
   actualizarEstadoBotonPrueba();
 }
 
@@ -1336,10 +1358,11 @@ function actualizarBloqueoCampos() {
   inpEjemploNombre.disabled = false;
   inpEjemploApellido.disabled = false;
   selNumeroPrueba.disabled = false;
-  inpEncabezadoTexto.disabled = !!encabezadoMediaId;
+  checkEncabezadoMultimedia.disabled = subiendoEncabezado;
+  inpEncabezadoTexto.disabled = checkEncabezadoMultimedia.checked;
   inpPieTexto.disabled = false;
-  inpEncabezadoMedia.disabled = !!inpEncabezadoTexto.value.trim();
-  btnQuitarEncabezado.disabled = false;
+  inpEncabezadoMedia.disabled = !checkEncabezadoMultimedia.checked;
+  btnQuitarEncabezado.disabled = !checkEncabezadoMultimedia.checked;
   inpNombre.disabled = esExistente;
   inpNombre.title = esExistente
     ? "El nombre es permanente y no se puede cambiar. Para usar otro nombre, elimina la plantilla y crea una nueva."
@@ -1384,6 +1407,9 @@ function abrir(id) {
   inpMensaje.value = p.texto;
   inpEncabezadoTexto.value = p.encabezado_texto || "";
   inpPieTexto.value = p.pie_texto || "";
+  checkEncabezadoMultimedia.checked = !!p.encabezado_media_id;
+  grupoEncabezadoTexto.hidden = checkEncabezadoMultimedia.checked;
+  grupoEncabezadoMedia.hidden = !checkEncabezadoMultimedia.checked;
   inpEjemploNombre.value = "David";
   inpEjemploApellido.value = "Araya";
   establecerEncabezado(p.encabezado_media_id);
@@ -1442,6 +1468,9 @@ function modoNueva() {
   inpMensaje.value = "";
   inpEncabezadoTexto.value = "";
   inpPieTexto.value = "";
+  checkEncabezadoMultimedia.checked = false;
+  grupoEncabezadoTexto.hidden = false;
+  grupoEncabezadoMedia.hidden = true;
   inpEjemploNombre.value = "David";
   inpEjemploApellido.value = "Araya";
   establecerEncabezado(null);
@@ -1476,6 +1505,9 @@ function modoVacia() {
   puedeEnviarPrueba = false;
   validandoPreview = false;
   formEl.style.display = "none";
+  checkEncabezadoMultimedia.checked = false;
+  grupoEncabezadoTexto.hidden = false;
+  grupoEncabezadoMedia.hidden = true;
   establecerEncabezado(null);
   estadoVacio.style.display = "flex";
   tituloForm.textContent = "Plantillas";
@@ -1643,7 +1675,7 @@ function cancelarEdicion() {
 formEl.addEventListener("submit", async (e) => {
   e.preventDefault();
   if (subiendoEncabezado) return toast("Espera a que termine la carga del encabezado.", "error");
-  if (!soloCambioArea() && encabezadoMediaId && appIdMetaConfigurada === false) {
+  if (!soloCambioArea() && encabezadoMediaActivo() && appIdMetaConfigurada === false) {
     return toast("Configura el App ID de Meta antes de guardar esta plantilla.", "error");
   }
   if (!PUEDE_EDITAR_PLANTILLAS) return;
@@ -1724,11 +1756,11 @@ formEl.addEventListener("submit", async (e) => {
     }
     let fila;
     if (activaId) {
-      fila = await actualizarPlantilla(activaId, nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezadoMediaId, inpEncabezadoTexto.value.trim(), inpPieTexto.value.trim(), ejemplosPreview());
+      fila = await actualizarPlantilla(activaId, nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezadoMediaActivo(), encabezadoTextoActivo(), inpPieTexto.value.trim(), ejemplosPreview());
       const i = plantillas.findIndex((x) => x.id === activaId);
       if (i >= 0) plantillas[i] = fila;
     } else {
-      fila = await crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezadoMediaId, inpEncabezadoTexto.value.trim(), inpPieTexto.value.trim(), ejemplosPreview());
+      fila = await crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezadoMediaActivo(), encabezadoTextoActivo(), inpPieTexto.value.trim(), ejemplosPreview());
       plantillas.push(fila);
     }
     setGuardando(false);

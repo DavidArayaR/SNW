@@ -208,3 +208,29 @@ body[data-pagina="mensajeria"] .modal__card {
 @media (prefers-reduced-motion: reduce) {
   body[data-pagina="mensajeria"] :is(.tpl-item, .btn) { transition: none; }
 }
+/* El editor muestra una sola variante de encabezado por vez. */
+body[data-pagina="mensajeria"] .encabezado__titulo {
+  display: block;
+  margin-bottom: 9px;
+  font-size: .82rem;
+  font-weight: 700;
+  color: var(--texto);
+}
+body[data-pagina="mensajeria"] .field label.encabezado__opcion {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  width: fit-content;
+  margin: 0 0 12px;
+  cursor: pointer;
+}
+body[data-pagina="mensajeria"] .encabezado__opcion input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--verde);
+  cursor: pointer;
+}
+body[data-pagina="mensajeria"] .encabezado__opcion input:disabled,
+body[data-pagina="mensajeria"] .encabezado__opcion input:disabled + span { cursor: not-allowed; opacity: .65; }
+body[data-pagina="mensajeria"] .encabezado__contenido[hidden] { display: none; }
