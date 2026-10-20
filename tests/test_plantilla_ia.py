@@ -27,6 +27,17 @@ class ValidacionIATests(unittest.TestCase):
                 ia.validar_instruccion(texto)
             self.assertEqual(error.exception.status_code, 422)
 
+    def test_instruccion_admite_datos_publicos_del_centro(self):
+        instruccion = ("Promociona Salud Mental Para Todos. Ubicación: Santiago Centro. "
+                       "Sitio web: https://saludmentalparatodos.cl/agenda")
+        self.assertEqual(ia.validar_instruccion(instruccion), instruccion)
+        for enlace in ("https://localhost/agenda", "https://127.0.0.1/agenda",
+                       "https://centro.cl/?token=secreto", "https://usuario:clave@centro.cl",
+                       "https://centro.cl:abc/agenda"):
+            with self.subTest(enlace=enlace), self.assertRaises(HTTPException) as error:
+                ia.validar_instruccion(f"Promociona el centro: {enlace}")
+            self.assertEqual(error.exception.status_code, 422)
+
     def test_borrador_y_variables(self):
         self.assertEqual(ia.validar_borrador("  Hola {{nombre}} {apellido}, confirma tu cita.  "),
                          "Hola {nombre} {apellido},\n\nconfirma tu cita.")
@@ -43,6 +54,15 @@ class ValidacionIATests(unittest.TestCase):
         for texto in ("", "Hola {edad}", "Hola {nombre", "https://ejemplo.com", "Hola Ana Pérez", "x" * 1025):
             with self.subTest(texto=texto[:20]), self.assertRaises(HTTPException) as error:
                 ia.validar_borrador(texto)
+            self.assertEqual(error.exception.status_code, 502)
+
+    def test_borrador_solo_admite_enlace_proporcionado(self):
+        enlace = "https://saludmentalparatodos.cl/agenda"
+        texto = f"Hola {{nombre}},\n\nVisítanos en Santiago Centro o agenda en {enlace}"
+        self.assertEqual(ia.validar_borrador(texto, enlaces_permitidos={enlace}), texto)
+        for permitido in (set(), {"https://otro-centro.cl"}):
+            with self.assertRaises(HTTPException) as error:
+                ia.validar_borrador(texto, enlaces_permitidos=permitido)
             self.assertEqual(error.exception.status_code, 502)
 
     def test_clave_en_bd_y_valores_heredados(self):
@@ -128,9 +148,32 @@ class ProveedorIATests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("número del call center", mensajes[0]["content"])
         self.assertIn("{nombre} y {apellido}", mensajes[0]["content"])
         self.assertIn("No inventes fechas", mensajes[0]["content"])
+        self.assertIn("saluda con cercanía", mensajes[0]["content"])
+        self.assertIn("los detalles útiles", mensajes[0]["content"])
+        self.assertIn("referencia es de tono y estructura, no una fuente de hechos", mensajes[0]["content"])
+        self.assertNotIn("$25.000", mensajes[0]["content"])
+        self.assertNotIn("saludmentalparatodos.cl", mensajes[0]["content"])
         self.assertEqual(argumentos.kwargs["json"]["model"], ia.MODELO)
         self.assertEqual(argumentos.kwargs["json"]["max_completion_tokens"], 1536)
         self.assertEqual(argumentos.kwargs["json"]["reasoning_effort"], "low")
+
+    async def test_proveedor_conserva_enlace_publico_del_centro(self):
+        enlace = "https://saludmentalparatodos.cl/agenda"
+        instruccion = f"Presenta Salud Mental Para Todos en Santiago Centro. Web: {enlace}"
+        respuesta = MagicMock(status_code=200)
+        respuesta.json.return_value = {"choices": [{"message": {
+            "content": f"Hola {{nombre}},\n\nEstamos en Santiago Centro. Agenda en {enlace}"},
+            "finish_reason": "stop"}]}
+        cliente = AsyncMock()
+        cliente.post.return_value = respuesta
+        contexto = MagicMock()
+        contexto.__aenter__ = AsyncMock(return_value=cliente)
+        contexto.__aexit__ = AsyncMock(return_value=None)
+        with patch.object(ia, "leer_clave", return_value="clave-falsa"), \
+             patch.object(ia.httpx, "AsyncClient", return_value=contexto):
+            borrador = await ia.generar_borrador(ia.validar_instruccion(instruccion))
+        self.assertIn(enlace, borrador)
+        self.assertIn(instruccion, cliente.post.call_args.kwargs["json"]["messages"][1]["content"])
 
     async def test_timeout_y_cuota(self):
         with self.assertRaises(HTTPException) as error:
