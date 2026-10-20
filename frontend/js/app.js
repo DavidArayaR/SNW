@@ -792,6 +792,10 @@ function renderLista(filtro = "") {
   agregarGrupo("Plantillas pendientes de aprobación por Meta", pendientesMeta, "info", "fa-clock");
 }
 
+function editorPlantillaVisible() {
+  return tabMsg === "plantillas" && formEl.style.display !== "none";
+}
+
 function actualizarPreview() {
   clearTimeout(previewTimer);
   previewSolicitud++;
@@ -799,7 +803,10 @@ function actualizarPreview() {
     hour: "2-digit",
     minute: "2-digit",
   });
-  if (formEl.style.display === "none") return;
+  if (!editorPlantillaVisible()) {
+    validandoPreview = false;
+    return;
+  }
   puedeEnviarPrueba = false;
   validandoPreview = true;
   actualizarEstadoBotonGuardar();
@@ -852,6 +859,7 @@ function mostrarPreviewServidor(data) {
 }
 
 async function consultarPreview(solicitud) {
+  if (!editorPlantillaVisible()) return null;
   try {
     const res = await fetch(`${API_URL}/previsualizar`, {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
@@ -3009,6 +3017,12 @@ function cambiarTabMsg(t) {
     "--msg-panel-entrada-x", orden[t] > orden[tabMsg] ? "20px" : "-20px"
   );
   tabMsg = t;
+  if (tabMsg !== "plantillas") {
+    clearTimeout(previewTimer);
+    previewSolicitud++;
+    validandoPreview = false;
+  }
+  programarProgs();
   try { localStorage.setItem("snw_tab_msg", tabMsg); } catch { /* sin almacenamiento */ }
   pintarTabsMsg();
   // Cada tab parte desde arriba: si no, el scroll heredado de la tab
@@ -3017,7 +3031,9 @@ function cambiarTabMsg(t) {
   window.scrollTo(0, 0);
   renderLista(buscadorEl.value);
   if (tabMsg === "programados") {
-    cargarProgramados();
+    cargarProgramados().then(() => {
+      if (tabMsg === "programados") revisarProgs();
+    });
     actualizarProgPlantilla();
   } else if (tabMsg === "envios") {
     // Si se eligió otra plantilla desde otra tab, actualiza la card manual
@@ -3039,6 +3055,7 @@ function cambiarTabMsg(t) {
         renderLista(buscadorEl.value);
       }
     }
+    if (editorPlantillaVisible()) actualizarPreview();
   }
 }
 
@@ -3516,8 +3533,10 @@ let progsDecididoPropio = new Map(); // id -> cuándo decidió este usuario
 
 function programarProgs() {
   if (timerProgs) clearInterval(timerProgs);
+  timerProgs = null;
+  if (tabMsg !== "programados") return;
   timerProgs = setInterval(() => {
-    if (!document.hidden) revisarProgs();
+    if (!document.hidden && tabMsg === "programados") revisarProgs();
   }, hayProgsPendientes ? INTERVALO_PROG_VIVO : INTERVALO_PROG_LATIDO);
 }
 
@@ -3565,6 +3584,7 @@ function avisarCambioProgs(nuevos, cambiados) {
 }
 
 async function revisarProgs() {
+  if (tabMsg !== "programados" || document.hidden) return;
   if (cargandoResumenProgs) return; // no apilar sondeos si uno quedó colgado
   cargandoResumenProgs = true;
   let data;
@@ -3581,6 +3601,7 @@ async function revisarProgs() {
   } finally {
     cargandoResumenProgs = false;
   }
+  if (tabMsg !== "programados") return;
   const items = data.items || [];
   // La primera foto solo deja registrada la base de comparación: todavía no
   // hay nada que avisar.
@@ -3900,7 +3921,7 @@ $("#btnConfirmarProgRechazar").addEventListener("click", () => {
 // Al volver a la pestaña se revisa de inmediato: si en otra pantalla se
 // aprobó, rechazó o creó un envío, la lista ya está al día al mirarla.
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) revisarProgs();
+  if (!document.hidden && tabMsg === "programados") revisarProgs();
 });
 programarProgs();
 
@@ -3913,5 +3934,7 @@ cargarMiUsuario();
 // misAreas (card de envío / formulario de programar).
 const inicioCargaInicialPlantillas = iniciarCargaPlantillas();
 cargarAreas().then(cargar).finally(() => terminarCargaPlantillas(inicioCargaInicialPlantillas));
-cargarProgramados();
+cargarProgramados().then(() => {
+  if (tabMsg === "programados") revisarProgs();
+});
 setInterval(revisarPlantillasEnSegundoPlano, 30000);
