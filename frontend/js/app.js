@@ -2851,10 +2851,14 @@ function seguirProgresoConf(jobId, total) {
       hechosActualConf = hechos;
       $("#barraFillConf").style.width = `${total ? Math.round((hechos / total) * 100) : 100}%`;
       $("#progresoNumerosConf").textContent = `${hechos} / ${total}`;
+      const rendimiento = job.velocidad_mps > 0
+        ? ` · ${job.velocidad_mps} mensajes/s` +
+          (job.eta_segundos != null ? ` · ~${Math.ceil(job.eta_segundos / 60)} min restantes` : "")
+        : "";
       $("#progresoTextoConf").textContent =
         job.estado === "completado"
           ? "Envío finalizado."
-          : jobPausadoConf ? `Envío pausado (${hechos}/${total}).` : `Enviando mensajes... (${hechos}/${total})`;
+          : jobPausadoConf ? `Envío pausado (${hechos}/${total}).` : `Enviando mensajes... (${hechos}/${total})${rendimiento}`;
 
       if (job.estado === "completado" || job.estado === "error" || job.estado === "cancelado") {
         clearInterval(timerPollingConf);

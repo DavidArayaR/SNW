@@ -45,7 +45,8 @@ from db import (
     invite_crear, invite_estado, invite_consumir,
     auditoria_registrar, auditoria_listar,
 )
-from motor_envio import obtener_canal
+from motor_envio import (obtener_canal, ResultadoEnvioIncierto,
+                         FalloInfraestructuraDespacho)
 from whatsapp_channels import (CENTROS, claves_centro, listar_canales, resolver_centro,
                                resolver_phone_id, emisor_webhook_actual)
 import whatsapp_service
@@ -54,6 +55,8 @@ from plantilla_media import (MAX_MEDIA_BYTES, descargar_media_meta, guardar_medi
 from plantilla_revision import MAX_CUERPO, presentar_plantilla, componentes_para_vista
 from groq_service import consumir_cuota, generar_borrador, validar_instruccion
 from wa_rate_limit import gobernador as wa_gobernador
+from wa_dispatch_limit import (estados as estados_despacho, politica as politica_despacho,
+                               limpiar_pares_vencidos)
 from whatsapp_service import WhatsAppService, es_mensaje_interes, etiquetas_automaticas
 from whatsapp_webhook import router as whatsapp_router
 from supresion import (asegurar_tabla_supresion, reintentar_pendientes,
@@ -4259,12 +4262,7 @@ _CONFIG_SECCIONES = [
              "opciones": ["simulado", "api_oficial"],
              "ayuda": "«simulado» no manda nada real; «api_oficial» usa la WhatsApp Cloud API de Meta."},
             {"clave": "intervalo_ms", "etiqueta": "Intervalo entre mensajes (ms)", "tipo": "number",
-             "ayuda": "Pausa entre cada mensaje de un envío masivo. No es para los rate limits de "
-                      "Meta (de eso se encarga «Throughput»): sirve para espaciar el envío y cuidar "
-                      "la calificación de calidad del número, y para tener margen de pausar/cancelar. "
-                      "1000 (1 msg/s) está bien para tandas normales; bajarlo (100–250) si se necesita "
-                      "más velocidad —el throughput lo limita igual— o subirlo para ir más suave. "
-                      "0 = tan rápido como permita el throughput."},
+             "ayuda": "Solo aplica al motor simulado. La API oficial usa el presupuesto compartido del centro."},
             {"clave": "numeros_prueba_dev", "etiqueta": "Números de prueba · desarrollo", "tipo": "text",
              "ayuda": "Separados por coma. En entorno de desarrollo solo se envía a estos."},
             {"clave": "numeros_prueba_prod", "etiqueta": "Números de prueba · producción", "tipo": "text",
@@ -4340,9 +4338,13 @@ _CONFIG_SECCIONES = [
             {"clave": "wa_rate_limit_reintentos", "etiqueta": "Reintentos por llamada tras un 429", "tipo": "number",
              "ayuda": "Cuántas veces se reintenta una misma llamada (esperando lo que indique Meta) "
                       "antes de darla por fallida."},
-            {"clave": "wa_throughput_mps", "etiqueta": "Throughput · mensajes por segundo", "tipo": "number",
-             "ayuda": "Ritmo máximo de salida hacia Meta (que permite 80/s por número, contando "
-                      "entrantes y salientes). Conviene dejar margen. 0 = sin límite de ritmo."},
+            {"clave": "wa_dispatch_pair_seconds", "etiqueta": "Espera por paciente y número (s)", "tipo": "number",
+             "ayuda": "Separación mínima entre mensajes del mismo centro al mismo paciente. Inicial: 6 s."},
+            {"clave": "wa_dispatch_reserved_percent", "etiqueta": "Capacidad reservada (%)", "tipo": "number",
+             "ayuda": "Margen para respuestas y otros mensajes; el máximo masivo nunca usa el 100 %."},
+            {"clave": "wa_dispatch_max_retries", "etiqueta": "Reintentos por saturación", "tipo": "number"},
+            {"clave": "wa_dispatch_backoff_base_seconds", "etiqueta": "Espera inicial de reintento (s)", "tipo": "number"},
+            {"clave": "wa_dispatch_backoff_max_seconds", "etiqueta": "Espera máxima de reintento (s)", "tipo": "number"},
             {"clave": "wa_messaging_limit_24h", "etiqueta": "Messaging limit · usuarios únicos / 24 h", "tipo": "number",
              "ayuda": "Límite de Meta: usuarios únicos a los que el negocio puede escribir en una "
                       "ventana móvil de 24 h (250, 1000, 2000, 10000, 100000). Al alcanzarlo se bloquean "
@@ -4397,6 +4399,13 @@ for _codigo, _nombre in CENTROS.items():
              "ayuda": "Con código de país, sin espacios. Puede quedar vacío mientras se configura."},
             {"clave": _identificador, "etiqueta": "Phone Number ID de Meta", "tipo": "text",
              "ayuda": "Identificador numérico de este número en la WABA compartida."},
+            {"clave": f"{_codigo}_WSP_RATE_LIMIT_MODE", "etiqueta": "Modalidad del número", "tipo": "select",
+             "opciones": ["estandar", "coexistencia"],
+             "ayuda": "Coexistencia comparte número con la aplicación de WhatsApp Business y tiene un techo menor."},
+            {"clave": f"{_codigo}_WSP_RATE_LIMIT_MPS", "etiqueta": "Ritmo máximo solicitado (mensajes/s)", "tipo": "number",
+             "ayuda": "Empieza en 10; se aplica el menor entre este valor y el techo seguro del modo, con margen reservado."},
+            {"clave": f"{_codigo}_WSP_RATE_LIMIT_VERIFIED", "etiqueta": "Capacidad verificada en Meta", "tipo": "bool",
+             "ayuda": "Actívalo solo tras comprobar el modo y capacidad de este número en Meta. Sin verificar, el techo es 10/s estándar o 3/s coexistencia."},
         ],
     })
 
@@ -4432,6 +4441,9 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
                      "wa_rate_limit_umbral_pct", "wa_rate_limit_pausa_max_s",
                      "wa_rate_limit_espera_defecto_s", "wa_rate_limit_reintentos",
                      "wa_throughput_mps", "wa_messaging_limit_24h", "sesion_expira_horas",
+                     "wa_dispatch_pair_seconds", "wa_dispatch_reserved_percent",
+                     "wa_dispatch_max_retries", "wa_dispatch_backoff_base_seconds",
+                     "wa_dispatch_backoff_max_seconds",
                      "plantillas_revision_minutos", "plantillas_badge_aprobada_minutos"):
             try:
                 n = int(v or "0")
@@ -4443,6 +4455,15 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
             if clave == "groq_limite_hora":
                 n = min(100, max(1, n))
             v = str(max(minimo, n))
+        if clave.endswith("_WSP_RATE_LIMIT_MPS"):
+            try:
+                v = str(min(1000, max(1, int(v))))
+            except ValueError:
+                raise HTTPException(400, detail=f"«{clave}» debe ser un número entero")
+        if clave.endswith("_WSP_RATE_LIMIT_MODE") and v not in ("estandar", "coexistencia"):
+            raise HTTPException(400, detail=f"«{clave}»: modalidad no reconocida")
+        if clave.endswith("_WSP_RATE_LIMIT_VERIFIED"):
+            v = "true" if v.lower() in ("true", "1", "on", "si", "sí") else "false"
         if clave == "call_center_numeros":
             partes = [re.sub(r"\D", "", p) for p in v.split(",")]
             v = ", ".join(dict.fromkeys(p for p in partes if p))
@@ -4512,7 +4533,24 @@ def probar_api_wa(body: PruebaWAIn, sesion: dict = Depends(solo_dev)):
 def estado_rate_limit(sesion: dict = Depends(solo_dev)):
     """Consumo de cuota de la Graph API visto en la última respuesta de Meta y
     la espera que el sistema está aplicando (si la hay)."""
-    return wa_gobernador.estado()
+    estados = {fila["phone_id"]: fila for fila in estados_despacho()}
+    ahora = datetime.datetime.utcnow()
+    canales = []
+    for canal in listar_canales():
+        phone_id = canal.get("phoneNumberId")
+        fila = estados.get(phone_id) or {}
+        reglas = politica_despacho(phone_id) if canal["configured"] else None
+        hasta = fila.get("bloqueado_hasta")
+        canales.append({
+            "centro": canal["codigo"], "configurado": canal["configured"],
+            "mps_configurado": reglas["mps"] if reglas else None,
+            "mps_actual": fila.get("mps_actual") or (reglas["mps_inicial"] if reglas else None),
+            "espera_segundos": max(0, int((hasta - ahora).total_seconds())) if hasta else 0,
+            "aceptados_meta": fila.get("enviados") or 0,
+            "errores_130429": fila.get("errores_130429") or 0,
+            "errores_131057": fila.get("errores_131057") or 0,
+        })
+    return {**wa_gobernador.estado(), "canales": canales}
 
 
 # Plantillas cuyos envíos NO cuentan para el messaging limit de Meta: respuestas
@@ -5163,7 +5201,10 @@ def _procesar_job(job_id: str) -> None:
         job["detalle"] = f"Canal de envío no disponible ({cfg.get('metodo_envio')})"
         return
 
-    intervalo = max(0, int(cfg.get("intervalo_ms", 1000))) / 1000
+    # La API oficial comparte el presupuesto del emisor entre campañas.
+    # El intervalo fijo se conserva solo para el motor simulado.
+    intervalo = (0 if canal.nombre == "api_oficial" else
+                 max(0, int(cfg.get("intervalo_ms", 1000))) / 1000)
     total = len(job["destinatarios"])
 
     bloqueo_base = _restriccion_envio_desarrollo(amb, t_esp)
@@ -5263,8 +5304,26 @@ def _procesar_job(job_id: str) -> None:
             else:
                 ok, error = resultado
                 message_id = None
+        except ResultadoEnvioIncierto as e:
+            # No avanzar ni reintentar automáticamente: el proveedor pudo
+            # aceptar este mensaje antes de perderse la respuesta HTTP.
+            log_error(f"procesar_job {job_id}: resultado incierto", e)
+            job["estado"] = "error"
+            job["actual"] = ""
+            job["detalle"] = ("Envío detenido: Meta pudo aceptar un mensaje cuya respuesta "
+                              "no se recibió. Revisa el historial de Meta antes de reintentar.")
+            actualizar_envio_batch(envio_id, amb, estado="error")
+            break
+        except FalloInfraestructuraDespacho as e:
+            log_error(f"procesar_job {job_id}: infraestructura de despacho", e)
+            job["estado"] = "error"
+            job["actual"] = ""
+            job["detalle"] = ("Envío detenido: no se pudo verificar el canal o su capacidad. "
+                              "Revisa el servidor antes de volver a iniciar el lote.")
+            actualizar_envio_batch(envio_id, amb, estado="error")
+            break
         except Exception as e:
-            log_error(f"procesar_job {job_id}: fallo enviando a {d.get('telefono')}", e)
+            log_error(f"procesar_job {job_id}: fallo enviando", e)
             ok, message_id, error = False, None, f"Error inesperado: {e}"
 
         if esta_suprimido(d["telefono"]):
@@ -5278,11 +5337,15 @@ def _procesar_job(job_id: str) -> None:
 
         if ok:
             job["enviados"] += 1
+            marcas = job.setdefault("aceptados_ultimos", [])
+            marcas.append(time.monotonic())
+            while marcas and marcas[0] < marcas[-1] - 60:
+                marcas.pop(0)
         else:
             job["fallidos"] += 1
             job["errores"].append({"id": d["id"], "telefono": d["telefono"], "detalle": error})
             message_id = None
-            log_error(f"procesar_job {job_id}: {d.get('telefono')} -> {error}")
+            log_error(f"procesar_job {job_id}: envío rechazado: {error}")
 
         registrar_historial(d["id"], d["nombre"], d["telefono"], clave,
                             d["mensaje"], "enviado" if ok else "error", error,
@@ -5623,6 +5686,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
             "estado": "en_proceso",
             "total": len(destinatarios),
             "enviados": 0,
+            "aceptados_ultimos": [],
             "fallidos": 0,
             "actual": "",
             "errores": [],
@@ -5772,6 +5836,7 @@ def confirmar_envio(token: str, background_tasks: BackgroundTasks):
             "estado": "en_proceso",
             "total": len(pend["destinatarios"]),
             "enviados": 0,
+            "aceptados_ultimos": [],
             "fallidos": 0,
             "actual": "",
             "errores": [],
@@ -5904,7 +5969,18 @@ def estado_job(job_id: str, sesion: dict = Depends(exigir("mensajeria"))):
         _exigir_base_desarrollo(sesion, "desarrollo")
 
     respuesta = {k: v for k, v in job.items()
-                 if k not in ("destinatarios", "actual", "errores")}
+                 if k not in ("destinatarios", "actual", "errores", "aceptados_ultimos")}
+    marcas = [t for t in (job.get("aceptados_ultimos") or [])
+              if t >= time.monotonic() - 60]
+    if len(marcas) >= 2 and job.get("estado") == "en_proceso":
+        segundos = max(1, marcas[-1] - marcas[0])
+        velocidad = (len(marcas) - 1) / segundos
+        respuesta["velocidad_mps"] = round(velocidad, 1)
+        pendientes = max(0, job["total"] - job["enviados"] - job["fallidos"])
+        respuesta["eta_segundos"] = round(pendientes / velocidad) if velocidad > 0 else None
+    else:
+        respuesta["velocidad_mps"] = None
+        respuesta["eta_segundos"] = None
     if respuesta.get("estado") == "error":
         respuesta["detalle"] = "Error interno del envío. Revisa el registro del servidor."
     return respuesta
@@ -7047,6 +7123,7 @@ async def _loop_supresion() -> None:
         try:
             await asyncio.to_thread(asegurar_tabla_supresion)
             await asyncio.to_thread(reintentar_pendientes)
+            await asyncio.to_thread(limpiar_pares_vencidos)
         except Exception as e:
             log_error("scheduler supresión", e)
         await asyncio.sleep(60)

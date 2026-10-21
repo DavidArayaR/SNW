@@ -12,6 +12,7 @@ o desde el router de webhook.
 import asyncio
 import hashlib
 import json
+import random
 import re
 import threading
 import time
@@ -32,6 +33,8 @@ import servicio_areas
 from wa_rate_limit import (
     gobernador, es_error_throttle, clasificar_error, reintentos_throttle, TOPE_ESPERA_S,
 )
+from wa_dispatch_limit import reservar as reservar_despacho, bloquear as bloquear_despacho
+from wa_dispatch_limit import aplazar_pareja, politica as politica_despacho, registrar_aceptado
 
 # Versión de la Graph API de Meta. Configurable en la tabla `configuracion`
 # (clave `wa_graph_version`); si no está, se usa este valor por defecto.
@@ -306,6 +309,10 @@ class ErrorWhatsApp(Exception):
         super().__init__(f"Tipo {tipo} (código {codigo}): {mensaje}")
 
 
+class ResultadoEnvioIncierto(Exception):
+    """Meta pudo aceptar la solicitud, pero no hay ID fiable para conciliarla."""
+
+
 class WhatsAppApiClient:
     """Cliente HTTP para el envío de mensajes vía Graph API."""
 
@@ -323,29 +330,40 @@ class WhatsAppApiClient:
                         params: dict | None = None, throughput: bool = False) -> dict:
         """Hace una llamada a la Graph API respetando los límites de Meta.
 
-        - Antes de cada llamada espera lo que sugiera el gobernador (consumo de
-          cuota que Meta reportó en las cabeceras anteriores) y, si `throughput`,
-          también un turno para no pasarse de `wa_throughput_mps` msg/s.
+        - Antes de cada llamada respeta la cuota de Graph API y, para /messages,
+          reserva un turno compartido en MySQL por número y destinatario.
         - Ante un throttle GLOBAL (HTTP 429 / códigos 4, 17, 32, 613, 80007,
           80008, 130429, 131048, 131057, 368) espera el tiempo de recuperación
           que indica Meta y reintenta hasta `wa_rate_limit_reintentos` veces.
-        - Ante un límite POR DESTINATARIO (131056, 131049, 130497) no reintenta
-          ni frena al resto: falla solo ese mensaje.
+        - 131056 aplaza esa pareja y reintenta con backoff; 131049 y 130497
+          no reintentan ni bloquean otros destinatarios.
         """
-        reintentos = reintentos_throttle()
+        reglas = politica_despacho(self.phone_number_id) if throughput else None
+        destinatario = str((json or {}).get("to") or "") if throughput else ""
+        reintentos = reglas["max_retries"] if reglas else reintentos_throttle()
         async with httpx.AsyncClient(timeout=30) as cliente:
             for intento in range(reintentos + 1):
                 espera = gobernador.pausa_antes_de_enviar()
                 if espera > 0:
                     await asyncio.sleep(min(espera, TOPE_ESPERA_S))
                 if throughput:
-                    turno = gobernador.reservar_turno_throughput()
-                    if turno > 0:
-                        await asyncio.sleep(turno)
+                    while True:
+                        turno = await asyncio.to_thread(
+                            reservar_despacho, self.phone_number_id, destinatario)
+                        if turno <= 0:
+                            break
+                        await asyncio.sleep(min(turno, 1.0))
                 resp = await cliente.request(metodo, url, json=json, params=params,
                                              headers=self._headers())
                 gobernador.registrar_respuesta(resp.headers)
                 if resp.status_code in (200, 201):
+                    if throughput:
+                        try:
+                            await asyncio.to_thread(registrar_aceptado, self.phone_number_id)
+                        except Exception as e:
+                            # La respuesta positiva de Meta prevalece: una métrica
+                            # caída jamás convierte un envío aceptado en fallido.
+                            log_error("wa_dispatch_limit.registrar_aceptado", e)
                     return resp.json()
 
                 err = {}
@@ -355,6 +373,29 @@ class WhatsAppApiClient:
                     pass
                 tipo_limite = clasificar_error(resp.status_code, err.get("code"),
                                                err.get("error_subcode"))
+                codigo = err.get("code")
+                if throughput and codigo in (130429, 131057, 131056):
+                    base = reglas["backoff_base"] * (2 ** intento)
+                    espera_meta = resp.headers.get("retry-after")
+                    try:
+                        espera_meta = max(0.0, float(espera_meta))
+                    except (TypeError, ValueError):
+                        espera_meta = 0.0
+                    minimo = (reglas["pair_seconds"] if codigo == 131056 else
+                              60 if codigo == 131057 else 0)
+                    demora = min(max(reglas["backoff_max"], minimo),
+                                 max(base, espera_meta, minimo))
+                    demora += random.uniform(0, min(1, demora / 4))
+                    if codigo == 131056:
+                        await asyncio.to_thread(aplazar_pareja, self.phone_number_id,
+                                                destinatario, demora)
+                    else:
+                        await asyncio.to_thread(bloquear_despacho, self.phone_number_id,
+                                                codigo, demora)
+                    if intento < reintentos:
+                        await asyncio.sleep(min(demora, TOPE_ESPERA_S))
+                        continue
+                    return self._procesar_respuesta(resp)
                 if tipo_limite == "global":
                     segundos = gobernador.registrar_error(
                         err.get("code"), err.get("error_subcode"),
@@ -954,7 +995,7 @@ class WhatsAppService:
         if data.get("messages"):
             msg_id = data["messages"][0].get("id", "") or ""
         if not msg_id:
-            return False, "", "La API no devolvió message id", "failed"
+            raise ResultadoEnvioIncierto("Meta respondió sin identificador del mensaje")
         return True, msg_id, None, "sent"
 
     # ---------- Webhook ----------

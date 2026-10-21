@@ -1,6 +1,12 @@
 from db import log_error
-from whatsapp_service import WhatsAppService
+import httpx
+
+from whatsapp_service import WhatsAppService, ResultadoEnvioIncierto
 from supresion import esta_suprimido
+
+
+class FalloInfraestructuraDespacho(Exception):
+    """No se pudo verificar el despacho; no continuar el lote a ciegas."""
 
 
 class MotorSimulado:
@@ -43,11 +49,17 @@ class MotorApiOficial:
             ok, message_id, error, _ = asyncio.run(
                 self.servicio.enviar(telefono, mensaje, plantilla=plantilla, variables=variables)
             )
+        except (httpx.TransportError, ResultadoEnvioIncierto) as e:
+            # Una caída de red puede ocurrir DESPUÉS de que Meta aceptó el
+            # mensaje. No clasificarla como fallo reintentable ni exponer PII.
+            log_error("MotorApiOficial: resultado incierto", e)
+            raise ResultadoEnvioIncierto("No se pudo confirmar si Meta aceptó el mensaje") from e
         except Exception as e:
-            log_error(f"MotorApiOficial.enviar a {telefono}", e)
-            return False, None, f"Fallo de conexión con la API de Meta: {e}"
+            log_error("MotorApiOficial: error de envío", e)
+            raise FalloInfraestructuraDespacho(
+                "No se pudo verificar la configuración o capacidad del canal") from e
         if not ok:
-            log_error(f"MotorApiOficial.enviar a {telefono}: {error}")
+            log_error(f"MotorApiOficial: envío rechazado: {error}")
         return ok, message_id, error
 
 

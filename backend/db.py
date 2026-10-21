@@ -184,6 +184,13 @@ CONFIG_DEFAULTS = {
     # Throughput de la Cloud API (msg/s por número; Meta permite 80 por defecto,
     # cuenta entrantes + salientes). Se deja margen. 0 = sin límite de ritmo.
     "wa_throughput_mps": "10",
+    # Presupuesto compartido entre procesos por Phone Number ID. La capacidad
+    # ampliada nunca se activa automáticamente; el techo seguro sigue en 60/s.
+    "wa_dispatch_pair_seconds": "6",
+    "wa_dispatch_reserved_percent": "25",
+    "wa_dispatch_max_retries": "3",
+    "wa_dispatch_backoff_base_seconds": "2",
+    "wa_dispatch_backoff_max_seconds": "60",
     # Messaging limit: usuarios ÚNICOS a los que se puede escribir (mensajes
     # iniciados por el negocio) en 24 h. Tiers de Meta: 250 / 2000 / 10000 /
     # 100000 / ilimitado. 0 = sin control. Ajústalo al tier real de la cuenta.
@@ -192,6 +199,9 @@ CONFIG_DEFAULTS = {
 for _centro in CENTROS:
     for _clave in claves_centro(_centro):
         CONFIG_DEFAULTS[_clave] = ""
+    CONFIG_DEFAULTS[f"{_centro}_WSP_RATE_LIMIT_MPS"] = "10"
+    CONFIG_DEFAULTS[f"{_centro}_WSP_RATE_LIMIT_MODE"] = "estandar"
+    CONFIG_DEFAULTS[f"{_centro}_WSP_RATE_LIMIT_VERIFIED"] = "false"
 
 _CLAVES_CENTRO_ANTIGUAS = {
     "SMPT_WSP_PHONE_NUMER": "SMPT_WSP_PHONE_NUMBER",
@@ -244,6 +254,38 @@ def asegurar_tabla_config() -> None:
                     (clave, valor),
                 )
             _migrar_claves_centro(cur)
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS wa_despacho_canales ("
+                " phone_id VARCHAR(64) PRIMARY KEY,"
+                " proximo_turno DATETIME(6) NULL,"
+                " bloqueado_hasta DATETIME(6) NULL,"
+                " mps_actual INT NULL,"
+                " aceptados_desde_ajuste INT NOT NULL DEFAULT 0,"
+                " ajustado_en DATETIME(6) NULL,"
+                " errores_130429 BIGINT NOT NULL DEFAULT 0,"
+                " errores_131057 BIGINT NOT NULL DEFAULT 0,"
+                " enviados BIGINT NOT NULL DEFAULT 0,"
+                " actualizado DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)"
+                " ON UPDATE CURRENT_TIMESTAMP(6)"
+                ") CHARACTER SET utf8mb4"
+            )
+            cur.execute("SELECT COLUMN_NAME FROM information_schema.COLUMNS"
+                        " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'wa_despacho_canales'")
+            _columnas_despacho = {r["COLUMN_NAME"] for r in cur.fetchall()}
+            for _nombre, _tipo in (("mps_actual", "INT NULL"),
+                                   ("aceptados_desde_ajuste", "INT NOT NULL DEFAULT 0"),
+                                   ("ajustado_en", "DATETIME(6) NULL")):
+                if _nombre not in _columnas_despacho:
+                    cur.execute(f"ALTER TABLE wa_despacho_canales ADD COLUMN {_nombre} {_tipo}")
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS wa_despacho_pares ("
+                " phone_id VARCHAR(64) NOT NULL,"
+                " destinatario_hash CHAR(64) NOT NULL,"
+                " proximo_turno DATETIME(6) NOT NULL,"
+                " PRIMARY KEY (phone_id, destinatario_hash),"
+                " INDEX idx_pares_expira (proximo_turno)"
+                ") CHARACTER SET utf8mb4"
+            )
             cur.execute(
                 "CREATE TABLE IF NOT EXISTS gemini_cuotas ("
                 "  usuario_hash CHAR(64) NOT NULL,"

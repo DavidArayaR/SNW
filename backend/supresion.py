@@ -295,6 +295,17 @@ def _limpiar_datos(cur, telefono: str) -> tuple[int, int]:
     cur.execute("DELETE FROM crm_derivaciones_pendientes WHERE telefono = %s", (telefono,))
     cur.execute("DELETE FROM whatsapp_conversaciones_mensajes WHERE telefono_paciente = %s", (telefono,))
     cur.execute("DELETE FROM call_center_prueba_interes WHERE telefono = %s", (telefono,))
+    # La cuota por pareja guarda solo la huella, pero sigue derivándose del
+    # teléfono: también debe desaparecer al tramitar ELIMINAR.
+    from wa_dispatch_limit import huella_pareja
+    cur.execute("SELECT phone_id FROM wa_despacho_canales")
+    for canal in cur.fetchall():
+        phone_id = canal.get("phone_id")
+        if not phone_id:
+            continue
+        pareja_hash = huella_pareja(phone_id, telefono)
+        cur.execute("DELETE FROM wa_despacho_pares"
+                    " WHERE phone_id = %s AND destinatario_hash = %s", (phone_id, pareja_hash))
     cur.execute("SELECT telefono, tipo FROM whatsapp_avisos_unicos")
     for row in cur.fetchall():
         if normalizar_telefono(row.get("telefono") or "") == telefono:

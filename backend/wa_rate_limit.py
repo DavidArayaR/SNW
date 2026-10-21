@@ -9,20 +9,21 @@ Cubre las tres capas de límites que Meta aplica:
    se espera antes de la siguiente llamada.
    https://developers.facebook.com/docs/graph-api/overview/rate-limiting/
 
-2. **Throughput de la Cloud API** — por número, por defecto 80 mensajes/segundo
-   (entrantes + salientes, todos los tipos). Al superarlo Meta devuelve el
-   código 130429. Se limita el ritmo de salida a `wa_throughput_mps` msg/s
-   espaciando las llamadas a `/messages`.
+2. **Throughput de la Cloud API** — el presupuesto compartido por número y
+   destinatario se gestiona en `wa_dispatch_limit.py`. El método antiguo
+   `reservar_turno_throughput` queda solo por compatibilidad interna.
    https://developers.facebook.com/documentation/business-messaging/whatsapp/throughput
 
 3. **Messaging limits** — nº de usuarios ÚNICOS a los que el negocio puede
    escribir (mensajes iniciados por el negocio) en una ventana móvil de 24 h:
    250 / 1K / 10K / 100K / ilimitado. Ese control vive en `main.py` (necesita
    consultar `log_envios`); aquí solo se reconoce el error que devuelve Meta
-   cuando se topa (131056 / 131049, por destinatario).
+   cuando se topa (131049 / 130497, por destinatario). 131056 corresponde
+   a la frecuencia de la pareja emisor-destinatario, no a usuarios únicos.
    https://developers.facebook.com/documentation/business-messaging/whatsapp/messaging-limits
 
-Es un singleton en memoria del proceso (``gobernador``); no persiste nada.
+La cuota de Graph API de este módulo sigue en memoria; el throughput de
+mensajes se coordina entre procesos mediante MySQL en `wa_dispatch_limit.py`.
 """
 
 import json
@@ -41,7 +42,7 @@ CODIGOS_THROTTLE_GLOBAL = {
 }
 SUBCODIGO_THROTTLE = 2446079
 
-# --- Errores POR DESTINATARIO: no frenan el resto del envío ni sirve reintentar -
+# --- Errores por destinatario: no frenan otros pacientes ni centros. ---
 CODIGOS_LIMITE_DESTINATARIO = {
     131056,   # (negocio, usuario) pair rate limit: demasiados mensajes a ese usuario
     131049,   # frecuencia por usuario ("healthy ecosystem engagement")
