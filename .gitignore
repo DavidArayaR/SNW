@@ -32,8 +32,7 @@ dump_*.sql
 backup_*.sql
 backups/
 
-data/sesiones.json
-
+data/
 documentacion/
 AGENTS.md
 registro-log.md
