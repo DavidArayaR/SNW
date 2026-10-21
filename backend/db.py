@@ -478,6 +478,7 @@ def asegurar_tabla_config() -> None:
                 " centro_codigo VARCHAR(8) NOT NULL,"
                 " wa_phone_id VARCHAR(64) NOT NULL,"
                 " numero_emisor VARCHAR(20) NOT NULL,"
+                " contexto_json MEDIUMTEXT NULL,"
                 " estado VARCHAR(20) NOT NULL DEFAULT 'pendiente',"
                 " creado DATETIME DEFAULT CURRENT_TIMESTAMP,"
                 " INDEX idx_crm_centro_estado (centro_codigo, estado, creado)"
@@ -486,11 +487,15 @@ def asegurar_tabla_config() -> None:
             cur.execute(
                 "SELECT COLUMN_NAME FROM information_schema.COLUMNS"
                 " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'crm_derivaciones_pendientes'"
-                " AND COLUMN_NAME = 'numero_emisor'"
+                " AND COLUMN_NAME IN ('numero_emisor', 'contexto_json')"
             )
-            if not cur.fetchone():
+            _crm_cols = {fila["COLUMN_NAME"] for fila in cur.fetchall()}
+            if "numero_emisor" not in _crm_cols:
                 cur.execute("ALTER TABLE crm_derivaciones_pendientes"
                             " ADD COLUMN numero_emisor VARCHAR(20) NOT NULL DEFAULT ''")
+            if "contexto_json" not in _crm_cols:
+                cur.execute("ALTER TABLE crm_derivaciones_pendientes"
+                            " ADD COLUMN contexto_json MEDIUMTEXT NULL")
             cur.execute(
                 "CREATE TABLE IF NOT EXISTS whatsapp_conversaciones_mensajes ("
                 " mensaje_id VARCHAR(255) PRIMARY KEY,"

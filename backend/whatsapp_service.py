@@ -1161,6 +1161,13 @@ class WhatsAppService:
                     continue
                 if not es_solicitud_eliminar(pie):
                     self._guardar_corpus_respuesta(pie, telefono)
+                    if callable(al_derivar_crm):
+                        try:
+                            al_derivar_crm(telefono, pie, mensaje.get("id"), ("GENERAL",),
+                                          tipo=tipo, timestamp=mensaje.get("timestamp"),
+                                          referencia_meta_id=(mensaje.get("context") or {}).get("id"))
+                        except Exception as exc:
+                            log_error("al_derivar_crm: adjunto", exc)
                 continue
             cuerpo = texto or extra
             if not self._guardar_mensaje_entrante(mensaje, telefono, cuerpo):
@@ -1231,6 +1238,24 @@ class WhatsAppService:
                 es_mensaje_no_interes(texto) or es_mensaje_no_interes(extra)
             )
 
+            # La cola CRM registra cualquier respuesta humana, con independencia
+            # de si el clasificador también dispara un aviso de call center.
+            # ELIMINAR ya salió antes de este punto y nunca se copia a la cola.
+            motivos_crm = (("BAJA",) if fue_baja else
+                           ("DESINTERES",) if no_interes else
+                           ("INTERES",) if fue_interes else
+                           ("SOLICITA_CONTACTO",) if es_boton and extra == BOTON_ID_EJECUTIVA else
+                           tuple(clasificacion.motivos) if clasificacion and clasificacion.motivos else
+                           ("GENERAL",))
+            if callable(al_derivar_crm):
+                try:
+                    al_derivar_crm(telefono, "Solicitud de baja" if fue_baja else cuerpo,
+                                  mensaje.get("id"), motivos_crm,
+                                  tipo=tipo, timestamp=mensaje.get("timestamp"),
+                                  referencia_meta_id=(mensaje.get("context") or {}).get("id"))
+                except Exception as exc:
+                    log_error("al_derivar_crm", exc)
+
             # El aviso de baja informa que cualquier nueva respuesta distinta
             # de BAJA/ELIMINAR reincorpora al paciente. Una nueva baja jamás
             # se interpreta como reactivación.
@@ -1277,8 +1302,6 @@ class WhatsAppService:
                 self._registrar_interes(telefono)
                 hubo_interes = True
                 acciones.append("interes_boton")
-                if callable(al_derivar_crm):
-                    al_derivar_crm(telefono, cuerpo, mensaje.get("id"), ("INTERES",))
                 if callable(al_detectar_interes):
                     try:
                         if numero_prueba:
@@ -1304,8 +1327,6 @@ class WhatsAppService:
                 self._registrar_interes(telefono)
                 hubo_interes = True
                 acciones.append("interes")
-                if callable(al_derivar_crm):
-                    al_derivar_crm(telefono, cuerpo, mensaje.get("id"), ("INTERES",))
                 if callable(al_detectar_interes):
                     try:
                         if numero_prueba:

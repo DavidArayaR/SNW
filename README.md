@@ -43,13 +43,19 @@ configuración cambia antes de ejecutarse: debe revisarse y programarse de nuevo
 antiguos sin emisor conocido aparecen como «Emisor histórico no identificado».
 
 El webhook identifica el centro por `metadata.phone_number_id`, registra un mensaje lógico por
-ID de Meta y no atribuye a otro centro un número desconocido. Las consultas o intereses que
-requieren atención humana se guardan en `crm_derivaciones_pendientes`, con estado `pendiente`.
+ID de Meta y no atribuye a otro centro un número desconocido. Toda respuesta humana entrante
+(incluidos interés, consulta, desinterés y solicitud de baja) se registra una sola vez en
+`crm_derivaciones_pendientes`, con estado `pendiente`, aunque no haya campaña asociada. No se
+encolan autorespuestas detectadas ni la orden `ELIMINAR`; la baja se representa como evento
+mínimo. `contexto_json` conserva el mensaje, clínica y número receptor, hasta 20 mensajes
+recientes del mismo teléfono y emisor, y una campaña solo si el mensaje entrante cita un ID de
+Meta que coincide de forma inequívoca con el envío a ese paciente desde ese mismo emisor.
 El aviso de interés abre el WhatsApp del CRM configurado para el centro emisor; el paciente
 debe pulsar «Ir a call center» y confirmar allí el envío del texto preparado. Abrir el enlace
 no equivale a una entrega al CRM.
-**Aún no se envían al CRM externo**: faltan su URL, autenticación y contrato de eventos. Cuando
-estén definidos, el integrador podrá consumir esa cola de forma idempotente; no debe enviar
+**Aún no se envían al CRM externo**: faltan su URL, autenticación y contrato de eventos. El
+estado `pendiente` indica persistencia local, no sincronización ni entrega. Cuando estén
+definidos, el integrador podrá consumir esa cola de forma idempotente; no debe enviar
 respuestas desde otro número. La solicitud `ELIMINAR` retira también las conversaciones y
 derivaciones pendientes del paciente. El bloqueo en Meta se intenta para cada emisor configurado.
 

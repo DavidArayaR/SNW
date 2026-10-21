@@ -2667,20 +2667,89 @@ def _registrar_derivacion_consulta(telefono: str, texto: str, mensaje_id: str,
     return "nueva" if nueva else "reutilizada"
 
 
+def _contexto_derivacion_crm(cur, emisor: dict, telefono: str, mensaje_id: str,
+                            tipo: str, timestamp: str | None,
+                            referencia_meta_id: str | None) -> dict:
+    """Instantánea acotada al paciente y número receptor, sin inferir campaña."""
+    def fecha(valor):
+        return valor.isoformat() if hasattr(valor, "isoformat") else str(valor or "")
+
+    contexto = {
+        "version": 1,
+        "clinica": {"codigo": emisor["codigo"], "nombre": emisor["nombre"],
+                     "phone_number_id": emisor["phoneNumberId"],
+                     "numero_emisor": emisor["phoneNumber"]},
+        "mensaje_actual": {"id": mensaje_id, "tipo": tipo, "texto": "", "timestamp_meta": timestamp},
+        "campania": None,
+        "historial": [],
+    }
+    if referencia_meta_id:
+        cur.execute(
+            "SELECT l.envio_id, l.plantilla_clave, l.mensaje, l.fecha_hora,"
+            " e.plantilla_nombre, e.base_datos FROM log_envios l"
+            " LEFT JOIN envios e ON e.id = l.envio_id"
+            " WHERE l.whatsapp_message_id = %s AND l.numero_telefono = %s"
+            " AND l.wa_phone_id = %s AND l.estado_envio = 'enviado' LIMIT 2",
+            (referencia_meta_id, telefono, emisor["phoneNumberId"]),
+        )
+        coincidencias = cur.fetchall() or []
+        if len(coincidencias) == 1:
+            fila = coincidencias[0]
+            contexto["campania"] = {
+                "envio_id": fila.get("envio_id"), "nombre": fila.get("plantilla_nombre"),
+                "plantilla": fila.get("plantilla_clave"), "base_datos": fila.get("base_datos"),
+                "mensaje_original": fila.get("mensaje"), "fecha": fecha(fila.get("fecha_hora")),
+                "whatsapp_message_id": referencia_meta_id,
+            }
+    cur.execute(
+        "SELECT mensaje_id, tipo, texto, recibido FROM whatsapp_conversaciones_mensajes"
+        " WHERE wa_phone_id = %s AND telefono_paciente = %s"
+        " ORDER BY recibido DESC, mensaje_id DESC LIMIT 20",
+        (emisor["phoneNumberId"], telefono),
+    )
+    entradas = [{"direccion": "entrante", "id": fila["mensaje_id"],
+                 "tipo": fila["tipo"], "texto": fila.get("texto"),
+                 "fecha": fecha(fila.get("recibido"))} for fila in (cur.fetchall() or [])]
+    cur.execute(
+        "SELECT whatsapp_message_id, mensaje, plantilla_clave, fecha_hora"
+        " FROM log_envios WHERE wa_phone_id = %s AND numero_telefono = %s"
+        " AND estado_envio = 'enviado'"
+        " AND COALESCE(plantilla_clave, '') NOT IN ('respuesta', 'ajuste_manual')"
+        " ORDER BY fecha_hora DESC, id DESC LIMIT 20",
+        (emisor["phoneNumberId"], telefono),
+    )
+    salidas = [{"direccion": "saliente", "id": fila.get("whatsapp_message_id"),
+                "tipo": fila.get("plantilla_clave"), "texto": fila.get("mensaje"),
+                "fecha": fecha(fila.get("fecha_hora"))} for fila in (cur.fetchall() or [])]
+    contexto["historial"] = sorted(entradas + salidas, key=lambda fila: fila["fecha"])[-20:]
+    return contexto
+
+
 def _encolar_derivacion_crm(telefono: str, texto: str, mensaje_id: str,
-                           motivos: tuple[str, ...]) -> None:
-    """Registra la derivación; no envía datos fuera de SNW sin contrato CRM."""
+                           motivos: tuple[str, ...], *, tipo: str = "text",
+                           timestamp: str | None = None,
+                           referencia_meta_id: str | None = None) -> None:
+    """Registra toda respuesta legítima; no envía datos fuera de SNW sin contrato CRM."""
     emisor = emisor_webhook_actual()
-    if not emisor or not emisor.get("phoneNumberId"):
+    if not emisor or not emisor.get("phoneNumberId") or not mensaje_id:
         return
     try:
         with conectar() as conn, conn.cursor() as cur:
+            contexto = _contexto_derivacion_crm(
+                cur, emisor, telefono, mensaje_id, tipo, timestamp, referencia_meta_id)
+            contexto["mensaje_actual"]["texto"] = texto[:2000]
+            if "BAJA" in motivos:
+                # El CRM futuro solo necesita el evento de baja, no copiar el
+                # historial clínico/comercial junto a una oposición.
+                contexto["historial"] = []
+                contexto["campania"] = None
             cur.execute(
                 "INSERT IGNORE INTO crm_derivaciones_pendientes"
-                " (mensaje_id, telefono, mensaje, motivos, centro_codigo, wa_phone_id, numero_emisor)"
-                " VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                " (mensaje_id, telefono, mensaje, motivos, centro_codigo, wa_phone_id, numero_emisor, contexto_json)"
+                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
                 (mensaje_id[:255], telefono, texto[:2000], ",".join(motivos),
-                 emisor["codigo"], emisor["phoneNumberId"], emisor["phoneNumber"]),
+                 emisor["codigo"], emisor["phoneNumberId"], emisor["phoneNumber"],
+                 json.dumps(contexto, ensure_ascii=False)),
             )
             conn.commit()
     except Exception as exc:
