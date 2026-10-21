@@ -26,7 +26,8 @@ def claves_centro(codigo: str) -> tuple[str, str]:
     return f"{codigo}_WSP_PHONE_NUMBER", f"{codigo}_WSP_PHONE_NUMBER_ID"
 
 
-def catalogo_centros(config: dict | None = None, *, incluir_inactivas: bool = False) -> dict[str, str]:
+def catalogo_centros(config: dict | None = None, *, incluir_inactivas: bool = False,
+                    incluir_desactivadas: bool = False) -> dict[str, str]:
     from db import config_all
     valores = config if config is not None else config_all()
     centros = dict(CENTROS)
@@ -39,13 +40,15 @@ def catalogo_centros(config: dict | None = None, *, incluir_inactivas: bool = Fa
             if not isinstance(item, dict):
                 continue
             codigo = str(item.get("codigo") or "")
+            visible = (item.get("activo") is not False or incluir_inactivas or
+                       (incluir_desactivadas and item.get("eliminada") is False))
             if codigo in CENTROS:
-                if item.get("activo") is False and not incluir_inactivas:
+                if not visible:
                     centros.pop(codigo, None)
                 continue
             if not re.fullmatch(r"C[A-F0-9]{7}", codigo):
                 continue
-            if item.get("activo") is False and not incluir_inactivas:
+            if not visible:
                 continue
             nombre = str(item.get("nombre") or "").strip()
             if nombre and len(nombre) <= 100:

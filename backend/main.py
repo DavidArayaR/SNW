@@ -4392,11 +4392,11 @@ _CONFIG_ENUM = {
     "metodo_envio": ("simulado", "api_oficial"),
 }
 
-def _seccion_centro(codigo: str, nombre: str) -> dict:
+def _seccion_centro(codigo: str, nombre: str, *, activa: bool = True) -> dict:
     numero, identificador = claves_centro(codigo)
     return {
         "id": f"centro_{codigo.lower()}", "titulo": f"WhatsApp · {nombre}",
-        "eliminable": True,
+        "eliminable": True, "activa": activa,
         "icono": "fa-whatsapp", "marca": True, "campos": [
             {"clave": numero, "etiqueta": "Número visible", "tipo": "text",
              "ayuda": "Con código de país, sin espacios. Puede quedar vacío mientras se configura."},
@@ -4424,7 +4424,7 @@ for _codigo, _nombre in CENTROS.items():
 def _config_valores(cfg: dict | None = None) -> dict:
     cfg = cfg if cfg is not None else config_all()
     claves = set(CONFIG_DEFAULTS)
-    for codigo in catalogo_centros(cfg):
+    for codigo in catalogo_centros(cfg, incluir_desactivadas=True):
         claves.update(c["clave"] for c in _seccion_centro(codigo, "")["campos"])
     return {c: ("" if cfg.get(c) is None else str(cfg.get(c))) for c in claves}
 
@@ -4432,13 +4432,13 @@ def _config_valores(cfg: dict | None = None) -> dict:
 def obtener_configuracion_completa(sesion: dict = Depends(solo_dev)):
     """Configuración completa, disponible solo para desarrolladores."""
     cfg = config_all(refresh=True)
-    catalogo = catalogo_centros(cfg)
+    catalogo = catalogo_centros(cfg, incluir_desactivadas=True)
+    activos = catalogo_centros(cfg)
     secciones = [seccion for seccion in _CONFIG_SECCIONES
-                 if not seccion["id"].startswith("centro_") or
-                 seccion["id"][7:].upper() in catalogo]
-    adicionales = [_seccion_centro(codigo, nombre) for codigo, nombre in
-                   catalogo.items() if codigo not in CENTROS]
-    return {"secciones": secciones + adicionales, "valores": _config_valores(cfg),
+                 if not seccion["id"].startswith("centro_")]
+    secciones.extend(_seccion_centro(codigo, nombre, activa=codigo in activos)
+                     for codigo, nombre in catalogo.items())
+    return {"secciones": secciones, "valores": _config_valores(cfg),
             "centros": listar_canales(cfg),
             "groq_api_key_configurada": bool(config_get("groq_api_key")),
             "supresion": resumen_supresion()}
@@ -4477,13 +4477,11 @@ def agregar_clinica_whatsapp(body: NuevaClinicaIn, sesion: dict = Depends(solo_d
     return {"codigo": codigo, "nombre": nombre}
 
 
-def eliminar_clinica_whatsapp(codigo: str, sesion: dict = Depends(solo_dev)):
-    """Retira cualquier emisor; conserva su nombre para el historial."""
-    config = config_all(refresh=True)
-    catalogo = catalogo_centros(config)
-    if codigo not in catalogo:
-        raise HTTPException(404, detail="La clínica no existe o ya fue eliminada.")
-    canal = resolver_centro(codigo, config)
+class ClinicaEstadoIn(BaseModel):
+    activa: bool
+
+
+def _comprobar_clinica_sin_envios(codigo: str, accion: str) -> None:
     with JOBS_LOCK:
         ocupado = any((job.get("emisor") or {}).get("codigo") == codigo and
                       job.get("estado") in ESTADOS_ENVIO_EN_CURSO for job in JOBS.values())
@@ -4491,7 +4489,7 @@ def eliminar_clinica_whatsapp(codigo: str, sesion: dict = Depends(solo_dev)):
                                  (pend.get("emisor") or {}).get("codigo") == codigo
                                  for pend in PENDIENTES.values())
     if ocupado:
-        raise HTTPException(409, detail="Esta clínica tiene un envío activo o pendiente de confirmación. Termínalo o cancélalo antes de eliminarla.")
+        raise HTTPException(409, detail=f"Esta clínica tiene un envío activo o pendiente de confirmación. Termínalo o cancélalo antes de {accion}.")
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT COUNT(*) AS n FROM envios_programados"
@@ -4499,21 +4497,60 @@ def eliminar_clinica_whatsapp(codigo: str, sesion: dict = Depends(solo_dev)):
             (codigo,),
         )
         if int((cur.fetchone() or {}).get("n") or 0):
-            raise HTTPException(409, detail="Esta clínica tiene envíos programados activos. Cancélalos antes de eliminarla.")
+            raise HTTPException(409, detail=f"Esta clínica tiene envíos programados activos. Cancélalos antes de {accion}.")
         # ELIMINAR bloquea el número en todos los emisores; no retirar uno
         # mientras alguna solicitud aún debe confirmarse en Meta.
         cur.execute("SELECT COUNT(*) AS n FROM supresion_telefonos"
                     " WHERE estado IN ('pendiente', 'procesando')")
         if int((cur.fetchone() or {}).get("n") or 0):
             raise HTTPException(409, detail="Hay solicitudes de eliminación pendientes. Espera a que terminen antes de retirar un número emisor.")
+
+
+def cambiar_estado_clinica_whatsapp(codigo: str, body: ClinicaEstadoIn,
+                                   sesion: dict = Depends(solo_dev)):
+    """Pausa o reactiva un emisor sin borrar sus credenciales ni su historial."""
+    config = config_all(refresh=True)
+    catalogo = catalogo_centros(config, incluir_desactivadas=True)
+    if codigo not in catalogo:
+        raise HTTPException(404, detail="La clínica no existe o fue eliminada.")
+    activa = codigo in catalogo_centros(config)
+    if activa == body.activa:
+        return {"codigo": codigo, "activa": activa}
+    if not body.activa:
+        _comprobar_clinica_sin_envios(codigo, "desactivarla")
+    adicionales = json.loads(config.get("wa_clinicas_adicionales") or "[]")
+    for item in adicionales:
+        if item.get("codigo") == codigo:
+            item["activo"] = body.activa
+            item["eliminada"] = False
+            break
+    else:
+        adicionales.append({"codigo": codigo, "nombre": catalogo[codigo],
+                            "activo": body.activa, "eliminada": False})
+    config_set({"wa_clinicas_adicionales": json.dumps(adicionales, ensure_ascii=False)})
+    auditoria_registrar(sesion.get("usuario", ""),
+                       "clinica_wa_activada" if body.activa else "clinica_wa_desactivada",
+                       codigo, catalogo[codigo])
+    return {"codigo": codigo, "activa": body.activa}
+
+
+def eliminar_clinica_whatsapp(codigo: str, sesion: dict = Depends(solo_dev)):
+    """Retira cualquier emisor; conserva su nombre para el historial."""
+    config = config_all(refresh=True)
+    catalogo = catalogo_centros(config, incluir_desactivadas=True)
+    if codigo not in catalogo:
+        raise HTTPException(404, detail="La clínica no existe o ya fue eliminada.")
+    _comprobar_clinica_sin_envios(codigo, "eliminarla")
     adicionales = json.loads(config.get("wa_clinicas_adicionales") or "[]")
     for item in adicionales:
         if item.get("codigo") == codigo:
             item["activo"] = False
+            item["eliminada"] = True
             break
     else:
         # Los centros originales viven en CENTROS, no en el catálogo dinámico.
-        adicionales.append({"codigo": codigo, "nombre": catalogo[codigo], "activo": False})
+        adicionales.append({"codigo": codigo, "nombre": catalogo[codigo],
+                            "activo": False, "eliminada": True})
     cambios = {"wa_clinicas_adicionales": json.dumps(adicionales, ensure_ascii=False)}
     cambios.update({campo["clave"]: "" for campo in _seccion_centro(codigo, catalogo[codigo])["campos"]})
     config_set(cambios)
@@ -4523,7 +4560,7 @@ def eliminar_clinica_whatsapp(codigo: str, sesion: dict = Depends(solo_dev)):
 
 def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends(solo_dev)):
     cambios: dict[str, str] = {}
-    catalogo = catalogo_centros()
+    catalogo = catalogo_centros(incluir_desactivadas=True)
     claves_clinicas = {c["clave"] for codigo, nombre in catalogo.items()
                        for c in _seccion_centro(codigo, nombre)["campos"]}
     for clave, valor in (body.cambios or {}).items():

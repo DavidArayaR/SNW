@@ -13,6 +13,7 @@ from whatsapp_channels import (CENTROS, EMISOR_WEBHOOK, catalogo_centros,
                                credenciales_centro, listar_canales, resolver_phone_id)
 from whatsapp_service import WhatsAppService
 from wa_dispatch_limit import politica
+from routes.configuracion import RUTAS as RUTAS_CONFIGURACION
 import main
 
 
@@ -78,6 +79,7 @@ class MultiNumerosTests(unittest.TestCase):
         self.assertEqual(cambios[f"{codigo}_WSP_ACCESS_TOKEN"], "")
         valores.update(cambios)
         self.assertNotIn(codigo, catalogo_centros(valores))
+        self.assertNotIn(codigo, catalogo_centros(valores, incluir_desactivadas=True))
         self.assertEqual(catalogo_centros(valores, incluir_inactivas=True)[codigo], "Clínica Norte")
         self.assertIsNone(resolver_phone_id("9876543210", valores))
 
@@ -95,7 +97,8 @@ class MultiNumerosTests(unittest.TestCase):
         self.assertTrue(respuesta["eliminada"])
         cambios = guardar.call_args.args[0]
         self.assertEqual(json.loads(cambios["wa_clinicas_adicionales"]), [
-            {"codigo": "SMPT", "nombre": CENTROS["SMPT"], "activo": False}])
+            {"codigo": "SMPT", "nombre": CENTROS["SMPT"],
+             "activo": False, "eliminada": True}])
         valores.update(cambios)
         self.assertNotIn("SMPT", catalogo_centros(valores))
         self.assertEqual(catalogo_centros(valores, incluir_inactivas=True)["SMPT"],
@@ -106,6 +109,85 @@ class MultiNumerosTests(unittest.TestCase):
              patch("main.resumen_supresion", return_value={}):
             config = main.obtener_configuracion_completa(sesion={})
         self.assertNotIn("centro_smpt", {s["id"] for s in config["secciones"]})
+
+    def test_desactivar_y_reactivar_clinica_conserva_credenciales(self):
+        valores = configuracion()
+        valores["wa_clinicas_adicionales"] = "[]"
+        valores["SMPT_WSP_ACCESS_TOKEN"] = "secreto"
+        conexion = MagicMock()
+        cursor = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cursor.fetchone.side_effect = [{"n": 0}, {"n": 0}]
+        with patch("main.config_all", return_value=valores), \
+             patch("main.conectar", return_value=conexion), \
+             patch("main.config_set") as guardar, \
+             patch("main.auditoria_registrar") as auditar:
+            respuesta = main.cambiar_estado_clinica_whatsapp(
+                "SMPT", main.ClinicaEstadoIn(activa=False), sesion={"usuario": "dev"})
+        self.assertFalse(respuesta["activa"])
+        cambios = guardar.call_args.args[0]
+        self.assertEqual(set(cambios), {"wa_clinicas_adicionales"})
+        self.assertEqual(auditar.call_args.args[1], "clinica_wa_desactivada")
+        valores.update(cambios)
+        self.assertNotIn("SMPT", catalogo_centros(valores))
+        self.assertIn("SMPT", catalogo_centros(valores, incluir_desactivadas=True))
+        self.assertIsNone(resolver_phone_id("1234500001", valores))
+        with patch("main.config_all", return_value=valores), \
+             patch("main.resumen_supresion", return_value={}):
+            config = main.obtener_configuracion_completa(sesion={})
+        seccion = next(s for s in config["secciones"] if s["id"] == "centro_smpt")
+        self.assertFalse(seccion["activa"])
+        self.assertEqual(config["valores"]["SMPT_WSP_ACCESS_TOKEN"], "secreto")
+        with patch("main.config_all", return_value=valores), \
+             patch("main.config_set") as guardar, \
+             patch("main.auditoria_registrar") as auditar:
+            respuesta = main.cambiar_estado_clinica_whatsapp(
+                "SMPT", main.ClinicaEstadoIn(activa=True), sesion={"usuario": "dev"})
+        self.assertTrue(respuesta["activa"])
+        self.assertEqual(auditar.call_args.args[1], "clinica_wa_activada")
+        valores.update(guardar.call_args.args[0])
+        self.assertEqual(resolver_phone_id("1234500001", valores)["codigo"], "SMPT")
+
+    def test_desactivar_clinica_bloquea_programados_y_no_reactiva_eliminadas(self):
+        valores = configuracion()
+        valores["wa_clinicas_adicionales"] = "[]"
+        conexion = MagicMock()
+        cursor = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cursor.fetchone.return_value = {"n": 1}
+        with patch("main.config_all", return_value=valores), \
+             patch("main.conectar", return_value=conexion), \
+             patch("main.config_set") as guardar:
+            with self.assertRaises(main.HTTPException) as programados:
+                main.cambiar_estado_clinica_whatsapp(
+                    "SMPT", main.ClinicaEstadoIn(activa=False), sesion={})
+        self.assertEqual(programados.exception.status_code, 409)
+        guardar.assert_not_called()
+        valores["wa_clinicas_adicionales"] = json.dumps([
+            {"codigo": "SMPT", "nombre": CENTROS["SMPT"], "activo": False,
+             "eliminada": True}])
+        with patch("main.config_all", return_value=valores), \
+             patch("main.config_set") as guardar:
+            with self.assertRaises(main.HTTPException) as eliminada:
+                main.cambiar_estado_clinica_whatsapp(
+                    "SMPT", main.ClinicaEstadoIn(activa=True), sesion={})
+        self.assertEqual(eliminada.exception.status_code, 404)
+        guardar.assert_not_called()
+        self.assertIn(("/api/configuracion/clinicas/{codigo}/estado", "PUT",
+                       "cambiar_estado_clinica_whatsapp", None), RUTAS_CONFIGURACION)
+
+    def test_respuestas_de_clinica_desactivada_conservan_emisor_historico(self):
+        valores = configuracion()
+        valores["wa_clinicas_adicionales"] = json.dumps([
+            {"codigo": "SMPT", "nombre": CENTROS["SMPT"], "activo": False,
+             "eliminada": False}])
+        conexion = MagicMock()
+        cursor = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cursor.fetchall.return_value = [{"centro_codigo": "SMPT", "numero_emisor": "+56900000001"}]
+        with patch("whatsapp_service.conectar", return_value=conexion), \
+             patch("whatsapp_service.catalogo_centros",
+                   return_value=catalogo_centros(valores, incluir_desactivadas=True)) as catalogo:
+            emisor = WhatsAppService._emisor_historico("1234500001")
+        self.assertEqual(emisor["codigo"], "SMPT")
+        catalogo.assert_called_once_with(incluir_desactivadas=True)
 
     def test_eliminar_clinica_bloquea_programados(self):
         valores = {"wa_clinicas_adicionales": json.dumps([

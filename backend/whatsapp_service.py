@@ -1069,7 +1069,9 @@ class WhatsAppService:
                     (phone_id,),
                 )
                 filas = cur.fetchall() or []
-            catalogo = catalogo_centros()
+            # Una clínica pausada no puede iniciar envíos nuevos, pero aún
+            # debemos reconocer las respuestas a mensajes anteriores.
+            catalogo = catalogo_centros(incluir_desactivadas=True)
             codigos = {r["centro_codigo"] for r in filas if r.get("centro_codigo") in catalogo}
             if len(codigos) == 1:
                 codigo = codigos.pop()

@@ -69,6 +69,7 @@
 }
 .config-centro-estado--ok { color: var(--verde); }
 .config-centro-estado--pendiente { color: var(--rojo); }
+.config-centro-estado--inactiva { color: var(--texto-suave); }
 
 .config-campos {
   display: grid;

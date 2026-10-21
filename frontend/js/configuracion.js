@@ -282,11 +282,41 @@ function render(secciones) {
       });
     }
     if (s.id.startsWith("centro_")) {
-      const centro = centrosConfig.find((c) => c.codigo.toLowerCase() === s.id.slice(7));
+      const codigoCentro = s.id.slice(7).toUpperCase();
+      const activa = s.activa !== false;
+      const centro = centrosConfig.find((c) => c.codigo === codigoCentro);
       const estado = document.createElement("span");
-      estado.className = `config-centro-estado ${centro?.configured ? "config-centro-estado--ok" : "config-centro-estado--pendiente"}`;
-      estado.textContent = centro?.configured ? "Configurado" : `Pendiente${centro?.problemas?.length ? ` · ${centro.problemas.join(", ")}` : ""}`;
+      estado.className = `config-centro-estado ${!activa ? "config-centro-estado--inactiva" : centro?.configured ? "config-centro-estado--ok" : "config-centro-estado--pendiente"}`;
+      estado.textContent = !activa ? "Desactivada" : centro?.configured ? "Configurado" : `Pendiente${centro?.problemas?.length ? ` · ${centro.problemas.join(", ")}` : ""}`;
       panel.querySelector(".panel__head").appendChild(estado);
+      const alternar = document.createElement("button");
+      alternar.type = "button";
+      alternar.className = "btn btn--ghost config-alternar-clinica";
+      alternar.innerHTML = activa
+        ? '<i class="fa-solid fa-pause" aria-hidden="true"></i> Desactivar'
+        : '<i class="fa-solid fa-play" aria-hidden="true"></i> Activar';
+      panel.querySelector(".panel__head").appendChild(alternar);
+      alternar.addEventListener("click", async () => {
+        if (Object.keys(diff()).length) {
+          toast("Guarda o descarta los cambios pendientes antes de cambiar el estado de la clínica.", "error");
+          return;
+        }
+        alternar.disabled = true;
+        try {
+          const res = await fetch(`api/configuracion/clinicas/${encodeURIComponent(codigoCentro)}/estado`, {
+            method: "PUT", headers: authHeaders({ "Content-Type": "application/json" }),
+            body: JSON.stringify({ activa: !activa }),
+          });
+          const datos = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(datos.detail || "No se pudo cambiar el estado de la clínica.");
+          await cargar();
+          toast(activa ? "Clínica desactivada. Sus datos se conservaron." : "Clínica activada.");
+        } catch (error) {
+          toast(error.message || "No se pudo cambiar el estado de la clínica.", "error");
+        } finally {
+          alternar.disabled = false;
+        }
+      });
       if (s.eliminable) {
         const eliminar = document.createElement("button");
         eliminar.type = "button";
@@ -317,7 +347,7 @@ function render(secciones) {
           const aceptar = confirmar.querySelector("[data-confirmar]");
           aceptar.disabled = true;
           try {
-            const res = await fetch(`api/configuracion/clinicas/${encodeURIComponent(centro.codigo)}`, {
+            const res = await fetch(`api/configuracion/clinicas/${encodeURIComponent(codigoCentro)}`, {
               method: "DELETE", headers: authHeaders(),
             });
             const datos = await res.json().catch(() => ({}));
