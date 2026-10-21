@@ -4396,6 +4396,7 @@ def _seccion_centro(codigo: str, nombre: str) -> dict:
     numero, identificador = claves_centro(codigo)
     return {
         "id": f"centro_{codigo.lower()}", "titulo": f"WhatsApp · {nombre}",
+        "eliminable": True,
         "icono": "fa-whatsapp", "marca": True, "campos": [
             {"clave": numero, "etiqueta": "Número visible", "tipo": "text",
              "ayuda": "Con código de país, sin espacios. Puede quedar vacío mientras se configura."},
@@ -4420,8 +4421,8 @@ for _codigo, _nombre in CENTROS.items():
     _CONFIG_SECCIONES.append(_seccion_centro(_codigo, _nombre))
 
 
-def _config_valores() -> dict:
-    cfg = config_all()
+def _config_valores(cfg: dict | None = None) -> dict:
+    cfg = cfg if cfg is not None else config_all()
     claves = set(CONFIG_DEFAULTS)
     for codigo in catalogo_centros(cfg):
         claves.update(c["clave"] for c in _seccion_centro(codigo, "")["campos"])
@@ -4430,17 +4431,22 @@ def _config_valores() -> dict:
 
 def obtener_configuracion_completa(sesion: dict = Depends(solo_dev)):
     """Configuración completa, disponible solo para desarrolladores."""
+    cfg = config_all(refresh=True)
+    catalogo = catalogo_centros(cfg)
+    secciones = [seccion for seccion in _CONFIG_SECCIONES
+                 if not seccion["id"].startswith("centro_") or
+                 seccion["id"][7:].upper() in catalogo]
     adicionales = [_seccion_centro(codigo, nombre) for codigo, nombre in
-                   catalogo_centros().items() if codigo not in CENTROS]
-    return {"secciones": _CONFIG_SECCIONES + adicionales, "valores": _config_valores(),
-            "centros": listar_canales(),
+                   catalogo.items() if codigo not in CENTROS]
+    return {"secciones": secciones + adicionales, "valores": _config_valores(cfg),
+            "centros": listar_canales(cfg),
             "groq_api_key_configurada": bool(config_get("groq_api_key")),
             "supresion": resumen_supresion()}
 
 
 def listar_centros_whatsapp(sesion: dict = Depends(sesion_actual)):
     """Canales visibles para elegir emisor; nunca incluye el token compartido."""
-    return listar_canales()
+    return listar_canales(config_all(refresh=True))
 
 
 class NuevaClinicaIn(BaseModel):
@@ -4467,7 +4473,52 @@ def agregar_clinica_whatsapp(body: NuevaClinicaIn, sesion: dict = Depends(solo_d
         codigo = "C" + secrets.token_hex(4)[:7].upper()
     adicionales.append({"codigo": codigo, "nombre": nombre})
     config_set({"wa_clinicas_adicionales": json.dumps(adicionales, ensure_ascii=False)})
+    auditoria_registrar(sesion.get("usuario", ""), "clinica_wa_creada", codigo, nombre)
     return {"codigo": codigo, "nombre": nombre}
+
+
+def eliminar_clinica_whatsapp(codigo: str, sesion: dict = Depends(solo_dev)):
+    """Retira cualquier emisor; conserva su nombre para el historial."""
+    config = config_all(refresh=True)
+    catalogo = catalogo_centros(config)
+    if codigo not in catalogo:
+        raise HTTPException(404, detail="La clínica no existe o ya fue eliminada.")
+    canal = resolver_centro(codigo, config)
+    with JOBS_LOCK:
+        ocupado = any((job.get("emisor") or {}).get("codigo") == codigo and
+                      job.get("estado") in ESTADOS_ENVIO_EN_CURSO for job in JOBS.values())
+        ocupado = ocupado or any(pend.get("estado") == "pendiente" and
+                                 (pend.get("emisor") or {}).get("codigo") == codigo
+                                 for pend in PENDIENTES.values())
+    if ocupado:
+        raise HTTPException(409, detail="Esta clínica tiene un envío activo o pendiente de confirmación. Termínalo o cancélalo antes de eliminarla.")
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT COUNT(*) AS n FROM envios_programados"
+            " WHERE centro_codigo = %s AND estado IN ('pendiente', 'aprobado', 'enviando')",
+            (codigo,),
+        )
+        if int((cur.fetchone() or {}).get("n") or 0):
+            raise HTTPException(409, detail="Esta clínica tiene envíos programados activos. Cancélalos antes de eliminarla.")
+        # ELIMINAR bloquea el número en todos los emisores; no retirar uno
+        # mientras alguna solicitud aún debe confirmarse en Meta.
+        cur.execute("SELECT COUNT(*) AS n FROM supresion_telefonos"
+                    " WHERE estado IN ('pendiente', 'procesando')")
+        if int((cur.fetchone() or {}).get("n") or 0):
+            raise HTTPException(409, detail="Hay solicitudes de eliminación pendientes. Espera a que terminen antes de retirar un número emisor.")
+    adicionales = json.loads(config.get("wa_clinicas_adicionales") or "[]")
+    for item in adicionales:
+        if item.get("codigo") == codigo:
+            item["activo"] = False
+            break
+    else:
+        # Los centros originales viven en CENTROS, no en el catálogo dinámico.
+        adicionales.append({"codigo": codigo, "nombre": catalogo[codigo], "activo": False})
+    cambios = {"wa_clinicas_adicionales": json.dumps(adicionales, ensure_ascii=False)}
+    cambios.update({campo["clave"]: "" for campo in _seccion_centro(codigo, catalogo[codigo])["campos"]})
+    config_set(cambios)
+    auditoria_registrar(sesion.get("usuario", ""), "clinica_wa_eliminada", codigo, catalogo[codigo])
+    return {"codigo": codigo, "eliminada": True}
 
 
 def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends(solo_dev)):
@@ -5184,7 +5235,7 @@ def _exigir_centro_envio(codigo: str | None) -> dict:
     if not codigo:
         raise HTTPException(422, detail="Selecciona el centro y número de WhatsApp emisor.")
     try:
-        canal = resolver_centro(codigo)
+        canal = resolver_centro(codigo, config_all(refresh=True))
     except ValueError:
         raise HTTPException(422, detail="Centro emisor desconocido.")
     if not canal["configured"]:
@@ -5200,8 +5251,8 @@ def _emisor_vigente(emisor: dict | None) -> bool:
     if not emisor:
         return False
     try:
-        actual = resolver_centro(emisor.get("codigo"))
-    except ValueError:
+        actual = resolver_centro(emisor.get("codigo"), config_all(refresh=True))
+    except (ValueError, RuntimeError):
         return False
     return bool(actual["configured"] and actual["phoneNumberId"] == emisor.get("phoneNumberId")
                 and actual["phoneNumber"] == emisor.get("phoneNumber"))
@@ -6085,7 +6136,7 @@ def envios_en_progreso(sesion: dict = Depends(exigir("mensajeria"))):
         items.append({
             "origen": "programado", "id": f["id"], "job_id": f.get("job_id") or "",
             "centro_codigo": f.get("centro_codigo"),
-            "centro": catalogo_centros().get(f.get("centro_codigo"), "Emisor histórico no identificado"),
+            "centro": catalogo_centros(incluir_inactivas=True).get(f.get("centro_codigo"), "Emisor histórico no identificado"),
             "numero_emisor": f.get("numero_emisor"),
             "puede_cancelar": pc["puede_cancelar"],
             "puede_pausar": bool(vivo and _puede_controlar_job(sesion, vivo)),
@@ -6394,7 +6445,7 @@ def _prog_a_respuesta(f: dict, sesion: dict, preelegidos: int | None = None) -> 
     return {
         "id": f["id"], "area_id": f.get("area_id"),
         "centro_codigo": f.get("centro_codigo"),
-        "centro": catalogo_centros().get(f.get("centro_codigo"), "Emisor histórico no identificado"),
+        "centro": catalogo_centros(incluir_inactivas=True).get(f.get("centro_codigo"), "Emisor histórico no identificado"),
         "numero_emisor": f.get("numero_emisor"),
         "area": (esp.get("nombre_visible") if esp else ""),
         "tabla": f.get("tabla") or "", "ambiente": f.get("ambiente") or "produccion",
@@ -7334,7 +7385,7 @@ def _presentar_historial(filas: list[dict], sesion: dict, limite: int | None = N
                  for jid, j in JOBS.items()
                  if j.get("estado") in ESTADOS_ENVIO_EN_CURSO and j.get("envio_id")}
     for f in filas:
-        f["centro"] = catalogo_centros().get(f.get("centro_codigo"), "Emisor histórico no identificado")
+        f["centro"] = catalogo_centros(incluir_inactivas=True).get(f.get("centro_codigo"), "Emisor histórico no identificado")
         orden = f.pop("_orden", None)
         if f.pop("_sin_lote", False):
             pc = _prog_a_respuesta(f, sesion)

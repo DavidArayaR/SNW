@@ -287,6 +287,50 @@ function render(secciones) {
       estado.className = `config-centro-estado ${centro?.configured ? "config-centro-estado--ok" : "config-centro-estado--pendiente"}`;
       estado.textContent = centro?.configured ? "Configurado" : `Pendiente${centro?.problemas?.length ? ` · ${centro.problemas.join(", ")}` : ""}`;
       panel.querySelector(".panel__head").appendChild(estado);
+      if (s.eliminable) {
+        const eliminar = document.createElement("button");
+        eliminar.type = "button";
+        eliminar.className = "btn btn--ghost config-eliminar-clinica";
+        eliminar.innerHTML = '<i class="fa-solid fa-trash-can" aria-hidden="true"></i> Eliminar clínica';
+        panel.querySelector(".panel__head").appendChild(eliminar);
+        const confirmar = document.createElement("div");
+        confirmar.className = "config-confirmar-eliminacion";
+        confirmar.hidden = true;
+        confirmar.innerHTML = `<p>¿Eliminar ${escaparHtml(centro?.nombre || s.titulo)}? Dejará de estar disponible para envíos. ` +
+          'Su historial se conservará y se quitarán sus datos de conexión en SNW. Esto no elimina el número en Meta.</p>' +
+          '<div><button type="button" class="btn btn--ghost" data-cancelar>Volver</button>' +
+          '<button type="button" class="btn btn--danger" data-confirmar>Eliminar clínica</button></div>';
+        panel.querySelector(".panel__head").after(confirmar);
+        eliminar.addEventListener("click", () => {
+          if (Object.keys(diff()).length) {
+            toast("Guarda o descarta los cambios pendientes antes de eliminar una clínica.", "error");
+            return;
+          }
+          confirmar.hidden = !confirmar.hidden;
+          if (!confirmar.hidden) confirmar.querySelector("[data-cancelar]").focus();
+        });
+        confirmar.querySelector("[data-cancelar]").addEventListener("click", () => {
+          confirmar.hidden = true;
+          eliminar.focus();
+        });
+        confirmar.querySelector("[data-confirmar]").addEventListener("click", async () => {
+          const aceptar = confirmar.querySelector("[data-confirmar]");
+          aceptar.disabled = true;
+          try {
+            const res = await fetch(`api/configuracion/clinicas/${encodeURIComponent(centro.codigo)}`, {
+              method: "DELETE", headers: authHeaders(),
+            });
+            const datos = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(datos.detail || "No se pudo eliminar la clínica.");
+            await cargar();
+            toast("Clínica eliminada. Su historial se conserva.");
+          } catch (error) {
+            toast(error.message || "No se pudo eliminar la clínica.", "error");
+          } finally {
+            aceptar.disabled = false;
+          }
+        });
+      }
     }
     const grid = panel.querySelector(".config-campos");
     const pendientes = Number(estadoSupresion.pendientes || 0) +

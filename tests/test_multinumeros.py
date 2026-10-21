@@ -49,11 +49,77 @@ class MultiNumerosTests(unittest.TestCase):
 
     def test_crear_clinica_no_modifica_las_existentes(self):
         with patch("main.config_all", return_value={"wa_clinicas_adicionales": "[]"}), \
-             patch("main.config_set") as guardar:
+             patch("main.config_set") as guardar, \
+             patch("main.auditoria_registrar"):
             creado = main.agregar_clinica_whatsapp(main.NuevaClinicaIn(nombre="Clínica Sur"), sesion={})
         self.assertEqual(creado["nombre"], "Clínica Sur")
         self.assertTrue(creado["codigo"].startswith("C"))
         self.assertEqual(json.loads(guardar.call_args.args[0]["wa_clinicas_adicionales"]), [creado])
+
+    def test_eliminar_clinica_retira_canal_y_conserva_nombre_historico(self):
+        codigo = "C1A2B3C4"
+        valores = configuracion()
+        valores.update({
+            "wa_clinicas_adicionales": json.dumps([{"codigo": codigo, "nombre": "Clínica Norte"}]),
+            f"{codigo}_WSP_PHONE_NUMBER": "+56988887777",
+            f"{codigo}_WSP_PHONE_NUMBER_ID": "9876543210",
+            f"{codigo}_WSP_ACCESS_TOKEN": "secreto",
+        })
+        conexion = MagicMock()
+        cursor = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cursor.fetchone.side_effect = [{"n": 0}, {"n": 0}]
+        with patch("main.config_all", return_value=valores), \
+             patch("main.conectar", return_value=conexion), \
+             patch("main.config_set") as guardar, \
+             patch("main.auditoria_registrar"):
+            respuesta = main.eliminar_clinica_whatsapp(codigo, sesion={})
+        self.assertTrue(respuesta["eliminada"])
+        cambios = guardar.call_args.args[0]
+        self.assertEqual(cambios[f"{codigo}_WSP_ACCESS_TOKEN"], "")
+        valores.update(cambios)
+        self.assertNotIn(codigo, catalogo_centros(valores))
+        self.assertEqual(catalogo_centros(valores, incluir_inactivas=True)[codigo], "Clínica Norte")
+        self.assertIsNone(resolver_phone_id("9876543210", valores))
+
+    def test_eliminar_clinica_original_retira_canal_y_tarjeta_sin_perder_historial(self):
+        valores = configuracion()
+        valores["wa_clinicas_adicionales"] = "[]"
+        conexion = MagicMock()
+        cursor = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cursor.fetchone.side_effect = [{"n": 0}, {"n": 0}]
+        with patch("main.config_all", return_value=valores), \
+             patch("main.conectar", return_value=conexion), \
+             patch("main.config_set") as guardar, \
+             patch("main.auditoria_registrar"):
+            respuesta = main.eliminar_clinica_whatsapp("SMPT", sesion={})
+        self.assertTrue(respuesta["eliminada"])
+        cambios = guardar.call_args.args[0]
+        self.assertEqual(json.loads(cambios["wa_clinicas_adicionales"]), [
+            {"codigo": "SMPT", "nombre": CENTROS["SMPT"], "activo": False}])
+        valores.update(cambios)
+        self.assertNotIn("SMPT", catalogo_centros(valores))
+        self.assertEqual(catalogo_centros(valores, incluir_inactivas=True)["SMPT"],
+                         CENTROS["SMPT"])
+        self.assertIsNone(resolver_phone_id("1234500001", valores))
+        with patch("main.config_all", return_value=valores), \
+             patch("main.listar_canales", return_value=listar_canales(valores)), \
+             patch("main.resumen_supresion", return_value={}):
+            config = main.obtener_configuracion_completa(sesion={})
+        self.assertNotIn("centro_smpt", {s["id"] for s in config["secciones"]})
+
+    def test_eliminar_clinica_bloquea_programados(self):
+        valores = {"wa_clinicas_adicionales": json.dumps([
+            {"codigo": "C1A2B3C4", "nombre": "Clínica Norte"}])}
+        conexion = MagicMock()
+        cursor = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cursor.fetchone.return_value = {"n": 1}
+        with patch("main.config_all", return_value=valores), \
+             patch("main.conectar", return_value=conexion), \
+             patch("main.config_set") as guardar:
+            with self.assertRaises(main.HTTPException) as programados:
+                main.eliminar_clinica_whatsapp("C1A2B3C4", sesion={})
+        self.assertEqual(programados.exception.status_code, 409)
+        guardar.assert_not_called()
 
     def test_secciones_de_centros_usan_icono_de_marca(self):
         for codigo in CENTROS:
@@ -61,6 +127,7 @@ class MultiNumerosTests(unittest.TestCase):
                            if s["id"] == f"centro_{codigo.lower()}")
             self.assertEqual(seccion["icono"], "fa-whatsapp")
             self.assertTrue(seccion["marca"])
+            self.assertTrue(seccion["eliminable"])
 
     def test_catalogo_valida_cuatro_centros_y_resuelve_id(self):
         canales = listar_canales(configuracion())
