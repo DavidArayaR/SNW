@@ -196,9 +196,32 @@ async function cargar() {
     centrosConfig = d.centros || [];
     estadoSupresion = d.supresion || {};
     render(d.secciones || []);
+    cargarEstadoDespacho();
   } catch {
     console.error("[configuracion.js cargar()]");
     cont.innerHTML = '<p class="mes-vacio" style="padding:18px;">No se pudo cargar la configuración.</p>';
+  }
+}
+
+async function cargarEstadoDespacho() {
+  try {
+    const res = await fetch("api/whatsapp/rate-limit", { headers: authHeaders(), cache: "no-store" });
+    if (!res.ok) return;
+    const datos = await res.json();
+    for (const canal of datos.canales || []) {
+      const panel = [...cont.querySelectorAll(".config-seccion[data-centro]")]
+        .find((item) => item.dataset.centro === canal.centro);
+      if (!panel || !canal.configurado) continue;
+      const etiqueta = document.createElement("p");
+      etiqueta.className = "config-centro-ritmo";
+      etiqueta.textContent = canal.espera_segundos > 0
+        ? `En pausa · reintento en ${canal.espera_segundos} s`
+        : `Ritmo actual: ${canal.mps_actual} de ${canal.mps_configurado} mensajes/s · ` +
+          `${canal.aceptados_meta} aceptados por Meta`;
+      panel.querySelector(".panel__head").after(etiqueta);
+    }
+  } catch (error) {
+    console.error("[configuracion.js cargarEstadoDespacho()]", error);
   }
 }
 
@@ -212,7 +235,7 @@ function render(secciones) {
     panel.className = "panel config-seccion";
     if (s.id.startsWith("centro_")) panel.dataset.centro = s.id.slice(7).toUpperCase();
     panel.innerHTML =
-      `<div class="panel__head"><h2><i class="${s.marca ? "fa-brands" : "fa-solid"} ${s.icono || "fa-gear"}"></i> ${escaparHtml(s.titulo)}</h2></div>` +
+      `<div class="panel__head"><h2><i class="${s.marca || s.icono === "fa-whatsapp" ? "fa-brands" : "fa-solid"} ${s.icono || "fa-gear"}"></i> ${escaparHtml(s.titulo)}</h2></div>` +
       `<div class="config-campos"></div>`;
     if (s.id.startsWith("centro_")) {
       const centro = centrosConfig.find((c) => c.codigo.toLowerCase() === s.id.slice(7));
