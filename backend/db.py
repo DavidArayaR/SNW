@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import time
 import traceback
 from pathlib import Path
 
@@ -237,6 +238,7 @@ def _migrar_claves_centro(cur) -> None:
         cur.execute("DELETE FROM configuracion WHERE clave = %s", (vieja,))
 
 _config_cache: dict | None = None
+_config_cache_cargado: float = 0.0
 
 
 def asegurar_tabla_config() -> None:
@@ -1384,13 +1386,17 @@ def _cargar_config() -> tuple[dict, bool]:
         return valores, False
 
 
-def config_all() -> dict:
-    global _config_cache
-    if _config_cache is None:
+def config_all(*, refresh: bool = False) -> dict:
+    global _config_cache, _config_cache_cargado
+    if _config_cache is None or (refresh and time.monotonic() - _config_cache_cargado >= 1):
         valores, ok = _cargar_config()
         # Solo se cachea una lectura real; si la BD falló se reintenta luego.
         if ok:
             _config_cache = valores
+            _config_cache_cargado = time.monotonic()
+        elif refresh:
+            # No devolver datos antiguos si se pidió revalidar un canal retirado.
+            raise RuntimeError("No se pudo actualizar la configuración")
         return dict(valores)
     return dict(_config_cache)
 

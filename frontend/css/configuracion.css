@@ -37,6 +37,17 @@
 .config-nueva-clinica label { display: block; margin-bottom: 7px; font-weight: 700; }
 .config-nueva-clinica__fila { display: flex; gap: 10px; flex-wrap: wrap; }
 .config-nueva-clinica__fila input { flex: 1 1 230px; min-width: 0; }
+.config-eliminar-clinica { color: var(--rojo); }
+.config-confirmar-eliminacion {
+  margin: 12px 18px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--rojo);
+  border-radius: 10px;
+  background: var(--panel-2);
+}
+.config-confirmar-eliminacion[hidden] { display: none; }
+.config-confirmar-eliminacion p { margin: 0 0 10px; }
+.config-confirmar-eliminacion div { display: flex; gap: 8px; flex-wrap: wrap; }
 .config-centro-ritmo {
   margin: 0;
   padding: 10px 20px;

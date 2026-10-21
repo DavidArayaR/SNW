@@ -21,7 +21,7 @@ from datetime import datetime
 
 import httpx
 
-from db import conectar, config_get, log_error, tabla_pacientes
+from db import conectar, config_all, config_get, log_error, tabla_pacientes
 from whatsapp_channels import (CENTROS, EMISOR_WEBHOOK, catalogo_centros,
                                credenciales_centro, listar_canales, resolver_phone_id)
 from corpus_respuestas import guardar_mensaje_completo
@@ -1032,10 +1032,11 @@ class WhatsAppService:
                     accion.append(f"template_{valor.get('event', '?')}")
                     continue
                 phone_id = str((valor.get("metadata") or {}).get("phone_number_id") or "").strip()
-                if len([c for c in listar_canales() if c["phoneNumberId"] == phone_id]) > 1:
+                config_canal = config_all(refresh=True)
+                if len([c for c in listar_canales(config_canal) if c["phoneNumberId"] == phone_id]) > 1:
                     accion.append("emisor_duplicado")
                     continue
-                emisor = resolver_phone_id(phone_id)
+                emisor = resolver_phone_id(phone_id, config_canal)
                 if not emisor or not emisor.get("phoneNumber"):
                     emisor = self._emisor_historico(phone_id)
                 if not emisor or not emisor.get("phoneNumber"):
