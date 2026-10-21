@@ -35,6 +35,7 @@ backups/
 data/
 documentacion/
 AGENTS.md
+DESIGN.md
 registro-log.md
 docs/
 scripts/
