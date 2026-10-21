@@ -1,5 +1,56 @@
 /* Página de Configuración (solo admin) */
 
+.app-topbar .config-tabs {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: min(100%, calc(100vw - 32px));
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: var(--surface-2);
+  border-color: var(--borde);
+  scrollbar-width: none;
+}
+.app-topbar .config-tabs::-webkit-scrollbar { display: none; }
+.app-topbar .config-tabs::before {
+  background: var(--btn-primary-bg);
+  box-shadow: none;
+}
+.app-topbar .config-tabs .msg-tab { color: var(--texto-suave); white-space: nowrap; }
+.app-topbar .config-tabs .msg-tab:hover:not(.activo) {
+  color: var(--texto);
+  text-shadow: none;
+}
+.app-topbar .config-tabs .msg-tab.activo,
+.app-topbar .config-tabs .msg-tab.activo:hover {
+  color: var(--btn-primary-fg);
+  text-shadow: none;
+}
+.app-topbar .config-tabs .msg-tab:focus-visible {
+  outline: 2px solid var(--sidebar-contorno);
+  outline-offset: -2px;
+}
+.config-tab-panel[hidden],
+.config-api-docs[hidden] { display: none; }
+.config-tab-panel:not([hidden]) {
+  animation: config-panel-entrada .24s ease-out both;
+}
+@keyframes config-panel-entrada {
+  from { opacity: 0; transform: translateX(var(--config-panel-entrada-x, 0px)); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.config-clinicas-vacio {
+  padding: 18px;
+  color: var(--texto-suave);
+}
+.config-clinicas-vacio p { margin-bottom: 12px; }
+@media (prefers-reduced-motion: reduce) {
+  .app-topbar .config-tabs::before { transition: none; }
+  .config-tab-panel:not([hidden]) { animation: none; }
+}
+@media (max-width: 760px) {
+  .app-topbar .config-tabs { margin-left: 0; }
+}
+
 .config-intro {
   margin: 4px 18px 18px;
   font-size: .88rem;
@@ -32,6 +83,19 @@
 .config-api-docs .btn { flex: 0 0 auto; }
 
 .config-seccion { margin-bottom: 18px; }
+.config-clinicas-acciones {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  margin: 0 0 18px;
+}
+.config-clinicas-acciones .config-nueva-clinica {
+  width: 100%;
+  border: 1px solid var(--borde);
+  border-radius: 12px;
+  background: var(--panel-2);
+}
 .config-nueva-clinica { padding: 14px 20px; border-bottom: 1px solid var(--borde); }
 .config-nueva-clinica[hidden] { display: none; }
 .config-nueva-clinica label { display: block; margin-bottom: 7px; font-weight: 700; }

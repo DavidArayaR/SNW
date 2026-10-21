@@ -21,11 +21,85 @@ function toast(msg, tipo = "ok") {
 toastEl.addEventListener("click", () => toastEl.classList.remove("visible"));
 
 const cont = $("#secciones");
+const idsTabs = ["general", "whatsapp", "clinicas", "correo", "integraciones"];
+let tabConfig = "general";
+try {
+  const guardada = localStorage.getItem("snw_tab_config");
+  if (idsTabs.includes(guardada)) tabConfig = guardada;
+} catch { /* sin almacenamiento */ }
 let centrosConfig = [];
 let valores = {};          // valor guardado (servidor)
 let estadoSupresion = {};  // solo conteos; nunca teléfonos ni huellas
 let campos = {};           // clave -> { def, input }
 let derivados = [];        // campos calculados (ej. URL del webhook)
+
+function tabDeSeccion(id) {
+  if (id.startsWith("centro_")) return "clinicas";
+  if (id === "correo") return "correo";
+  if (id === "whatsapp") return "whatsapp";
+  if (id === "ia" || id === "call_center") return "integraciones";
+  return "general";
+}
+
+function posicionarIndicadorConfig() {
+  const barra = $(".config-tabs");
+  const activa = barra?.querySelector(".msg-tab.activo");
+  if (!barra || !activa) return;
+  if (activa.offsetLeft < barra.scrollLeft + 8) {
+    barra.scrollLeft = Math.max(0, activa.offsetLeft - 8);
+  } else if (activa.offsetLeft + activa.offsetWidth > barra.scrollLeft + barra.clientWidth - 8) {
+    barra.scrollLeft = activa.offsetLeft + activa.offsetWidth - barra.clientWidth + 8;
+  }
+  const rectBarra = barra.getBoundingClientRect();
+  const rectActiva = activa.getBoundingClientRect();
+  barra.style.setProperty("--msg-indicador-x",
+    `${rectActiva.left - rectBarra.left - barra.clientLeft + barra.scrollLeft}px`);
+  barra.style.setProperty("--msg-indicador-ancho", `${rectActiva.width}px`);
+}
+
+function mostrarTabConfig(anterior = tabConfig) {
+  document.querySelectorAll("[data-config-tab]").forEach((boton) => {
+    const seleccionada = boton.dataset.configTab === tabConfig;
+    boton.classList.toggle("activo", seleccionada);
+    boton.setAttribute("aria-selected", String(seleccionada));
+    boton.tabIndex = seleccionada ? 0 : -1;
+  });
+  posicionarIndicadorConfig();
+  cont.querySelectorAll(".config-tab-panel").forEach((panel) => {
+    if (panel.dataset.configPanel === tabConfig && panel.hidden) {
+      panel.style.setProperty("--config-panel-entrada-x",
+        idsTabs.indexOf(tabConfig) > idsTabs.indexOf(anterior) ? "20px" : "-20px");
+    }
+    panel.hidden = panel.dataset.configPanel !== tabConfig;
+  });
+  $("#configApiDocs").hidden = tabConfig !== "general";
+}
+
+function cambiarTabConfig(destino, { enfocar = false } = {}) {
+  if (!idsTabs.includes(destino) || destino === tabConfig) return;
+  const anterior = tabConfig;
+  tabConfig = destino;
+  try { localStorage.setItem("snw_tab_config", destino); } catch { /* sin almacenamiento */ }
+  mostrarTabConfig(anterior);
+  if (enfocar) $(`#config-tab-${destino}`)?.focus();
+  window.scrollTo(0, 0);
+}
+
+document.querySelectorAll("[data-config-tab]").forEach((boton) => {
+  boton.addEventListener("click", () => cambiarTabConfig(boton.dataset.configTab));
+  boton.addEventListener("keydown", (evento) => {
+    const actual = idsTabs.indexOf(boton.dataset.configTab);
+    const destino = evento.key === "ArrowRight" ? idsTabs[(actual + 1) % idsTabs.length]
+      : evento.key === "ArrowLeft" ? idsTabs[(actual - 1 + idsTabs.length) % idsTabs.length]
+      : evento.key === "Home" ? idsTabs[0]
+      : evento.key === "End" ? idsTabs[idsTabs.length - 1] : null;
+    if (destino) {
+      evento.preventDefault();
+      cambiarTabConfig(destino, { enfocar: true });
+    }
+  });
+});
+window.addEventListener("resize", posicionarIndicadorConfig);
 
 const CATEGORIAS_PATRONES = [
   ["CONSULTA_HORAS", "Horas y citas"],
@@ -225,62 +299,83 @@ async function cargarEstadoDespacho() {
   }
 }
 
+function agregarFormularioClinica(contenedor) {
+  const acciones = document.createElement("div");
+  acciones.className = "config-clinicas-acciones";
+  const boton = document.createElement("button");
+  boton.type = "button";
+  boton.className = "btn btn--ghost";
+  boton.innerHTML = '<i class="fa-solid fa-plus" aria-hidden="true"></i> Añadir clínica';
+  acciones.appendChild(boton);
+  const formulario = document.createElement("form");
+  formulario.className = "config-nueva-clinica";
+  formulario.hidden = true;
+  formulario.innerHTML = '<label for="nombreNuevaClinica">Nombre de la clínica</label>' +
+    '<div class="config-nueva-clinica__fila"><input id="nombreNuevaClinica" name="nombre" ' +
+    'type="text" minlength="2" maxlength="100" required placeholder="Ej.: Clínica Norte">' +
+    '<button class="btn btn--primary" type="submit">Crear clínica</button></div>' +
+    '<p class="field__hint">Después podrás configurar su número, Phone Number ID, WABA ID y access token.</p>';
+  acciones.appendChild(formulario);
+  contenedor.appendChild(acciones);
+  boton.addEventListener("click", () => {
+    formulario.hidden = !formulario.hidden;
+    if (!formulario.hidden) formulario.querySelector("input").focus();
+  });
+  formulario.addEventListener("submit", async (evento) => {
+    evento.preventDefault();
+    if (Object.keys(diff()).length) {
+      toast("Guarda o descarta los cambios pendientes antes de añadir una clínica.", "error");
+      return;
+    }
+    const enviar = formulario.querySelector("button");
+    enviar.disabled = true;
+    try {
+      const res = await fetch("api/configuracion/clinicas", {
+        method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ nombre: formulario.querySelector("input").value.trim() }),
+      });
+      const datos = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(datos.detail || "No se pudo añadir la clínica.");
+      await cargar();
+      cont.querySelector(`[data-centro="${datos.codigo}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      toast("Clínica añadida. Completa sus datos y guarda los cambios.");
+    } catch (error) {
+      toast(error.message || "No se pudo añadir la clínica.", "error");
+    } finally {
+      enviar.disabled = false;
+    }
+  });
+}
+
 function render(secciones) {
   cont.innerHTML = "";
   campos = {};
   derivados = [];
+  const paneles = {};
+  for (const id of idsTabs) {
+    const grupo = document.createElement("div");
+    grupo.className = "config-tab-panel";
+    grupo.id = `config-panel-${id}`;
+    grupo.dataset.configPanel = id;
+    grupo.setAttribute("role", "tabpanel");
+    grupo.setAttribute("aria-labelledby", `config-tab-${id}`);
+    grupo.tabIndex = 0;
+    grupo.hidden = true;
+    cont.appendChild(grupo);
+    paneles[id] = grupo;
+  }
+  agregarFormularioClinica(paneles.clinicas);
 
   for (const s of secciones) {
     const panel = document.createElement("section");
     panel.className = "panel config-seccion";
-    if (s.id.startsWith("centro_")) panel.dataset.centro = s.id.slice(7).toUpperCase();
+    if (s.id.startsWith("centro_")) {
+      panel.dataset.centro = s.id.slice(7).toUpperCase();
+      panel.dataset.activa = String(s.activa !== false);
+    }
     panel.innerHTML =
       `<div class="panel__head"><h2><i class="${s.marca || s.icono === "fa-whatsapp" ? "fa-brands" : "fa-solid"} ${s.icono || "fa-gear"}"></i> ${escaparHtml(s.titulo)}</h2></div>` +
       `<div class="config-campos"></div>`;
-    if (s.id === "whatsapp") {
-      const boton = document.createElement("button");
-      boton.type = "button";
-      boton.className = "btn btn--ghost";
-      boton.innerHTML = '<i class="fa-solid fa-plus" aria-hidden="true"></i> Añadir clínica';
-      panel.querySelector(".panel__head").appendChild(boton);
-      const formulario = document.createElement("form");
-      formulario.className = "config-nueva-clinica";
-      formulario.hidden = true;
-      formulario.innerHTML = '<label for="nombreNuevaClinica">Nombre de la clínica</label>' +
-        '<div class="config-nueva-clinica__fila"><input id="nombreNuevaClinica" name="nombre" ' +
-        'type="text" minlength="2" maxlength="100" required placeholder="Ej.: Clínica Norte">' +
-        '<button class="btn btn--primary" type="submit">Crear clínica</button></div>' +
-        '<p class="field__hint">Después podrás configurar su número, Phone Number ID, WABA ID y access token.</p>';
-      panel.querySelector(".panel__head").after(formulario);
-      boton.addEventListener("click", () => {
-        formulario.hidden = !formulario.hidden;
-        if (!formulario.hidden) formulario.querySelector("input").focus();
-      });
-      formulario.addEventListener("submit", async (evento) => {
-        evento.preventDefault();
-        if (Object.keys(diff()).length) {
-          toast("Guarda o descarta los cambios pendientes antes de añadir una clínica.", "error");
-          return;
-        }
-        const enviar = formulario.querySelector("button");
-        enviar.disabled = true;
-        try {
-          const res = await fetch("api/configuracion/clinicas", {
-            method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
-            body: JSON.stringify({ nombre: formulario.querySelector("input").value.trim() }),
-          });
-          const datos = await res.json().catch(() => ({}));
-          if (!res.ok) throw new Error(datos.detail || "No se pudo añadir la clínica.");
-          await cargar();
-          cont.querySelector(`[data-centro="${datos.codigo}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-          toast("Clínica añadida. Completa sus datos y guarda los cambios.");
-        } catch (error) {
-          toast(error.message || "No se pudo añadir la clínica.", "error");
-        } finally {
-          enviar.disabled = false;
-        }
-      });
-    }
     if (s.id.startsWith("centro_")) {
       const codigoCentro = s.id.slice(7).toUpperCase();
       const activa = s.activa !== false;
@@ -469,8 +564,15 @@ function render(secciones) {
       }
 
     }
-    cont.appendChild(panel);
+    paneles[tabDeSeccion(s.id)].appendChild(panel);
   }
+  if (!paneles.clinicas.querySelector(".config-seccion")) {
+    const vacio = document.createElement("div");
+    vacio.className = "config-clinicas-vacio";
+    vacio.innerHTML = '<p>No hay clínicas configuradas. Usa «Añadir clínica» para crear una.</p>';
+    paneles.clinicas.appendChild(vacio);
+  }
+  mostrarTabConfig();
   marcarCambios();
 }
 
@@ -508,7 +610,7 @@ function marcarCambios() {
   $("#btnGuardarFijo").disabled = !hay || invalido;
   $("#barraGuardar").hidden = !hay;
   $("#cambiosResumen").textContent = hay
-    ? `${n} cambio${n === 1 ? "" : "s"} sin guardar${invalido ? " · Corrige las frases marcadas" : ""}: ${Object.keys(cambios).join(", ")}`
+    ? `${n} cambio${n === 1 ? "" : "s"} sin guardar${invalido ? " · Corrige las frases marcadas en Integraciones" : ""}: ${Object.keys(cambios).join(", ")}`
     : "Sin cambios";
 }
 
@@ -539,8 +641,9 @@ async function guardar() {
       const centro = centrosConfig.find((c) => c.codigo === codigo);
       const estado = panel.querySelector(".config-centro-estado");
       if (estado) {
-        estado.className = `config-centro-estado ${centro?.configured ? "config-centro-estado--ok" : "config-centro-estado--pendiente"}`;
-        estado.textContent = centro?.configured ? "Configurado" : `Pendiente${centro?.problemas?.length ? ` · ${centro.problemas.join(", ")}` : ""}`;
+        const activa = panel.dataset.activa !== "false";
+        estado.className = `config-centro-estado ${!activa ? "config-centro-estado--inactiva" : centro?.configured ? "config-centro-estado--ok" : "config-centro-estado--pendiente"}`;
+        estado.textContent = !activa ? "Desactivada" : centro?.configured ? "Configurado" : `Pendiente${centro?.problemas?.length ? ` · ${centro.problemas.join(", ")}` : ""}`;
       }
     }
 
@@ -595,6 +698,7 @@ let yaCargada = false;
 window.snwCargarConfiguracion = function () {
   if (yaCargada) return;
   yaCargada = true;
+  mostrarTabConfig();
   cargar();
 };
 })();

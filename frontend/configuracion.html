@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="css/componentes.css">
   <link rel="stylesheet" href="css/layout.css?v=navcolor1">
   <link rel="stylesheet" href="css/admin.css?v=tokens1">
-  <link rel="stylesheet" href="css/configuracion.css?v=clinicas3">
+  <link rel="stylesheet" href="css/configuracion.css?v=tabs1">
   <link rel="stylesheet" href="css/refinamiento.css?v=merge-frontend1">
   <link rel="stylesheet" href="css/estilo-nuevo.css?v=1">
   <script src="js/tema.js?v=scrollbar1"></script>
@@ -28,6 +28,14 @@
           <i class="fa-solid fa-bars"></i>
         </button>
         <span class="app-topbar__titulo">Configuraci&oacute;n</span>
+        <div class="msg-tabs config-tabs" role="tablist" aria-label="Secciones de configuración">
+          <button type="button" class="msg-tab activo" id="config-tab-general" data-config-tab="general" role="tab" aria-selected="true" aria-controls="config-panel-general">General</button>
+          <button type="button" class="msg-tab" id="config-tab-whatsapp" data-config-tab="whatsapp" role="tab" aria-selected="false" aria-controls="config-panel-whatsapp">WhatsApp</button>
+          <button type="button" class="msg-tab" id="config-tab-clinicas" data-config-tab="clinicas" role="tab" aria-selected="false" aria-controls="config-panel-clinicas">Clínicas</button>
+          <button type="button" class="msg-tab" id="config-tab-correo" data-config-tab="correo" role="tab" aria-selected="false" aria-controls="config-panel-correo">Correo</button>
+          <button type="button" class="msg-tab" id="config-tab-integraciones" data-config-tab="integraciones" role="tab" aria-selected="false" aria-controls="config-panel-integraciones">Integraciones</button>
+        </div>
+        <span class="app-topbar__sep"></span>
       </header>
 
       <main class="layout layout--ancho">
@@ -42,7 +50,7 @@
             entorno activo) se aplican sin reiniciar.
           </p>
 
-          <div class="config-api-docs">
+          <div class="config-api-docs" id="configApiDocs">
             <div>
               <h3>Documentación de la API</h3>
               <p>Consulta los endpoints con tu cuenta de desarrollador.</p>
@@ -71,7 +79,7 @@
   <div id="toast" class="toast"></div>
 
   <script src="js/layout.js?v=permisos-acciones1"></script>
-  <script src="js/configuracion.js?v=clinicas3"></script>
+  <script src="js/configuracion.js?v=tabs1"></script>
   <script>
     if (window.snwCargarConfiguracion) window.snwCargarConfiguracion();
   </script>
