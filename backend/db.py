@@ -145,6 +145,7 @@ CONFIG_DEFAULTS = {
     "wa_token": "",
     "wa_phone_id": "",
     "wa_business_account_id": "",
+    "wa_clinicas_adicionales": "[]",
     "wa_app_id": "",
     "wa_verify_token": "",
     "wa_app_secret": "",
@@ -202,6 +203,8 @@ for _centro in CENTROS:
     CONFIG_DEFAULTS[f"{_centro}_WSP_RATE_LIMIT_MPS"] = "10"
     CONFIG_DEFAULTS[f"{_centro}_WSP_RATE_LIMIT_MODE"] = "estandar"
     CONFIG_DEFAULTS[f"{_centro}_WSP_RATE_LIMIT_VERIFIED"] = "false"
+    CONFIG_DEFAULTS[f"{_centro}_WSP_WABA_ID"] = ""
+    CONFIG_DEFAULTS[f"{_centro}_WSP_ACCESS_TOKEN"] = ""
 
 _CLAVES_CENTRO_ANTIGUAS = {
     "SMPT_WSP_PHONE_NUMER": "SMPT_WSP_PHONE_NUMBER",

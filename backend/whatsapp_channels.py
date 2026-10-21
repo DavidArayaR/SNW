@@ -1,5 +1,6 @@
-"""Catálogo y validación de los cuatro emisores WhatsApp de SNW."""
+"""Catálogo de emisores WhatsApp, incluidos centros añadidos en Configuración."""
 
+import json
 import re
 from contextvars import ContextVar
 
@@ -20,16 +21,49 @@ def emisor_webhook_actual() -> dict | None:
 
 
 def claves_centro(codigo: str) -> tuple[str, str]:
-    if codigo not in CENTROS:
+    if not re.fullmatch(r"[A-Z][A-Z0-9]{1,7}", codigo or ""):
         raise ValueError("Centro emisor desconocido")
     return f"{codigo}_WSP_PHONE_NUMBER", f"{codigo}_WSP_PHONE_NUMBER_ID"
+
+
+def catalogo_centros(config: dict | None = None) -> dict[str, str]:
+    from db import config_all
+    valores = config if config is not None else config_all()
+    centros = dict(CENTROS)
+    try:
+        adicionales = json.loads(valores.get("wa_clinicas_adicionales") or "[]")
+    except (TypeError, ValueError):
+        adicionales = []
+    if isinstance(adicionales, list):
+        for item in adicionales:
+            if isinstance(item, dict) and re.fullmatch(r"C[A-F0-9]{7}", str(item.get("codigo") or "")):
+                nombre = str(item.get("nombre") or "").strip()
+                if nombre and len(nombre) <= 100:
+                    centros[item["codigo"]] = nombre
+    return centros
+
+
+def credenciales_centro(phone_id: str, config: dict | None = None) -> dict:
+    """Credenciales del emisor, sin enviarlas a endpoints públicos."""
+    from db import config_all
+    valores = config if config is not None else config_all()
+    canal = resolver_phone_id(phone_id, valores)
+    if not canal:
+        return {"token": "", "waba_id": ""}
+    codigo = canal["codigo"]
+    return {
+        "token": str(valores.get(f"{codigo}_WSP_ACCESS_TOKEN") or
+                     valores.get("wa_token") or "").strip(),
+        "waba_id": str(valores.get(f"{codigo}_WSP_WABA_ID") or
+                       valores.get("wa_business_account_id") or "").strip(),
+    }
 
 
 def listar_canales(config: dict | None = None) -> list[dict]:
     from db import config_all
     valores = config if config is not None else config_all()
     canales = []
-    for codigo, nombre in CENTROS.items():
+    for codigo, nombre in catalogo_centros(valores).items():
         clave_numero, clave_id = claves_centro(codigo)
         numero = str(valores.get(clave_numero) or "").strip()
         phone_id = str(valores.get(clave_id) or "").strip()

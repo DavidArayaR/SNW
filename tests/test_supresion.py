@@ -306,7 +306,9 @@ class SupresionTests(unittest.TestCase):
             "block_users": {"added_users": [{"input": TEL.lstrip("+"),
                                                "wa_id": TEL.lstrip("+")}]}}
         with patch("supresion.config_get", side_effect=lambda k: {
-                "wa_token": "token-ficticio", "wa_graph_version": "v26.0"}.get(k)), \
+                "wa_graph_version": "v26.0"}.get(k)), \
+                patch("whatsapp_channels.credenciales_centro",
+                      return_value={"token": "token-ficticio", "waba_id": "12345"}), \
                 patch("supresion.httpx.Client", return_value=cliente):
             self.assertTrue(supresion._bloquear_en_meta(TEL, "id-ficticio"))
         self.assertIn("/id-ficticio/block_users", api.post.call_args.args[0])

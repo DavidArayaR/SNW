@@ -237,6 +237,50 @@ function render(secciones) {
     panel.innerHTML =
       `<div class="panel__head"><h2><i class="${s.marca || s.icono === "fa-whatsapp" ? "fa-brands" : "fa-solid"} ${s.icono || "fa-gear"}"></i> ${escaparHtml(s.titulo)}</h2></div>` +
       `<div class="config-campos"></div>`;
+    if (s.id === "whatsapp") {
+      const boton = document.createElement("button");
+      boton.type = "button";
+      boton.className = "btn btn--ghost";
+      boton.innerHTML = '<i class="fa-solid fa-plus" aria-hidden="true"></i> Añadir clínica';
+      panel.querySelector(".panel__head").appendChild(boton);
+      const formulario = document.createElement("form");
+      formulario.className = "config-nueva-clinica";
+      formulario.hidden = true;
+      formulario.innerHTML = '<label for="nombreNuevaClinica">Nombre de la clínica</label>' +
+        '<div class="config-nueva-clinica__fila"><input id="nombreNuevaClinica" name="nombre" ' +
+        'type="text" minlength="2" maxlength="100" required placeholder="Ej.: Clínica Norte">' +
+        '<button class="btn btn--primary" type="submit">Crear clínica</button></div>' +
+        '<p class="field__hint">Después podrás configurar su número, Phone Number ID, WABA ID y access token.</p>';
+      panel.querySelector(".panel__head").after(formulario);
+      boton.addEventListener("click", () => {
+        formulario.hidden = !formulario.hidden;
+        if (!formulario.hidden) formulario.querySelector("input").focus();
+      });
+      formulario.addEventListener("submit", async (evento) => {
+        evento.preventDefault();
+        if (Object.keys(diff()).length) {
+          toast("Guarda o descarta los cambios pendientes antes de añadir una clínica.", "error");
+          return;
+        }
+        const enviar = formulario.querySelector("button");
+        enviar.disabled = true;
+        try {
+          const res = await fetch("api/configuracion/clinicas", {
+            method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
+            body: JSON.stringify({ nombre: formulario.querySelector("input").value.trim() }),
+          });
+          const datos = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(datos.detail || "No se pudo añadir la clínica.");
+          await cargar();
+          cont.querySelector(`[data-centro="${datos.codigo}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+          toast("Clínica añadida. Completa sus datos y guarda los cambios.");
+        } catch (error) {
+          toast(error.message || "No se pudo añadir la clínica.", "error");
+        } finally {
+          enviar.disabled = false;
+        }
+      });
+    }
     if (s.id.startsWith("centro_")) {
       const centro = centrosConfig.find((c) => c.codigo.toLowerCase() === s.id.slice(7));
       const estado = document.createElement("span");

@@ -173,7 +173,8 @@ def oferta_eliminacion_enviada(telefono: str) -> bool:
 
 
 def _bloquear_en_meta(telefono: str, phone_id: str) -> bool:
-    token = (config_get("wa_token") or "").strip()
+    from whatsapp_channels import credenciales_centro
+    token = credenciales_centro(phone_id)["token"]
     version = (config_get("wa_graph_version") or "v26.0").strip()
     if not token or not phone_id:
         log_error("supresión: faltan credenciales de Meta; se mantiene pendiente")

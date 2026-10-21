@@ -2,14 +2,17 @@
 
 import sys
 import datetime
+import json
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
-from whatsapp_channels import CENTROS, EMISOR_WEBHOOK, listar_canales, resolver_phone_id
+from whatsapp_channels import (CENTROS, EMISOR_WEBHOOK, catalogo_centros,
+                               credenciales_centro, listar_canales, resolver_phone_id)
 from whatsapp_service import WhatsAppService
+from wa_dispatch_limit import politica
 import main
 
 
@@ -22,6 +25,36 @@ def configuracion():
 
 
 class MultiNumerosTests(unittest.TestCase):
+    def test_clinica_adicional_usa_credenciales_propias_o_globales(self):
+        valores = configuracion()
+        valores.update({
+            "wa_clinicas_adicionales": json.dumps([{"codigo": "C1A2B3C4", "nombre": "Clínica Norte"}]),
+            "C1A2B3C4_WSP_PHONE_NUMBER": "+56988887777",
+            "C1A2B3C4_WSP_PHONE_NUMBER_ID": "9876543210",
+            "wa_token": "global", "wa_business_account_id": "111111",
+        })
+        self.assertEqual(catalogo_centros(valores)["C1A2B3C4"], "Clínica Norte")
+        self.assertEqual(resolver_phone_id("9876543210", valores)["codigo"], "C1A2B3C4")
+        self.assertEqual(credenciales_centro("9876543210", valores),
+                         {"token": "global", "waba_id": "111111"})
+        valores["C1A2B3C4_WSP_ACCESS_TOKEN"] = "específico"
+        valores["C1A2B3C4_WSP_WABA_ID"] = "222222"
+        self.assertEqual(credenciales_centro("9876543210", valores),
+                         {"token": "específico", "waba_id": "222222"})
+        self.assertEqual(politica("9876543210", valores)["centro"], "C1A2B3C4")
+        with patch("whatsapp_service.credenciales_centro",
+                   return_value=credenciales_centro("9876543210", valores)):
+            servicio = WhatsAppService(phone_number_id="9876543210")
+            self.assertEqual((servicio.token, servicio.waba_id), ("específico", "222222"))
+
+    def test_crear_clinica_no_modifica_las_existentes(self):
+        with patch("main.config_all", return_value={"wa_clinicas_adicionales": "[]"}), \
+             patch("main.config_set") as guardar:
+            creado = main.agregar_clinica_whatsapp(main.NuevaClinicaIn(nombre="Clínica Sur"), sesion={})
+        self.assertEqual(creado["nombre"], "Clínica Sur")
+        self.assertTrue(creado["codigo"].startswith("C"))
+        self.assertEqual(json.loads(guardar.call_args.args[0]["wa_clinicas_adicionales"]), [creado])
+
     def test_secciones_de_centros_usan_icono_de_marca(self):
         for codigo in CENTROS:
             seccion = next(s for s in main._CONFIG_SECCIONES

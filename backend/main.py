@@ -47,8 +47,8 @@ from db import (
 )
 from motor_envio import (obtener_canal, ResultadoEnvioIncierto,
                          FalloInfraestructuraDespacho)
-from whatsapp_channels import (CENTROS, claves_centro, listar_canales, resolver_centro,
-                               resolver_phone_id, emisor_webhook_actual)
+from whatsapp_channels import (CENTROS, catalogo_centros, claves_centro, credenciales_centro,
+                               listar_canales, resolver_centro, resolver_phone_id, emisor_webhook_actual)
 import whatsapp_service
 from plantilla_media import (MAX_MEDIA_BYTES, descargar_media_meta, guardar_media,
                             guardar_media_importada, obtener_media, ruta_media)
@@ -4294,8 +4294,10 @@ _CONFIG_SECCIONES = [
     {
         "id": "whatsapp", "titulo": "WhatsApp · Meta Cloud API", "icono": "fa-whatsapp", "marca": True,
         "campos": [
-            {"clave": "wa_token", "etiqueta": "Access token", "tipo": "password"},
-            {"clave": "wa_business_account_id", "etiqueta": "WhatsApp Business Account ID (WABA)", "tipo": "text"},
+            {"clave": "wa_token", "etiqueta": "Access token global", "tipo": "password",
+             "ayuda": "Se usa en las clínicas que no tengan un access token propio."},
+            {"clave": "wa_business_account_id", "etiqueta": "WABA ID global", "tipo": "text",
+             "ayuda": "Se usa en las clínicas que no tengan un WABA ID propio."},
             {"clave": "wa_app_id", "etiqueta": "App ID de Meta", "tipo": "text",
              "ayuda": "Necesario para registrar plantillas con imagen o GIF de encabezado."},
             {"clave": "wa_verify_token", "etiqueta": "Verify token del webhook", "tipo": "password"},
@@ -4390,35 +4392,47 @@ _CONFIG_ENUM = {
     "metodo_envio": ("simulado", "api_oficial"),
 }
 
-for _codigo, _nombre in CENTROS.items():
-    _numero, _identificador = claves_centro(_codigo)
-    _CONFIG_SECCIONES.append({
-        "id": f"centro_{_codigo.lower()}", "titulo": f"WhatsApp · {_nombre}",
+def _seccion_centro(codigo: str, nombre: str) -> dict:
+    numero, identificador = claves_centro(codigo)
+    return {
+        "id": f"centro_{codigo.lower()}", "titulo": f"WhatsApp · {nombre}",
         "icono": "fa-whatsapp", "marca": True, "campos": [
-            {"clave": _numero, "etiqueta": "Número visible", "tipo": "text",
+            {"clave": numero, "etiqueta": "Número visible", "tipo": "text",
              "ayuda": "Con código de país, sin espacios. Puede quedar vacío mientras se configura."},
-            {"clave": _identificador, "etiqueta": "Phone Number ID de Meta", "tipo": "text",
-             "ayuda": "Identificador numérico de este número en la WABA compartida."},
-            {"clave": f"{_codigo}_WSP_RATE_LIMIT_MODE", "etiqueta": "Modalidad del número", "tipo": "select",
+            {"clave": identificador, "etiqueta": "Phone Number ID de Meta", "tipo": "text",
+             "ayuda": "Identificador numérico de este número en Meta."},
+            {"clave": f"{codigo}_WSP_WABA_ID", "etiqueta": "WABA ID (opcional)", "tipo": "text",
+             "ayuda": "Si queda vacío, se usa el WABA ID global. En otra WABA, las plantillas deben aprobarse también allí."},
+            {"clave": f"{codigo}_WSP_ACCESS_TOKEN", "etiqueta": "Access token (opcional)", "tipo": "password",
+             "ayuda": "Si queda vacío, se usa el access token global de WhatsApp."},
+            {"clave": f"{codigo}_WSP_RATE_LIMIT_MODE", "etiqueta": "Modalidad del número", "tipo": "select",
              "opciones": ["estandar", "coexistencia"],
              "ayuda": "Coexistencia comparte número con la aplicación de WhatsApp Business y tiene un techo menor."},
-            {"clave": f"{_codigo}_WSP_RATE_LIMIT_MPS", "etiqueta": "Ritmo máximo solicitado (mensajes/s)", "tipo": "number",
+            {"clave": f"{codigo}_WSP_RATE_LIMIT_MPS", "etiqueta": "Ritmo máximo solicitado (mensajes/s)", "tipo": "number",
              "ayuda": "Empieza en 10; se aplica el menor entre este valor y el techo seguro del modo, con margen reservado."},
-            {"clave": f"{_codigo}_WSP_RATE_LIMIT_VERIFIED", "etiqueta": "Capacidad verificada en Meta", "tipo": "bool",
+            {"clave": f"{codigo}_WSP_RATE_LIMIT_VERIFIED", "etiqueta": "Capacidad verificada en Meta", "tipo": "bool",
              "ayuda": "Actívalo solo tras comprobar el modo y capacidad de este número en Meta. Sin verificar, el techo es 10/s estándar o 3/s coexistencia."},
         ],
-    })
+    }
+
+
+for _codigo, _nombre in CENTROS.items():
+    _CONFIG_SECCIONES.append(_seccion_centro(_codigo, _nombre))
 
 
 def _config_valores() -> dict:
     cfg = config_all()
-    return {c: ("" if cfg.get(c) is None else str(cfg.get(c)))
-            for c in CONFIG_DEFAULTS}
+    claves = set(CONFIG_DEFAULTS)
+    for codigo in catalogo_centros(cfg):
+        claves.update(c["clave"] for c in _seccion_centro(codigo, "")["campos"])
+    return {c: ("" if cfg.get(c) is None else str(cfg.get(c))) for c in claves}
 
 
 def obtener_configuracion_completa(sesion: dict = Depends(solo_dev)):
     """Configuración completa, disponible solo para desarrolladores."""
-    return {"secciones": _CONFIG_SECCIONES, "valores": _config_valores(),
+    adicionales = [_seccion_centro(codigo, nombre) for codigo, nombre in
+                   catalogo_centros().items() if codigo not in CENTROS]
+    return {"secciones": _CONFIG_SECCIONES + adicionales, "valores": _config_valores(),
             "centros": listar_canales(),
             "groq_api_key_configurada": bool(config_get("groq_api_key")),
             "supresion": resumen_supresion()}
@@ -4429,10 +4443,42 @@ def listar_centros_whatsapp(sesion: dict = Depends(sesion_actual)):
     return listar_canales()
 
 
+class NuevaClinicaIn(BaseModel):
+    nombre: str = Field(min_length=2, max_length=100)
+
+
+def agregar_clinica_whatsapp(body: NuevaClinicaIn, sesion: dict = Depends(solo_dev)):
+    """Añade un emisor sin modificar ni borrar los centros existentes."""
+    nombre = body.nombre.strip()
+    if len(nombre) < 2:
+        raise HTTPException(422, detail="Escribe un nombre para la clínica.")
+    config = config_all()
+    catalogo = catalogo_centros(config)
+    if any(n.casefold() == nombre.casefold() for n in catalogo.values()):
+        raise HTTPException(409, detail="Ya existe una clínica con ese nombre.")
+    try:
+        adicionales = json.loads(config.get("wa_clinicas_adicionales") or "[]")
+        if not isinstance(adicionales, list):
+            raise ValueError()
+    except ValueError:
+        raise HTTPException(500, detail="No se pudo leer el catálogo de clínicas.")
+    codigo = "C" + secrets.token_hex(4)[:7].upper()
+    while codigo in catalogo:
+        codigo = "C" + secrets.token_hex(4)[:7].upper()
+    adicionales.append({"codigo": codigo, "nombre": nombre})
+    config_set({"wa_clinicas_adicionales": json.dumps(adicionales, ensure_ascii=False)})
+    return {"codigo": codigo, "nombre": nombre}
+
+
 def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends(solo_dev)):
     cambios: dict[str, str] = {}
+    catalogo = catalogo_centros()
+    claves_clinicas = {c["clave"] for codigo, nombre in catalogo.items()
+                       for c in _seccion_centro(codigo, nombre)["campos"]}
     for clave, valor in (body.cambios or {}).items():
-        if clave not in CONFIG_DEFAULTS:
+        if clave == "wa_clinicas_adicionales":
+            raise HTTPException(400, detail="Usa «Añadir clínica» para modificar el catálogo.")
+        if clave not in CONFIG_DEFAULTS and clave not in claves_clinicas:
             raise HTTPException(400, detail=f"Clave de configuración desconocida: «{clave}»")
         v = "" if valor is None else str(valor).strip()
         if clave in _CONFIG_ENUM and v not in _CONFIG_ENUM[clave]:
@@ -4488,9 +4534,13 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
         if clave == "groq_api_key":
             if len(v) > 512:
                 raise HTTPException(422, detail="La clave de Groq es demasiado extensa.")
+        if clave.endswith("_WSP_ACCESS_TOKEN") and len(v) > 2048:
+            raise HTTPException(422, detail="El access token es demasiado extenso.")
+        if clave.endswith("_WSP_WABA_ID") and v and not re.fullmatch(r"[1-9]\d{4,30}", v):
+            raise HTTPException(422, detail="El WABA ID debe ser numérico.")
         cambios[clave] = v
 
-    if any(clave in cambios for codigo in CENTROS for clave in claves_centro(codigo)):
+    if any(clave in cambios for codigo in catalogo for clave in claves_centro(codigo)):
         estado = {**config_all(), **cambios}
         for canal in listar_canales(estado):
             invalidos = [p for p in canal["problemas"] if "inválido" in p or "duplicado" in p]
@@ -5140,8 +5190,9 @@ def _exigir_centro_envio(codigo: str | None) -> dict:
     if not canal["configured"]:
         raise HTTPException(409, detail=f"{canal['nombre']}: {', '.join(canal['problemas'])}.")
     if (config_get("metodo_envio") or "").strip() == "api_oficial":
-        if not (config_get("wa_token") or "").strip() or not (config_get("wa_business_account_id") or "").strip():
-            raise HTTPException(409, detail="Falta el token o la WABA compartida de Meta.")
+        credenciales = credenciales_centro(canal["phoneNumberId"])
+        if not credenciales["token"] or not credenciales["waba_id"]:
+            raise HTTPException(409, detail="Falta el access token o el WABA ID de este emisor (o los globales).")
     return canal
 
 
@@ -5935,7 +5986,7 @@ def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensaj
     aplica_limite_meta = (
         amb == "produccion" and config_get("metodo_envio", "").strip() == "api_oficial"
     )
-    emisor_preview = resolver_centro(body.centro) if body.centro in CENTROS else None
+    emisor_preview = resolver_centro(body.centro) if body.centro in catalogo_centros() else None
     phone_id_preview = (emisor_preview or {}).get("phoneNumberId")
     info_limite = (None if body.prevision_programado or not phone_id_preview
                    else _limite_mensajeria_aviso(amb, phone_id_preview))
@@ -6034,7 +6085,7 @@ def envios_en_progreso(sesion: dict = Depends(exigir("mensajeria"))):
         items.append({
             "origen": "programado", "id": f["id"], "job_id": f.get("job_id") or "",
             "centro_codigo": f.get("centro_codigo"),
-            "centro": CENTROS.get(f.get("centro_codigo"), "Emisor histórico no identificado"),
+            "centro": catalogo_centros().get(f.get("centro_codigo"), "Emisor histórico no identificado"),
             "numero_emisor": f.get("numero_emisor"),
             "puede_cancelar": pc["puede_cancelar"],
             "puede_pausar": bool(vivo and _puede_controlar_job(sesion, vivo)),
@@ -6343,7 +6394,7 @@ def _prog_a_respuesta(f: dict, sesion: dict, preelegidos: int | None = None) -> 
     return {
         "id": f["id"], "area_id": f.get("area_id"),
         "centro_codigo": f.get("centro_codigo"),
-        "centro": CENTROS.get(f.get("centro_codigo"), "Emisor histórico no identificado"),
+        "centro": catalogo_centros().get(f.get("centro_codigo"), "Emisor histórico no identificado"),
         "numero_emisor": f.get("numero_emisor"),
         "area": (esp.get("nombre_visible") if esp else ""),
         "tabla": f.get("tabla") or "", "ambiente": f.get("ambiente") or "produccion",
@@ -7142,7 +7193,7 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
                      centro: str = Query("todos"),
                      sesion: dict = Depends(exigir("historial"))):
     centro = centro if isinstance(centro, str) else "todos"
-    if centro != "todos" and centro not in CENTROS:
+    if centro != "todos" and centro not in catalogo_centros():
         raise HTTPException(422, detail="Centro emisor inválido.")
     if origen not in ("todos", "manual", "programado"):
         raise HTTPException(422, detail="Tipo de envío inválido.")
@@ -7283,7 +7334,7 @@ def _presentar_historial(filas: list[dict], sesion: dict, limite: int | None = N
                  for jid, j in JOBS.items()
                  if j.get("estado") in ESTADOS_ENVIO_EN_CURSO and j.get("envio_id")}
     for f in filas:
-        f["centro"] = CENTROS.get(f.get("centro_codigo"), "Emisor histórico no identificado")
+        f["centro"] = catalogo_centros().get(f.get("centro_codigo"), "Emisor histórico no identificado")
         orden = f.pop("_orden", None)
         if f.pop("_sin_lote", False):
             pc = _prog_a_respuesta(f, sesion)
@@ -7328,7 +7379,7 @@ def _fuentes_historial_pagina(sesion: dict, ambiente: str, area_id: int | None,
     """Une solo claves/fechas visibles; los detalles se buscan tras paginar."""
     if origen not in ("todos", "manual", "programado"):
         raise HTTPException(422, detail="Tipo de envío inválido.")
-    if centro != "todos" and centro not in CENTROS:
+    if centro != "todos" and centro not in catalogo_centros():
         raise HTTPException(422, detail="Centro emisor inválido.")
     if not tabla and ambiente == "desarrollo":
         _exigir_base_desarrollo(sesion, ambiente)
@@ -7774,7 +7825,7 @@ def estadisticas(area_id: int | None = Query(None), base: str = "produccion",
     """Resumen de producción/área o de la base de desarrollo."""
     alcance, _, filtro_esp, args_esp, esp = _alcance_estadisticas(sesion, area_id, base)
     centro = centro if isinstance(centro, str) else "todos"
-    if centro != "todos" and centro not in CENTROS:
+    if centro != "todos" and centro not in catalogo_centros():
         raise HTTPException(422, detail="Centro emisor inválido.")
     filtro_centro = " AND centro_codigo = %s" if centro != "todos" else ""
     args_centro = (centro,) if filtro_centro else ()
@@ -7898,7 +7949,7 @@ def estadisticas_envios(granularidad: str = Query("mes"), area_id: int | None = 
         raise HTTPException(400, detail=str(exc)) from exc
     alcance, _, filtro_esp, args_esp, esp = _alcance_estadisticas(sesion, area_id, base)
     centro = centro if isinstance(centro, str) else "todos"
-    if centro != "todos" and centro not in CENTROS:
+    if centro != "todos" and centro not in catalogo_centros():
         raise HTTPException(422, detail="Centro emisor inválido.")
     filtro_centro = " AND centro_codigo = %s" if centro != "todos" else ""
     args_centro = (centro,) if filtro_centro else ()
@@ -8358,7 +8409,7 @@ def estadisticas_costos(granularidad: str = Query("mes"), area_id: int | None = 
     valores_periodos = tuple(sorted(seleccion))
     _, alcance_costos, filtro_esp, args_esp, esp = _alcance_estadisticas(sesion, area_id, base)
     centro = centro if isinstance(centro, str) else "todos"
-    if centro != "todos" and centro not in CENTROS:
+    if centro != "todos" and centro not in catalogo_centros():
         raise HTTPException(422, detail="Centro emisor inválido.")
     filtro_centro = " AND centro_codigo = %s" if centro != "todos" else ""
     args_centro = (centro,) if filtro_centro else ()

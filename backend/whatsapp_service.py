@@ -22,7 +22,8 @@ from datetime import datetime
 import httpx
 
 from db import conectar, config_get, log_error, tabla_pacientes
-from whatsapp_channels import CENTROS, EMISOR_WEBHOOK, listar_canales, resolver_phone_id
+from whatsapp_channels import (CENTROS, EMISOR_WEBHOOK, catalogo_centros,
+                               credenciales_centro, listar_canales, resolver_phone_id)
 from corpus_respuestas import guardar_mensaje_completo
 from intenciones_call_center import clasificar, patrones_configurados
 from plantilla_media import obtener_media, ruta_media
@@ -545,6 +546,8 @@ class WhatsAppService:
 
     @property
     def token(self) -> str:
+        if self.phone_number_id:
+            return credenciales_centro(self.phone_number_id)["token"]
         return (config_get("wa_token") or "").strip()
 
     @property
@@ -555,6 +558,8 @@ class WhatsAppService:
 
     @property
     def waba_id(self) -> str:
+        if self.phone_number_id:
+            return credenciales_centro(self.phone_number_id)["waba_id"]
         return (config_get("wa_business_account_id") or "").strip()
 
     @property
@@ -1063,10 +1068,11 @@ class WhatsAppService:
                     (phone_id,),
                 )
                 filas = cur.fetchall() or []
-            codigos = {r["centro_codigo"] for r in filas if r.get("centro_codigo") in CENTROS}
+            catalogo = catalogo_centros()
+            codigos = {r["centro_codigo"] for r in filas if r.get("centro_codigo") in catalogo}
             if len(codigos) == 1:
                 codigo = codigos.pop()
-                return {"codigo": codigo, "nombre": CENTROS[codigo],
+                return {"codigo": codigo, "nombre": catalogo[codigo],
                         "phoneNumber": filas[0]["numero_emisor"],
                         "phoneNumberId": phone_id, "configured": False}
         except Exception as exc:

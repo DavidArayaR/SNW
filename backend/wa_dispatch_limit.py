@@ -33,16 +33,19 @@ def _config_actual() -> dict:
         if time.monotonic() < _config_cache[0]:
             return dict(_config_cache[1])
         with conectar() as conn, conn.cursor() as cur:
-            cur.execute("SELECT clave, valor FROM configuracion WHERE clave IN ("
-                        + ",".join("%s" for _ in _CLAVES) + ")", tuple(_CLAVES))
+            cur.execute("SELECT clave, valor FROM configuracion")
             valores = {**{clave: CONFIG_DEFAULTS[clave] for clave in _CLAVES},
-                       **{fila["clave"]: fila["valor"] for fila in cur.fetchall()}}
+                       **{fila["clave"]: fila["valor"] for fila in cur.fetchall()
+                          if fila["clave"] in _CLAVES or fila["clave"].endswith((
+                              "_WSP_PHONE_NUMBER", "_WSP_PHONE_NUMBER_ID",
+                              "_WSP_RATE_LIMIT_MPS", "_WSP_RATE_LIMIT_MODE",
+                              "_WSP_RATE_LIMIT_VERIFIED"))}}
         _config_cache = (time.monotonic() + 5, valores)
         return dict(valores)
 
 
 _CLAVES = tuple(
-    ["wa_dispatch_pair_seconds", "wa_dispatch_reserved_percent",
+    ["wa_clinicas_adicionales", "wa_dispatch_pair_seconds", "wa_dispatch_reserved_percent",
      "wa_dispatch_max_retries", "wa_dispatch_backoff_base_seconds",
      "wa_dispatch_backoff_max_seconds"] +
     [f"{centro}_WSP_{campo}" for centro in ("SMPT", "MS", "PS", "CP")
