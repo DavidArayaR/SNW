@@ -14,10 +14,12 @@ from wa_dispatch_limit import bloquear, politica, registrar_aceptado, reservar, 
 
 
 def configuracion():
-    cfg = {"wa_dispatch_reserved_percent": "25", "wa_dispatch_pair_seconds": "6"}
-    for codigo in ("SMPT", "MS", "PS", "CP"):
+    cfg = {"wa_dispatch_reserved_percent": "25", "wa_dispatch_pair_seconds": "6",
+           "wa_token": "global"}
+    for codigo in ("SMPT", "MS", "PS", "CP", "VS"):
         cfg[f"{codigo}_WSP_PHONE_NUMBER"] = "+5691111111" + str(len(cfg))
         cfg[f"{codigo}_WSP_PHONE_NUMBER_ID"] = str(1234500000 + len(cfg))
+        cfg[f"{codigo}_WSP_WABA_ID"] = str(2234500000 + len(cfg))
         cfg[f"{codigo}_WSP_RATE_LIMIT_MPS"] = "10"
         cfg[f"{codigo}_WSP_RATE_LIMIT_MODE"] = "estandar"
         cfg[f"{codigo}_WSP_RATE_LIMIT_VERIFIED"] = "true"

@@ -49,6 +49,7 @@ from motor_envio import (obtener_canal, ResultadoEnvioIncierto,
                          FalloInfraestructuraDespacho)
 from whatsapp_channels import (CENTROS, catalogo_centros, claves_centro, credenciales_centro,
                                listar_canales, resolver_centro, resolver_phone_id, emisor_webhook_actual)
+from whatsapp_channel_verification import verificar_canal_meta
 import whatsapp_service
 from plantilla_media import (MAX_MEDIA_BYTES, descargar_media_meta, guardar_media,
                             guardar_media_importada, obtener_media, ruta_media)
@@ -188,18 +189,17 @@ def _validar_categoria_template(valor: str | None) -> str:
 # Mensaje de call center: se manda automáticamente 1s después de detectar
 # interés (ver CALL_CENTER_AUTO_SEGUNDOS más abajo). No es editable: es un
 # texto fijo con un botón al call center. El número al que lleva el botón se
-# pide en cada respuesta a `call_center_url` (con respaldo manual en
-# `call_center_numeros`), ambas configurables en Configuración.
+# obtiene del número CRM configurado para la clínica que recibió la respuesta.
 CALL_CENTER_CLAVE = "call_center"
 CALL_CENTER_TEXTO_DEFAULT = (
-    "🤖 Mensaje automático: Gracias por tu interés. Pulsa «Ir al call center» "
+    "🤖 Mensaje automático: Gracias por tu interés. Pulsa «Ir a call center» "
     "y envía el mensaje preparado para conversar con una persona de nuestro equipo."
 )
 CALL_CENTER_PLANTILLA_FIJA = {
     "clave": CALL_CENTER_CLAVE,
     "texto": CALL_CENTER_TEXTO_DEFAULT,
     "cc_boton": True,
-    "cc_boton_texto": "Ir al call center",
+    "cc_boton_texto": "Ir a call center",
 }
 
 
@@ -2307,23 +2307,27 @@ def _mensaje_boton_call_center(paciente_id, ambiente: str) -> str:
     return oferta if _CC_PALABRAS_OFERTA.search(texto_origen) else generico
 
 
-def _cc_datos_envio(pac: dict, ambiente: str, consulta: str = "") -> tuple[str, dict, str]:
+def _cc_datos_envio(pac: dict, ambiente: str, consulta: str = "",
+                    emisor: dict | None = None) -> tuple[str, dict, str]:
     """Devuelve (texto renderizado, datos_plantilla, numero_asignado) para el
     mensaje fijo de call center. Añade el botón que abre el chat del call
-    center si hay al menos un número configurado; el número se elige por
-    menor uso. El botón lleva un mensaje autocompletado según lo que decía la
-    última plantilla enviada."""
+    center si la clínica receptora tiene un número CRM válido. Nunca usa el
+    número de otra clínica."""
     texto = (config_get("call_center_aviso_consulta") or "").strip() if consulta else ""
     if not texto or "automátic" not in texto.casefold():
         texto = CALL_CENTER_PLANTILLA_FIJA["texto"]
     texto = renderizar_mensaje(texto, pac)
     datos = {"texto": texto}
-    numero = _elegir_numero_call_center()
+    codigo = (emisor or {}).get("codigo")
+    numero = re.sub(r"\D", "", config_get(f"{codigo}_CRM_PHONE_NUMBER") or "") if codigo else ""
+    if numero and not re.fullmatch(r"[1-9]\d{7,14}", numero):
+        numero = ""
     if numero:
         url = f"https://wa.me/{numero}"
-        prefijo = ("Hola, esta es mi consulta: " + consulta.strip()[:500]) if consulta else _mensaje_boton_call_center(pac.get("id"), ambiente)
-        if prefijo:
-            url += "?text=" + urllib.parse.quote(prefijo, safe="")
+        mensaje_preparado = (("Hola, esta es mi consulta: " + consulta.strip()[:500])
+                             if consulta else
+                             "Hola, estoy interesado/a en la oferta que me enviaron.")
+        url += "?text=" + urllib.parse.quote(mensaje_preparado, safe="")
         datos["cta"] = {
             "texto": CALL_CENTER_PLANTILLA_FIJA["cc_boton_texto"][:20],
             "url": url,
@@ -2389,17 +2393,17 @@ def _despachar_call_center(pac: dict, ambiente: str, tabla: str | None = None,
         return {"ok": False, "error": "El número no está autorizado en la base de desarrollo", "telefono": telefono}
 
     nombre = " ".join(x for x in [pac.get("nombre"), pac.get("apellido")] if x)
-    texto, datos_plantilla, numero_cc = _cc_datos_envio(pac, ambiente, consulta)
+    emisor = _emisor_para_respuesta(telefono, tabla or tabla_pacientes(ambiente))
+    if not emisor:
+        return {"ok": False, "error": "No se pudo identificar el número emisor", "telefono": telefono}
+    texto, datos_plantilla, numero_cc = _cc_datos_envio(pac, ambiente, consulta, emisor)
     if not numero_cc:
-        return {"ok": False, "error": "Call center sin número disponible", "telefono": telefono}
+        return {"ok": False, "error": f"{emisor['nombre']}: falta un número CRM válido", "telefono": telefono}
     esp_id = None
     if tabla is not None:
         _esp_cc = servicio_areas.area_por_tabla(tabla)
         esp_id = _esp_cc["id"] if _esp_cc else None
 
-    emisor = _emisor_para_respuesta(telefono, tabla or tabla_pacientes(ambiente))
-    if cfg.get("metodo_envio") == "api_oficial" and not emisor:
-        return {"ok": False, "error": "No se pudo identificar el número emisor", "telefono": telefono}
     canal = obtener_canal(cfg, (emisor or {}).get("phoneNumberId"))
     try:
         resultado = canal.enviar(telefono, texto, plantilla=datos_plantilla)
@@ -2882,6 +2886,18 @@ whatsapp_service.al_detectar_retractacion = lambda tel: _programar_aviso(_avisar
 whatsapp_service.al_detectar_insulto = lambda tel, _mensaje_id: _programar_aviso(_avisar_insulto, tel)
 
 
+def _servicio_plantilla(plantilla: dict) -> WhatsAppService:
+    """Selecciona la WABA de la clínica; las plantillas antiguas conservan la global."""
+    codigo = plantilla.get("centro_codigo")
+    if not codigo:
+        return WhatsAppService()
+    try:
+        canal = resolver_centro(codigo)
+    except ValueError:
+        return WhatsAppService(phone_number_id="inactivo")
+    return WhatsAppService(phone_number_id=canal.get("phoneNumberId") or "incompleto")
+
+
 def _registrar_template_meta(p: dict, nombre_anterior: str | None = None,
                              lang_anterior: str | None = None,
                              template_id_anterior: str | None = None) -> dict:
@@ -2920,7 +2936,7 @@ def _registrar_template_meta(p: dict, nombre_anterior: str | None = None,
     )
 
     try:
-        servicio = WhatsAppService()
+        servicio = _servicio_plantilla(p)
         resultado = servicio.guardar_template_meta(
             nombre_template, p.get("texto", ""), lang, categoria,
             template_id_conocido=id_conocido,
@@ -3019,7 +3035,7 @@ def _actualizar_estado_meta(p: dict) -> dict:
         return p
 
     lang = (p.get("whatsapp_template_lang") or "").strip() or "es"
-    servicio = WhatsAppService()
+    servicio = _servicio_plantilla(p)
     resultado = servicio.estado_template_meta(nombre_template, lang)
 
     if not resultado.get("ok"):
@@ -3091,25 +3107,25 @@ def _actualizar_estados_aprobados_meta(plantillas: list[dict]) -> bool:
     ]
     if not aprobadas:
         return False
-    resultado = WhatsAppService().listar_templates_meta()
-    if not resultado.get("ok"):
-        return False
-    templates_meta = resultado.get("templates") or []
     cambio = False
-    for p in aprobadas:
-        nombre = (p.get("whatsapp_template") or "").strip()
-        idioma = (p.get("whatsapp_template_lang") or "").strip() or "es"
-        meta = next((t for t in templates_meta
-                     if t.get("name") == nombre and t.get("language") == idioma), None)
-        if not meta:
-            meta = next((t for t in templates_meta if t.get("name") == nombre), None)
-        if not meta:
+    for codigo in {p.get("centro_codigo") or "" for p in aprobadas}:
+        grupo = [p for p in aprobadas if (p.get("centro_codigo") or "") == codigo]
+        resultado = _servicio_plantilla(grupo[0]).listar_templates_meta()
+        if not resultado.get("ok"):
             continue
-        cambio = _guardar_estado_y_calidad_meta(
-            p, meta.get("status"),
-            meta.get("rejected_reason") or meta.get("reject_reason"),
-            meta.get("quality_score"),
-        ) or cambio
+        templates_meta = resultado.get("templates") or []
+        for p in grupo:
+            nombre = (p.get("whatsapp_template") or "").strip()
+            idioma = (p.get("whatsapp_template_lang") or "").strip() or "es"
+            meta = next((t for t in templates_meta
+                         if t.get("name") == nombre and t.get("language") == idioma), None)
+            if not meta:
+                continue
+            cambio = _guardar_estado_y_calidad_meta(
+                p, meta.get("status"),
+                meta.get("rejected_reason") or meta.get("reject_reason"),
+                meta.get("quality_score"),
+            ) or cambio
     return cambio
 
 
@@ -3269,8 +3285,29 @@ def _plantillas_ausentes_meta(plantillas: list[dict], templates: list[dict]) -> 
     return [p for p in vinculadas if _coincidencia_template_meta(p, templates) is None]
 
 
-def _consultar_templates_meta() -> list:
-    resultado = WhatsAppService().listar_templates_meta()
+def _plantilla_en_clinica(plantilla: dict, codigo: str, config: dict) -> bool:
+    asignada = plantilla.get("centro_codigo")
+    if asignada:
+        return asignada == codigo
+    # Registros anteriores al modelo multiclínica pertenecen a la WABA global
+    # original. No se borran al sincronizar una WABA distinta.
+    return bool(config.get("wa_business_account_id") and
+                config.get("wa_business_account_id") ==
+                config.get(f"{codigo}_WSP_WABA_ID"))
+
+
+def _consultar_templates_meta(centro: str) -> list:
+    config = config_all(refresh=True)
+    try:
+        canal = resolver_centro(centro, config)
+    except ValueError:
+        raise HTTPException(422, detail="Selecciona una clínica activa para sincronizar.")
+    if not canal["configured"]:
+        raise HTTPException(409, detail=f"{canal['nombre']}: {', '.join(canal['problemas'])}.")
+    ok, mensaje = verificar_canal_meta(canal, config)
+    if not ok:
+        raise HTTPException(409, detail=mensaje)
+    resultado = WhatsAppService(phone_number_id=canal["phoneNumberId"]).listar_templates_meta()
     if not resultado["ok"]:
         raise HTTPException(502, detail=f"No se pudo consultar los templates en Meta: {resultado['error']}")
     return resultado["templates"]
@@ -3297,12 +3334,15 @@ def _descargar_encabezado_template_meta(template: dict, media_actual: str | None
     return guardar_media_importada(datos, formato)["id"]
 
 
-def preparar_sincronizacion_plantillas(sesion: dict = Depends(exigir("mensajeria"))):
+def preparar_sincronizacion_plantillas(centro: str,
+                                      sesion: dict = Depends(exigir("mensajeria"))):
     """Consulta sin guardar para elegir un área por cada plantilla nueva."""
-    templates = _consultar_templates_meta()
+    templates = _consultar_templates_meta(centro)
     plantillas = leer_plantillas()
-    eliminadas = _plantillas_ausentes_meta(plantillas, templates)
-    existentes = {_match.get("id") for p in plantillas
+    config = config_all()
+    propias = [p for p in plantillas if _plantilla_en_clinica(p, centro, config)]
+    eliminadas = _plantillas_ausentes_meta(propias, templates)
+    existentes = {_match.get("id") for p in propias
                   if (_match := _coincidencia_template_meta(p, templates))}
     return {"nuevas": [{"id": str(t["id"]), "nombre": t.get("name"),
                         "idioma": t.get("language")}
@@ -3327,10 +3367,12 @@ def sincronizar_plantillas_meta(body: SincronizarPlantillasIn,
       - Importa como plantillas nuevas los templates que existen en Meta y
         todavía no tienen una plantilla local asociada.
     No crea ni edita nada en Meta, solo lee."""
-    templates_meta = _consultar_templates_meta()
+    templates_meta = _consultar_templates_meta(body.centro)
     plantillas = leer_plantillas()
+    config = config_all()
+    propias = [p for p in plantillas if _plantilla_en_clinica(p, body.centro, config)]
     siguiente_id = max((p["id"] for p in plantillas), default=0) + 1
-    ausentes = _plantillas_ausentes_meta(plantillas, templates_meta)
+    ausentes = _plantillas_ausentes_meta(propias, templates_meta)
     if _es_privilegiado(sesion):
         ids_ausentes = {p["id"] for p in ausentes}
         if ids_ausentes != set(body.eliminadas) or len(body.eliminadas) != len(ids_ausentes):
@@ -3346,7 +3388,7 @@ def sincronizar_plantillas_meta(body: SincronizarPlantillasIn,
     # Validar todas las asignaciones antes de modificar registros. Una plantilla
     # llegada desde la previsualización obliga a elegir su área, nunca se importa
     # global por omisión. Las existentes conservan su asociación.
-    locales_por_id = {match.get("id"): p for p in plantillas
+    locales_por_id = {match.get("id"): p for p in propias
                      if (match := _coincidencia_template_meta(p, templates_meta))}
     existentes = set(locales_por_id)
     nuevas = [t for t in templates_meta if t.get("id") not in existentes]
@@ -3369,6 +3411,8 @@ def sincronizar_plantillas_meta(body: SincronizarPlantillasIn,
     usados_id = set()
     actualizadas = 0
     for p in plantillas:
+        if not _plantilla_en_clinica(p, body.centro, config):
+            continue
         nombre_tpl = (p.get("whatsapp_template") or "").strip()
         if not nombre_tpl:
             continue
@@ -3440,6 +3484,7 @@ def sincronizar_plantillas_meta(body: SincronizarPlantillasIn,
             "id": siguiente_id,
             "clave": clave,
             "nombre": nombre,
+            "centro_codigo": body.centro,
             "area_id": areas_importacion[str(t["id"])],
             "texto": _texto_desde_componentes(t.get("components")),
             "whatsapp_template": t.get("name"),
@@ -3680,6 +3725,8 @@ def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(exigir("plantillas
     if len(body.texto) > MAX_TEXTO_PLANTILLA:
         raise HTTPException(400, detail=f"El mensaje supera el limite de {MAX_TEXTO_PLANTILLA} caracteres")
     categoria = _validar_categoria_template(body.whatsapp_template_categoria)
+    if body.centro and body.centro not in catalogo_centros():
+        raise HTTPException(422, detail="Selecciona una clínica activa para esta plantilla.")
     esp_id = _validar_plantilla_area(sesion, body.area_id)
     media_id = _validar_media_plantilla(body.encabezado_media_id, sesion)
     encabezado_texto = (body.encabezado_texto or "").strip()
@@ -3702,6 +3749,7 @@ def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(exigir("plantillas
         "id": max((p["id"] for p in plantillas), default=0) + 1,
         "clave": clave,
         "nombre": body.nombre.strip(),
+        "centro_codigo": body.centro or None,
         "texto": body.texto,
         "area_id": esp_id,
         "encabezado_media_id": media_id,
@@ -3771,6 +3819,8 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
                     detail="Solo puedes editar las plantillas que tú creaste.",
                 )
             _exigir_plantilla_en_alcance(sesion, p)
+            if body.centro and body.centro != p.get("centro_codigo"):
+                raise HTTPException(409, detail="No se puede cambiar la WABA de una plantilla existente. Sincronízala desde la otra clínica.")
             encabezado_texto = ((body.encabezado_texto if "encabezado_texto" in body.model_fields_set
                                  else p.get("encabezado_texto")) or "").strip()
             pie_texto = ((body.pie_texto if "pie_texto" in body.model_fields_set
@@ -3961,7 +4011,7 @@ def eliminar_plantilla(plantilla_id: int, sesion: dict = Depends(exigir("plantil
     nombre_template = (objetivo.get("whatsapp_template") or "").strip()
     if nombre_template:
         try:
-            res = WhatsAppService().eliminar_template_meta(
+            res = _servicio_plantilla(objetivo).eliminar_template_meta(
                 nombre_template, objetivo.get("whatsapp_template_id"),
             )
         except Exception as e:
@@ -4295,9 +4345,9 @@ _CONFIG_SECCIONES = [
         "id": "whatsapp", "titulo": "WhatsApp · Meta Cloud API", "icono": "fa-whatsapp", "marca": True,
         "campos": [
             {"clave": "wa_token", "etiqueta": "Access token global", "tipo": "password",
-             "ayuda": "Se usa en las clínicas que no tengan un access token propio."},
+             "ayuda": "Único token para todos los números y WABA de las clínicas."},
             {"clave": "wa_business_account_id", "etiqueta": "WABA ID global", "tipo": "text",
-             "ayuda": "Se usa en las clínicas que no tengan un WABA ID propio."},
+             "ayuda": "Valor histórico. Para enviar, configura el WABA ID de cada clínica."},
             {"clave": "wa_app_id", "etiqueta": "App ID de Meta", "tipo": "text",
              "ayuda": "Necesario para registrar plantillas con imagen o GIF de encabezado."},
             {"clave": "wa_verify_token", "etiqueta": "Verify token del webhook", "tipo": "password"},
@@ -4365,21 +4415,6 @@ _CONFIG_SECCIONES = [
     {
         "id": "call_center", "titulo": "Call center", "icono": "fa-headset",
         "campos": [
-            {"clave": "call_center_url", "etiqueta": "URL de teléfonos del call center", "tipo": "text",
-             "ayuda": "Servicio que devuelve un número de call center (solo dígitos, con "
-                      "código de país). Se consulta en cada respuesta y ese servicio ya "
-                      "reparte la carga entre los teléfonos. Es el número al que lleva el "
-                      "botón de las plantillas de call center."},
-            {"clave": "call_center_numeros", "etiqueta": "Números de respaldo (manual)", "tipo": "text",
-             "ayuda": "Uno o varios, separados por coma, con código de país y sin «+». "
-                      "Ej: 56912345678, 56987654321. Solo se usan si la URL de números no "
-                      "responde; si hay varios se elige el menos usado."},
-            {"clave": "call_center_boton_mensaje", "etiqueta": "Mensaje del botón (genérico)", "tipo": "text",
-             "ayuda": "Texto que se autocompleta en el chat del call center cuando el paciente pulsa "
-                      "el botón. Déjalo vacío para no autocompletar nada."},
-            {"clave": "call_center_boton_mensaje_oferta", "etiqueta": "Mensaje del botón (oferta / precio especial)", "tipo": "text",
-             "ayuda": "Se usa en lugar del genérico cuando la última plantilla enviada al paciente "
-                      "mencionaba un descuento, una oferta o un precio especial."},
             {"clave": "call_center_aviso_consulta", "etiqueta": "Aviso automático de derivación", "tipo": "textarea",
              "ayuda": "Debe decir explícitamente «mensaje automático». El paciente debe pulsar el botón y enviar el texto preparado."},
             {"clave": "call_center_patrones_consulta", "etiqueta": "Patrones de consulta (JSON)", "tipo": "textarea",
@@ -4402,10 +4437,10 @@ def _seccion_centro(codigo: str, nombre: str, *, activa: bool = True) -> dict:
              "ayuda": "Con código de país, sin espacios. Puede quedar vacío mientras se configura."},
             {"clave": identificador, "etiqueta": "Phone Number ID de Meta", "tipo": "text",
              "ayuda": "Identificador numérico de este número en Meta."},
-            {"clave": f"{codigo}_WSP_WABA_ID", "etiqueta": "WABA ID (opcional)", "tipo": "text",
-             "ayuda": "Si queda vacío, se usa el WABA ID global. En otra WABA, las plantillas deben aprobarse también allí."},
-            {"clave": f"{codigo}_WSP_ACCESS_TOKEN", "etiqueta": "Access token (opcional)", "tipo": "password",
-             "ayuda": "Si queda vacío, se usa el access token global de WhatsApp."},
+            {"clave": f"{codigo}_WSP_WABA_ID", "etiqueta": "WABA ID (obligatorio para enviar)", "tipo": "text",
+             "ayuda": "Debe pertenecer al Phone Number ID de esta clínica. Las plantillas se aprueban por WABA."},
+            {"clave": f"{codigo}_CRM_PHONE_NUMBER", "etiqueta": "Número WhatsApp del CRM", "tipo": "text",
+             "ayuda": "Destino del botón «Ir a call center» para pacientes de esta clínica. Opcional para campañas."},
             {"clave": f"{codigo}_WSP_RATE_LIMIT_MODE", "etiqueta": "Modalidad del número", "tipo": "select",
              "opciones": ["estandar", "coexistencia"],
              "ayuda": "Coexistencia comparte número con la aplicación de WhatsApp Business y tiene un techo menor."},
@@ -4426,7 +4461,8 @@ def _config_valores(cfg: dict | None = None) -> dict:
     claves = set(CONFIG_DEFAULTS)
     for codigo in catalogo_centros(cfg, incluir_desactivadas=True):
         claves.update(c["clave"] for c in _seccion_centro(codigo, "")["campos"])
-    return {c: ("" if cfg.get(c) is None else str(cfg.get(c))) for c in claves}
+    return {c: ("" if c == "wa_token" or cfg.get(c) is None else str(cfg.get(c)))
+            for c in claves}
 
 
 def obtener_configuracion_completa(sesion: dict = Depends(solo_dev)):
@@ -4440,6 +4476,7 @@ def obtener_configuracion_completa(sesion: dict = Depends(solo_dev)):
                      for codigo, nombre in catalogo.items())
     return {"secciones": secciones, "valores": _config_valores(cfg),
             "centros": listar_canales(cfg),
+            "wa_token_configurado": bool(cfg.get("wa_token")),
             "groq_api_key_configurada": bool(config_get("groq_api_key")),
             "supresion": resumen_supresion()}
 
@@ -4447,6 +4484,19 @@ def obtener_configuracion_completa(sesion: dict = Depends(solo_dev)):
 def listar_centros_whatsapp(sesion: dict = Depends(sesion_actual)):
     """Canales visibles para elegir emisor; nunca incluye el token compartido."""
     return listar_canales(config_all(refresh=True))
+
+
+def verificar_meta_clinica_whatsapp(codigo: str, sesion: dict = Depends(solo_dev)):
+    """Comprobación explícita de la asociación WABA/número y permisos del token."""
+    cfg = config_all(refresh=True)
+    try:
+        canal = resolver_centro(codigo, cfg)
+    except ValueError:
+        raise HTTPException(404, detail="Clínica no disponible.")
+    if not canal["configured"]:
+        raise HTTPException(409, detail=f"{canal['nombre']}: {', '.join(canal['problemas'])}.")
+    ok, mensaje = verificar_canal_meta(canal, cfg, mostrar_numeros=True)
+    return {"ok": ok, "mensaje": mensaje}
 
 
 class NuevaClinicaIn(BaseModel):
@@ -4553,6 +4603,8 @@ def eliminar_clinica_whatsapp(codigo: str, sesion: dict = Depends(solo_dev)):
                             "activo": False, "eliminada": True})
     cambios = {"wa_clinicas_adicionales": json.dumps(adicionales, ensure_ascii=False)}
     cambios.update({campo["clave"]: "" for campo in _seccion_centro(codigo, catalogo[codigo])["campos"]})
+    # Una clínica eliminada no debe conservar una credencial heredada sin uso.
+    cambios[f"{codigo}_WSP_ACCESS_TOKEN"] = ""
     config_set(cambios)
     auditoria_registrar(sesion.get("usuario", ""), "clinica_wa_eliminada", codigo, catalogo[codigo])
     return {"codigo": codigo, "eliminada": True}
@@ -4566,6 +4618,8 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
     for clave, valor in (body.cambios or {}).items():
         if clave == "wa_clinicas_adicionales":
             raise HTTPException(400, detail="Usa «Añadir clínica» para modificar el catálogo.")
+        if clave.endswith("_WSP_ACCESS_TOKEN"):
+            raise HTTPException(400, detail="Los tokens por clínica ya no se utilizan. Configura el access token global.")
         if clave not in CONFIG_DEFAULTS and clave not in claves_clinicas:
             raise HTTPException(400, detail=f"Clave de configuración desconocida: «{clave}»")
         v = "" if valor is None else str(valor).strip()
@@ -4626,6 +4680,8 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
             raise HTTPException(422, detail="El access token es demasiado extenso.")
         if clave.endswith("_WSP_WABA_ID") and v and not re.fullmatch(r"[1-9]\d{4,30}", v):
             raise HTTPException(422, detail="El WABA ID debe ser numérico.")
+        if clave.endswith("_CRM_PHONE_NUMBER") and v and not re.fullmatch(r"\+?[1-9]\d{7,14}", v):
+            raise HTTPException(422, detail="El número CRM debe tener código de país y entre 8 y 15 dígitos.")
         cambios[clave] = v
 
     if any(clave in cambios for codigo in catalogo for clave in claves_centro(codigo)):
@@ -4638,6 +4694,7 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
     if cambios:
         config_set(cambios)
     return {"valores": _config_valores(), "centros": listar_canales(),
+            "wa_token_configurado": bool(config_get("wa_token")),
             "groq_api_key_configurada": bool(config_get("groq_api_key"))}
 
 
@@ -5278,9 +5335,9 @@ def _exigir_centro_envio(codigo: str | None) -> dict:
     if not canal["configured"]:
         raise HTTPException(409, detail=f"{canal['nombre']}: {', '.join(canal['problemas'])}.")
     if (config_get("metodo_envio") or "").strip() == "api_oficial":
-        credenciales = credenciales_centro(canal["phoneNumberId"])
-        if not credenciales["token"] or not credenciales["waba_id"]:
-            raise HTTPException(409, detail="Falta el access token o el WABA ID de este emisor (o los globales).")
+        ok, mensaje = verificar_canal_meta(canal, config_all(refresh=True))
+        if not ok:
+            raise HTTPException(409, detail=f"{canal['nombre']}: {mensaje}")
     return canal
 
 

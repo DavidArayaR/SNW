@@ -272,16 +272,40 @@ class IntencionesCallCenterTests(unittest.TestCase):
 
     def test_aviso_identifica_automatizacion_y_boton_conserva_consulta(self):
         import main
-        with patch.object(main, "config_get", return_value=(
-                "🤖 Mensaje automático: Pulsa Ir al call center y envía tu consulta.")), \
-             patch.object(main, "_elegir_numero_call_center", return_value="56999999999"):
+        with patch.object(main, "config_get", side_effect=lambda clave, *args: (
+                "56999999999" if clave == "SMPT_CRM_PHONE_NUMBER" else
+                "🤖 Mensaje automático: Pulsa Ir al call center y envía tu consulta.")):
             texto, datos, numero = main._cc_datos_envio(
-                {"id": 1, "nombre": "Paciente"}, "produccion", "¿Tienen horas mañana?")
+                {"id": 1, "nombre": "Paciente"}, "produccion", "¿Tienen horas mañana?",
+                {"codigo": "SMPT"})
         self.assertIn("Mensaje automático", texto)
         self.assertEqual(numero, "56999999999")
         enlace = datos["cta"]["url"]
         self.assertEqual(urllib.parse.unquote(enlace.split("text=", 1)[1]),
                          "Hola, esta es mi consulta: ¿Tienen horas mañana?")
+
+    def test_interes_smpt_abre_su_crm_con_mensaje_exacto(self):
+        import main
+        with patch.object(main, "config_get", side_effect=lambda clave, *args: (
+                "+56999999999" if clave == "SMPT_CRM_PHONE_NUMBER" else "")):
+            _, datos, numero = main._cc_datos_envio(
+                {"id": 1, "nombre": "Paciente"}, "produccion", "",
+                {"codigo": "SMPT"})
+        self.assertEqual(numero, "56999999999")
+        self.assertEqual(datos["cta"]["texto"], "Ir a call center")
+        self.assertEqual(urllib.parse.unquote(datos["cta"]["url"].split("text=", 1)[1]),
+                         "Hola, estoy interesado/a en la oferta que me enviaron.")
+
+    def test_smpt_sin_crm_no_usa_url_antigua_ni_otro_centro(self):
+        import main
+        with patch.object(main, "config_get", side_effect=lambda clave, *args: (
+                "56988887777" if clave in ("VS_CRM_PHONE_NUMBER", "call_center_numeros")
+                else "https://ejemplo.test/antiguo" if clave == "call_center_url" else "")):
+            _, datos, numero = main._cc_datos_envio(
+                {"id": 1, "nombre": "Paciente"}, "produccion", "",
+                {"codigo": "SMPT"})
+        self.assertEqual(numero, "")
+        self.assertNotIn("cta", datos)
 
     def test_vista_de_aviso_se_entrega_solo_con_permiso_de_datos(self):
         import main
@@ -316,6 +340,9 @@ class IntencionesCallCenterTests(unittest.TestCase):
         with patch.object(main, "esta_suprimido", return_value=False), \
              patch.object(main, "leer_config", return_value={}), \
              patch.object(main, "obtener_canal", return_value=canal), \
+             patch.object(main, "_emisor_para_respuesta", return_value={
+                 "codigo": "SMPT", "nombre": "Salud Mental Para Todos",
+                 "phoneNumberId": "1234500001"}), \
              patch.object(main, "_cc_datos_envio", return_value=("Mensaje automático", datos, "56999999999")), \
              patch.object(main, "registrar_historial"), \
              patch.object(main, "_registrar_call_center_log") as registrar:

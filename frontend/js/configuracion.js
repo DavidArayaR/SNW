@@ -28,6 +28,7 @@ try {
   if (idsTabs.includes(guardada)) tabConfig = guardada;
 } catch { /* sin almacenamiento */ }
 let centrosConfig = [];
+let tokenGlobalConfigurado = false;
 let valores = {};          // valor guardado (servidor)
 let estadoSupresion = {};  // solo conteos; nunca teléfonos ni huellas
 let campos = {};           // clave -> { def, input }
@@ -268,6 +269,7 @@ async function cargar() {
     const d = await res.json();
     valores = d.valores || {};
     centrosConfig = d.centros || [];
+    tokenGlobalConfigurado = !!d.wa_token_configurado;
     estadoSupresion = d.supresion || {};
     render(d.secciones || []);
     cargarEstadoDespacho();
@@ -382,8 +384,34 @@ function render(secciones) {
       const centro = centrosConfig.find((c) => c.codigo === codigoCentro);
       const estado = document.createElement("span");
       estado.className = `config-centro-estado ${!activa ? "config-centro-estado--inactiva" : centro?.configured ? "config-centro-estado--ok" : "config-centro-estado--pendiente"}`;
-      estado.textContent = !activa ? "Desactivada" : centro?.configured ? "Configurado" : `Pendiente${centro?.problemas?.length ? ` · ${centro.problemas.join(", ")}` : ""}`;
+      estado.textContent = !activa ? "Desactivada" : centro?.configured
+        ? `Configurado${centro?.avisos?.length ? ` · ${centro.avisos.join(", ")}` : ""}`
+        : `Pendiente${centro?.problemas?.length ? ` · ${centro.problemas.join(", ")}` : ""}`;
       panel.querySelector(".panel__head").appendChild(estado);
+      if (activa) {
+        const verificar = document.createElement("button");
+        verificar.type = "button";
+        verificar.className = "btn btn--ghost";
+        verificar.textContent = "Verificar en Meta";
+        panel.querySelector(".panel__head").appendChild(verificar);
+        verificar.addEventListener("click", async () => {
+          verificar.disabled = true;
+          verificar.textContent = "Verificando…";
+          try {
+            const res = await fetch(`api/configuracion/clinicas/${encodeURIComponent(codigoCentro)}/verificar-meta`, {
+              headers: authHeaders(), cache: "no-store",
+            });
+            const datos = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(datos.detail || "No se pudo verificar la clínica.");
+            toast(datos.mensaje || "Verificación completada.", datos.ok ? "ok" : "error");
+          } catch (error) {
+            toast(error.message || "No se pudo verificar la clínica.", "error");
+          } finally {
+            verificar.disabled = false;
+            verificar.textContent = "Verificar en Meta";
+          }
+        });
+      }
       const alternar = document.createElement("button");
       alternar.type = "button";
       alternar.className = "btn btn--ghost config-alternar-clinica";
@@ -541,7 +569,9 @@ function render(secciones) {
         control = `<textarea id="${id}" data-clave="${c.clave}" rows="4" autocomplete="off" spellcheck="false">${escaparHtml(val)}</textarea>`;
       } else {
         const t = c.tipo === "number" ? "number" : c.tipo === "password" ? "password" : "text";
-        control = `<input type="${t}" id="${id}" data-clave="${c.clave}" value="${escaparAtributo(val)}" autocomplete="off" spellcheck="false">`;
+        const placeholder = c.clave === "wa_token" && tokenGlobalConfigurado
+          ? ' placeholder="Token guardado · escribe uno nuevo para reemplazarlo"' : "";
+        control = `<input type="${t}" id="${id}" data-clave="${c.clave}" value="${escaparAtributo(val)}"${placeholder} autocomplete="off" spellcheck="false">`;
       }
 
       wrap.innerHTML =
@@ -635,6 +665,9 @@ async function guardar() {
     if (!res.ok) throw new Error(d.detail || "No se pudo guardar");
     valores = d.valores || valores;
     centrosConfig = d.centros || centrosConfig;
+    tokenGlobalConfigurado = !!d.wa_token_configurado;
+    if (campos.wa_token) campos.wa_token.input.placeholder = tokenGlobalConfigurado
+      ? "Token guardado · escribe uno nuevo para reemplazarlo" : "";
     for (const panel of cont.querySelectorAll(".config-seccion")) {
       const codigo = panel.dataset.centro;
       if (!codigo) continue;
@@ -643,7 +676,9 @@ async function guardar() {
       if (estado) {
         const activa = panel.dataset.activa !== "false";
         estado.className = `config-centro-estado ${!activa ? "config-centro-estado--inactiva" : centro?.configured ? "config-centro-estado--ok" : "config-centro-estado--pendiente"}`;
-        estado.textContent = !activa ? "Desactivada" : centro?.configured ? "Configurado" : `Pendiente${centro?.problemas?.length ? ` · ${centro.problemas.join(", ")}` : ""}`;
+        estado.textContent = !activa ? "Desactivada" : centro?.configured
+          ? `Configurado${centro?.avisos?.length ? ` · ${centro.avisos.join(", ")}` : ""}`
+          : `Pendiente${centro?.problemas?.length ? ` · ${centro.problemas.join(", ")}` : ""}`;
       }
     }
 

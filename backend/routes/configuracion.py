@@ -6,6 +6,7 @@ RUTAS = (
     ("/api/configuracion/todo", "PUT", "actualizar_configuracion_completa", None),
     ("/api/configuracion/clinicas", "POST", "agregar_clinica_whatsapp", None),
     ("/api/configuracion/clinicas/{codigo}/estado", "PUT", "cambiar_estado_clinica_whatsapp", None),
+    ("/api/configuracion/clinicas/{codigo}/verificar-meta", "GET", "verificar_meta_clinica_whatsapp", None),
     ("/api/configuracion/clinicas/{codigo}", "DELETE", "eliminar_clinica_whatsapp", None),
     ("/api/whatsapp/centros", "GET", "listar_centros_whatsapp", None),
     ("/api/whatsapp/rate-limit", "GET", "estado_rate_limit", None),

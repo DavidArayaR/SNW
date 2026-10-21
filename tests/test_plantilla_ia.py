@@ -296,7 +296,7 @@ class EndpointIATests(unittest.TestCase):
             "groq_api_key": "groq-prueba",
         }):
             values = main._config_valores()
-        self.assertEqual(values["wa_token"], "meta-prueba")
+        self.assertEqual(values["wa_token"], "")
         self.assertEqual(values["groq_api_key"], "groq-prueba")
 
 

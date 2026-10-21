@@ -115,6 +115,10 @@ class EnvioConMediaTests(unittest.IsolatedAsyncioTestCase):
     async def test_envio_adjunta_video_y_parametros_de_cuerpo(self):
         servicio = WhatsAppService()
         with patch("whatsapp_service.esta_suprimido", return_value=False), \
+             patch.object(WhatsAppService, "_validar_canal_antes_envio", new_callable=AsyncMock,
+                          return_value=(True, "ok")), \
+             patch.object(WhatsAppService, "_plantilla_aprobada_en_waba", new_callable=AsyncMock,
+                          return_value=True), \
              patch.object(WhatsAppService, "_id_media_envio", new_callable=AsyncMock,
                           return_value=("media-meta", "video")), \
              patch.object(WhatsAppApiClient, "enviar", new_callable=AsyncMock,
@@ -134,6 +138,10 @@ class EnvioConMediaTests(unittest.IsolatedAsyncioTestCase):
     async def test_envio_real_no_usa_variable_vacia(self):
         servicio = WhatsAppService()
         with patch("whatsapp_service.esta_suprimido", return_value=False), \
+             patch.object(WhatsAppService, "_validar_canal_antes_envio", new_callable=AsyncMock,
+                          return_value=(True, "ok")), \
+             patch.object(WhatsAppService, "_plantilla_aprobada_en_waba", new_callable=AsyncMock,
+                          return_value=True), \
              patch.object(WhatsAppApiClient, "enviar", new_callable=AsyncMock) as enviar:
             resultado = await servicio.enviar(
                 "+56912345678", "Hola", {"whatsapp_template": "hola",

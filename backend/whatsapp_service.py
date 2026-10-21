@@ -24,6 +24,7 @@ import httpx
 from db import conectar, config_all, config_get, log_error, tabla_pacientes
 from whatsapp_channels import (CENTROS, EMISOR_WEBHOOK, catalogo_centros,
                                credenciales_centro, listar_canales, resolver_phone_id)
+from whatsapp_channel_verification import verificar_canal_meta
 from corpus_respuestas import guardar_mensaje_completo
 from intenciones_call_center import clasificar, patrones_configurados
 from plantilla_media import obtener_media, ruta_media
@@ -42,6 +43,8 @@ from wa_dispatch_limit import aplazar_pareja, politica as politica_despacho, reg
 GRAPH_VERSION_DEFAULT = "v26.0"
 _media_cache: dict[tuple[str, str], tuple[str, float]] = {}
 _media_cache_lock = threading.Lock()
+_template_aprobada_cache: dict[tuple[str, str, str, str], float] = {}
+_template_aprobada_lock = threading.Lock()
 
 
 def graph_version() -> str:
@@ -546,8 +549,7 @@ class WhatsAppService:
 
     @property
     def token(self) -> str:
-        if self.phone_number_id:
-            return credenciales_centro(self.phone_number_id)["token"]
+        # Una sola credencial en configuracion para todas las clínicas.
         return (config_get("wa_token") or "").strip()
 
     @property
@@ -560,6 +562,8 @@ class WhatsAppService:
     def waba_id(self) -> str:
         if self.phone_number_id:
             return credenciales_centro(self.phone_number_id)["waba_id"]
+        # Compatibilidad para las plantillas locales antiguas gestionadas en
+        # la WABA original; el envío exige siempre un Phone Number ID concreto.
         return (config_get("wa_business_account_id") or "").strip()
 
     @property
@@ -589,7 +593,32 @@ class WhatsAppService:
                 "example": {"header_handle": [handle]}}
 
     def configurada(self) -> bool:
-        return bool(self.token) and bool(self.phone_number_id)
+        return bool(self.token and self.phone_number_id and self.waba_id)
+
+    async def _validar_canal_antes_envio(self) -> tuple[bool, str]:
+        cfg = config_all(refresh=True)
+        canal = resolver_phone_id(self.phone_number_id, cfg)
+        if not canal or not canal["configured"]:
+            return False, "El centro emisor no está configurado para enviar."
+        return await asyncio.to_thread(verificar_canal_meta, canal, cfg)
+
+    async def _plantilla_aprobada_en_waba(self, nombre: str, idioma: str) -> bool:
+        clave = (hashlib.sha256(self.token.encode()).hexdigest(), self.waba_id,
+                 nombre, idioma)
+        with _template_aprobada_lock:
+            if _template_aprobada_cache.get(clave, 0) > time.monotonic():
+                return True
+        try:
+            resultado = await self.cliente.buscar_template(self.waba_id, nombre)
+        except ErrorWhatsApp:
+            return False
+        aprobada = any(t.get("name") == nombre and t.get("language") == idioma
+                       and t.get("status") == "APPROVED"
+                       for t in resultado.get("data") or [])
+        if aprobada:
+            with _template_aprobada_lock:
+                _template_aprobada_cache[clave] = time.monotonic() + 60
+        return aprobada
 
     @property
     def cliente(self) -> WhatsAppApiClient:
@@ -949,12 +978,17 @@ class WhatsAppService:
         """
         if esta_suprimido(telefono):
             return False, None, "Número suprimido por solicitud del paciente", "failed"
+        autorizado, problema = await self._validar_canal_antes_envio()
+        if not autorizado:
+            return False, None, problema, "failed"
         msg = plantilla or {}
         nombre_template = msg.get("whatsapp_template")
         idioma = msg.get("whatsapp_template_lang") or config_get("wa_template_lang", "es")
         cta = msg.get("cta") if isinstance(msg, dict) else None
 
         if nombre_template:
+            if not await self._plantilla_aprobada_en_waba(nombre_template, idioma):
+                return False, None, "La plantilla no está aprobada para el WABA de esta clínica.", "failed"
             if msg.get("encabezado_media_id") and not msg.get("encabezado_meta_registrado"):
                 return False, None, "El encabezado aún no se registró en Meta", "failed"
             revision = presentar_plantilla(msg, variables or {})

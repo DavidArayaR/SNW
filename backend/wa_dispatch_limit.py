@@ -12,7 +12,7 @@ import time
 from datetime import datetime
 
 from db import CONFIG_DEFAULTS, conectar
-from whatsapp_channels import resolver_phone_id
+from whatsapp_channels import CENTROS, resolver_phone_id
 
 
 def _entero(valor, defecto: int, minimo: int, maximo: int) -> int:
@@ -38,6 +38,7 @@ def _config_actual() -> dict:
                        **{fila["clave"]: fila["valor"] for fila in cur.fetchall()
                           if fila["clave"] in _CLAVES or fila["clave"].endswith((
                               "_WSP_PHONE_NUMBER", "_WSP_PHONE_NUMBER_ID",
+                              "_WSP_WABA_ID",
                               "_WSP_RATE_LIMIT_MPS", "_WSP_RATE_LIMIT_MODE",
                               "_WSP_RATE_LIMIT_VERIFIED"))}}
         _config_cache = (time.monotonic() + 5, valores)
@@ -45,11 +46,11 @@ def _config_actual() -> dict:
 
 
 _CLAVES = tuple(
-    ["wa_clinicas_adicionales", "wa_dispatch_pair_seconds", "wa_dispatch_reserved_percent",
+    ["wa_clinicas_adicionales", "wa_token", "wa_dispatch_pair_seconds", "wa_dispatch_reserved_percent",
      "wa_dispatch_max_retries", "wa_dispatch_backoff_base_seconds",
      "wa_dispatch_backoff_max_seconds"] +
-    [f"{centro}_WSP_{campo}" for centro in ("SMPT", "MS", "PS", "CP")
-     for campo in ("PHONE_NUMBER", "PHONE_NUMBER_ID", "RATE_LIMIT_MPS", "RATE_LIMIT_MODE",
+    [f"{centro}_WSP_{campo}" for centro in CENTROS
+     for campo in ("PHONE_NUMBER", "PHONE_NUMBER_ID", "WABA_ID", "RATE_LIMIT_MPS", "RATE_LIMIT_MODE",
                    "RATE_LIMIT_VERIFIED")]
 )
 

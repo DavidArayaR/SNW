@@ -230,6 +230,23 @@ class SincronizarAreaTests(unittest.TestCase):
         self.sesion = dict(SESION)
         app.dependency_overrides[main.sesion_actual] = lambda: self.sesion
         self.cliente = TestClient(app)
+        cfg = {"wa_token": "global", "wa_business_account_id": "111111",
+               "SMPT_WSP_WABA_ID": "111111"}
+        canal = {"codigo": "SMPT", "nombre": "Salud Mental Para Todos",
+                 "phoneNumberId": "1234500001", "configured": True, "problemas": []}
+        for parche in (patch.object(main, "config_all", return_value=cfg),
+                       patch.object(main, "resolver_centro", return_value=canal),
+                       patch.object(main, "verificar_canal_meta", return_value=(True, "ok"))):
+            parche.start()
+            self.addCleanup(parche.stop)
+        obtener = self.cliente.get
+        enviar = self.cliente.post
+        ruta = "/api/plantillas/sincronizar-meta"
+        self.cliente.get = lambda url, *args, **kwargs: obtener(
+            url + "?centro=SMPT" if url == ruta else url, *args, **kwargs)
+        self.cliente.post = lambda url, *args, **kwargs: enviar(
+            url, *args, **({**kwargs, "json": {"centro": "SMPT", **kwargs["json"]}}
+                         if url == ruta and isinstance(kwargs.get("json"), dict) else kwargs))
 
     def test_eliminada_en_meta_se_previsualiza_y_se_quita_solo_al_confirmar(self):
         viva = {"id": "meta-viva", "name": "saludo", "language": "es",

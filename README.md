@@ -18,20 +18,21 @@ con la **WhatsApp Business Cloud API** de Meta (v26.0).
 | Correo | SMTP (configurable en la tabla `configuracion`) — confirmación de envíos en producción y recuperación de contraseña |
 | Configuración | Tabla `configuracion` en MySQL (todo salvo credenciales de BD, que van en `.env`) |
 
-## Cuatro números emisores de WhatsApp
+## Clínicas y números emisores de WhatsApp
 
-SNW admite cuatro centros: `SMPT` (Salud Mental Para Todos), `MS` (Centro Mentalidad Saludable),
-`PS` (PROSALUD) y `CP` (Centro Psiquiatrico Huerfanos). En **Configuración**, un desarrollador
-debe completar para cada centro el número visible y su *Phone Number ID* de Meta. Las ocho claves
-son `SMPT_WSP_PHONE_NUMBER`, `SMPT_WSP_PHONE_NUMBER_ID`, `MS_WSP_PHONE_NUMBER`,
-`MS_WSP_PHONE_NUMBER_ID`, `PS_WSP_PHONE_NUMBER`, `PS_WSP_PHONE_NUMBER_ID`,
-`CP_WSP_PHONE_NUMBER` y `CP_WSP_PHONE_NUMBER_ID`. Pueden quedar vacías hasta que se active
-cada centro; un centro incompleto o duplicado no puede seleccionarse para enviar.
+SNW incluye cinco centros: `SMPT` (Salud Mental Para Todos), `MS` (Centro Mentalidad Saludable),
+`PS` (PROSALUD), `CP` (Centro Psiquiatrico Huerfanos) y `VS` (VIDA Y SALUD). Se pueden añadir
+otros desde Configuración. Cada clínica tiene cuatro claves en la tabla `configuracion`:
+`<CODIGO>_WSP_PHONE_NUMBER`, `<CODIGO>_WSP_PHONE_NUMBER_ID`, `<CODIGO>_WSP_WABA_ID` y
+`<CODIGO>_CRM_PHONE_NUMBER`. Por ejemplo, para SMPT son `SMPT_WSP_PHONE_NUMBER`,
+`SMPT_WSP_PHONE_NUMBER_ID`, `SMPT_WSP_WABA_ID` y `SMPT_CRM_PHONE_NUMBER`.
+El número CRM puede quedar vacío; los otros tres campos son obligatorios para enviar.
 
-Los cuatro números comparten una WABA y el token `wa_token` actual. Antes de utilizar cada uno,
-verifique en Meta que ese token tenga permiso de envío, que el número esté conectado al webhook
-y que las plantillas estén aprobadas para la WABA. SNW no prueba la autorización del token sobre
-un número hasta que se efectúa un envío de prueba explícito. El antiguo `wa_phone_id` se conserva
+Todas las clínicas usan exclusivamente `wa_token`, el access token global guardado en
+`configuracion`. Cada clínica debe tener su propio WABA ID; el WABA global histórico ya no
+reemplaza uno faltante. En Configuración → Clínicas, «Verificar en Meta» comprueba que el token
+pueda consultar el WABA y que el Phone Number ID corresponda al número emisor. Los envíos
+oficiales repiten esa validación antes de llamar a `/messages`. El antiguo `wa_phone_id` se conserva
 solo por compatibilidad histórica; no se utiliza como alternativa automática en envíos nuevos.
 La migración de claves antiguas `PHONE_NUMER` se ejecuta al iniciar: copia valores no conflictivos;
 ante dos valores distintos conserva ambas claves e informa el conflicto en el registro del servidor.
@@ -44,6 +45,9 @@ antiguos sin emisor conocido aparecen como «Emisor histórico no identificado»
 El webhook identifica el centro por `metadata.phone_number_id`, registra un mensaje lógico por
 ID de Meta y no atribuye a otro centro un número desconocido. Las consultas o intereses que
 requieren atención humana se guardan en `crm_derivaciones_pendientes`, con estado `pendiente`.
+El aviso de interés abre el WhatsApp del CRM configurado para el centro emisor; el paciente
+debe pulsar «Ir a call center» y confirmar allí el envío del texto preparado. Abrir el enlace
+no equivale a una entrega al CRM.
 **Aún no se envían al CRM externo**: faltan su URL, autenticación y contrato de eventos. Cuando
 estén definidos, el integrador podrá consumir esa cola de forma idempotente; no debe enviar
 respuestas desde otro número. La solicitud `ELIMINAR` retira también las conversaciones y
@@ -169,9 +173,9 @@ configura desde la página y queda legible en la base de datos para quien tenga 
 | Grupo | Claves |
 |---|---|
 | App / envío | `entorno` (`desarrollo`/`produccion`), `metodo_envio` (`simulado`/`api_oficial`), `numeros_prueba_dev`, `numeros_prueba_prod`, `intervalo_ms`, `sesion_expira_horas` (horas de inactividad antes de cerrar una sesión sola; 0 = no expiran; por defecto 5), `url_base` |
-| Call center | `call_center_url` (servicio que devuelve un número de call center; se consulta en cada respuesta y ese servicio reparte la carga), `call_center_numeros` (respaldo manual, uno o varios separados por coma, solo si la URL no responde), `call_center_boton_mensaje` / `call_center_boton_mensaje_oferta` (texto que autocompleta el botón; el de oferta se usa si la última plantilla enviada mencionaba un descuento o precio especial). El mensaje de call center y su espera (1s fija) no son configurables, ver [Mensaje de call center](#mensaje-de-call-center) |
+| Call center | `<CODIGO>_CRM_PHONE_NUMBER` configura el número de WhatsApp de atención propio de cada clínica. Las claves antiguas `call_center_url`, `call_center_numeros` y `call_center_boton_mensaje*` se conservan por compatibilidad, pero el botón actual no las utiliza. |
 | Correo | `smtp_host`, `smtp_port`, `smtp_user`, `smtp_pass`, `smtp_tls`, `correo_emisor`, `correo_destino` |
-| WhatsApp / Meta | `wa_token`, `wa_phone_id`, `wa_business_account_id`, `wa_app_id` (necesario para encabezados multimedia), `wa_verify_token`, `wa_template_nombre`, `wa_template_lang`, `wa_webhook_path`, `wa_graph_version` (por defecto `v26.0`), `wa_moneda` (moneda de facturación de la cuenta, se autodetecta desde Meta al actualizar tarifas — por defecto `USD`), `plantillas_revision_minutos` (cada cuántos minutos se revisa sola en Meta el estado de las plantillas pendientes; 0 = desactivado; por defecto 2), `plantillas_badge_aprobada_minutos` (cuánto se muestra el aviso «Aprobada recientemente»; 0 = nunca; por defecto 10) |
+| WhatsApp / Meta | `wa_token` es el único token de acceso; `<CODIGO>_WSP_WABA_ID` identifica la WABA de cada clínica. `wa_business_account_id` y `wa_phone_id` permanecen para compatibilidad con plantillas históricas; no sustituyen los identificadores por clínica al enviar. También se usan `wa_app_id`, `wa_verify_token`, `wa_webhook_path`, `wa_graph_version`, `wa_moneda`, `plantillas_revision_minutos` y `plantillas_badge_aprobada_minutos`. |
 | Groq | `groq_api_key` (solo desarrollador; guardada en `configuracion`), `groq_limite_hora` (borradores por cuenta y hora, por defecto 12) |
 | Límites de envío Meta | `wa_rate_limit_activo` (frenado proactivo on/off), `wa_rate_limit_umbral_pct` (% de cuota a partir del cual se espera, 80), `wa_rate_limit_pausa_max_s` (espera entre mensajes al 100 % de cuota, 30), `wa_rate_limit_espera_defecto_s` (espera tras un 429 sin dato, 60), `wa_rate_limit_reintentos` (reintentos de una llamada tras un 429, 3), `wa_throughput_mps` (ritmo máximo de salida hacia Meta, msg/s; 0 = sin límite; 10), `wa_messaging_limit_24h` (usuarios únicos que se pueden contactar en 24 h antes de bloquear el envío masivo; 0 = ilimitado; 2000) |
 
@@ -265,7 +269,7 @@ día / mes / año aplicando a cada mensaje enviado la tarifa vigente en su fecha
 categoría de su plantilla.
 
 **`call_center_log`** — una fila por cada respuesta de call center enviada a un paciente
-interesado, con el `numero_call_center` que le asignó el servicio de `call_center_url`, si
+interesado, con el `numero_call_center` configurado para su clínica, si
 fue `automatico` o manual y el `estado` (`enviado`/`error`). El contador de usos por número
 sale de los envíos exitosos aquí registrados (`GROUP BY numero_call_center`). El panel
 **«Historial de call center»** muestra las últimas 200 filas y los contadores históricos
@@ -453,21 +457,15 @@ tiene template de Meta (va como texto libre, ventana de 24 h). No hay gestión d
   hay envío manual. Si el paciente venía de baja y se reactiva con ese mismo interés, esta es
   la **única** respuesta que recibe: no se suma el aviso de «¡Bienvenido/a de vuelta!» (ver
   «Avisos automáticos» en «Sistema de baja»).
-- **Botón:** el mensaje incluye un botón CTA que abre el chat del call center
-  (`https://wa.me/<número>`, mensaje interactivo `cta_url`). El número se pide en cada
-  respuesta a **`call_center_url`** (configurado en **Configuración → Call center**), un
-  servicio que devuelve un número —solo dígitos, con código de país— y ya reparte la carga
-  entre los teléfonos por su cuenta. Si esa URL no responde, se usa el respaldo manual
-  `call_center_numeros` (el menos usado según `call_center_log`). El botón autocompleta un
-  mensaje en el chat (`?text=`): `call_center_boton_mensaje_oferta` si la última plantilla
-  enviada al paciente mencionaba un descuento / oferta / precio especial (detección por
-  palabras clave sobre `log_envios.mensaje`), o `call_center_boton_mensaje` en cualquier otro
-  caso (ambos en **Configuración → Call center**; vacíos = sin autocompletar).
+- **Botón:** «Ir a call center» abre `https://wa.me/<número CRM de la clínica>` como CTA.
+  En respuestas de interés prepara exactamente «Hola, estoy interesado/a en la oferta que me
+  enviaron.». En consultas prepara el texto de la consulta. Si no hay número CRM válido de esa
+  clínica, no se usa el de otra ni se construye un enlace inválido; el interés queda registrado.
 - **Registro:** cada envío queda en `call_center_log` con el número asignado.
   El panel de Historial muestra la fecha, el nombre y teléfono del paciente,
   su base de datos, el número de call center asignado y el estado. También
   indica cuántos envíos exitosos se registraron con cada número. Los datos
-  completos del paciente solo se muestran a quien subió su CSV; para otras
+  completos del paciente requieren el permiso `pacientes_ver_datos`; para otras
   cuentas se usan iniciales y teléfono enmascarado.
 
 | Método | Endpoint | Descripción |
@@ -815,19 +813,20 @@ volver a procesarlo.
 1. **Meta for Developers** → crea una App tipo **Business**.
 2. Agrega el producto **WhatsApp** → se crea la **WhatsApp Business Account (WABA)**.
 3. Añade y verifica el **número de teléfono** del negocio.
-4. En **API Setup** copia a la tabla `configuracion` (con `PUT /api/configuracion` o `UPDATE`):
-   - `Phone number ID` → `wa_phone_id`
-   - `WhatsApp Business Account ID` → `wa_business_account_id`
+4. En **Configuración → Clínicas**, completa para cada clínica el número emisor,
+   `Phone Number ID` y `WABA ID`. Para SMPT, configura también
+   `SMPT_CRM_PHONE_NUMBER` si usarás el botón de derivación. Repite para MS, PS, CP y VS.
+   Cada WABA debe dar acceso al mismo token global y tener sus plantillas aprobadas.
+5. En **Configuración → WhatsApp**, guarda:
    - `App ID` de Meta for Developers → `wa_app_id` (para plantillas con encabezado)
-   - `Access Token` → `wa_token` (usa uno de *System User* si necesitas que no
+   - `Access Token` global → `wa_token` (usa uno de *System User* si necesitas que no
      caduque; los tokens temporales de API Setup expiran en 24 h)
-5. Define tu propio **Verify Token** → `wa_verify_token`, y configura el **Webhook**
+6. Define tu propio **Verify Token** → `wa_verify_token`, y configura el **Webhook**
    de la App con `https://TU-DOMINIO/api/whatsapp/webhook` más ese token. Suscríbelo al
    menos a `messages`.
-6. Pon `metodo_envio` en `api_oficial`.
-7. Verifica que el `wa_token` sea de la **misma** WABA que pusiste en
-   `wa_business_account_id` (un token válido de otra WABA falla con *"Object with ID
-   '...' does not exist, cannot be loaded due to missing permissions"*).
+7. Pulsa **Verificar en Meta** en la tarjeta de cada clínica. Si hay varias WABA,
+   suscríbelas a la aplicación del webhook para que SNW reciba las respuestas.
+8. Pon `metodo_envio` en `api_oficial` y haz una prueba con un número autorizado.
 
 > **Nota:** Meta exige que el webhook esté en una URL **HTTPS pública** y accesible desde
 > internet. En local, usa un túnel (ngrok) para probarlo.

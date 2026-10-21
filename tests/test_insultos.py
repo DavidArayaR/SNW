@@ -118,6 +118,8 @@ class AvisoInsultoTests(unittest.TestCase):
         cliente = MagicMock()
         cliente.enviar = AsyncMock(return_value={"messages": [{"id": "wamid.aviso"}]})
         with patch("whatsapp_service.esta_suprimido", return_value=False), \
+             patch.object(WhatsAppService, "_validar_canal_antes_envio", new_callable=AsyncMock,
+                          return_value=(True, "ok")), \
              patch.object(WhatsAppService, "cliente", new=property(lambda _self: cliente)):
             ok, mensaje_id, _, _ = asyncio.run(servicio.enviar(
                 TEL, "Lamentamos que hayas tenido una mala experiencia.",

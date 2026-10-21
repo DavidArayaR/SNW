@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 class PlantillaIn(BaseModel):
     nombre: str
     texto: str
+    centro: str | None = None
     clave: str | None = None
     whatsapp_template_lang: str | None = None
     whatsapp_template_categoria: str | None = None
@@ -21,6 +22,7 @@ class PlantillaIn(BaseModel):
 
 
 class SincronizarPlantillasIn(BaseModel):
+    centro: str
     # Clave: identificador de la plantilla en Meta. None es global explícito.
     asignaciones: dict[str, int | None]
     # IDs locales que el usuario vio como ausentes de Meta en la previsualización.

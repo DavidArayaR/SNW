@@ -115,22 +115,15 @@ CONFIG_DEFAULTS = {
     "anti_flip_flop_dev": "true",
     "intervalo_ms": "1000",
     "url_base": "",
-    # Call center: el número al que lleva el botón de las plantillas de call
-    # center se pide en cada respuesta a `call_center_url` (un servicio que
-    # devuelve un número —solo dígitos, con código de país— y ya reparte la
-    # carga). `call_center_numeros` es un respaldo manual (uno o varios,
-    # separados por coma) por si la URL no responde.
-    # `call_center_boton_mensaje` / `..._oferta`: texto que se autocompleta en el
-    # chat del call center al pulsar el botón. Se usa el de «oferta» cuando la
-    # última plantilla enviada al paciente mencionaba un descuento o precio
-    # especial; si no, el genérico. El envío automático de call center espera
-    # siempre 1s fijo (CALL_CENTER_AUTO_SEGUNDOS en main.py), no es configurable.
+    # Claves históricas de call center: se conservan para no borrar datos de
+    # instalaciones anteriores, pero el botón actual usa *_CRM_PHONE_NUMBER
+    # del emisor y el mensaje preparado fijo.
     "call_center_url": "https://saludmentalparatodos.cl/telefonosmpt.php",
     "call_center_numeros": "",
     "call_center_boton_mensaje": "Hola, estoy interesado/a en la información que me enviaron.",
     "call_center_boton_mensaje_oferta": "Hola, estoy interesado/a en la oferta que me enviaron.",
     "call_center_aviso_consulta": (
-        "🤖 Mensaje automático: Recibimos tu consulta. Pulsa «Ir al call center» "
+        "🤖 Mensaje automático: Recibimos tu consulta. Pulsa «Ir a call center» "
         "y envía el mensaje preparado para que una persona pueda atenderte."
     ),
     "call_center_patrones_consulta": "{}",
@@ -205,7 +198,7 @@ for _centro in CENTROS:
     CONFIG_DEFAULTS[f"{_centro}_WSP_RATE_LIMIT_MODE"] = "estandar"
     CONFIG_DEFAULTS[f"{_centro}_WSP_RATE_LIMIT_VERIFIED"] = "false"
     CONFIG_DEFAULTS[f"{_centro}_WSP_WABA_ID"] = ""
-    CONFIG_DEFAULTS[f"{_centro}_WSP_ACCESS_TOKEN"] = ""
+    CONFIG_DEFAULTS[f"{_centro}_CRM_PHONE_NUMBER"] = ""
 
 _CLAVES_CENTRO_ANTIGUAS = {
     "SMPT_WSP_PHONE_NUMER": "SMPT_WSP_PHONE_NUMBER",

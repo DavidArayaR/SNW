@@ -9,6 +9,7 @@ CENTROS = {
     "MS": "Centro Mentalidad Saludable",
     "PS": "PROSALUD",
     "CP": "Centro Psiquiatrico Huerfanos",
+    "VS": "VIDA Y SALUD",
 }
 
 # Contexto aislado por solicitud de webhook; los callbacks diferidos copian el
@@ -65,10 +66,8 @@ def credenciales_centro(phone_id: str, config: dict | None = None) -> dict:
         return {"token": "", "waba_id": ""}
     codigo = canal["codigo"]
     return {
-        "token": str(valores.get(f"{codigo}_WSP_ACCESS_TOKEN") or
-                     valores.get("wa_token") or "").strip(),
-        "waba_id": str(valores.get(f"{codigo}_WSP_WABA_ID") or
-                       valores.get("wa_business_account_id") or "").strip(),
+        "token": str(valores.get("wa_token") or "").strip(),
+        "waba_id": str(valores.get(f"{codigo}_WSP_WABA_ID") or "").strip(),
     }
 
 
@@ -80,6 +79,8 @@ def listar_canales(config: dict | None = None) -> list[dict]:
         clave_numero, clave_id = claves_centro(codigo)
         numero = str(valores.get(clave_numero) or "").strip()
         phone_id = str(valores.get(clave_id) or "").strip()
+        waba_id = str(valores.get(f"{codigo}_WSP_WABA_ID") or "").strip()
+        crm_numero = str(valores.get(f"{codigo}_CRM_PHONE_NUMBER") or "").strip()
         razones = []
         if not numero:
             razones.append("Falta número visible")
@@ -89,9 +90,21 @@ def listar_canales(config: dict | None = None) -> list[dict]:
             razones.append("Falta Phone Number ID")
         elif not re.fullmatch(r"[1-9]\d{4,30}", phone_id):
             razones.append("Phone Number ID inválido")
+        if not waba_id:
+            razones.append("Falta WABA ID")
+        elif not re.fullmatch(r"[1-9]\d{4,30}", waba_id):
+            razones.append("WABA ID inválido")
+        if not str(valores.get("wa_token") or "").strip():
+            razones.append("Falta access token global")
+        avisos = []
+        if not crm_numero:
+            avisos.append("Número CRM pendiente")
+        elif not re.fullmatch(r"\+?[1-9]\d{7,14}", crm_numero):
+            avisos.append("Número CRM inválido")
         canales.append({"codigo": codigo, "nombre": nombre, "phoneNumber": numero or None,
-                        "phoneNumberId": phone_id or None, "configured": not razones,
-                        "problemas": razones})
+                        "phoneNumberId": phone_id or None, "wabaId": waba_id or None,
+                        "crmPhoneNumber": crm_numero or None,
+                        "configured": not razones, "problemas": razones, "avisos": avisos})
     for campo, etiqueta in (("phoneNumber", "Número visible"), ("phoneNumberId", "Phone Number ID")):
         usados = {}
         for canal in canales:

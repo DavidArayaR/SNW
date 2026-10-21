@@ -67,6 +67,18 @@ function pintarCentrosEmisores() {
       error.textContent = error.hidden ? "" : "No hay centros emisores configurados. Revisa Configuración.";
     }
   }
+  for (const id of ["#inpCentroPlantilla", "#selCentroSync"]) {
+    const selector = $(id);
+    if (!selector) continue;
+    const anterior = selector.value;
+    selector.replaceChildren(new Option("— Seleccione clínica —", ""));
+    for (const centro of centrosEmisores) {
+      selector.add(new Option(`${centro.nombre}${centro.configured ? "" : " · pendiente"}`, centro.codigo));
+    }
+    const elegido = id === "#inpCentroPlantilla" && activaId
+      ? plantillas.find((p) => p.id === activaId)?.centro_codigo : anterior;
+    selector.value = centrosEmisores.some((c) => c.codigo === elegido) ? elegido : "";
+  }
   actualizarPasosManual();
   actualizarPasosProg();
   actualizarEstadoBotonPrueba();
@@ -143,6 +155,7 @@ const inpTemplate = $("#inpTemplate");
 const inpTemplateLang = $("#inpTemplateLang");
 const inpTemplateCategoria = $("#inpTemplateCategoria");
 const inpArea = $("#inpArea");
+const inpCentroPlantilla = $("#inpCentroPlantilla");
 const hayTemplateMeta = !!inpTemplate && !!inpTemplateLang && !!inpTemplateCategoria;
 const bloqueEstadoMeta = $("#bloqueEstadoMeta");
 const badgeEstadoMeta = $("#badgeEstadoMeta");
@@ -493,11 +506,11 @@ async function revisarPlantillasEnSegundoPlano() {
   }
 }
 
-async function crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezado_media_id, encabezado_texto, pie_texto, ejemplos) {
+async function crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezado_media_id, encabezado_texto, pie_texto, ejemplos, centro) {
   const res = await fetch(API_URL, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ clave: slug(nombre), nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezado_media_id, encabezado_texto, pie_texto, ejemplos }),
+    body: JSON.stringify({ clave: slug(nombre), nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezado_media_id, encabezado_texto, pie_texto, ejemplos, centro }),
   });
   if (res.status === 401) { window.snwSesionExpirada(); return Promise.reject(new Error("Sesión expirada")); }
   const data = await res.json().catch(() => ({}));
@@ -505,11 +518,11 @@ async function crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_te
   return data;
 }
 
-async function actualizarPlantilla(id, nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezado_media_id, encabezado_texto, pie_texto, ejemplos) {
+async function actualizarPlantilla(id, nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezado_media_id, encabezado_texto, pie_texto, ejemplos, centro) {
   const res = await fetch(`${API_URL}/${id}`, {
     method: "PUT",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezado_media_id, encabezado_texto, pie_texto, ejemplos }),
+    body: JSON.stringify({ nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezado_media_id, encabezado_texto, pie_texto, ejemplos, centro }),
   });
   if (res.status === 401) { window.snwSesionExpirada(); return Promise.reject(new Error("Sesión expirada")); }
   const data = await res.json().catch(() => ({}));
@@ -1138,9 +1151,10 @@ function refrescarEditor() {
 }
 
 if (inpArea) inpArea.addEventListener("change", refrescarEditor);
+inpCentroPlantilla?.addEventListener("change", refrescarEditor);
 
 function estadoActualEditor() {
-  return JSON.stringify([inpNombre.value, inpMensaje.value, valTemplate(), valTemplateLang(), valTemplateCategoria(), inpArea ? inpArea.value : "", encabezadoMediaActivo(), encabezadoTextoActivo(), inpPieTexto.value]);
+  return JSON.stringify([inpNombre.value, inpMensaje.value, valTemplate(), valTemplateLang(), valTemplateCategoria(), inpArea ? inpArea.value : "", encabezadoMediaActivo(), encabezadoTextoActivo(), inpPieTexto.value, inpCentroPlantilla?.value || ""]);
 }
 
 function marcarSnapshot() {
@@ -1403,6 +1417,7 @@ function actualizarBloqueoCampos() {
   // false al pasar a una plantilla sí editable — quedaba pegado en
   // disabled para siempre después de abrir la primera no editable.
   inpMensaje.disabled = false;
+  inpCentroPlantilla.disabled = esExistente;
   btnAbrirIA.hidden = false;
   inpInstruccionIA.disabled = false;
   inpEjemploNombre.disabled = false;
@@ -1471,6 +1486,7 @@ function abrir(id) {
     }
     inpArea.value = espVal;
   }
+  if (inpCentroPlantilla) inpCentroPlantilla.value = p.centro_codigo || "";
   if (hayTemplateMeta) {
     inpTemplateLang.value = p.whatsapp_template_lang || "es";
     // Todas las plantillas son categoría Marketing; una plantilla antigua con
@@ -1525,6 +1541,7 @@ function modoNueva() {
   inpEjemploApellido.value = "Araya";
   establecerEncabezado(null);
   if (inpArea) inpArea.value = "";
+  if (inpCentroPlantilla) inpCentroPlantilla.value = "";
   if (hayTemplateMeta) {
     inpTemplateLang.value = "es";
     inpTemplateCategoria.value = "MARKETING";
@@ -1742,6 +1759,7 @@ formEl.addEventListener("submit", async (e) => {
   const whatsapp_template = valTemplate().trim();
   const whatsapp_template_lang = valTemplateLang() || "es";
   const whatsapp_template_categoria = valTemplateCategoria().trim();
+  const centroPlantilla = inpCentroPlantilla?.value || null;
 
   inpNombre.classList.toggle("invalido", !nombre);
   inpMensaje.classList.toggle("invalido", !texto);
@@ -1753,6 +1771,7 @@ formEl.addEventListener("submit", async (e) => {
 
   if (!nombre) return toast("Falta el nombre.", "error");
   if (!texto) return toast("El mensaje está vacío.", "error");
+  if (!activaId && !centroPlantilla) return toast("Selecciona la clínica de Meta para esta plantilla.", "error");
   if (inpMensaje.value.length > MAX_MENSAJE) {
     inpMensaje.classList.add("invalido");
     return toast(
@@ -1806,11 +1825,11 @@ formEl.addEventListener("submit", async (e) => {
     }
     let fila;
     if (activaId) {
-      fila = await actualizarPlantilla(activaId, nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezadoMediaActivo(), encabezadoTextoActivo(), inpPieTexto.value.trim(), ejemplosPreview());
+      fila = await actualizarPlantilla(activaId, nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezadoMediaActivo(), encabezadoTextoActivo(), inpPieTexto.value.trim(), ejemplosPreview(), centroPlantilla);
       const i = plantillas.findIndex((x) => x.id === activaId);
       if (i >= 0) plantillas[i] = fila;
     } else {
-      fila = await crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezadoMediaActivo(), encabezadoTextoActivo(), inpPieTexto.value.trim(), ejemplosPreview());
+      fila = await crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezadoMediaActivo(), encabezadoTextoActivo(), inpPieTexto.value.trim(), ejemplosPreview(), centroPlantilla);
       plantillas.push(fila);
     }
     setGuardando(false);
@@ -2942,18 +2961,32 @@ if (btnRevisarTodos) {
 // e importa como plantilla nueva los que existan en Meta y falten aquí.
 if (btnSincronizarMeta) {
   const modalSync = $("#modalSincronizar");
+  const selCentroSync = $("#selCentroSync");
   const areasSync = $("#areasSincronizar");
   const confirmarSync = $("#confirmarSincronizar");
   let sincronizando = false;
   let eliminadasSync = [];
   let puedeEliminarSync = false;
+  selCentroSync.addEventListener("change", () => {
+    areasSync.replaceChildren();
+    confirmarSync.disabled = true;
+    if (selCentroSync.value) btnSincronizarMeta.click();
+  });
   btnSincronizarMeta.addEventListener("click", async () => {
     if (sincronizando) return;
+    modalSync.hidden = false;
+    confirmarSync.disabled = true;
+    if (!selCentroSync.value) {
+      selCentroSync.focus();
+      return;
+    }
     sincronizando = true;
+    const centroSync = selCentroSync.value;
+    selCentroSync.disabled = true;
     const inicioCarga = iniciarCargaPlantillas("Consultando plantillas…");
     setConsultandoEstado(true, btnSincronizarMeta, "Consultando...");
     try {
-      const res = await fetch(`${API_URL}/sincronizar-meta`, { headers: authHeaders(), cache: "no-store" });
+      const res = await fetch(`${API_URL}/sincronizar-meta?centro=${encodeURIComponent(centroSync)}`, { headers: authHeaders(), cache: "no-store" });
       if (res.status === 401) { window.snwSesionExpirada(); return; }
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.detail ?? `Error ${res.status}`);
@@ -3011,6 +3044,7 @@ if (btnSincronizarMeta) {
     } finally {
       await terminarCargaPlantillas(inicioCarga);
       sincronizando = false;
+      selCentroSync.disabled = false;
       setConsultandoEstado(false, btnSincronizarMeta);
     }
   });
@@ -3035,7 +3069,8 @@ if (btnSincronizarMeta) {
       const res = await fetch(`${API_URL}/sincronizar-meta`, {
         method: "POST",
         headers: { ...authHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({ asignaciones, eliminadas: puedeEliminarSync ? eliminadasSync.map((p) => p.id) : [] }),
+        body: JSON.stringify({ centro: selCentroSync.value, asignaciones,
+          eliminadas: puedeEliminarSync ? eliminadasSync.map((p) => p.id) : [] }),
       });
       if (res.status === 401) { window.snwSesionExpirada(); return; }
       const data = await res.json().catch(() => ({}));

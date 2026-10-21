@@ -122,6 +122,8 @@ class DespachoHttpTests(unittest.TestCase):
         cliente = MagicMock()
         cliente.enviar = AsyncMock(return_value={"messages": [{}]})
         with patch("whatsapp_service.esta_suprimido", return_value=False), \
+             patch.object(WhatsAppService, "_validar_canal_antes_envio", new_callable=AsyncMock,
+                          return_value=(True, "ok")), \
              patch.object(WhatsAppService, "cliente", new_callable=lambda: property(lambda _self: cliente)):
             with self.assertRaises(ResultadoEnvioIncierto):
                 asyncio.run(servicio.enviar("56900000001", "mensaje"))
