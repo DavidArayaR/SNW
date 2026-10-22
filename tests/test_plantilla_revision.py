@@ -745,17 +745,40 @@ class EndpointPruebaPlantillaTests(unittest.TestCase):
              patch.object(main, "auditoria_registrar") as auditoria, \
              patch.object(main, "conectar", side_effect=AssertionError("No debe consultar campañas")):
             respuesta = self.cliente.post("/api/plantillas/7/prueba", json={
-                "telefono": TELEFONO, "centro": "SMPT", "ejemplos": {"nombre": "Ana"}})
+                "telefono": TELEFONO, "ejemplos": {"nombre": "Ana"}})
         self.assertEqual(respuesta.status_code, 200)
         self.assertEqual(respuesta.json()["message_id"], "wamid-prueba")
+        self.assertEqual(respuesta.json()["centro"], "SMPT")
         self.assertEqual(enviar.await_count, 1)
         self.assertEqual(enviar.await_args.kwargs["variables"]["nombre"], "Ana")
         self.assertTrue(enviar.await_args.kwargs["es_prueba"])
         auditoria.assert_called_once()
 
-    def test_prueba_requiere_elegir_centro(self):
-        respuesta = self.cliente.post("/api/plantillas/7/prueba", json={"telefono": TELEFONO})
-        self.assertEqual(respuesta.status_code, 422)
+    def test_prueba_rechaza_plantilla_sin_centro_asociado(self):
+        sin_centro = {**PLANTILLA, "centro_codigo": None}
+        with patch.object(main, "leer_plantillas", return_value=[sin_centro]), \
+             patch.object(main, "config_get", side_effect=self._config), \
+             patch.object(main, "_numeros_prueba_editables", return_value={TELEFONO}), \
+             patch.object(main.WhatsAppService, "enviar", new_callable=AsyncMock) as enviar:
+            respuesta = self.cliente.post("/api/plantillas/7/prueba", json={"telefono": TELEFONO})
+        self.assertEqual(respuesta.status_code, 409)
+        self.assertIn("no tiene un centro emisor asociado", respuesta.json()["detail"])
+        enviar.assert_not_awaited()
+
+    def test_prueba_ignora_centro_enviado_por_cliente(self):
+        with patch.object(main, "leer_plantillas", return_value=[PLANTILLA]), \
+             patch.object(main, "config_get", side_effect=self._config), \
+             patch.object(main, "_numeros_prueba_editables", return_value={TELEFONO}), \
+             patch.object(main, "_exigir_centro_envio", return_value={
+                 "codigo": "SMPT", "phoneNumberId": "123456789",
+                 "phoneNumber": "+56900000001"}) as exigir_centro, \
+             patch.object(main.WhatsAppService, "configurada", return_value=True), \
+             patch.object(main.WhatsAppService, "enviar", new_callable=AsyncMock,
+                          return_value=(True, "wamid-prueba", None, "sent")):
+            respuesta = self.cliente.post("/api/plantillas/7/prueba", json={
+                "telefono": TELEFONO, "centro": "OTRO"})
+        self.assertEqual(respuesta.status_code, 200)
+        exigir_centro.assert_called_once_with("SMPT")
 
     def test_rechaza_destinatario_no_autorizado(self):
         with patch.object(main, "leer_plantillas", return_value=[PLANTILLA]), \
@@ -763,7 +786,7 @@ class EndpointPruebaPlantillaTests(unittest.TestCase):
              patch.object(main, "_numeros_prueba_editables", return_value={TELEFONO}), \
              patch.object(main.WhatsAppService, "enviar", new_callable=AsyncMock) as enviar:
             respuesta = self.cliente.post("/api/plantillas/7/prueba", json={
-                "telefono": "+56999998888", "centro": "SMPT", "ejemplos": {"nombre": "Ana"}})
+                "telefono": "+56999998888", "ejemplos": {"nombre": "Ana"}})
         self.assertEqual(respuesta.status_code, 403)
         enviar.assert_not_awaited()
 
@@ -772,7 +795,7 @@ class EndpointPruebaPlantillaTests(unittest.TestCase):
         with patch.object(main, "leer_plantillas", return_value=[pendiente]), \
              patch.object(main.WhatsAppService, "enviar", new_callable=AsyncMock) as enviar:
             respuesta = self.cliente.post("/api/plantillas/7/prueba", json={
-                "telefono": TELEFONO, "centro": "SMPT"})
+                "telefono": TELEFONO})
         self.assertEqual(respuesta.status_code, 400)
         enviar.assert_not_awaited()
 
@@ -784,8 +807,8 @@ class EndpointPruebaPlantillaTests(unittest.TestCase):
              patch.object(main.WhatsAppService, "enviar", new_callable=AsyncMock,
                           return_value=(True, "wamid-prueba", None, "sent")) as enviar, \
              patch.object(main, "auditoria_registrar"):
-            primera = self.cliente.post("/api/plantillas/7/prueba", json={"telefono": TELEFONO, "centro": "SMPT"})
-            segunda = self.cliente.post("/api/plantillas/7/prueba", json={"telefono": TELEFONO, "centro": "SMPT"})
+            primera = self.cliente.post("/api/plantillas/7/prueba", json={"telefono": TELEFONO})
+            segunda = self.cliente.post("/api/plantillas/7/prueba", json={"telefono": TELEFONO})
         self.assertEqual(primera.status_code, 200)
         self.assertEqual(segunda.status_code, 429)
         restantes = int(segunda.headers["Retry-After"])
@@ -800,7 +823,7 @@ class EndpointPruebaPlantillaTests(unittest.TestCase):
              patch.object(main, "config_get", side_effect=self._config), \
              patch.object(main, "_numeros_prueba_editables", return_value={TELEFONO}), \
              patch.object(main.WhatsAppService, "configurada", return_value=True):
-            respuesta = self.cliente.post("/api/plantillas/7/prueba", json={"telefono": TELEFONO, "centro": "SMPT"})
+            respuesta = self.cliente.post("/api/plantillas/7/prueba", json={"telefono": TELEFONO})
         self.assertEqual(respuesta.status_code, 429)
         self.assertEqual(respuesta.headers["Retry-After"], "1")
         self.assertEqual(respuesta.json()["detail"], "Espera 1 segundo antes de repetir esta prueba.")
@@ -814,7 +837,7 @@ class EndpointPruebaPlantillaTests(unittest.TestCase):
                           return_value=(False, None, "Plantilla no aprobada", "failed")), \
              patch.object(main, "auditoria_registrar") as auditoria, \
              patch.object(main, "log_error"):
-            respuesta = self.cliente.post("/api/plantillas/7/prueba", json={"telefono": TELEFONO, "centro": "SMPT"})
+            respuesta = self.cliente.post("/api/plantillas/7/prueba", json={"telefono": TELEFONO})
         self.assertEqual(respuesta.status_code, 502)
         self.assertIn("Plantilla no aprobada", respuesta.json()["detail"])
         auditoria.assert_not_called()

@@ -3803,7 +3803,10 @@ def enviar_prueba_plantilla(plantilla_id: int, body: PruebaPlantillaIn,
         raise HTTPException(403, detail="Elige un número de prueba autorizado en Configuración.")
     if (config_get("metodo_envio") or "").strip() != "api_oficial":
         raise HTTPException(400, detail="Activa api_oficial para enviar una prueba real.")
-    emisor = _exigir_centro_envio(body.centro)
+    centro_plantilla = plantilla.get("centro_codigo")
+    if not centro_plantilla:
+        raise HTTPException(409, detail="Esta plantilla no tiene un centro emisor asociado. Sincronízala desde su clínica antes de probarla.")
+    emisor = _exigir_centro_envio(centro_plantilla)
     servicio_wa = WhatsAppService(phone_number_id=emisor["phoneNumberId"])
     if not servicio_wa.configurada():
         raise HTTPException(400, detail="Configura el token y el número emisor de Meta antes de probar.")

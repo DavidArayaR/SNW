@@ -14,10 +14,10 @@ assert.match(html, /id="grupoEncabezadoMedia"[^>]* hidden/);
 assert.match(app, /encabezado_media_id: encabezadoMediaActivo\(\)/);
 assert.match(app, /encabezado_texto: encabezadoTextoActivo\(\)/);
 assert.match(app, /encabezadoMediaActivo\(\), encabezadoTextoActivo\(\)/);
-const bloqueo = app.split("function actualizarBloqueoCampos() {")[1]?.split("function ")[0];
-assert(bloqueo, "Debe existir el control de bloqueo del editor");
-assert.equal((bloqueo.match(/selCentroPrueba\.disabled = false;/g) || []).length, 2,
-  "El centro emisor de prueba debe quedar habilitado tanto en solo lectura como al editar");
+assert.doesNotMatch(html, /id="selCentroPrueba"/);
+assert.doesNotMatch(app, /selCentroPrueba/);
+assert.match(app, /!centroDePlantillaActiva\(\)/);
+assert.match(app, /body: JSON\.stringify\(\{ telefono, ejemplos: ejemplosPreview\(\) \}\)/);
 const descripcionCuenta = app.split("function descripcionCuentaPlantilla(codigo) {")[1]?.split("function pintarCuentaPlantillaEditor()")[0];
 assert(descripcionCuenta, "Debe existir la descripción del centro de la plantilla");
 assert.match(descripcionCuenta, /cuenta\.nombre.*cuenta\.phoneNumber/);

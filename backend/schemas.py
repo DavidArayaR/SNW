@@ -46,7 +46,6 @@ class GenerarPlantillaIAIn(BaseModel):
 
 class PruebaPlantillaIn(BaseModel):
     telefono: str
-    centro: str
     ejemplos: dict[str, str] | None = None
 
 

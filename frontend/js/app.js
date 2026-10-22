@@ -47,6 +47,10 @@ let cuentasPlantillas = [];
 function centroElegido(id) {
   return centrosEmisores.find((c) => c.codigo === $(id)?.value && c.configured) || null;
 }
+function centroDePlantillaActiva() {
+  const codigo = plantillas.find((p) => p.id === activaId)?.centro_codigo;
+  return centrosEmisores.find((c) => c.codigo === codigo && c.configured) || null;
+}
 function cuentaDePlantilla(codigo) {
   return cuentasPlantillas.find((c) => c.codigo === codigo) || null;
 }
@@ -70,7 +74,7 @@ function pintarCuentaPlantillaEditor() {
   aviso.classList.toggle("tpl-cuenta-editor--pendiente", !codigo || !cuentaDePlantilla(codigo)?.wabaId);
 }
 function pintarCentrosEmisores() {
-  for (const id of ["#selCentroConf", "#selProgCentro", "#selCentroPrueba"]) {
+  for (const id of ["#selCentroConf", "#selProgCentro"]) {
     const selector = $(id);
     if (!selector) continue;
     const anterior = selector.value;
@@ -136,7 +140,6 @@ async function cargarCentrosEmisores() {
 cargarCentrosEmisores();
 $("#selCentroConf")?.addEventListener("change", () => { actualizarPasosManual(); actualizarResumenConf(); });
 $("#selProgCentro")?.addEventListener("change", () => { actualizarPasosProg(); cargarCupoProg(true); });
-$("#selCentroPrueba")?.addEventListener("change", actualizarEstadoBotonPrueba);
 
 const listaEl = $("#listaPlantillas");
 const cargandoPlantillasEl = $("#cargandoPlantillas");
@@ -419,7 +422,6 @@ const previewBotones = $("#previewBotones");
 const inpEjemploNombre = $("#inpEjemploNombre");
 const inpEjemploApellido = $("#inpEjemploApellido");
 const previewValidaciones = $("#previewValidaciones");
-const selCentroPrueba = $("#selCentroPrueba");
 const selNumeroPrueba = $("#selNumeroPrueba");
 const btnRecargarNumerosPrueba = $("#btnRecargarNumerosPrueba");
 const btnEnviarPrueba = $("#btnEnviarPrueba");
@@ -1128,7 +1130,7 @@ function ejemplosPreview() {
 
 function actualizarEstadoBotonPrueba() {
   btnEnviarPrueba.disabled = enviandoPrueba || !puedeEnviarPrueba || !activaId ||
-    !selNumeroPrueba.value || !centroElegido("#selCentroPrueba") || hayCambios() || subiendoEncabezado;
+    !selNumeroPrueba.value || !centroDePlantillaActiva() || hayCambios() || subiendoEncabezado;
 }
 
 function mostrarValidaciones(errores, avisos) {
@@ -1239,7 +1241,7 @@ btnEnviarPrueba.addEventListener("click", async () => {
     return toast("Corrige la vista previa y guarda la plantilla antes de probarla.", "error");
   }
   const telefono = selNumeroPrueba.value;
-  const centro = centroElegido("#selCentroPrueba");
+  const centro = centroDePlantillaActiva();
   if (!telefono || !centro || !confirm(`¿Enviar una sola prueba de «${inpNombre.value}» desde ${centro.nombre} (${centro.phoneNumber}) a ${telefono}?`)) return;
   enviandoPrueba = true;
   estadoEnvioPrueba.textContent = "Enviando prueba a Meta…";
@@ -1247,7 +1249,7 @@ btnEnviarPrueba.addEventListener("click", async () => {
   try {
     const res = await fetch(`${API_URL}/${activaId}/prueba`, {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ telefono, centro: centro.codigo, ejemplos: ejemplosPreview() }),
+      body: JSON.stringify({ telefono, ejemplos: ejemplosPreview() }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.detail || `Error ${res.status}`);
@@ -1654,7 +1656,6 @@ function actualizarBloqueoCampos() {
     // Una plantilla aprobada puede estar en solo lectura y aun así probarse.
     inpEjemploNombre.disabled = false;
     inpEjemploApellido.disabled = false;
-    selCentroPrueba.disabled = false;
     selNumeroPrueba.disabled = false;
     btnQuitarEncabezado.disabled = true;
     btnAbrirIA.hidden = true;
@@ -1678,7 +1679,6 @@ function actualizarBloqueoCampos() {
   inpInstruccionIA.disabled = false;
   inpEjemploNombre.disabled = false;
   inpEjemploApellido.disabled = false;
-  selCentroPrueba.disabled = false;
   selNumeroPrueba.disabled = false;
   checkEncabezadoMultimedia.disabled = subiendoEncabezado;
   inpEncabezadoTexto.disabled = checkEncabezadoMultimedia.checked;
