@@ -22,14 +22,15 @@ con la **WhatsApp Business Cloud API** de Meta (v26.0).
 
 SNW incluye cinco centros: `SMPT` (Salud Mental Para Todos), `MS` (Centro Mentalidad Saludable),
 `PS` (PROSALUD), `CP` (Centro Psiquiatrico Huerfanos) y `VS` (VIDA Y SALUD). Se pueden añadir
-otros desde Configuración. Cada clínica tiene cuatro claves en la tabla `configuracion`:
-`<CODIGO>_WSP_PHONE_NUMBER`, `<CODIGO>_WSP_PHONE_NUMBER_ID`, `<CODIGO>_WSP_WABA_ID` y
-`<CODIGO>_CRM_PHONE_NUMBER`. Por ejemplo, para SMPT son `SMPT_WSP_PHONE_NUMBER`,
-`SMPT_WSP_PHONE_NUMBER_ID`, `SMPT_WSP_WABA_ID` y `SMPT_CRM_PHONE_NUMBER`.
-El número CRM puede quedar vacío; los otros tres campos son obligatorios para enviar.
+otros desde Configuración. Cada clínica guarda en `configuracion` su número visible,
+Phone Number ID, WABA ID, Access Token y Verify Token propios con el prefijo
+`<CODIGO>_WSP_`; por ejemplo, `SMPT_WSP_ACCESS_TOKEN` y `SMPT_WSP_VERIFY_TOKEN`.
+`<CODIGO>_CRM_PHONE_NUMBER` es opcional. El número visible, Phone Number ID,
+WABA ID y Access Token son obligatorios para enviar. Cada URL de webhook por
+clínica exige su Verify Token propio. Los Access Token y Verify Token no pueden
+repetirse entre clínicas; el antiguo `wa_token` no sirve de respaldo al enviar.
 
-Todas las clínicas usan exclusivamente `wa_token`, el access token global guardado en
-`configuracion`. Cada clínica debe tener su propio WABA ID; no existe un WABA global de respaldo.
+Cada clínica debe tener su propio WABA ID; no existe un WABA global de respaldo.
 Las plantillas históricas sin clínica se vinculan solo cuando su ID de Meta coincide con uno
 devuelto por la WABA de la clínica elegida al sincronizar. En Configuración → Clínicas, «Verificar en Meta» comprueba que el token
 pueda consultar el WABA y que el Phone Number ID corresponda al número emisor. Los envíos
@@ -38,7 +39,8 @@ solo por compatibilidad histórica; no se utiliza como alternativa automática e
 La migración de claves antiguas `PHONE_NUMER` se ejecuta al iniciar: copia valores no conflictivos;
 ante dos valores distintos conserva ambas claves e informa el conflicto en el registro del servidor.
 
-Los formularios manuales, programados y de prueba de plantilla exigen elegir el centro emisor.
+Los formularios manuales y programados exigen elegir el centro emisor; la prueba de
+plantilla usa automáticamente el centro al que está vinculada.
 Los lotes conservan código, Phone Number ID y número visible. Un programado se detiene si esa
 configuración cambia antes de ejecutarse: debe revisarse y programarse de nuevo. Los registros
 antiguos sin emisor conocido aparecen como «Emisor histórico no identificado».
@@ -182,7 +184,7 @@ configura desde la página y queda legible en la base de datos para quien tenga 
 | App / envío | `entorno` (`desarrollo`/`produccion`), `metodo_envio` (`simulado`/`api_oficial`), `numeros_prueba_dev`, `numeros_prueba_prod`, `intervalo_ms`, `sesion_expira_horas` (horas de inactividad antes de cerrar una sesión sola; 0 = no expiran; por defecto 5), `url_base` |
 | Call center | `<CODIGO>_CRM_PHONE_NUMBER` configura el número de WhatsApp de atención propio de cada clínica. Las claves antiguas `call_center_url`, `call_center_numeros` y `call_center_boton_mensaje*` se conservan por compatibilidad, pero el botón actual no las utiliza. |
 | Correo | `smtp_host`, `smtp_port`, `smtp_user`, `smtp_pass`, `smtp_tls`, `correo_emisor`, `correo_destino` |
-| WhatsApp / Meta | `wa_token` es el único token de acceso; `<CODIGO>_WSP_WABA_ID` identifica la WABA de cada clínica. No se usa WABA ID global. El antiguo `wa_phone_id` permanece por compatibilidad histórica, sin sustituir al Phone Number ID de la clínica al enviar. También se usan `wa_app_id`, `wa_verify_token`, `wa_webhook_path`, `wa_graph_version`, `wa_moneda`, `plantillas_revision_minutos` y `plantillas_badge_aprobada_minutos`. |
+| WhatsApp / Meta | `<CODIGO>_WSP_ACCESS_TOKEN` y `<CODIGO>_WSP_WABA_ID` identifican las credenciales propias de cada clínica; `<CODIGO>_WSP_VERIFY_TOKEN` verifica su webhook. No hay respaldo global para envíos ni para la verificación de URLs por clínica. `wa_token` queda como clave legada sin uso para envíos; `wa_verify_token` y `wa_webhook_path` conservan la URL global. `wa_app_id`, `wa_graph_version`, `wa_moneda`, `plantillas_revision_minutos` y `plantillas_badge_aprobada_minutos` siguen en uso. |
 | Groq | `groq_api_key` (solo desarrollador; guardada en `configuracion`), `groq_limite_hora` (borradores por cuenta y hora, por defecto 12) |
 | Límites de envío Meta | `wa_rate_limit_activo` (frenado proactivo on/off), `wa_rate_limit_umbral_pct` (% de cuota a partir del cual se espera, 80), `wa_rate_limit_pausa_max_s` (espera entre mensajes al 100 % de cuota, 30), `wa_rate_limit_espera_defecto_s` (espera tras un 429 sin dato, 60), `wa_rate_limit_reintentos` (reintentos de una llamada tras un 429, 3), `wa_throughput_mps` (ritmo máximo de salida hacia Meta, msg/s; 0 = sin límite; 10), `wa_messaging_limit_24h` (usuarios únicos que se pueden contactar en 24 h antes de bloquear el envío masivo; 0 = ilimitado; 2000) |
 
@@ -196,7 +198,7 @@ pero no garantiza detectarlos todos: nunca incluyas información real de pacient
 instrucción. Para activar la función, crea una clave en [Groq Console](https://console.groq.com/keys) y guárdala en
 Configuración → Asistente de plantillas · Groq. No reutilices la clave antigua de Gemini;
 esta permanece en la base de datos sin usarse. Las credenciales `smtp_pass`,
-`wa_token`, `wa_verify_token`, `wa_app_secret` y `groq_api_key` se guardan
+Los tokens por clínica, `wa_verify_token`, `wa_app_secret` y `groq_api_key` se guardan
 únicamente en la tabla `configuracion` y se editan en campos enmascarados de la página de Configuración,
 que conserva su acceso restringido a desarrolladores. No se necesita un archivo
 de clave adicional ni una variable nueva en `.env`. **Estos valores quedan legibles
@@ -572,6 +574,18 @@ Cada especialidad vive en **una sola tabla** `pacientes_<slug>` dentro de `snw_b
 |---|---|---|
 | GET | `/api/whatsapp/webhook` | Verificación inicial (`hub.mode`, `hub.verify_token`, `hub.challenge`) |
 | POST | `/api/whatsapp/webhook` | Recepción de eventos: mensajes entrantes y cambios de estado |
+| GET | `/api/whatsapp/webhook/{CODIGO}` | Verificación de la URL exclusiva de una clínica, por ejemplo `SMPT` |
+| POST | `/api/whatsapp/webhook/{CODIGO}` | Eventos de la WABA y el Phone Number ID configurados para esa clínica |
+
+La URL global sigue disponible. En **Configuración → Clínicas**, cada ficha muestra una
+URL propia para copiar, formada por `url_base` y `/api/whatsapp/webhook/{CODIGO}`.
+Las URLs por clínica exigen su Verify Token propio, guardado en
+`{CODIGO}_WSP_VERIFY_TOKEN`. Su App Secret puede ser propio (`{CODIGO}_WSP_APP_SECRET`)
+o usar el global si comparten la misma app. Antes de procesar un POST se comprueba la firma y se
+rechazan eventos cuyo WABA ID o Phone Number ID no corresponda al centro de la URL.
+Crear estas rutas no modifica las suscripciones en Meta: configura cada callback en
+la app correspondiente o usa un override por WABA. Conserva la URL global mientras
+terminas la migración y pruebas los callbacks nuevos.
 
 ## Integración con WhatsApp Business Cloud API
 
@@ -823,14 +837,13 @@ volver a procesarlo.
 4. En **Configuración → Clínicas**, completa para cada clínica el número emisor,
    `Phone Number ID` y `WABA ID`. Para SMPT, configura también
    `SMPT_CRM_PHONE_NUMBER` si usarás el botón de derivación. Repite para MS, PS, CP y VS.
-   Cada WABA debe dar acceso al mismo token global y tener sus plantillas aprobadas.
-5. En **Configuración → WhatsApp**, guarda:
-   - `App ID` de Meta for Developers → `wa_app_id` (para plantillas con encabezado)
-   - `Access Token` global → `wa_token` (usa uno de *System User* si necesitas que no
-     caduque; los tokens temporales de API Setup expiran en 24 h)
-6. Define tu propio **Verify Token** → `wa_verify_token`, y configura el **Webhook**
-   de la App con `https://TU-DOMINIO/api/whatsapp/webhook` más ese token. Suscríbelo al
-   menos a `messages`.
+   Cada WABA debe dar acceso al token propio de su clínica y tener sus plantillas aprobadas.
+5. En **Configuración → WhatsApp**, guarda el `App ID` de Meta for Developers →
+   `wa_app_id` (para plantillas con encabezado). En **Configuración → Clínicas**,
+   guarda un Access Token distinto para cada centro, con acceso a su WABA.
+6. Define un **Verify Token distinto por clínica**. Copia la URL específica de
+   cada ficha y asígnala a su WABA en Meta; suscríbela al menos a `messages`.
+   Si cada clínica usa una app distinta, configura también su App Secret propio.
 7. Pulsa **Verificar en Meta** en la tarjeta de cada clínica. Si hay varias WABA,
    suscríbelas a la aplicación del webhook para que SNW reciba las respuestas.
 8. Pon `metodo_envio` en `api_oficial` y haz una prueba con un número autorizado.

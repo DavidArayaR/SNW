@@ -4505,13 +4505,11 @@ _CONFIG_SECCIONES = [
     {
         "id": "whatsapp", "titulo": "WhatsApp · Meta Cloud API", "icono": "fa-whatsapp", "marca": True,
         "campos": [
-            {"clave": "wa_token", "etiqueta": "Access token global", "tipo": "password",
-             "ayuda": "Único token para todos los números y WABA de las clínicas."},
             {"clave": "wa_app_id", "etiqueta": "App ID de Meta", "tipo": "text",
              "ayuda": "Necesario para registrar plantillas con imagen o GIF de encabezado."},
-            {"clave": "wa_verify_token", "etiqueta": "Verify token del webhook", "tipo": "password"},
-            {"clave": "wa_app_secret", "etiqueta": "App Secret de Meta", "tipo": "password",
-             "ayuda": "Se usa para verificar la firma de los webhook POST. Es distinto del Verify token y del Access token."},
+            {"clave": "wa_verify_token", "etiqueta": "Verify token del webhook global (compatibilidad)", "tipo": "password"},
+            {"clave": "wa_app_secret", "etiqueta": "App Secret global de Meta", "tipo": "password",
+             "ayuda": "Respaldo de firma para webhooks de clínicas sin App Secret propio y para la URL antigua."},
             {"clave": "wa_webhook_path", "etiqueta": "Ruta del webhook", "tipo": "text",
              "ayuda": "Se concatena a la URL base. Debe empezar con «/». Ej: /api/whatsapp/webhook"},
             {"tipo": "derivado", "etiqueta": "URL del webhook (para pegar en Meta)",
@@ -4598,6 +4596,15 @@ def _seccion_centro(codigo: str, nombre: str, *, activa: bool = True) -> dict:
              "ayuda": "Identificador numérico de este número en Meta."},
             {"clave": f"{codigo}_WSP_WABA_ID", "etiqueta": "WABA ID (obligatorio para enviar)", "tipo": "text",
              "ayuda": "Debe pertenecer al Phone Number ID de esta clínica. Las plantillas se aprueban por WABA."},
+            {"clave": f"{codigo}_WSP_ACCESS_TOKEN", "etiqueta": "Access token de esta clínica", "tipo": "password",
+             "ayuda": "Token con acceso a la WABA y al número de esta clínica. No se comparte con otras clínicas."},
+            {"tipo": "derivado", "etiqueta": "URL del webhook de esta clínica",
+             "formula": ["url_base"], "ruta_fija": f"/api/whatsapp/webhook/{codigo}",
+             "ayuda": "Usa esta URL en la app de Meta de esta clínica o como callback alternativo de su WABA."},
+            {"clave": f"{codigo}_WSP_VERIFY_TOKEN", "etiqueta": "Verify token de esta clínica", "tipo": "password",
+             "ayuda": "Usa un valor distinto al de las otras clínicas al registrar su URL de webhook en Meta."},
+            {"clave": f"{codigo}_WSP_APP_SECRET", "etiqueta": "App Secret propio (opcional)", "tipo": "password",
+             "ayuda": "Si esta clínica usa otra app de Meta, pega su App Secret. Vacío: usa el global."},
             {"clave": f"{codigo}_CRM_PHONE_NUMBER", "etiqueta": "Número WhatsApp del CRM", "tipo": "text",
              "ayuda": "Destino del botón «Ir a call center» para pacientes de esta clínica. Opcional para campañas."},
             {"clave": f"{codigo}_WSP_RATE_LIMIT_MODE", "etiqueta": "Modalidad del número", "tipo": "select",
@@ -4619,7 +4626,8 @@ def _config_valores(cfg: dict | None = None) -> dict:
     cfg = cfg if cfg is not None else config_all()
     claves = set(CONFIG_DEFAULTS)
     for codigo in catalogo_centros(cfg, incluir_desactivadas=True):
-        claves.update(c["clave"] for c in _seccion_centro(codigo, "")["campos"])
+        claves.update(c["clave"] for c in _seccion_centro(codigo, "")["campos"]
+                      if "clave" in c)
     return {c: ("" if c == "wa_token" or cfg.get(c) is None else str(cfg.get(c)))
             for c in claves}
 
@@ -4775,7 +4783,8 @@ def eliminar_clinica_whatsapp(codigo: str, sesion: dict = Depends(solo_dev)):
         adicionales.append({"codigo": codigo, "nombre": catalogo[codigo],
                             "activo": False, "eliminada": True})
     cambios = {"wa_clinicas_adicionales": json.dumps(adicionales, ensure_ascii=False)}
-    cambios.update({campo["clave"]: "" for campo in _seccion_centro(codigo, catalogo[codigo])["campos"]})
+    cambios.update({campo["clave"]: "" for campo in _seccion_centro(codigo, catalogo[codigo])["campos"]
+                    if "clave" in campo})
     # Una clínica eliminada no debe conservar una credencial heredada sin uso.
     cambios[f"{codigo}_WSP_ACCESS_TOKEN"] = ""
     config_set(cambios)
@@ -4787,12 +4796,10 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
     cambios: dict[str, str] = {}
     catalogo = catalogo_centros(incluir_desactivadas=True)
     claves_clinicas = {c["clave"] for codigo, nombre in catalogo.items()
-                       for c in _seccion_centro(codigo, nombre)["campos"]}
+                       for c in _seccion_centro(codigo, nombre)["campos"] if "clave" in c}
     for clave, valor in (body.cambios or {}).items():
         if clave == "wa_clinicas_adicionales":
             raise HTTPException(400, detail="Usa «Añadir clínica» para modificar el catálogo.")
-        if clave.endswith("_WSP_ACCESS_TOKEN"):
-            raise HTTPException(400, detail="Los tokens por clínica ya no se utilizan. Configura el access token global.")
         if clave not in CONFIG_DEFAULTS and clave not in claves_clinicas:
             raise HTTPException(400, detail=f"Clave de configuración desconocida: «{clave}»")
         v = "" if valor is None else str(valor).strip()
@@ -4851,11 +4858,25 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
                 raise HTTPException(422, detail="La clave de Groq es demasiado extensa.")
         if clave.endswith("_WSP_ACCESS_TOKEN") and len(v) > 2048:
             raise HTTPException(422, detail="El access token es demasiado extenso.")
+        if clave.endswith(("_WSP_VERIFY_TOKEN", "_WSP_APP_SECRET")) and len(v) > 512:
+            raise HTTPException(422, detail="La credencial del webhook es demasiado extensa.")
         if clave.endswith("_WSP_WABA_ID") and v and not re.fullmatch(r"[1-9]\d{4,30}", v):
             raise HTTPException(422, detail="El WABA ID debe ser numérico.")
         if clave.endswith("_CRM_PHONE_NUMBER") and v and not re.fullmatch(r"\+?[1-9]\d{7,14}", v):
             raise HTTPException(422, detail="El número CRM debe tener código de país y entre 8 y 15 dígitos.")
         cambios[clave] = v
+
+    if any(clave.endswith(("_WSP_ACCESS_TOKEN", "_WSP_VERIFY_TOKEN")) for clave in cambios):
+        estado = {**config_all(refresh=True), **cambios}
+        for sufijo, etiqueta in (("_WSP_ACCESS_TOKEN", "access token"),
+                                ("_WSP_VERIFY_TOKEN", "Verify token")):
+            usados: set[str] = set()
+            for codigo in catalogo:
+                valor = str(estado.get(f"{codigo}{sufijo}") or "").strip()
+                if valor and valor in usados:
+                    raise HTTPException(422, detail=f"Cada clínica debe tener un {etiqueta} distinto.")
+                if valor:
+                    usados.add(valor)
 
     if any(clave in cambios for codigo in catalogo for clave in claves_centro(codigo)):
         estado = {**config_all(), **cambios}
@@ -8581,16 +8602,16 @@ def _obtener_moneda_meta() -> str | None:
     """Usa moneda automática solo si todas las WABA activas coinciden."""
     from whatsapp_service import graph_url
     cfg = config_all(refresh=True)
-    token = (cfg.get("wa_token") or "").strip()
-    wabas = {canal["wabaId"] for canal in listar_canales(cfg)
-             if canal["configured"] and canal.get("wabaId")}
-    if not token or not wabas:
+    canales = [canal for canal in listar_canales(cfg)
+               if canal["configured"] and canal.get("wabaId")]
+    if not canales:
         return None
     try:
         with httpx.Client(timeout=15) as c:
             monedas = set()
-            for waba_id in sorted(wabas):
-                r = c.get(f"{graph_url()}/{waba_id}",
+            for canal in canales:
+                token = credenciales_centro(canal["phoneNumberId"], cfg)["token"]
+                r = c.get(f"{graph_url()}/{canal['wabaId']}",
                           params={"fields": "currency"},
                           headers={"Authorization": f"Bearer {token}"})
                 if r.status_code != 200:

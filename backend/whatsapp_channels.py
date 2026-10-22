@@ -66,7 +66,7 @@ def credenciales_centro(phone_id: str, config: dict | None = None) -> dict:
         return {"token": "", "waba_id": ""}
     codigo = canal["codigo"]
     return {
-        "token": str(valores.get("wa_token") or "").strip(),
+        "token": str(valores.get(f"{codigo}_WSP_ACCESS_TOKEN") or "").strip(),
         "waba_id": str(valores.get(f"{codigo}_WSP_WABA_ID") or "").strip(),
     }
 
@@ -95,8 +95,8 @@ def listar_canales(config: dict | None = None, *, incluir_inactivas: bool = Fals
             razones.append("Falta WABA ID")
         elif not re.fullmatch(r"[1-9]\d{4,30}", waba_id):
             razones.append("WABA ID inválido")
-        if not str(valores.get("wa_token") or "").strip():
-            razones.append("Falta access token global")
+        if not str(valores.get(f"{codigo}_WSP_ACCESS_TOKEN") or "").strip():
+            razones.append("Falta access token de la clínica")
         avisos = []
         if not crm_numero:
             avisos.append("Número CRM pendiente")

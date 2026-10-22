@@ -1,4 +1,4 @@
-"""Comprueba con Meta que el token global puede usar el número de cada WABA."""
+"""Comprueba con Meta que el token de la clínica puede usar su WABA y número."""
 
 import hashlib
 import re
@@ -18,10 +18,11 @@ def verificar_canal_meta(canal: dict, config: dict, *, mostrar_numeros: bool = F
     phone_id = str(canal.get("phoneNumberId") or "").strip()
     waba_id = str(canal.get("wabaId") or "").strip()
     numero = re.sub(r"\D", "", str(canal.get("phoneNumber") or ""))
-    token = str(config.get("wa_token") or "").strip()
+    codigo = str(canal.get("codigo") or "").strip()
+    token = str(config.get(f"{codigo}_WSP_ACCESS_TOKEN") or "").strip()
     version = str(config.get("wa_graph_version") or "v26.0").strip()
     if not (phone_id and waba_id and numero and token):
-        return False, "Falta número emisor, Phone Number ID, WABA ID o access token global."
+        return False, "Falta número emisor, Phone Number ID, WABA ID o access token de la clínica."
     if not re.fullmatch(r"v\d+\.\d+", version):
         return False, "La versión de Graph API configurada no es válida."
     clave = (hashlib.sha256(token.encode()).hexdigest(), waba_id, phone_id, numero,
@@ -47,7 +48,7 @@ def verificar_canal_meta(canal: dict, config: dict, *, mostrar_numeros: bool = F
                 respuesta = cliente.get(url, params=parametros,
                                         headers={"Authorization": f"Bearer {token}"})
                 if respuesta.status_code != 200:
-                    return guardar(False, "Meta no autorizó consultar los números de este WABA con el access token global.")
+                    return guardar(False, "Meta no autorizó consultar los números de este WABA con el access token de la clínica.")
                 datos = respuesta.json()
                 for item in datos.get("data") or []:
                     if str(item.get("id") or "") != phone_id:
@@ -79,5 +80,5 @@ def verificar_canal_meta(canal: dict, config: dict, *, mostrar_numeros: bool = F
                 if not cursor or not (datos.get("paging") or {}).get("next"):
                     break
     except (httpx.HTTPError, ValueError, TypeError):
-        return guardar(False, "No se pudo verificar el canal en Meta. Revisa la conexión y el acceso del token global.")
+        return guardar(False, "No se pudo verificar el canal en Meta. Revisa la conexión y el acceso del token de la clínica.")
     return guardar(False, "El Phone Number ID no pertenece al WABA ID configurado para esta clínica.")

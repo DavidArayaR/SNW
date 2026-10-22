@@ -557,8 +557,10 @@ class WhatsAppService:
 
     @property
     def token(self) -> str:
-        # Una sola credencial en configuracion para todas las clínicas.
-        return (config_get("wa_token") or "").strip()
+        # Nunca usar otra clínica ni el token global como respaldo implícito.
+        if not self.phone_number_id:
+            return ""
+        return credenciales_centro(self.phone_number_id)["token"]
 
     @property
     def phone_number_id(self) -> str:

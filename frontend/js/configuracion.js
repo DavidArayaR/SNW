@@ -523,7 +523,7 @@ function render(secciones) {
           const [kBase, kRuta] = c.formula || [];
           salida.value = unirUrl(
             campos[kBase] ? valorActual(kBase) : "",
-            campos[kRuta] ? valorActual(kRuta) : ""
+            c.ruta_fija || (campos[kRuta] ? valorActual(kRuta) : "")
           );
         };
         derivados.push(recomputar);

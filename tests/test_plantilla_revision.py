@@ -144,12 +144,12 @@ class PresentacionPlantillaTests(unittest.TestCase):
 
 class ComponentesMetaEditablesTests(unittest.TestCase):
     def test_creacion_envia_encabezado_y_pie_a_meta(self):
-        configuracion = {"wa_token": "token-test"}
-        with patch("whatsapp_service.config_get", side_effect=lambda clave, *args: configuracion.get(clave, "")), \
+        with patch("whatsapp_service.credenciales_centro", return_value={
+                 "token": "token-test", "waba_id": "waba-test"}), \
              patch.object(WhatsAppService, "waba_id", "waba-test"), \
              patch.object(WhatsAppApiClient, "crear_template", new_callable=AsyncMock,
                           return_value={"id": "meta-7", "status": "PENDING"}) as crear:
-            resultado = WhatsAppService().crear_template_meta(
+            resultado = WhatsAppService(phone_number_id="phone-test").crear_template_meta(
                 "saludo", "Hola", "es", "MARKETING", encabezado_texto="Oferta",
                 pie_texto="Notificaciones SNW")
         self.assertTrue(resultado["ok"])
@@ -160,13 +160,13 @@ class ComponentesMetaEditablesTests(unittest.TestCase):
         self.assertEqual(componentes[2]["text"], "Notificaciones SNW")
 
     def test_edicion_reenvia_encabezado_y_pie_a_meta(self):
-        configuracion = {"wa_token": "token-test", "wa_phone_id": "phone-test"}
-        with patch("whatsapp_service.config_get", side_effect=lambda clave, *args: configuracion.get(clave, "")), \
+        with patch("whatsapp_service.credenciales_centro", return_value={
+                 "token": "token-test", "waba_id": "waba-test"}), \
              patch.object(WhatsAppApiClient, "obtener_template", new_callable=AsyncMock,
                           return_value={"category": "MARKETING"}), \
              patch.object(WhatsAppApiClient, "editar_template", new_callable=AsyncMock,
                           return_value={"status": "PENDING"}) as editar:
-            resultado = WhatsAppService().editar_template_meta(
+            resultado = WhatsAppService(phone_number_id="phone-test").editar_template_meta(
                 "meta-7", "Hola", "MARKETING", encabezado_texto="Nueva oferta",
                 pie_texto="Nuevo pie")
         self.assertTrue(resultado["ok"])

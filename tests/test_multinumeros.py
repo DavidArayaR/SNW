@@ -25,19 +25,48 @@ def configuracion():
         valores[f"{codigo}_WSP_PHONE_NUMBER"] = f"+5690000000{i}"
         valores[f"{codigo}_WSP_PHONE_NUMBER_ID"] = f"123450000{i}"
         valores[f"{codigo}_WSP_WABA_ID"] = f"223450000{i}"
+        valores[f"{codigo}_WSP_ACCESS_TOKEN"] = f"token-{codigo}"
+        valores[f"{codigo}_WSP_VERIFY_TOKEN"] = f"verify-{codigo}"
     return valores
 
 
 class MultiNumerosTests(unittest.TestCase):
-    def test_cinco_clinicas_tienen_waba_propio_y_unico_token(self):
+    def test_cinco_clinicas_tienen_waba_y_token_propios(self):
         cfg = configuracion()
         canales = listar_canales(cfg)
         self.assertEqual({c["codigo"] for c in canales}, {"SMPT", "MS", "PS", "CP", "VS"})
         self.assertEqual(len({c["wabaId"] for c in canales}), 5)
+        self.assertEqual(len({cfg[f"{c['codigo']}_WSP_ACCESS_TOKEN"] for c in canales}), 5)
         self.assertTrue(all(c["configured"] for c in canales))
         for canal in canales:
             self.assertEqual(credenciales_centro(canal["phoneNumberId"], cfg),
-                             {"token": "global", "waba_id": canal["wabaId"]})
+                             {"token": f"token-{canal['codigo']}", "waba_id": canal["wabaId"]})
+        with patch("db.config_all", return_value=cfg):
+            self.assertEqual(WhatsAppService(phone_number_id=canales[0]["phoneNumberId"]).token,
+                             f"token-{canales[0]['codigo']}")
+            self.assertEqual(WhatsAppService(phone_number_id=canales[1]["phoneNumberId"]).token,
+                             f"token-{canales[1]['codigo']}")
+
+    def test_global_no_sustituye_token_faltante_de_clinica(self):
+        cfg = configuracion()
+        cfg.pop("SMPT_WSP_ACCESS_TOKEN")
+        canal = next(c for c in listar_canales(cfg) if c["codigo"] == "SMPT")
+        self.assertFalse(canal["configured"])
+        self.assertIn("Falta access token de la clínica", canal["problemas"])
+        self.assertEqual(credenciales_centro(canal["phoneNumberId"], cfg)["token"], "")
+
+    def test_configuracion_rechaza_tokens_repetidos_entre_clinicas(self):
+        cfg = configuracion()
+        with patch("main.config_all", return_value=cfg), \
+             patch("main.config_set") as guardar:
+            for clave, duplicado in (
+                    ("MS_WSP_ACCESS_TOKEN", cfg["SMPT_WSP_ACCESS_TOKEN"]),
+                    ("MS_WSP_VERIFY_TOKEN", cfg["SMPT_WSP_VERIFY_TOKEN"])):
+                with self.subTest(clave=clave), self.assertRaises(main.HTTPException) as error:
+                    main.actualizar_configuracion_completa(
+                        main.ConfigTodoIn(cambios={clave: duplicado}), sesion={})
+                self.assertEqual(error.exception.status_code, 422)
+            guardar.assert_not_called()
 
     def test_estadisticas_pueden_elegir_clinica_inactiva_con_historial(self):
         cfg = configuracion()
@@ -88,8 +117,11 @@ class MultiNumerosTests(unittest.TestCase):
             fabrica.return_value.__enter__.return_value.get.side_effect = respuestas
             self.assertIsNone(main._obtener_moneda_meta())
             self.assertEqual(fabrica.return_value.__enter__.return_value.get.call_count, 2)
+            llamadas = fabrica.return_value.__enter__.return_value.get.call_args_list
+            self.assertEqual([llamada.kwargs["headers"]["Authorization"] for llamada in llamadas],
+                             [f"Bearer token-{canal['codigo']}" for canal in canales[:2]])
 
-    def test_meta_confirma_asociacion_waba_numero_con_token_global(self):
+    def test_meta_confirma_asociacion_waba_numero_con_token_de_clinica(self):
         cfg = configuracion()
         canal = listar_canales(cfg)[0]
         respuesta = MagicMock(status_code=200)
@@ -101,11 +133,11 @@ class MultiNumerosTests(unittest.TestCase):
         self.assertTrue(ok)
         llamada = fabrica.return_value.__enter__.return_value.get.call_args
         self.assertIn(canal["wabaId"], llamada.args[0])
-        self.assertEqual(llamada.kwargs["headers"]["Authorization"], "Bearer global")
+        self.assertEqual(llamada.kwargs["headers"]["Authorization"], "Bearer token-SMPT")
 
     def test_meta_bloquea_waba_sin_permiso_o_numero_ajeno(self):
         cfg = configuracion()
-        cfg["wa_token"] = "secreto-prueba"
+        cfg["MS_WSP_ACCESS_TOKEN"] = "secreto-prueba"
         canal = listar_canales(cfg)[1]
         respuesta = MagicMock(status_code=403)
         with patch("whatsapp_channel_verification.httpx.Client") as fabrica:
@@ -113,7 +145,7 @@ class MultiNumerosTests(unittest.TestCase):
             ok, mensaje = verificar_canal_meta(canal, cfg)
         self.assertFalse(ok)
         self.assertNotIn("secreto-prueba", mensaje)
-        cfg["wa_token"] = "secreto-prueba-2"
+        cfg["MS_WSP_ACCESS_TOKEN"] = "secreto-prueba-2"
         respuesta.status_code = 200
         respuesta.json.return_value = {"data": [{"id": "9999999999"}]}
         with patch("whatsapp_channel_verification.httpx.Client") as fabrica:
@@ -124,7 +156,7 @@ class MultiNumerosTests(unittest.TestCase):
 
     def test_meta_indica_terminaciones_si_phone_id_tiene_otro_numero(self):
         cfg = configuracion()
-        cfg["wa_token"] = "token-para-comparacion"
+        cfg["SMPT_WSP_ACCESS_TOKEN"] = "token-para-comparacion"
         canal = listar_canales(cfg)[0]
         respuesta = MagicMock(status_code=200)
         respuesta.json.return_value = {"data": [{"id": canal["phoneNumberId"],
@@ -161,28 +193,26 @@ class MultiNumerosTests(unittest.TestCase):
         self.assertEqual(resultado[0], False)
         self.assertEqual(resultado[2], "Sin permiso")
 
-    def test_clinica_adicional_usa_waba_propio_y_token_global(self):
+    def test_clinica_adicional_requiere_token_propio(self):
         valores = configuracion()
         valores.update({
             "wa_clinicas_adicionales": json.dumps([{"codigo": "C1A2B3C4", "nombre": "Clínica Norte"}]),
             "C1A2B3C4_WSP_PHONE_NUMBER": "+56988887777",
             "C1A2B3C4_WSP_PHONE_NUMBER_ID": "9876543210",
-            "wa_token": "global",
         })
         self.assertEqual(catalogo_centros(valores)["C1A2B3C4"], "Clínica Norte")
         self.assertEqual(resolver_phone_id("9876543210", valores)["codigo"], "C1A2B3C4")
         self.assertEqual(credenciales_centro("9876543210", valores),
-                         {"token": "global", "waba_id": ""})
+                         {"token": "", "waba_id": ""})
         valores["C1A2B3C4_WSP_ACCESS_TOKEN"] = "específico"
         valores["C1A2B3C4_WSP_WABA_ID"] = "222222"
         self.assertEqual(credenciales_centro("9876543210", valores),
-                         {"token": "global", "waba_id": "222222"})
+                         {"token": "específico", "waba_id": "222222"})
         self.assertEqual(politica("9876543210", valores)["centro"], "C1A2B3C4")
         with patch("whatsapp_service.credenciales_centro",
                    return_value=credenciales_centro("9876543210", valores)):
             servicio = WhatsAppService(phone_number_id="9876543210")
-            with patch("whatsapp_service.config_get", return_value="global"):
-                self.assertEqual((servicio.token, servicio.waba_id), ("global", "222222"))
+            self.assertEqual((servicio.token, servicio.waba_id), ("específico", "222222"))
 
     def test_crear_clinica_no_modifica_las_existentes(self):
         with patch("main.config_all", return_value={"wa_clinicas_adicionales": "[]"}), \
@@ -272,7 +302,7 @@ class MultiNumerosTests(unittest.TestCase):
             config = main.obtener_configuracion_completa(sesion={})
         seccion = next(s for s in config["secciones"] if s["id"] == "centro_smpt")
         self.assertFalse(seccion["activa"])
-        self.assertNotIn("SMPT_WSP_ACCESS_TOKEN", config["valores"])
+        self.assertEqual(config["valores"]["SMPT_WSP_ACCESS_TOKEN"], "secreto")
         with patch("main.config_all", return_value=valores), \
              patch("main.config_set") as guardar, \
              patch("main.auditoria_registrar") as auditar:
