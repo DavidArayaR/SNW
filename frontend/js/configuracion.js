@@ -38,7 +38,7 @@ function tabDeSeccion(id) {
   if (id.startsWith("centro_")) return "clinicas";
   if (id === "correo") return "correo";
   if (id === "whatsapp") return "whatsapp";
-  if (id === "ia" || id === "call_center") return "integraciones";
+  if (id === "ia" || id === "call_center" || id === "reagendar") return "integraciones";
   return "general";
 }
 
@@ -486,6 +486,45 @@ function render(secciones) {
       }
     }
     const grid = panel.querySelector(".config-campos");
+    if (s.id === "reagendar") {
+      const accion = document.createElement("div");
+      accion.className = "config-clinicas-acciones";
+      const boton = document.createElement("button");
+      boton.type = "button";
+      boton.className = "btn btn--ghost";
+      boton.textContent = "Generar / rotar token de integración";
+      const estado = document.createElement("p");
+      estado.className = "field__hint";
+      estado.setAttribute("role", "status");
+      accion.append(boton, estado);
+      grid.before(accion);
+      boton.addEventListener("click", async () => {
+        if (!confirm("Se invalidará el token anterior del sistema externo. ¿Continuar?")) return;
+        boton.disabled = true;
+        try {
+          const res = await fetch("api/v1/paciente-reagendar/token", {
+            method: "POST", headers: authHeaders() });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.detail || "No se pudo generar el token.");
+          try {
+            await navigator.clipboard.writeText(data.token);
+            estado.textContent = "Token nuevo copiado al portapapeles. Pégalo ahora en el sistema externo; no volverá a mostrarse.";
+          } catch {
+            const entrada = document.createElement("input");
+            entrada.type = "text";
+            entrada.readOnly = true;
+            entrada.value = data.token;
+            entrada.setAttribute("aria-label", "Nuevo token de integración");
+            estado.replaceChildren("Copia este token ahora: ", entrada);
+            entrada.select();
+          }
+        } catch (error) {
+          estado.textContent = error.message;
+        } finally {
+          boton.disabled = false;
+        }
+      });
+    }
     const pendientes = Number(estadoSupresion.pendientes || 0) +
       Number(estadoSupresion.procesando || 0);
     if (s.id === "whatsapp" && pendientes > 0) {

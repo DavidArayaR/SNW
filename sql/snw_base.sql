@@ -91,6 +91,53 @@ CREATE TABLE IF NOT EXISTS log_envios (
   INDEX idx_log_area (area_id)
 );
 
+-- Importación idempotente de citas atendidas recibidas por API externa.
+-- Nunca se guarda el RUT ni se activa el envío por crear esta tabla.
+CREATE TABLE IF NOT EXISTS paciente_reagendar (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  fecha DATE NOT NULL,
+  ventana VARCHAR(5) NOT NULL,
+  clinica_id INT NULL,
+  clinica_nombre VARCHAR(100) NOT NULL,
+  reservo_cita_uuid VARCHAR(80) COLLATE utf8mb4_bin NOT NULL,
+  paciente_nombre VARCHAR(200) NOT NULL,
+  paciente_telefono VARCHAR(40) NULL,
+  paciente_telefono_normalizado VARCHAR(20) NULL,
+  doctor_nombre VARCHAR(200) NULL,
+  inicio_cita DATETIME NOT NULL,
+  centro_codigo VARCHAR(10) NULL,
+  autorizado_contacto TINYINT(1) NOT NULL DEFAULT 0,
+  estado_envio VARCHAR(20) NOT NULL DEFAULT 'PENDIENTE',
+  intentos_envio INT UNSIGNED NOT NULL DEFAULT 0,
+  reservado_en DATETIME NULL,
+  reserva_token CHAR(32) NULL,
+  ultimo_intento_en DATETIME NULL,
+  proximo_reintento_en DATETIME NULL,
+  enviado_en DATETIME NULL,
+  whatsapp_message_id VARCHAR(255) NULL,
+  whatsapp_phone_number_id VARCHAR(100) NULL,
+  whatsapp_numero_emisor VARCHAR(40) NULL,
+  plantilla_clave VARCHAR(80) NULL,
+  envio_id INT NULL,
+  log_envio_id INT NULL,
+  ultimo_error_codigo VARCHAR(60) NULL,
+  ultimo_error_detalle VARCHAR(255) NULL,
+  importado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  actualizado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_paciente_reagendar_cita (reservo_cita_uuid),
+  KEY idx_reagendar_estado (estado_envio, proximo_reintento_en),
+  KEY idx_reagendar_centro (centro_codigo, estado_envio),
+  KEY idx_reagendar_fecha (fecha, ventana),
+  KEY idx_reagendar_wa_id (whatsapp_message_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS reagendar_import_quota (
+  actor_hash CHAR(64) NOT NULL,
+  ventana BIGINT NOT NULL,
+  intentos INT UNSIGNED NOT NULL DEFAULT 0,
+  PRIMARY KEY (actor_hash, ventana)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS whatsapp_eventos (
   id INT AUTO_INCREMENT PRIMARY KEY,
   clave VARCHAR(64) NOT NULL,

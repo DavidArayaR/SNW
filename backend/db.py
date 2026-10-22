@@ -139,6 +139,12 @@ CONFIG_DEFAULTS = {
     "wa_token": "",
     "wa_phone_id": "",
     "wa_clinicas_adicionales": "[]",
+    # Integración de citas atendidas: la credencial se genera por API y solo
+    # su huella se conserva aquí. El despacho permanece apagado por defecto.
+    "reagendar_api_token_hash": "",
+    "reagendar_envio_activo": "false",
+    "reagendar_plantillas_json": "{}",
+    "reagendar_clinicas_ids": "{}",
     "wa_app_id": "",
     "wa_verify_token": "",
     "wa_app_secret": "",
@@ -254,6 +260,50 @@ def asegurar_tabla_config() -> None:
             # la fila heredada para que no reaparezca en configuraciones.
             cur.execute("DELETE FROM configuracion WHERE clave = 'wa_business_account_id'")
             _migrar_claves_centro(cur)
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS paciente_reagendar ("
+                " id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,"
+                " fecha DATE NOT NULL, ventana VARCHAR(5) NOT NULL,"
+                " clinica_id INT NULL, clinica_nombre VARCHAR(100) NOT NULL,"
+                " reservo_cita_uuid VARCHAR(80) COLLATE utf8mb4_bin NOT NULL,"
+                " paciente_nombre VARCHAR(200) NOT NULL,"
+                " paciente_telefono VARCHAR(40) NULL,"
+                " paciente_telefono_normalizado VARCHAR(20) NULL,"
+                " doctor_nombre VARCHAR(200) NULL, inicio_cita DATETIME NOT NULL,"
+                " centro_codigo VARCHAR(10) NULL,"
+                " autorizado_contacto TINYINT(1) NOT NULL DEFAULT 0,"
+                " estado_envio VARCHAR(20) NOT NULL DEFAULT 'PENDIENTE',"
+                " intentos_envio INT UNSIGNED NOT NULL DEFAULT 0,"
+                " reservado_en DATETIME NULL, reserva_token CHAR(32) NULL,"
+                " ultimo_intento_en DATETIME NULL, proximo_reintento_en DATETIME NULL,"
+                " enviado_en DATETIME NULL, whatsapp_message_id VARCHAR(255) NULL,"
+                " whatsapp_phone_number_id VARCHAR(100) NULL,"
+                " whatsapp_numero_emisor VARCHAR(40) NULL,"
+                " plantilla_clave VARCHAR(80) NULL, envio_id INT NULL, log_envio_id INT NULL,"
+                " ultimo_error_codigo VARCHAR(60) NULL,"
+                " ultimo_error_detalle VARCHAR(255) NULL,"
+                " importado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                " actualizado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                " ON UPDATE CURRENT_TIMESTAMP,"
+                " UNIQUE KEY uq_paciente_reagendar_cita (reservo_cita_uuid),"
+                " KEY idx_reagendar_estado (estado_envio, proximo_reintento_en),"
+                " KEY idx_reagendar_centro (centro_codigo, estado_envio),"
+                " KEY idx_reagendar_fecha (fecha, ventana),"
+                " KEY idx_reagendar_wa_id (whatsapp_message_id)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+            )
+            cur.execute("SELECT COLUMN_NAME FROM information_schema.COLUMNS"
+                        " WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='paciente_reagendar'"
+                        " AND COLUMN_NAME='envio_id'")
+            if not cur.fetchone():
+                cur.execute("ALTER TABLE paciente_reagendar ADD COLUMN envio_id INT NULL")
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS reagendar_import_quota ("
+                " actor_hash CHAR(64) NOT NULL, ventana BIGINT NOT NULL,"
+                " intentos INT UNSIGNED NOT NULL DEFAULT 0,"
+                " PRIMARY KEY (actor_hash, ventana)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
             cur.execute(
                 "CREATE TABLE IF NOT EXISTS wa_despacho_canales ("
                 " phone_id VARCHAR(64) PRIMARY KEY,"

@@ -1,5 +1,76 @@
 # SNW — Sistema de Notificaciones WhatsApp
 
+## Integración de citas atendidas para reagendar
+
+SNW recibe el CSV del sistema externo por `POST /api/v1/paciente-reagendar/importar-csv`.
+**No programa la carga**: el externo puede enviarla a cualquier hora. `08-14` y
+`14-20` identifican los tramos en que el sistema externo busca registros en
+Reservo (08:00–14:00 y 14:00–20:00). No son la hora de la cita ni los horarios
+en que SNW exige recibir el archivo.
+
+El desarrollador genera o rota el token de esta integración en
+**Configuración → Integraciones → Citas atendidas**. Se copia al portapapeles
+al generarlo y solo se muestra esa vez; la tabla `configuracion` conserva su
+hash. También puede generarse mediante `POST /api/v1/paciente-reagendar/token`
+con el Bearer de sesión de desarrollador. Este token es independiente de las
+credenciales de Meta. Usa HTTPS en producción y nunca coloques el token en
+la URL o en logs.
+
+Envía `multipart/form-data`, campo `file`, con un CSV UTF-8 (BOM opcional),
+máximo 5 MB y 10.000 filas. Ejemplo:
+
+```bash
+curl -X POST "https://DOMINIO-SNW/api/v1/paciente-reagendar/importar-csv" \
+  -H "Authorization: Bearer TOKEN_DE_INTEGRACION" \
+  -F "file=@citas_atendidas.csv"
+```
+
+Columnas obligatorias: `fecha`, `ventana`, `clinica_nombre`,
+`reservo_cita_uuid`, `paciente_nombre`, `inicio_cita`. Opcionales:
+`clinica_id`, `paciente_telefono`, `doctor_nombre`, `autorizado_contacto`.
+Otras columnas de origen como `id`, `creado_en` o `paciente_rut` se ignoran;
+**SNW no almacena el RUT**. `fecha` tiene formato `AAAA-MM-DD`,
+`inicio_cita` tiene formato `AAAA-MM-DD HH:MM:SS` en hora local
+`America/Santiago`, sin asumir offset UTC fijo, y `ventana` es `08-14` o
+`14-20` según la búsqueda en Reservo. No se exige que la fecha de la cita
+coincida con `fecha`, que corresponde al registro del tramo de origen.
+El teléfono se normaliza con las reglas chilenas existentes.
+Para habilitar el envío de una fila, el origen debe declarar
+`autorizado_contacto=si` (o `true`/`1`) únicamente tras verificar la
+autorización para esta comunicación. Sin esa columna, la fila se conserva,
+pero no se envía.
+
+Respuesta: `{"success":true,"summary":{"received":2,"inserted":1,
+"alreadyExists":1,"rejected":0},"errors":[]}`. Los errores por fila
+incluyen solo número y código, no datos de pacientes. Un UUID ya importado
+no crea otro envío ni modifica estado, intentos, fecha de envío o ID de Meta.
+Errores HTTP: `401` credencial incorrecta, `413` archivo >5 MB, `422` CSV
+inválido, `429` límite de 30 solicitudes por IP o 20 por credencial cada
+15 minutos, `503` token aún no configurado. La cuota se comparte en MySQL
+entre instancias. El archivo CSV no se conserva después de importar.
+
+La clínica se determina por nombre normalizado y, opcionalmente, por el mapa
+`reagendar_clinicas_ids` de Configuración (`{"1":"SMPT"}`). Si ID y nombre
+se contradicen o no hay correspondencia, no se elige otro emisor. El envío
+automático está **apagado por defecto**. Solo puede despachar en Producción
+con `api_oficial`, autorización explícita en la fila y una plantilla de la
+misma clínica aprobada por Meta y SNW, vinculada en
+`reagendar_plantillas_json` (`{"SMPT":"clave_plantilla"}`). Luego el
+desarrollador puede activar `reagendar_envio_activo`. La plantilla debe usar
+solo `{nombre}` y `{apellido}` como variables; no se inventa un texto.
+
+El worker reserva la cita atómicamente, usa el Phone Number ID, WABA ID y
+Access Token **propios de su clínica**, aplica el control de ritmo vigente y
+registra el resultado en `paciente_reagendar`, `envios` y `log_envios`.
+`ENVIADO` significa aceptado por Meta, no entregado. Un timeout o resultado
+incierto se deja en `ERROR` para conciliación, sin reenvío automático.
+Administradores y desarrolladores pueden ver las citas en **Base de datos →
+Citas atendidas · reagendar** o consultar `GET /api/v1/paciente-reagendar`
+filtrando por `centro`, `fecha`, `ventana`, `estado`, `pagina` y `limite`.
+Las respuestas siguen entrando por los webhooks existentes y su contexto
+puede pasar a la cola local de CRM. No existe aún un contrato para transmitir
+esa cola al CRM externo.
+
 Módulo web para gestionar y enviar notificaciones de WhatsApp a pacientes. Backend en
 **Python (FastAPI)**, una única base de datos **MySQL/MariaDB** con tablas separadas para
 desarrollo y producción, plantillas en un **archivo JSON**, e integración directa

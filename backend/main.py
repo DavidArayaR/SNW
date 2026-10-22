@@ -75,6 +75,7 @@ from schemas import (
 )
 from telefono import normalizar_telefono
 import servicio_areas
+import paciente_reagendar
 from servicio_areas import CSV_MAX_BYTES
 from routes import auth, configuracion, estadisticas as rutas_estadisticas
 from routes import notificaciones, pacientes, plantillas, usuarios, areas
@@ -4491,6 +4492,17 @@ _CONFIG_SECCIONES = [
         ],
     },
     {
+        "id": "reagendar", "titulo": "Citas atendidas · integración CSV", "icono": "fa-calendar-check",
+        "campos": [
+            {"clave": "reagendar_envio_activo", "etiqueta": "Procesar envíos de citas atendidas", "tipo": "bool",
+             "ayuda": "Apagado inicialmente. Solo envía en Producción por api_oficial con consentimiento por fila y plantilla aprobada de la clínica."},
+            {"clave": "reagendar_plantillas_json", "etiqueta": "Plantillas por clínica (JSON)", "tipo": "textarea",
+             "ayuda": "Ejemplo: {\"SMPT\":\"clave_plantilla\"}. Usa claves de plantillas aprobadas para cada centro; no se inventa ningún texto."},
+            {"clave": "reagendar_clinicas_ids", "etiqueta": "ID externo por clínica (JSON)", "tipo": "textarea",
+             "ayuda": "Opcional. Ejemplo: {\"1\":\"SMPT\"}. Si el ID contradice al nombre de clínica, el registro queda para revisión."},
+        ],
+    },
+    {
         "id": "correo", "titulo": "Correo / SMTP", "icono": "fa-envelope",
         "campos": [
             {"clave": "smtp_host", "etiqueta": "Servidor SMTP", "tipo": "text"},
@@ -4628,7 +4640,7 @@ def _config_valores(cfg: dict | None = None) -> dict:
     for codigo in catalogo_centros(cfg, incluir_desactivadas=True):
         claves.update(c["clave"] for c in _seccion_centro(codigo, "")["campos"]
                       if "clave" in c)
-    return {c: ("" if c == "wa_token" or cfg.get(c) is None else str(cfg.get(c)))
+    return {c: ("" if c in ("wa_token", "reagendar_api_token_hash") or cfg.get(c) is None else str(cfg.get(c)))
             for c in claves}
 
 
@@ -4798,6 +4810,8 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
     claves_clinicas = {c["clave"] for codigo, nombre in catalogo.items()
                        for c in _seccion_centro(codigo, nombre)["campos"] if "clave" in c}
     for clave, valor in (body.cambios or {}).items():
+        if clave == "reagendar_api_token_hash":
+            raise HTTPException(400, detail="La credencial se rota desde la API de integración.")
         if clave == "wa_clinicas_adicionales":
             raise HTTPException(400, detail="Usa «Añadir clínica» para modificar el catálogo.")
         if clave not in CONFIG_DEFAULTS and clave not in claves_clinicas:
@@ -4853,6 +4867,28 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
             v = json.dumps(patrones_configurados(v), ensure_ascii=False)
         if clave in ("smtp_tls", "wa_rate_limit_activo", "anti_flip_flop_dev"):
             v = "true" if v.lower() in ("true", "1", "on", "si", "sí") else "false"
+        if clave == "reagendar_envio_activo":
+            v = "true" if v.lower() in ("true", "1", "on", "si", "sí") else "false"
+        if clave in ("reagendar_plantillas_json", "reagendar_clinicas_ids"):
+            try:
+                mapa = json.loads(v or "{}")
+            except ValueError:
+                raise HTTPException(422, detail="La asignación de clínicas debe ser JSON válido.")
+            if not isinstance(mapa, dict) or len(mapa) > 100 or any(
+                not isinstance(k, str) or not isinstance(val, str) or len(k) > 30
+                or len(val) > 80 or not val for k, val in mapa.items()
+            ):
+                raise HTTPException(422, detail="La asignación de clínicas no es válida.")
+            if clave == "reagendar_clinicas_ids" and any(
+                not k.isdigit() or val not in catalogo_centros(incluir_desactivadas=True)
+                for k, val in mapa.items()
+            ):
+                raise HTTPException(422, detail="El mapa de IDs contiene una clínica desconocida.")
+            if clave == "reagendar_plantillas_json" and any(
+                k not in catalogo_centros(incluir_desactivadas=True) for k in mapa
+            ):
+                raise HTTPException(422, detail="El mapa de plantillas contiene una clínica desconocida.")
+            v = json.dumps(mapa, ensure_ascii=False)
         if clave == "groq_api_key":
             if len(v) > 512:
                 raise HTTPException(422, detail="La clave de Groq es demasiado extensa.")
@@ -7519,10 +7555,110 @@ async def _loop_supresion() -> None:
         await asyncio.sleep(60)
 
 
+async def _procesar_cita_reagendar(cita: dict, plantillas_por_centro: dict) -> None:
+    """Despacha una cita reservada con el motor oficial y sin emisor alternativo."""
+    try:
+        cfg = config_all(refresh=True)
+        if (cfg.get("reagendar_envio_activo") != "true"
+                or cfg.get("entorno") != "produccion"
+                or cfg.get("metodo_envio") != "api_oficial"):
+            paciente_reagendar.marcar_fallo(cita, "ENVIO_DESACTIVADO")
+            return
+        codigo = cita["centro_codigo"]
+        canal = resolver_centro(codigo, cfg)
+        plantilla = plantillas_por_centro[codigo]
+        mapa_actual = json.loads(cfg.get("reagendar_plantillas_json") or "{}")
+        if (not canal["configured"] or plantilla.get("centro_codigo") != codigo
+                or mapa_actual.get(codigo) != plantilla.get("clave")
+                or plantilla.get("whatsapp_template_status") != "APPROVED"
+                or _aprobacion_plantilla(plantilla) != "aprobada"):
+            paciente_reagendar.marcar_fallo(cita, "CANAL_NO_DISPONIBLE")
+            return
+        if not cita["autorizado_contacto"] or not cita["paciente_telefono_normalizado"]:
+            paciente_reagendar.marcar_fallo(cita, "NO_ELEGIBLE")
+            return
+        telefono = cita["paciente_telefono_normalizado"]
+        servicio = WhatsAppService(phone_number_id=canal["phoneNumberId"])
+        if await asyncio.to_thread(esta_suprimido, telefono):
+            paciente_reagendar.marcar_fallo(cita, "PACIENTE_ELIMINADO")
+            return
+        with conectar() as conn, conn.cursor() as cur:
+            if any(p.get("whatsapp_opt_out") for p in servicio._pacientes_con_tel(cur, telefono)):
+                paciente_reagendar.marcar_fallo(cita, "PACIENTE_DE_BAJA")
+                return
+        nombre, _, apellido = cita["paciente_nombre"].partition(" ")
+        vista = presentar_plantilla(plantilla, {"nombre": nombre, "apellido": apellido})
+        if vista["errores"]:
+            paciente_reagendar.marcar_fallo(cita, "PLANTILLA_INVALIDA")
+            return
+        lote_id = paciente_reagendar.registrar_lote(cita, plantilla, canal)
+        cita["envio_id"] = lote_id
+        # Revalidar bajas inmediatamente antes del POST a Meta.
+        if await asyncio.to_thread(esta_suprimido, telefono):
+            paciente_reagendar.marcar_fallo(cita, "PACIENTE_ELIMINADO")
+            return
+        cfg_final = config_all(refresh=True)
+        if (cfg_final.get("reagendar_envio_activo") != "true"
+                or cfg_final.get("entorno") != "produccion"
+                or cfg_final.get("metodo_envio") != "api_oficial"
+                or json.loads(cfg_final.get("reagendar_plantillas_json") or "{}").get(codigo)
+                != plantilla.get("clave")):
+            paciente_reagendar.marcar_fallo(cita, "ENVIO_DESACTIVADO")
+            return
+        ok, message_id, _error, resultado = await servicio.enviar(
+            telefono, vista["cuerpo"], plantilla=plantilla,
+            variables=vista["ejemplos"])
+        if ok:
+            paciente_reagendar.marcar_enviado(cita, canal, plantilla, vista["cuerpo"], message_id)
+        else:
+            paciente_reagendar.marcar_fallo(
+                cita, "META_RECHAZO" if resultado == "failed" else "META_TEMPORAL",
+                reintentar=resultado != "failed")
+    except (ResultadoEnvioIncierto, httpx.TimeoutException, httpx.TransportError) as exc:
+        log_error("reagendar: resultado incierto", exc)
+        paciente_reagendar.marcar_fallo(cita, "RESULTADO_INCIERTO")
+    except Exception as exc:
+        # Si la excepción ocurrió después del POST, no se puede saber si Meta
+        # aceptó el mensaje: detener para conciliación, nunca reintentar solo.
+        log_error("reagendar: revisar envío", exc)
+        paciente_reagendar.marcar_fallo(cita, "RESULTADO_INCIERTO")
+
+
+async def _loop_reagendar() -> None:
+    while True:
+        try:
+            await asyncio.to_thread(paciente_reagendar.recuperar_abandonados)
+            cfg = config_all(refresh=True)
+            if (cfg.get("reagendar_envio_activo") == "true"
+                    and cfg.get("entorno") == "produccion"
+                    and cfg.get("metodo_envio") == "api_oficial"):
+                mapa = json.loads(cfg.get("reagendar_plantillas_json") or "{}")
+                disponibles = {}
+                for p in leer_plantillas():
+                    codigo = p.get("centro_codigo")
+                    if (codigo in mapa and mapa[codigo] == p.get("clave")
+                            and p.get("whatsapp_template_status") == "APPROVED"
+                            and _aprobacion_plantilla(p) == "aprobada"
+                            and not p.get("especial")
+                            and not _es_plantilla_protegida(p)
+                            and (not p.get("encabezado_media_id")
+                                 or p.get("encabezado_meta_registrado"))):
+                        disponibles[codigo] = p
+                cita = await asyncio.to_thread(
+                    paciente_reagendar.reclamar_pendiente, list(disponibles))
+                if cita:
+                    await _procesar_cita_reagendar(cita, disponibles)
+                    continue
+        except Exception as exc:
+            log_error("scheduler reagendar", exc)
+        await asyncio.sleep(30)
+
+
 @app.on_event("startup")
 async def _arrancar_scheduler_programados() -> None:
     asyncio.create_task(_loop_programados())
     asyncio.create_task(_loop_supresion())
+    asyncio.create_task(_loop_reagendar())
 
 def listar_historial(q: str | None = Query(None), estado: str | None = Query(None),
                      ambiente: str = Query("produccion"),
@@ -8921,6 +9057,85 @@ def estadisticas_costos(granularidad: str = Query("mes"), area_id: int | None = 
                   "excluidos": excluidos, "simulados": simulados,
                   "por_categoria": tot["por_categoria"]},
     }
+
+
+# La credencial de este sistema externo es independiente de Meta y se muestra
+# una sola vez al desarrollador al rotarla; en la BD queda únicamente su hash.
+@app.post("/api/v1/paciente-reagendar/token")
+def rotar_token_reagendar(sesion: dict = Depends(solo_dev)):
+    token = secrets.token_urlsafe(48)
+    config_set({"reagendar_api_token_hash": hashlib.sha256(token.encode()).hexdigest()})
+    auditoria_registrar(sesion.get("usuario", ""), "reagendar_token_rotado",
+                       "integracion_reagendar", "Credencial reemplazada")
+    return {"token": token, "message": "Cópialo ahora: no volverá a mostrarse."}
+
+
+@app.post("/api/v1/paciente-reagendar/importar-csv")
+async def importar_citas_reagendar(request: Request, file: UploadFile = File(...)):
+    cfg = config_all(refresh=True)
+    esperado = str(cfg.get("reagendar_api_token_hash") or "")
+    if not esperado:
+        raise HTTPException(503, detail="La integración de citas no está habilitada.")
+    ip = request.client.host if request.client else "desconocida"
+    if not paciente_reagendar.consumir_cuota(f"ip:{esperado}:{ip}", 30):
+        raise HTTPException(429, detail="Demasiadas solicitudes. Inténtalo más tarde.")
+    cabecera = request.headers.get("Authorization", "")
+    proporcionado = cabecera[7:].strip() if cabecera.startswith("Bearer ") else ""
+    huella = hashlib.sha256(proporcionado.encode()).hexdigest()
+    if not proporcionado or not secrets.compare_digest(huella, esperado):
+        raise HTTPException(401, detail="Credencial de integración no válida.")
+    if not paciente_reagendar.consumir_cuota(f"token:{esperado}", 20):
+        raise HTTPException(429, detail="Demasiadas importaciones. Inténtalo más tarde.")
+    try:
+        datos = await file.read(paciente_reagendar.CSV_MAX_BYTES + 1)
+        resultado = await asyncio.to_thread(paciente_reagendar.importar, datos, cfg)
+    except paciente_reagendar.CsvInvalido as exc:
+        raise HTTPException(413 if len(datos) > paciente_reagendar.CSV_MAX_BYTES else 422,
+                            detail=str(exc)) from exc
+    auditoria_registrar("integracion_reagendar", "reagendar_csv", "citas_atendidas",
+                       json.dumps(resultado["summary"], ensure_ascii=False))
+    return resultado
+
+
+@app.get("/api/v1/paciente-reagendar")
+def listar_citas_reagendar(centro: str | None = Query(None),
+                          fecha: datetime.date | None = Query(None),
+                          ventana: str | None = Query(None),
+                          estado: str | None = Query(None),
+                          pagina: int = Query(1, ge=1),
+                          limite: int = Query(25, ge=1, le=100),
+                          sesion: dict = Depends(solo_admin)):
+    condiciones, args = [], []
+    if centro:
+        if centro not in catalogo_centros():
+            raise HTTPException(422, detail="Clínica inválida.")
+        condiciones.append("centro_codigo = %s")
+        args.append(centro)
+    if fecha:
+        condiciones.append("fecha = %s")
+        args.append(fecha)
+    if ventana:
+        if ventana not in ("08-14", "14-20"):
+            raise HTTPException(422, detail="Ventana inválida.")
+        condiciones.append("ventana = %s")
+        args.append(ventana)
+    if estado:
+        if estado not in ("PENDIENTE", "PROCESANDO", "ENVIADO", "REINTENTO", "ERROR", "OMITIDO"):
+            raise HTTPException(422, detail="Estado inválido.")
+        condiciones.append("estado_envio = %s")
+        args.append(estado)
+    where = " WHERE " + " AND ".join(condiciones) if condiciones else ""
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) AS n FROM paciente_reagendar" + where, tuple(args))
+        total = cur.fetchone()["n"]
+        cur.execute(
+            "SELECT id, fecha, ventana, clinica_nombre, centro_codigo,"
+            " paciente_nombre, paciente_telefono_normalizado, doctor_nombre,"
+            " estado_envio, intentos_envio, ultimo_error_codigo, importado_en,"
+            " enviado_en, whatsapp_message_id FROM paciente_reagendar" + where +
+            " ORDER BY id DESC LIMIT %s OFFSET %s", (*args, limite, (pagina - 1) * limite))
+        filas = cur.fetchall()
+    return {"total": total, "pagina": pagina, "limite": limite, "items": filas}
 
 
 # Cada módulo mantiene el contrato HTTP de su dominio. `main.py` conserva los

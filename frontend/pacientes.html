@@ -186,6 +186,35 @@
           <div id="csvResultado" class="gestion-resultado"></div>
         </section>
 
+        <section class="panel" id="cardReagendar" hidden>
+          <div class="panel__head">
+            <h2>Citas atendidas · reagendar</h2>
+            <button id="reagendarActualizar" type="button" class="btn btn--ghost">Actualizar</button>
+          </div>
+          <p class="field__hint reagendar__ayuda">La ventana indica cuándo Reservo buscó los registros, no la hora de la cita. «Enviado» indica aceptación por Meta, no entrega al paciente.</p>
+          <div class="reagendar__filtros">
+            <div class="field"><label for="reagendarCentro">Clínica</label><select id="reagendarCentro"><option value="">Todas</option></select></div>
+            <div class="field"><label for="reagendarFecha">Fecha de búsqueda en Reservo</label><input id="reagendarFecha" type="text" inputmode="numeric" placeholder="AAAA-MM-DD" maxlength="10"></div>
+            <div class="field"><label for="reagendarVentana">Tramo de búsqueda</label><select id="reagendarVentana"><option value="">Todos</option><option value="08-14">08:00–14:00</option><option value="14-20">14:00–20:00</option></select></div>
+            <div class="field"><label for="reagendarEstado">Estado</label><select id="reagendarEstado"><option value="">Todos</option><option>PENDIENTE</option><option>PROCESANDO</option><option>ENVIADO</option><option>REINTENTO</option><option>ERROR</option><option>OMITIDO</option></select></div>
+            <button id="reagendarFiltrar" type="button" class="btn btn--primary">Filtrar</button>
+          </div>
+          <div class="tabla-wrap reagendar__tabla">
+            <table aria-busy="false" id="tablaReagendar">
+              <thead><tr><th>Fecha de búsqueda</th><th>Tramo</th><th>Clínica</th><th>Paciente</th><th>Teléfono</th><th>Doctor</th><th>Estado</th><th>Intentos</th><th>Enviado</th><th>Motivo</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <p id="reagendarMensaje" class="field__hint reagendar__mensaje" role="status" aria-live="polite"></p>
+          <div class="reagendar__paginador">
+            <button id="reagendarPrimera" class="btn btn--ghost" type="button" aria-label="Primera página"><i class="fa-solid fa-angles-left" aria-hidden="true"></i></button>
+            <button id="reagendarAnterior" class="btn btn--ghost" type="button" aria-label="Página anterior"><i class="fa-solid fa-angle-left" aria-hidden="true"></i></button>
+            <input id="reagendarIr" class="pag-ir" type="number" min="1" step="1" inputmode="numeric" aria-label="Ir a la página">
+            <button id="reagendarSiguiente" class="btn btn--ghost" type="button" aria-label="Página siguiente"><i class="fa-solid fa-angle-right" aria-hidden="true"></i></button>
+            <button id="reagendarUltima" class="btn btn--ghost" type="button" aria-label="Última página"><i class="fa-solid fa-angles-right" aria-hidden="true"></i></button>
+          </div>
+        </section>
+
       </main>
     </div>
   </div>
@@ -240,6 +269,7 @@
   <script src="js/pass-toggle.js"></script>
   <script src="js/csv-chunks.js?v=filas2000-1"></script>
   <script src="js/pacientes.js?v=permisos-acciones1"></script>
+  <script src="js/reagendar.js?v=1"></script>
   <script>
     (function () {
       if (window.snwCargarPacientes) window.snwCargarPacientes();
