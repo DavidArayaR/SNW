@@ -138,7 +138,6 @@ CONFIG_DEFAULTS = {
     # WhatsApp Business Cloud API (Meta)
     "wa_token": "",
     "wa_phone_id": "",
-    "wa_business_account_id": "",
     "wa_clinicas_adicionales": "[]",
     "wa_app_id": "",
     "wa_verify_token": "",
@@ -251,6 +250,9 @@ def asegurar_tabla_config() -> None:
                     "INSERT IGNORE INTO configuracion (clave, valor) VALUES (%s, %s)",
                     (clave, valor),
                 )
+            # El WABA global ya no participa en ningún flujo. Retirar también
+            # la fila heredada para que no reaparezca en configuraciones.
+            cur.execute("DELETE FROM configuracion WHERE clave = 'wa_business_account_id'")
             _migrar_claves_centro(cur)
             cur.execute(
                 "CREATE TABLE IF NOT EXISTS wa_despacho_canales ("

@@ -29,8 +29,9 @@ otros desde Configuración. Cada clínica tiene cuatro claves en la tabla `confi
 El número CRM puede quedar vacío; los otros tres campos son obligatorios para enviar.
 
 Todas las clínicas usan exclusivamente `wa_token`, el access token global guardado en
-`configuracion`. Cada clínica debe tener su propio WABA ID; el WABA global histórico ya no
-reemplaza uno faltante. En Configuración → Clínicas, «Verificar en Meta» comprueba que el token
+`configuracion`. Cada clínica debe tener su propio WABA ID; no existe un WABA global de respaldo.
+Las plantillas históricas sin clínica se vinculan solo cuando su ID de Meta coincide con uno
+devuelto por la WABA de la clínica elegida al sincronizar. En Configuración → Clínicas, «Verificar en Meta» comprueba que el token
 pueda consultar el WABA y que el Phone Number ID corresponda al número emisor. Los envíos
 oficiales repiten esa validación antes de llamar a `/messages`. El antiguo `wa_phone_id` se conserva
 solo por compatibilidad histórica; no se utiliza como alternativa automática en envíos nuevos.
@@ -181,7 +182,7 @@ configura desde la página y queda legible en la base de datos para quien tenga 
 | App / envío | `entorno` (`desarrollo`/`produccion`), `metodo_envio` (`simulado`/`api_oficial`), `numeros_prueba_dev`, `numeros_prueba_prod`, `intervalo_ms`, `sesion_expira_horas` (horas de inactividad antes de cerrar una sesión sola; 0 = no expiran; por defecto 5), `url_base` |
 | Call center | `<CODIGO>_CRM_PHONE_NUMBER` configura el número de WhatsApp de atención propio de cada clínica. Las claves antiguas `call_center_url`, `call_center_numeros` y `call_center_boton_mensaje*` se conservan por compatibilidad, pero el botón actual no las utiliza. |
 | Correo | `smtp_host`, `smtp_port`, `smtp_user`, `smtp_pass`, `smtp_tls`, `correo_emisor`, `correo_destino` |
-| WhatsApp / Meta | `wa_token` es el único token de acceso; `<CODIGO>_WSP_WABA_ID` identifica la WABA de cada clínica. `wa_business_account_id` y `wa_phone_id` permanecen para compatibilidad con plantillas históricas; no sustituyen los identificadores por clínica al enviar. También se usan `wa_app_id`, `wa_verify_token`, `wa_webhook_path`, `wa_graph_version`, `wa_moneda`, `plantillas_revision_minutos` y `plantillas_badge_aprobada_minutos`. |
+| WhatsApp / Meta | `wa_token` es el único token de acceso; `<CODIGO>_WSP_WABA_ID` identifica la WABA de cada clínica. No se usa WABA ID global. El antiguo `wa_phone_id` permanece por compatibilidad histórica, sin sustituir al Phone Number ID de la clínica al enviar. También se usan `wa_app_id`, `wa_verify_token`, `wa_webhook_path`, `wa_graph_version`, `wa_moneda`, `plantillas_revision_minutos` y `plantillas_badge_aprobada_minutos`. |
 | Groq | `groq_api_key` (solo desarrollador; guardada en `configuracion`), `groq_limite_hora` (borradores por cuenta y hora, por defecto 12) |
 | Límites de envío Meta | `wa_rate_limit_activo` (frenado proactivo on/off), `wa_rate_limit_umbral_pct` (% de cuota a partir del cual se espera, 80), `wa_rate_limit_pausa_max_s` (espera entre mensajes al 100 % de cuota, 30), `wa_rate_limit_espera_defecto_s` (espera tras un 429 sin dato, 60), `wa_rate_limit_reintentos` (reintentos de una llamada tras un 429, 3), `wa_throughput_mps` (ritmo máximo de salida hacia Meta, msg/s; 0 = sin límite; 10), `wa_messaging_limit_24h` (usuarios únicos que se pueden contactar en 24 h antes de bloquear el envío masivo; 0 = ilimitado; 2000) |
 

@@ -2958,10 +2958,10 @@ whatsapp_service.al_detectar_insulto = lambda tel, _mensaje_id: _programar_aviso
 
 
 def _servicio_plantilla(plantilla: dict) -> WhatsAppService:
-    """Selecciona la WABA de la clínica; las plantillas antiguas conservan la global."""
+    """Selecciona la WABA de la clínica sin recurrir a una cuenta global."""
     codigo = plantilla.get("centro_codigo")
     if not codigo:
-        return WhatsAppService()
+        return WhatsAppService(phone_number_id="sin_clinica")
     try:
         canal = resolver_centro(codigo)
     except ValueError:
@@ -3415,15 +3415,14 @@ def _plantillas_ausentes_meta(plantillas: list[dict], templates: list[dict]) -> 
     return [p for p in vinculadas if _coincidencia_template_meta(p, templates) is None]
 
 
-def _plantilla_en_clinica(plantilla: dict, codigo: str, config: dict) -> bool:
+def _plantilla_en_clinica(plantilla: dict, codigo: str, templates: list[dict]) -> bool:
     asignada = plantilla.get("centro_codigo")
     if asignada:
         return asignada == codigo
-    # Registros anteriores al modelo multiclínica pertenecen a la WABA global
-    # original. No se borran al sincronizar una WABA distinta.
-    return bool(config.get("wa_business_account_id") and
-                config.get("wa_business_account_id") ==
-                config.get(f"{codigo}_WSP_WABA_ID"))
+    # Solo asociar registros históricos sin clínica si coincide el ID exacto
+    # que Meta devolvió desde la WABA seleccionada. El nombre puede repetirse.
+    meta_id = str(plantilla.get("whatsapp_template_id") or "").strip()
+    return bool(meta_id and any(str(t.get("id") or "") == meta_id for t in templates))
 
 
 def _consultar_templates_meta(centro: str) -> list:
@@ -3469,8 +3468,7 @@ def preparar_sincronizacion_plantillas(centro: str,
     """Consulta sin guardar para elegir un área por cada plantilla nueva."""
     templates = _consultar_templates_meta(centro)
     plantillas = leer_plantillas()
-    config = config_all()
-    propias = [p for p in plantillas if _plantilla_en_clinica(p, centro, config)]
+    propias = [p for p in plantillas if _plantilla_en_clinica(p, centro, templates)]
     eliminadas = _plantillas_ausentes_meta(propias, templates)
     existentes = {_match.get("id") for p in propias
                   if (_match := _coincidencia_template_meta(p, templates))}
@@ -3499,8 +3497,7 @@ def sincronizar_plantillas_meta(body: SincronizarPlantillasIn,
     No crea ni edita nada en Meta, solo lee."""
     templates_meta = _consultar_templates_meta(body.centro)
     plantillas = leer_plantillas()
-    config = config_all()
-    propias = [p for p in plantillas if _plantilla_en_clinica(p, body.centro, config)]
+    propias = [p for p in plantillas if _plantilla_en_clinica(p, body.centro, templates_meta)]
     siguiente_id = max((p["id"] for p in plantillas), default=0) + 1
     ausentes = _plantillas_ausentes_meta(propias, templates_meta)
     if _es_privilegiado(sesion):
@@ -3541,7 +3538,7 @@ def sincronizar_plantillas_meta(body: SincronizarPlantillasIn,
     usados_id = set()
     actualizadas = 0
     for p in plantillas:
-        if not _plantilla_en_clinica(p, body.centro, config):
+        if not _plantilla_en_clinica(p, body.centro, templates_meta):
             continue
         nombre_tpl = (p.get("whatsapp_template") or "").strip()
         if not nombre_tpl:
@@ -3550,6 +3547,11 @@ def sincronizar_plantillas_meta(body: SincronizarPlantillasIn,
         match = _coincidencia_template_meta(p, templates_meta)
 
         if match:
+            # Enlaza una plantilla histórica solo tras identificarla por ID
+            # dentro de la WABA de esta clínica.
+            era_historica = not p.get("centro_codigo")
+            if era_historica:
+                p["centro_codigo"] = body.centro
             usados_id.add(match.get("id"))
             media_importada = medios_meta.get(match.get("id"))
             componentes_meta = componentes_para_vista(match.get("components"))
@@ -3584,7 +3586,8 @@ def sincronizar_plantillas_meta(body: SincronizarPlantillasIn,
                 texto_nuevo = texto_traducido
 
             cambio = (
-                p.get("whatsapp_template_id") != match.get("id")
+                era_historica
+                or p.get("whatsapp_template_id") != match.get("id")
                 or p.get("whatsapp_template_status") != match.get("status")
                 or p.get("whatsapp_template_categoria") != match.get("category")
                 or p.get("whatsapp_template_quality_score") != match.get("quality_score")
@@ -4435,7 +4438,6 @@ def actualizar_configuracion(body: ConfigIn, sesion: dict = Depends(solo_dev)):
         "correo_destino": body.correo_destino,
         "wa_token": body.wa_token,
         "wa_phone_id": body.wa_phone_id,
-        "wa_business_account_id": body.wa_business_account_id,
         "wa_app_id": body.wa_app_id,
         "wa_verify_token": body.wa_verify_token,
         "wa_app_secret": body.wa_app_secret,
@@ -4502,8 +4504,6 @@ _CONFIG_SECCIONES = [
         "campos": [
             {"clave": "wa_token", "etiqueta": "Access token global", "tipo": "password",
              "ayuda": "Único token para todos los números y WABA de las clínicas."},
-            {"clave": "wa_business_account_id", "etiqueta": "WABA ID global", "tipo": "text",
-             "ayuda": "Valor histórico. Para enviar, configura el WABA ID de cada clínica."},
             {"clave": "wa_app_id", "etiqueta": "App ID de Meta", "tipo": "text",
              "ayuda": "Necesario para registrar plantillas con imagen o GIF de encabezado."},
             {"clave": "wa_verify_token", "etiqueta": "Verify token del webhook", "tipo": "password"},
@@ -8542,18 +8542,29 @@ def _tarifa_proxima(tarifas: list[dict]) -> dict | None:
 
 
 def _obtener_moneda_meta() -> str | None:
-    """Consulta a Meta la moneda de facturación de la WABA (ej. CLP, USD)."""
+    """Usa moneda automática solo si todas las WABA activas coinciden."""
     from whatsapp_service import graph_url
-    s = WhatsAppService()
-    if not s.waba_id or not s.token:
+    cfg = config_all(refresh=True)
+    token = (cfg.get("wa_token") or "").strip()
+    wabas = {canal["wabaId"] for canal in listar_canales(cfg)
+             if canal["configured"] and canal.get("wabaId")}
+    if not token or not wabas:
         return None
     try:
         with httpx.Client(timeout=15) as c:
-            r = c.get(f"{graph_url()}/{s.waba_id}",
-                      params={"fields": "currency"},
-                      headers={"Authorization": f"Bearer {s.token}"})
-        if r.status_code == 200:
-            return (r.json().get("currency") or "").strip().upper() or None
+            monedas = set()
+            for waba_id in sorted(wabas):
+                r = c.get(f"{graph_url()}/{waba_id}",
+                          params={"fields": "currency"},
+                          headers={"Authorization": f"Bearer {token}"})
+                if r.status_code != 200:
+                    return None
+                moneda = (r.json().get("currency") or "").strip().upper()
+                if not moneda:
+                    return None
+                monedas.add(moneda)
+        if len(monedas) == 1:
+            return monedas.pop()
     except Exception as e:
         log_error("_obtener_moneda_meta", e)
     return None

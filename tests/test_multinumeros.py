@@ -48,12 +48,35 @@ class MultiNumerosTests(unittest.TestCase):
         self.assertTrue(canales["VS"]["configured"])
 
     def test_sincronizacion_no_mezcla_plantillas_entre_waba(self):
+        templates = [{"id": "meta-smpt", "name": "saludo"}]
+        self.assertTrue(main._plantilla_en_clinica({"centro_codigo": "SMPT"}, "SMPT", templates))
+        self.assertFalse(main._plantilla_en_clinica({"centro_codigo": "VS"}, "SMPT", templates))
+        self.assertTrue(main._plantilla_en_clinica(
+            {"whatsapp_template_id": "meta-smpt"}, "SMPT", templates))
+        self.assertFalse(main._plantilla_en_clinica(
+            {"whatsapp_template_id": "meta-otra", "whatsapp_template": "saludo"},
+            "SMPT", templates))
+        self.assertFalse(main._plantilla_en_clinica({}, "SMPT", templates))
+
+    def test_servicio_sin_clinica_no_usa_waba_global_heredada(self):
+        with patch("whatsapp_service.config_get", return_value="123456789") as leer:
+            self.assertEqual(WhatsAppService().waba_id, "")
+        leer.assert_not_called()
+
+    def test_moneda_automatica_exige_acuerdo_entre_waba(self):
         cfg = configuracion()
-        cfg["wa_business_account_id"] = cfg["SMPT_WSP_WABA_ID"]
-        self.assertTrue(main._plantilla_en_clinica({"centro_codigo": "SMPT"}, "SMPT", cfg))
-        self.assertFalse(main._plantilla_en_clinica({"centro_codigo": "VS"}, "SMPT", cfg))
-        self.assertTrue(main._plantilla_en_clinica({}, "SMPT", cfg))
-        self.assertFalse(main._plantilla_en_clinica({}, "VS", cfg))
+        canales = listar_canales(cfg)
+        respuestas = []
+        for moneda in ("CLP", "USD"):
+            respuesta = MagicMock(status_code=200)
+            respuesta.json.return_value = {"currency": moneda}
+            respuestas.append(respuesta)
+        with patch.object(main, "config_all", return_value=cfg), \
+             patch.object(main, "listar_canales", return_value=canales[:2]), \
+             patch.object(main.httpx, "Client") as fabrica:
+            fabrica.return_value.__enter__.return_value.get.side_effect = respuestas
+            self.assertIsNone(main._obtener_moneda_meta())
+            self.assertEqual(fabrica.return_value.__enter__.return_value.get.call_count, 2)
 
     def test_meta_confirma_asociacion_waba_numero_con_token_global(self):
         cfg = configuracion()
@@ -133,7 +156,7 @@ class MultiNumerosTests(unittest.TestCase):
             "wa_clinicas_adicionales": json.dumps([{"codigo": "C1A2B3C4", "nombre": "Clínica Norte"}]),
             "C1A2B3C4_WSP_PHONE_NUMBER": "+56988887777",
             "C1A2B3C4_WSP_PHONE_NUMBER_ID": "9876543210",
-            "wa_token": "global", "wa_business_account_id": "111111",
+            "wa_token": "global",
         })
         self.assertEqual(catalogo_centros(valores)["C1A2B3C4"], "Clínica Norte")
         self.assertEqual(resolver_phone_id("9876543210", valores)["codigo"], "C1A2B3C4")

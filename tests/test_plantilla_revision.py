@@ -23,7 +23,7 @@ from whatsapp_service import WhatsAppApiClient, WhatsAppService
 PLANTILLA = {
     "id": 7, "clave": "saludo", "nombre": "Saludo", "texto": "Hola {nombre}\n¿Cómo estás?",
     "whatsapp_template": "saludo", "whatsapp_template_status": "APPROVED",
-    "aprobacion_estado": "aprobada", "area_id": None,
+    "aprobacion_estado": "aprobada", "area_id": None, "centro_codigo": "SMPT",
 }
 TELEFONO = "+56911112222"
 SESION = {"rol": "administrador", "usuario": "admin@example.com"}
@@ -144,9 +144,9 @@ class PresentacionPlantillaTests(unittest.TestCase):
 
 class ComponentesMetaEditablesTests(unittest.TestCase):
     def test_creacion_envia_encabezado_y_pie_a_meta(self):
-        configuracion = {"wa_token": "token-test", "wa_phone_id": "phone-test",
-                         "wa_business_account_id": "waba-test"}
+        configuracion = {"wa_token": "token-test"}
         with patch("whatsapp_service.config_get", side_effect=lambda clave, *args: configuracion.get(clave, "")), \
+             patch.object(WhatsAppService, "waba_id", "waba-test"), \
              patch.object(WhatsAppApiClient, "crear_template", new_callable=AsyncMock,
                           return_value={"id": "meta-7", "status": "PENDING"}) as crear:
             resultado = WhatsAppService().crear_template_meta(
@@ -278,8 +278,7 @@ class SincronizarAreaTests(unittest.TestCase):
         self.sesion = dict(SESION)
         app.dependency_overrides[main.sesion_actual] = lambda: self.sesion
         self.cliente = TestClient(app)
-        cfg = {"wa_token": "global", "wa_business_account_id": "111111",
-               "SMPT_WSP_WABA_ID": "111111"}
+        cfg = {"wa_token": "global", "SMPT_WSP_WABA_ID": "111111"}
         canal = {"codigo": "SMPT", "nombre": "Salud Mental Para Todos",
                  "phoneNumberId": "1234500001", "configured": True, "problemas": []}
         for parche in (patch.object(main, "config_all", return_value=cfg),
@@ -435,6 +434,22 @@ class SincronizarAreaTests(unittest.TestCase):
             self.assertEqual(almacen[1]["area_id"], 9)
             self.assertEqual(self.cliente.get("/api/plantillas/sincronizar-meta").json()["nuevas"], [])
             self.assertEqual(guardar.call_count, 2)
+
+    def test_plantilla_historica_se_vincula_solo_por_id_meta(self):
+        local = {**PLANTILLA, "centro_codigo": None,
+                 "whatsapp_template_id": "meta-7", "texto": "Hola"}
+        meta = {"id": "meta-7", "name": "saludo", "language": "es",
+                "status": "APPROVED", "components": [{"type": "BODY", "text": "Hola"}]}
+        with patch.object(main, "leer_plantillas", return_value=[local]), \
+             patch.object(main, "escribir_plantillas") as guardar, \
+             patch.object(main.WhatsAppService, "listar_templates_meta", return_value={
+                 "ok": True, "templates": [meta]}):
+            respuesta = self.cliente.post("/api/plantillas/sincronizar-meta", json={
+                "asignaciones": {}, "eliminadas": []})
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(local["centro_codigo"], "SMPT")
+        self.assertEqual(respuesta.json()["creadas"], 0)
+        guardar.assert_called_once()
 
     def test_sincronizar_conserva_accion_baja_de_boton_personalizado(self):
         local = {**PLANTILLA, "whatsapp_template_id": "meta-7", "texto": "Hola",

@@ -570,9 +570,7 @@ class WhatsAppService:
     def waba_id(self) -> str:
         if self.phone_number_id:
             return credenciales_centro(self.phone_number_id)["waba_id"]
-        # Compatibilidad para las plantillas locales antiguas gestionadas en
-        # la WABA original; el envío exige siempre un Phone Number ID concreto.
-        return (config_get("wa_business_account_id") or "").strip()
+        return ""
 
     @property
     def app_id(self) -> str:

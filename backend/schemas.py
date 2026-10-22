@@ -75,7 +75,6 @@ class ConfigIn(BaseModel):
     correo_destino: str | None = None
     wa_token: str | None = None
     wa_phone_id: str | None = None
-    wa_business_account_id: str | None = None
     wa_app_id: str | None = None
     wa_verify_token: str | None = None
     wa_app_secret: str | None = None

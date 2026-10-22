@@ -151,7 +151,6 @@ INSERT IGNORE INTO configuracion (clave, valor) VALUES
   -- WhatsApp Business Cloud API (Meta)
   ('wa_token', ''),
   ('wa_phone_id', ''),
-  ('wa_business_account_id', ''),
   ('wa_verify_token', ''),
   ('wa_app_secret', ''),
   ('wa_template_nombre', ''),
