@@ -123,6 +123,7 @@ CREATE TABLE IF NOT EXISTS paciente_reagendar (
   inicio_cita DATETIME NOT NULL,
   centro_codigo VARCHAR(10) NULL,
   autorizado_contacto TINYINT(1) NOT NULL DEFAULT 0,
+  modo_prueba TINYINT(1) NOT NULL DEFAULT 0,
   whatsapp_opt_out TINYINT(1) NOT NULL DEFAULT 0,
   estado_envio VARCHAR(20) NOT NULL DEFAULT 'PENDIENTE',
   intentos_envio INT UNSIGNED NOT NULL DEFAULT 0,

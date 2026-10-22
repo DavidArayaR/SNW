@@ -213,11 +213,12 @@
             <div class="field"><label for="reagendarFecha">Fecha de búsqueda en Reservo</label><input id="reagendarFecha" type="text" inputmode="numeric" placeholder="AAAA-MM-DD" maxlength="10"></div>
             <div class="field"><label for="reagendarVentana">Tramo de búsqueda</label><select id="reagendarVentana"><option value="">Todos</option><option value="08-14">08:00–14:00</option><option value="14-20">14:00–20:00</option></select></div>
             <div class="field"><label for="reagendarEstado">Estado</label><select id="reagendarEstado"><option value="">Todos</option><option>PENDIENTE</option><option>PROCESANDO</option><option>ENVIADO</option><option>REINTENTO</option><option>ERROR</option><option>OMITIDO</option></select></div>
+            <div class="field"><label for="reagendarModo">Tipo</label><select id="reagendarModo"><option value="">Todos</option><option value="false">Operativos</option><option value="true">Pruebas</option></select></div>
             <button id="reagendarFiltrar" type="button" class="btn btn--primary">Filtrar</button>
           </div>
           <div class="tabla-wrap reagendar__tabla">
             <table aria-busy="false" id="tablaReagendar">
-              <thead><tr><th>Fecha de búsqueda</th><th>Tramo</th><th>Clínica</th><th>Paciente</th><th>Teléfono</th><th>Doctor</th><th>Estado</th><th>Intentos</th><th>Enviado</th><th>Respuesta</th><th>Motivo</th></tr></thead>
+              <thead><tr><th>Fecha de búsqueda</th><th>Tramo</th><th>Clínica</th><th>Paciente</th><th>Teléfono</th><th>Doctor</th><th>Tipo</th><th>Estado</th><th>Intentos</th><th>Enviado</th><th>Respuesta</th><th>Motivo</th></tr></thead>
               <tbody></tbody>
             </table>
           </div>
@@ -285,7 +286,7 @@
   <script src="js/pass-toggle.js"></script>
   <script src="js/csv-chunks.js?v=filas2000-1"></script>
   <script src="js/pacientes.js?v=permisos-acciones1"></script>
-  <script src="js/reagendar.js?v=2"></script>
+  <script src="js/reagendar.js?v=3"></script>
   <script>
     (function () {
       if (window.snwCargarPacientes) window.snwCargarPacientes();

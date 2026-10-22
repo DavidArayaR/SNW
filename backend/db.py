@@ -286,6 +286,7 @@ def asegurar_tabla_config() -> None:
                 " doctor_nombre VARCHAR(200) NULL, inicio_cita DATETIME NOT NULL,"
                 " centro_codigo VARCHAR(10) NULL,"
                 " autorizado_contacto TINYINT(1) NOT NULL DEFAULT 0,"
+                " modo_prueba TINYINT(1) NOT NULL DEFAULT 0,"
                 " whatsapp_opt_out TINYINT(1) NOT NULL DEFAULT 0,"
                 " estado_envio VARCHAR(20) NOT NULL DEFAULT 'PENDIENTE',"
                 " intentos_envio INT UNSIGNED NOT NULL DEFAULT 0,"
@@ -322,6 +323,12 @@ def asegurar_tabla_config() -> None:
                         " AND COLUMN_NAME='whatsapp_opt_out'")
             if not cur.fetchone():
                 cur.execute("ALTER TABLE paciente_reagendar ADD COLUMN whatsapp_opt_out"
+                            " TINYINT(1) NOT NULL DEFAULT 0")
+            cur.execute("SELECT COLUMN_NAME FROM information_schema.COLUMNS"
+                        " WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='paciente_reagendar'"
+                        " AND COLUMN_NAME='modo_prueba'")
+            if not cur.fetchone():
+                cur.execute("ALTER TABLE paciente_reagendar ADD COLUMN modo_prueba"
                             " TINYINT(1) NOT NULL DEFAULT 0")
             cur.execute("SELECT INDEX_NAME FROM information_schema.STATISTICS"
                         " WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='paciente_reagendar'"

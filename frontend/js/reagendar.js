@@ -86,7 +86,8 @@
     const params = new URLSearchParams({ pagina: String(pagina), limite: "25" });
     if (loteActual) params.set("lote_id", String(loteActual));
     for (const [id, clave] of [["reagendarCentro", "centro"], ["reagendarFecha", "fecha"],
-                               ["reagendarVentana", "ventana"], ["reagendarEstado", "estado"]]) {
+                               ["reagendarVentana", "ventana"], ["reagendarEstado", "estado"],
+                               ["reagendarModo", "modo_prueba"]]) {
       const valor = $(id).value.trim();
       if (valor) params.set(clave, valor);
     }
@@ -102,7 +103,8 @@
         const tr = document.createElement("tr");
         for (const valor of [fecha(r.fecha), r.ventana, r.clinica_nombre,
                              r.paciente_nombre, r.paciente_telefono_normalizado,
-                             r.doctor_nombre, r.estado_envio, r.intentos_envio,
+                             r.doctor_nombre, r.modo_prueba ? "Prueba" : "Operativo",
+                             r.estado_envio, r.intentos_envio,
                              fecha(r.enviado_en), r.ultima_respuesta, r.ultimo_error_codigo]) celda(tr, valor);
         tbody.appendChild(tr);
       }

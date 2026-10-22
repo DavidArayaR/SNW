@@ -21,6 +21,8 @@ from whatsapp_service import WhatsAppService
 
 
 CFG = {"reagendar_clinicas_ids": "{}"}
+PRUEBA_CSV = (Path(__file__).resolve().parent / "fixtures" /
+              "paciente_reagendar_prueba.csv").read_bytes()
 for codigo, nombre in (("SMPT", "Salud Mental Para Todos"),
                        ("MS", "Centro Mentalidad Saludable"),
                        ("PS", "PROSALUD"),
@@ -41,6 +43,21 @@ def csv_fila(identificador="CITA-001", clinica="Salud Mental Para Todos",
 
 
 class ParserCitasTests(unittest.TestCase):
+    def test_csv_ficticio_tiene_una_fila_sin_datos_de_contacto(self):
+        filas, errores, recibidas = reagendar.analizar_csv(PRUEBA_CSV, CFG)
+        self.assertEqual((recibidas, errores), (1, []))
+        self.assertEqual(filas[0]["reservo_cita_uuid"], "TEST-CSV-REMOTO-001")
+        self.assertEqual(filas[0]["centro_codigo"], "VS")
+        self.assertIsNone(filas[0]["paciente_telefono_normalizado"])
+        self.assertFalse(filas[0]["autorizado_contacto"])
+
+    def test_modo_prueba_rechaza_multiples_citas(self):
+        encabezado, fila = PRUEBA_CSV.split(b"\n", 1)
+        datos = encabezado + b"\n" + fila + fila.replace(
+            b"TEST-CSV-REMOTO-001", b"TEST-CSV-REMOTO-002")
+        with self.assertRaises(reagendar.CsvInvalido):
+            reagendar.importar(datos, CFG, modo_prueba=True)
+
     def test_horarios_en_chile_y_carga_tardia(self):
         chile = ZoneInfo("America/Santiago")
         fecha = dt.date(2026, 10, 22)
@@ -149,6 +166,76 @@ class ApiCitasTests(unittest.TestCase):
                                   headers={"Authorization": "Bearer token-correcto"}, files=files)
             self.assertEqual(ok.status_code, 200)
             self.assertEqual(ok.json()["summary"]["inserted"], 1)
+
+    def test_importacion_remota_de_prueba_persiste_y_no_duplica(self):
+        clave = "TEST-CSV-REMOTO-" + uuid.uuid4().hex
+        datos = PRUEBA_CSV.replace(b"TEST-CSV-REMOTO-001", clave.encode())
+        token = "token-ficticio-para-tests"
+        cfg = {**CFG, "reagendar_api_token_hash": hashlib.sha256(token.encode()).hexdigest()}
+        ruta = "/api/v1/paciente-reagendar/importar-csv"
+        files = {"file": ("paciente_reagendar_prueba.csv", datos, "text/csv")}
+        try:
+            with patch.object(main, "config_all", return_value=cfg), \
+                    patch.object(reagendar, "consumir_cuota", return_value=True), \
+                    patch.object(main, "auditoria_registrar"), \
+                    patch.object(main, "WhatsAppService") as servicio:
+                sin_token = self.client.post(ruta, files=files, data={"modo_prueba": "true"})
+                self.assertEqual(sin_token.status_code, 401)
+                incorrecto = self.client.post(
+                    ruta, headers={"Authorization": "Bearer otro-token"},
+                    files=files, data={"modo_prueba": "true"})
+                self.assertEqual(incorrecto.status_code, 401)
+                self.assertNotIn(token, str(incorrecto.json()))
+                ausente = self.client.post(
+                    ruta, headers={"Authorization": f"Bearer {token}"},
+                    data={"modo_prueba": "true"})
+                self.assertEqual(ausente.status_code, 422)
+                invalido = self.client.post(
+                    ruta, headers={"Authorization": f"Bearer {token}"},
+                    files={"file": ("malo.csv", b"x,y\n1,2\n", "text/csv")},
+                    data={"modo_prueba": "true"})
+                self.assertEqual(invalido.status_code, 422)
+                primero = self.client.post(
+                    ruta, headers={"Authorization": f"Bearer {token}"},
+                    files=files, data={"modo_prueba": "true"})
+                self.assertEqual(primero.status_code, 200)
+                self.assertTrue(primero.json()["testMode"])
+                self.assertEqual(primero.json()["summary"]["inserted"], 1)
+                self.assertIsNone(primero.json()["summary"]["batchId"])
+                segundo = self.client.post(
+                    ruta, headers={"Authorization": f"Bearer {token}"},
+                    files=files, data={"modo_prueba": "true"})
+                self.assertEqual(segundo.status_code, 200)
+                self.assertEqual(segundo.json()["summary"]["alreadyExists"], 1)
+                self.assertEqual(segundo.json()["summary"]["inserted"], 0)
+                conflicto = self.client.post(
+                    ruta, headers={"Authorization": f"Bearer {token}"}, files=files)
+                self.assertEqual(conflicto.status_code, 409)
+                servicio.assert_not_called()
+            with conectar() as conn, conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) AS n, MAX(centro_codigo) AS centro,"
+                            " MAX(modo_prueba) AS prueba, MAX(estado_envio) AS estado,"
+                            " MAX(lote_id) AS lote, MAX(envio_id) AS envio"
+                            " FROM paciente_reagendar WHERE reservo_cita_uuid=%s", (clave,))
+                fila = cur.fetchone()
+            self.assertEqual(fila["n"], 1)
+            self.assertEqual((fila["centro"], fila["prueba"], fila["estado"]),
+                             ("VS", 1, "OMITIDO"))
+            self.assertIsNone(fila["lote"])
+            self.assertIsNone(fila["envio"])
+        finally:
+            with conectar() as conn, conn.cursor() as cur:
+                cur.execute("DELETE FROM paciente_reagendar WHERE reservo_cita_uuid=%s", (clave,))
+                conn.commit()
+
+    def test_guardia_final_impide_envio_de_registro_de_prueba(self):
+        cita = {"modo_prueba": 1, "id": 1, "intentos_envio": 1,
+                "reserva_token": "simulado"}
+        with patch.object(main, "WhatsAppService") as servicio, \
+                patch.object(reagendar, "marcar_fallo") as fallo:
+            asyncio.run(main._procesar_cita_reagendar(cita, {}))
+        servicio.assert_not_called()
+        fallo.assert_called_once_with(cita, "MODO_PRUEBA")
 
     def test_cuota_bloquea_solicitud(self):
         cfg = {"reagendar_api_token_hash": "algo"}

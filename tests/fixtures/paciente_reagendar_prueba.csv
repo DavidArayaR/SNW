@@ -1,0 +1,2 @@
+fecha,ventana,clinica_id,clinica_nombre,reservo_cita_uuid,paciente_rut,paciente_nombre,paciente_telefono,doctor_nombre,inicio_cita,autorizado_contacto
+2026-10-22,08-14,,VIDA Y SALUD,TEST-CSV-REMOTO-001,,Paciente Prueba,,,2026-10-22 11:00:00,no

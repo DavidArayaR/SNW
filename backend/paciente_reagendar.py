@@ -59,6 +59,10 @@ class CsvInvalido(ValueError):
     pass
 
 
+class ModoImportacionIncompatible(ValueError):
+    """Un UUID existente no puede convertirse entre prueba y operación real."""
+
+
 def _texto(valor, limite: int) -> str:
     texto = str(valor or "").strip()
     if len(texto) > limite or "\x00" in texto:
@@ -160,14 +164,17 @@ def analizar_csv(datos: bytes, cfg: dict) -> tuple[list[dict], list[dict], int]:
 _COLUMNAS = ("fecha", "ventana", "clinica_id", "clinica_nombre", "reservo_cita_uuid",
              "paciente_nombre", "paciente_telefono", "paciente_telefono_normalizado",
              "doctor_nombre", "inicio_cita", "centro_codigo", "autorizado_contacto",
-             "ultimo_error_codigo")
+             "ultimo_error_codigo", "modo_prueba")
 
 
-def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None) -> dict:
+def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None,
+            modo_prueba: bool = False) -> dict:
     registros, errores, recibidas = analizar_csv(datos, cfg)
+    if modo_prueba and recibidas != 1:
+        raise CsvInvalido("El modo de prueba requiere un CSV de una sola cita.")
     pares = {(r["fecha"], r["ventana"]) for r in registros}
     if not pares:
-        return {"success": True, "summary": {"received": recibidas, "inserted": 0,
+        return {"success": True, "testMode": modo_prueba, "summary": {"received": recibidas, "inserted": 0,
                 "alreadyExists": 0, "rejected": len(errores), "batchId": None,
                 "batchStatus": None, "scheduledAtUtc": None}, "errors": errores[:50]}
     if len(pares) != 1:
@@ -176,16 +183,19 @@ def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None) ->
     if recibido.tzinfo is None:
         raise ValueError("La recepción debe tener zona horaria")
     fecha, ventana = next(iter(pares))
-    programado = programacion_carga(fecha, ventana, recibido)
+    programado = None if modo_prueba else programacion_carga(fecha, ventana, recibido)
     insertados = duplicados = elegibles = 0
     from supresion import huella_telefono
     with conectar() as conn, conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO reagendar_lotes (fecha, ventana, recibido_en, estado)"
-            " VALUES (%s, %s, %s, 'REVISION')",
-            (fecha, ventana, recibido.astimezone(UTC).replace(tzinfo=None)))
-        lote_id = cur.lastrowid
+        lote_id = None
+        if not modo_prueba:
+            cur.execute(
+                "INSERT INTO reagendar_lotes (fecha, ventana, recibido_en, estado)"
+                " VALUES (%s, %s, %s, 'REVISION')",
+                (fecha, ventana, recibido.astimezone(UTC).replace(tzinfo=None)))
+            lote_id = cur.lastrowid
         for registro in registros:
+            registro["modo_prueba"] = int(modo_prueba)
             telefono = registro["paciente_telefono_normalizado"]
             if telefono:
                 cur.execute("SELECT 1 FROM supresion_telefonos"
@@ -205,7 +215,7 @@ def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None) ->
                     " VALUES (" + ",".join(["%s"] * (len(_COLUMNAS) + 1)) + ")",
                     (lote_id, *(registro[col] for col in _COLUMNAS)),
                 )
-                if registro["ultimo_error_codigo"]:
+                if registro["ultimo_error_codigo"] or modo_prueba:
                     cur.execute("UPDATE paciente_reagendar SET estado_envio='OMITIDO'"
                                 " WHERE id=%s", (cur.lastrowid,))
                 else:
@@ -214,9 +224,17 @@ def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None) ->
             except pymysql.err.IntegrityError as exc:
                 if exc.args[0] != 1062:
                     raise
+                cur.execute("SELECT modo_prueba FROM paciente_reagendar"
+                            " WHERE reservo_cita_uuid=%s", (registro["reservo_cita_uuid"],))
+                existente = cur.fetchone()
+                if existente is None or bool(existente["modo_prueba"]) != modo_prueba:
+                    raise ModoImportacionIncompatible(
+                        "El identificador de cita ya pertenece a otro modo de importación.") from exc
                 # Conserva íntegros estado, intentos, emisor e ID de Meta.
                 duplicados += 1
-        if insertados:
+        if modo_prueba:
+            estado = None
+        elif insertados:
             # Si la validación/inserción cruzó la hora de salida, revisión manual:
             # jamás disparar inmediatamente una programación ya vencida.
             vigente = (elegibles > 0 and programado is not None
@@ -231,7 +249,8 @@ def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None) ->
             lote_id = None
             estado = None
         conn.commit()
-    return {"success": True, "summary": {"received": recibidas, "inserted": insertados,
+    return {"success": True, "testMode": modo_prueba,
+            "summary": {"received": recibidas, "inserted": insertados,
             "eligible": elegibles, "alreadyExists": duplicados, "rejected": len(errores),
             "batchId": lote_id, "batchStatus": estado,
             "scheduledAtUtc": programado.isoformat() + "Z" if lote_id and estado == "PROGRAMADO" else None},
@@ -263,7 +282,7 @@ def reclamar_pendiente(centros: list[str]) -> dict | None:
             "SELECT r.* FROM paciente_reagendar r"
             " JOIN reagendar_lotes l ON l.id=r.lote_id"
             " WHERE r.estado_envio IN ('PENDIENTE','REINTENTO')"
-            " AND r.autorizado_contacto = 1 AND r.whatsapp_opt_out=0"
+            " AND r.autorizado_contacto = 1 AND r.whatsapp_opt_out=0 AND r.modo_prueba=0"
             " AND r.paciente_telefono_normalizado IS NOT NULL"
             f" AND r.centro_codigo IN ({marcadores})"
             " AND l.estado IN ('PROGRAMADO','APLAZADO','EN_CURSO')"

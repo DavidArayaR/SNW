@@ -55,6 +55,55 @@ inválido, `429` límite de 30 solicitudes por IP o 20 por credencial cada
 15 minutos, `503` token aún no configurado. La cuota se comparte en MySQL
 entre instancias. El archivo CSV no se conserva después de importar.
 
+### Prueba de conexión e importación remota
+
+El archivo [tests/fixtures/paciente_reagendar_prueba.csv](tests/fixtures/paciente_reagendar_prueba.csv)
+contiene **una sola cita ficticia** de VIDA Y SALUD, sin RUT, teléfono,
+médico ni autorización de contacto. Ejecuta la prueba desde la raíz del
+repositorio. Usa como base la URL HTTPS pública de SNW, comprobada en
+**Configuración → General → URL base del servidor**; `localhost` solo sirve
+para una prueba desde el propio servidor. Genera el token de integración en
+**Configuración → Integraciones → Citas atendidas** y consérvalo fuera del
+archivo y del historial de comandos.
+
+En Bash, la lectura silenciosa evita escribir el token en el historial:
+
+```bash
+SNW_CSV_URL="https://DOMINIO-SNW"
+read -rsp "Token de integración CSV: " SNW_CSV_TOKEN; printf '\n'
+curl --fail-with-body -X POST \
+  "${SNW_CSV_URL}/api/v1/paciente-reagendar/importar-csv" \
+  -H "Authorization: Bearer ${SNW_CSV_TOKEN}" \
+  -F "file=@tests/fixtures/paciente_reagendar_prueba.csv" \
+  -F "modo_prueba=true"
+unset SNW_CSV_TOKEN
+```
+
+El token viaja en el encabezado, nunca en la URL; `modo_prueba` forma parte
+del formulario `multipart/form-data`. La primera respuesta debe contener
+`"success":true`, `"testMode":true`, `"inserted":1`, `"batchId":null`
+y `"eligible":0`. Al repetir el mismo comando, `"inserted":0` y
+`"alreadyExists":1`. El campo `testMode` no sustituye la autenticación:
+sin token o con token incorrecto se responde `401`; sin archivo o con CSV
+inválido, `422`; si ese UUID ya existe en el otro modo, `409`.
+
+Verificación por un administrador en SNW: **Base de datos → Citas atendidas ·
+reagendar → Tipo: Pruebas**. Alternativamente, en la base de SNW:
+
+```sql
+SELECT reservo_cita_uuid, centro_codigo, modo_prueba, estado_envio,
+       lote_id, envio_id, whatsapp_message_id
+FROM paciente_reagendar
+WHERE reservo_cita_uuid = 'TEST-CSV-REMOTO-001';
+```
+
+Debe haber una sola fila, centro `VS`, `modo_prueba=1`, estado `OMITIDO`
+y sin lote, envío ni ID de Meta. El worker excluye los registros de prueba
+aunque alguien active los envíos. Para verificar otra inserción, usa un UUID
+ficticio nuevo en una copia local del CSV; no edites una cita real. Las
+importaciones operativas usan el **mismo endpoint y token**, pero omiten
+`modo_prueba` y requieren autorización de contacto, teléfono y médico válidos.
+
 La clínica se determina por nombre normalizado y, opcionalmente, por el mapa
 `reagendar_clinicas_ids` de Configuración (`{"1":"SMPT"}`). Si ID y nombre
 se contradicen o no hay correspondencia, no se elige otro emisor. El envío

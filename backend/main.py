@@ -7633,6 +7633,9 @@ async def _loop_supresion() -> None:
 async def _procesar_cita_reagendar(cita: dict, plantillas_por_centro: dict) -> None:
     """Despacha una cita reservada con el motor oficial y sin emisor alternativo."""
     try:
+        if cita.get("modo_prueba"):
+            paciente_reagendar.marcar_fallo(cita, "MODO_PRUEBA")
+            return
         cfg = config_all(refresh=True)
         if (cfg.get("reagendar_envio_activo") != "true"
                 or cfg.get("entorno") != "produccion"
@@ -9164,7 +9167,8 @@ def rotar_token_reagendar(sesion: dict = Depends(solo_dev)):
 
 
 @app.post("/api/v1/paciente-reagendar/importar-csv")
-async def importar_citas_reagendar(request: Request, file: UploadFile = File(...)):
+async def importar_citas_reagendar(request: Request, file: UploadFile = File(...),
+                                  modo_prueba: bool = Form(False)):
     cfg = config_all(refresh=True)
     esperado = str(cfg.get("reagendar_api_token_hash") or "")
     if not esperado:
@@ -9181,12 +9185,18 @@ async def importar_citas_reagendar(request: Request, file: UploadFile = File(...
         raise HTTPException(429, detail="Demasiadas importaciones. Inténtalo más tarde.")
     try:
         datos = await file.read(paciente_reagendar.CSV_MAX_BYTES + 1)
-        resultado = await asyncio.to_thread(paciente_reagendar.importar, datos, cfg)
+        resultado = await asyncio.to_thread(
+            paciente_reagendar.importar, datos, cfg, modo_prueba=modo_prueba)
     except paciente_reagendar.CsvInvalido as exc:
         raise HTTPException(413 if len(datos) > paciente_reagendar.CSV_MAX_BYTES else 422,
                             detail=str(exc)) from exc
+    except paciente_reagendar.ModoImportacionIncompatible as exc:
+        raise HTTPException(409, detail=str(exc)) from exc
+    if modo_prueba and not (resultado["summary"]["inserted"] or
+                           resultado["summary"]["alreadyExists"]):
+        raise HTTPException(422, detail="No se importó ningún registro de prueba válido.")
     auditoria_registrar("integracion_reagendar", "reagendar_csv", "citas_atendidas",
-                       json.dumps(resultado["summary"], ensure_ascii=False))
+                       json.dumps({"testMode": modo_prueba, **resultado["summary"]}, ensure_ascii=False))
     return resultado
 
 
@@ -9196,6 +9206,7 @@ def listar_citas_reagendar(centro: str | None = Query(None),
                           fecha: datetime.date | None = Query(None),
                           ventana: str | None = Query(None),
                           estado: str | None = Query(None),
+                          modo_prueba: bool | None = Query(None),
                           pagina: int = Query(1, ge=1),
                           limite: int = Query(25, ge=1, le=100),
                           sesion: dict = Depends(solo_admin)):
@@ -9203,6 +9214,9 @@ def listar_citas_reagendar(centro: str | None = Query(None),
     if lote_id:
         condiciones.append("lote_id = %s")
         args.append(lote_id)
+    if modo_prueba is not None:
+        condiciones.append("modo_prueba = %s")
+        args.append(int(modo_prueba))
     if centro:
         if centro not in catalogo_centros():
             raise HTTPException(422, detail="Clínica inválida.")
@@ -9228,7 +9242,7 @@ def listar_citas_reagendar(centro: str | None = Query(None),
         cur.execute(
             "SELECT id, fecha, ventana, clinica_nombre, centro_codigo,"
             " paciente_nombre, paciente_telefono_normalizado, doctor_nombre,"
-            " inicio_cita, lote_id, plantilla_clave,"
+            " inicio_cita, lote_id, plantilla_clave, modo_prueba,"
             " estado_envio, intentos_envio, ultimo_error_codigo, importado_en,"
             " enviado_en, whatsapp_message_id,"
             " (SELECT i.accion FROM reagendar_interacciones i"
