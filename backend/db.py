@@ -639,6 +639,13 @@ def asegurar_tabla_config() -> None:
                 "  PRIMARY KEY (telefono, tipo)"
                 ") CHARACTER SET utf8mb4"
             )
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS whatsapp_interacciones_lista ("
+                "  mensaje_hash CHAR(64) NOT NULL PRIMARY KEY,"
+                "  creado DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                "  KEY idx_interacciones_lista_creado (creado)"
+                ") ENGINE=InnoDB CHARACTER SET utf8mb4"
+            )
             # Los avisos ya enviados antes de esta migración también cuentan:
             # no deben repetirse solo por agregar el control de una vez.
             try:

@@ -19,6 +19,7 @@ class PlantillaIn(BaseModel):
     encabezado_texto: str | None = None
     pie_texto: str | None = None
     ejemplos: dict[str, str] | None = None
+    botones: list[dict] | None = None
 
 
 class SincronizarPlantillasIn(BaseModel):
@@ -36,6 +37,7 @@ class PlantillaPreviaIn(BaseModel):
     encabezado_texto: str | None = None
     pie_texto: str | None = None
     ejemplos: dict[str, str] | None = None
+    botones: list[dict] | None = None
 
 
 class GenerarPlantillaIAIn(BaseModel):

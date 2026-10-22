@@ -1,4 +1,48 @@
 /* Estilos específicos de estados y modales de Mensajería. */
+.tpl-botones__cabecera { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.tpl-botones__cabecera label { margin: 0; }
+.tpl-botones__guia { display: flex; align-items: flex-start; gap: 10px; margin-top: 10px; padding: 11px 13px; border: 1px solid var(--brand-tint-bd); border-radius: 10px; background: var(--brand-tint); color: var(--brand-tint-fg); font-size: .875rem; line-height: 1.45; }
+.tpl-botones__guia i { margin-top: 3px; }
+.tpl-botones__lista { display: grid; gap: 10px; margin-top: 12px; }
+.tpl-boton { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(130px, 1.2fr) minmax(140px, 1.2fr) 40px; align-items: start; gap: 10px; padding: 12px; border: 1px solid var(--borde); border-radius: 10px; background: var(--surface-2); }
+.tpl-boton__encabezado { grid-column: 1 / -2; grid-row: 1; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.tpl-boton__numero { color: var(--texto); font-size: .9rem; }
+.tpl-boton__ayuda { color: var(--texto-suave); font-size: .79rem; line-height: 1.4; }
+.field.tpl-botones .tpl-boton .tpl-boton__campo { display: grid; align-content: start; gap: 5px; min-width: 0; margin: 0; }
+.field.tpl-botones .tpl-boton .tpl-boton__campo[hidden] { display: none; }
+.tpl-boton__campo > span { color: var(--texto-suave); font-size: .78rem; font-weight: 600; line-height: 1.3; }
+.field.tpl-botones .tpl-boton input,
+.field.tpl-botones .tpl-boton select { width: 100%; min-width: 0; min-height: 44px; margin: 0; padding: 10px 12px; border: 1px solid var(--borde); border-radius: 10px; background: var(--panel-2); color: var(--texto); font: inherit; font-size: .875rem; line-height: 1.35; box-shadow: none; }
+.field.tpl-botones .tpl-boton input:focus,
+.field.tpl-botones .tpl-boton select:focus { border-color: var(--verde); outline: 2px solid var(--verde); outline-offset: 1px; box-shadow: none; }
+.field.tpl-botones .tpl-boton input:disabled,
+.field.tpl-botones .tpl-boton select:disabled { background: var(--surface-3); color: var(--texto-suave); border-style: dashed; }
+.field.tpl-botones .tpl-boton input[readonly] { background: var(--surface-3); color: var(--texto-suave); cursor: default; }
+.tpl-boton [hidden] { display: none; }
+.tpl-boton__quitar.btn { grid-column: -2 / -1; grid-row: 1; display: inline-grid; place-items: center; width: 40px; min-width: 40px; height: 40px; min-height: 40px; padding: 0; line-height: 1; }
+.tpl-boton__quitar i { display: block; font-size: .9rem; line-height: 1; }
+.tpl-boton__crear-lista.btn { grid-column: 1 / -1; justify-self: start; display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 6px 11px; border: 1px solid var(--brand-tint-bd); border-radius: 8px; background: var(--brand-tint); color: var(--brand-tint-fg); font-size: .82rem; font-weight: 700; }
+.tpl-boton__crear-lista.btn:hover { border-color: var(--verde); color: var(--verde-oscuro); }
+.tpl-boton__crear-lista.btn:focus-visible { outline: 2px solid var(--verde); outline-offset: 2px; }
+.tpl-boton__crear-lista.btn:disabled { opacity: .55; cursor: not-allowed; }
+.tpl-boton__crear-lista.btn[hidden] { display: none; }
+.tpl-boton__opciones { grid-column: 1 / -1; min-width: 0; padding: 12px; border: 1px solid var(--brand-tint-bd); border-radius: 10px; background: var(--panel-2); }
+.tpl-boton__opciones h4 { margin: 0 0 4px; color: var(--texto); font-size: .9rem; }
+.tpl-boton__opciones > .field__hint { margin: 0 0 10px; }
+.tpl-boton__opciones-lista { display: grid; gap: 8px; margin-bottom: 10px; }
+.tpl-boton__opcion { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(180px, 2fr) 40px; align-items: start; gap: 8px; }
+.field.tpl-botones .tpl-boton__opcion textarea { width: 100%; min-width: 0; min-height: 44px; margin: 0; padding: 10px 12px; border: 1px solid var(--borde); border-radius: 10px; background: var(--surface-2); color: var(--texto); font: inherit; font-size: .875rem; line-height: 1.35; resize: vertical; box-shadow: none; }
+.field.tpl-botones .tpl-boton__opcion textarea:focus { border-color: var(--verde); outline: 2px solid var(--verde); outline-offset: 1px; }
+.tpl-boton__opcion-quitar.btn { display: inline-grid; place-items: center; width: 40px; min-width: 40px; height: 44px; min-height: 44px; margin-top: 20px; padding: 0; }
+.bubble__opciones-preview { padding: 7px 10px; color: var(--texto-suave); font-size: .8rem; line-height: 1.4; }
+@media (max-width: 850px) {
+  .tpl-boton { grid-template-columns: minmax(0, 1fr) 40px; }
+  .tpl-boton__encabezado { grid-column: 1; }
+  .tpl-boton > .tpl-boton__campo { grid-column: 1 / -1; }
+  .tpl-boton__opcion { grid-template-columns: minmax(0, 1fr) 40px; }
+  .tpl-boton__opcion > .tpl-boton__campo { grid-column: 1 / -1; }
+  .tpl-boton__opcion-quitar.btn { grid-column: 2; grid-row: 1; margin-top: 0; }
+}
 .tpl-mensaje__campo { position: relative; }
 .tpl-mensaje__campo #inpMensaje { display: block; padding-right: 58px; }
 .tpl-ia__abrir {

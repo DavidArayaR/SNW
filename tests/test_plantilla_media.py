@@ -91,6 +91,31 @@ class PlantillaMediaTests(unittest.TestCase):
         componentes = crear.call_args.args[1]["components"]
         self.assertEqual([c["type"] for c in componentes[:2]], ["HEADER", "BODY"])
 
+    def test_template_meta_envia_botones_configurados(self):
+        servicio = WhatsAppService()
+        botones = [{"tipo": "url", "texto": "Sitio", "url": "https://example.org"},
+                   {"tipo": "respuesta", "texto": "Salir", "accion": "baja"}]
+        with patch.object(WhatsAppService, "waba_id", "waba"), \
+             patch.object(WhatsAppService, "token", "token"), \
+             patch.object(WhatsAppApiClient, "crear_template", new_callable=AsyncMock,
+                          return_value={"id": "tpl", "status": "PENDING"}) as crear:
+            resultado = servicio.crear_template_meta("ejemplo", "Hola", botones=botones)
+        self.assertTrue(resultado["ok"])
+        componente = crear.call_args.args[1]["components"][-1]
+        self.assertEqual(componente["type"], "BUTTONS")
+        self.assertEqual([b["type"] for b in componente["buttons"]], ["URL", "QUICK_REPLY"])
+
+    def test_guardar_template_conserva_encabezado_pie_y_botones(self):
+        servicio = WhatsAppService()
+        botones = [{"tipo": "respuesta", "texto": "Dar de baja", "accion": "baja"}]
+        with patch.object(servicio, "id_template_meta", return_value=None), \
+             patch.object(servicio, "crear_template_meta", return_value={"ok": True}) as crear:
+            servicio.guardar_template_meta("ejemplo", "Hola", media_id="media",
+                                          encabezado_texto=None, pie_texto="Centro",
+                                          botones=botones)
+        crear.assert_called_once_with("ejemplo", "Hola", "es", "UTILITY", "media",
+                                      None, "Centro", botones)
+
     def test_no_guarda_encabezado_sin_app_id(self):
         with patch.object(main, "config_get", return_value=""), \
              patch.object(main, "obtener_media") as obtener:
@@ -123,7 +148,7 @@ class EnvioConMediaTests(unittest.IsolatedAsyncioTestCase):
                           return_value=("media-meta", "video")), \
              patch.object(WhatsAppApiClient, "enviar", new_callable=AsyncMock,
                           return_value={"messages": [{"id": "wamid"}]}) as enviar, \
-             patch("whatsapp_service.presentar_plantilla", return_value={"errores": []}), \
+             patch("whatsapp_service.presentar_plantilla", return_value={"errores": [], "botones": []}), \
              patch("whatsapp_service.config_get", return_value="es"):
             resultado = await servicio.enviar(
                 "+56912345678", "Hola David", {

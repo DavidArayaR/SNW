@@ -111,6 +111,7 @@ class AvisoInsultoTests(unittest.TestCase):
         botones = payload["interactive"]["action"]["buttons"]
         self.assertEqual([b["reply"]["id"] for b in botones],
                          [BOTON_ID_EJECUTIVA, BOTON_ID_BAJA_INSULTO])
+        self.assertEqual(botones[0]["reply"]["title"], "Ir al callcenter")
         self.assertTrue(all(len(b["reply"]["title"]) <= 20 for b in botones))
 
     def test_envio_oficial_usa_payload_interactivo(self):
@@ -189,7 +190,7 @@ class AvisoInsultoTests(unittest.TestCase):
         valor = {"contacts": [{"wa_id": TEL.lstrip("+")}], "messages": [{
             "id": "wamid.ejecutiva", "type": "interactive",
             "interactive": {"button_reply": {"id": BOTON_ID_EJECUTIVA,
-                                             "title": "Hablar con ejecutiva"}}}]}
+                                             "title": "Ir al callcenter"}}}]}
         with patch("whatsapp_service.esta_suprimido", return_value=False), \
              patch("whatsapp_service.es_exento", return_value=False), \
              patch("whatsapp_service.es_numero_prueba", return_value=False), \
@@ -199,6 +200,21 @@ class AvisoInsultoTests(unittest.TestCase):
             acciones = servicio._procesar_mensajes(valor)
         self.assertIn("derivacion_nueva", acciones)
         self.assertEqual(consulta.call_args.args[-1], True)
+
+    def test_boton_antiguo_sin_id_sigue_derivando(self):
+        servicio = WhatsAppService()
+        valor = {"contacts": [{"wa_id": TEL.lstrip("+")}], "messages": [{
+            "id": "wamid.ejecutiva-antigua", "type": "button",
+            "button": {"text": "Hablar con ejecutiva"}}]}
+        with patch("whatsapp_service.esta_suprimido", return_value=False), \
+             patch("whatsapp_service.es_exento", return_value=False), \
+             patch("whatsapp_service.es_numero_prueba", return_value=False), \
+             patch.object(servicio, "_estaba_opt_out", return_value=False), \
+             patch.object(servicio, "_registrar_respuesta", return_value="registrada"), \
+             patch("whatsapp_service.al_detectar_consulta", return_value="nueva") as consulta:
+            acciones = servicio._procesar_mensajes(valor)
+        self.assertIn("derivacion_nueva", acciones)
+        consulta.assert_called_once()
 
     def test_boton_baja_insulto_conserva_la_baja_explicita(self):
         servicio = WhatsAppService()
@@ -227,7 +243,7 @@ class AvisoInsultoTests(unittest.TestCase):
              patch.object(main, "_enviar_mensaje_directo", return_value=True) as enviar:
             main._avisar_insulto(TEL)
         self.assertEqual(enviar.call_args.kwargs["plantilla"], {"opciones_insulto": True})
-        self.assertIn("hablar con una ejecutiva", enviar.call_args.args[1])
+        self.assertIn("hablar con callcenter", enviar.call_args.args[1])
         conn = MagicMock()
         cur = conn.__enter__.return_value.cursor.return_value.__enter__.return_value
         def ejecutar(sql, *_):

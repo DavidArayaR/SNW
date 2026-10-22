@@ -53,7 +53,8 @@ from whatsapp_channel_verification import verificar_canal_meta
 import whatsapp_service
 from plantilla_media import (MAX_MEDIA_BYTES, descargar_media_meta, guardar_media,
                             guardar_media_importada, obtener_media, ruta_media)
-from plantilla_revision import MAX_CUERPO, presentar_plantilla, componentes_para_vista
+from plantilla_revision import (MAX_CUERPO, presentar_plantilla,
+                               componentes_para_vista, version_opciones)
 from groq_service import consumir_cuota, generar_borrador, validar_instruccion
 from wa_rate_limit import gobernador as wa_gobernador
 from wa_dispatch_limit import (estados as estados_despacho, politica as politica_despacho,
@@ -2500,7 +2501,8 @@ def _enviar_call_center_auto(tel: str, mensaje_prueba_id: str | None = None) -> 
                         "     AND estado_envio = 'enviado'"
                         "     AND COALESCE(plantilla_clave, '') NOT IN"
                         "      ('respuesta', 'ajuste_manual', 'call_center', 'interes_boton',"
-                        "       'no_interes_boton', 'baja_aviso', 'retractacion_aviso')"
+                        "       'no_interes_boton', 'baja_aviso', 'retractacion_aviso',"
+                        "       'lista_opciones', 'lista_respuesta')"
                         "  ) AS ult_plantilla,"
                         "  (SELECT MAX(id) FROM log_envios WHERE paciente_id = %s"
                         f"     {cond_t}"
@@ -2779,7 +2781,7 @@ _MENSAJE_BIENVENIDA_DEVUELTA = (
 )
 _MENSAJE_OPCIONES_INSULTO = (
     "Lamentamos que hayas tenido una mala experiencia. Si quieres, puedes "
-    "hablar con una ejecutiva o darte de baja inmediatamente."
+    "hablar con callcenter o darte de baja inmediatamente."
 )
 
 
@@ -2966,6 +2968,66 @@ def _servicio_plantilla(plantilla: dict) -> WhatsAppService:
         return WhatsAppService(phone_number_id="inactivo")
     return WhatsAppService(phone_number_id=canal.get("phoneNumberId") or "incompleto")
 
+def _reservar_interaccion_lista(mensaje_id: str | None) -> bool:
+    """Evita respuestas duplicadas ante reintentos del webhook, también entre procesos."""
+    if not mensaje_id:
+        return False
+    clave = hashlib.sha256(mensaje_id.encode("utf-8")).hexdigest()
+    try:
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute("DELETE FROM whatsapp_interacciones_lista"
+                        " WHERE creado < DATE_SUB(NOW(), INTERVAL 30 DAY)")
+            cur.execute("INSERT IGNORE INTO whatsapp_interacciones_lista (mensaje_hash)"
+                        " VALUES (%s)", (clave,))
+            reservado = cur.rowcount == 1
+            conn.commit()
+        return reservado
+    except Exception as exc:
+        log_error("reservar interacción de lista", exc)
+        return False
+
+
+def _boton_de_lista(plantilla_id: int) -> dict | None:
+    plantilla = next((p for p in leer_plantillas() if p.get("id") == plantilla_id), None)
+    if (not plantilla or plantilla.get("whatsapp_template_status") != "APPROVED"
+            or _aprobacion_plantilla(plantilla) != "aprobada"):
+        return None
+    vista = presentar_plantilla(plantilla)
+    if vista["errores"]:
+        return None
+    return next((b for b in vista["botones"] if b.get("accion") == "opciones"), None)
+
+
+def _enviar_lista_opciones(telefono: str, plantilla_id: int, mensaje_id: str | None) -> None:
+    if config_get("metodo_envio") != "api_oficial" or esta_suprimido(telefono):
+        return
+    boton = _boton_de_lista(plantilla_id)
+    if not boton or not _reservar_interaccion_lista(mensaje_id):
+        return
+    _enviar_mensaje_directo(
+        telefono, "Selecciona una opción para recibir más información.", "lista_opciones",
+        plantilla={"lista_opciones": {"plantilla_id": plantilla_id, "boton": boton}},
+    )
+
+
+def _responder_opcion_lista(telefono: str, plantilla_id: int, version: str,
+                           indice: int, mensaje_id: str | None) -> None:
+    if config_get("metodo_envio") != "api_oficial" or esta_suprimido(telefono):
+        return
+    boton = _boton_de_lista(plantilla_id)
+    if not boton or version_opciones(boton["opciones"]) != version:
+        return  # No responder con contenido distinto al de la lista recibida.
+    opciones = boton["opciones"]
+    if indice < 0 or indice >= len(opciones) or not _reservar_interaccion_lista(mensaje_id):
+        return
+    _enviar_mensaje_directo(telefono, opciones[indice]["mensaje"], "lista_respuesta")
+
+
+whatsapp_service.al_mostrar_opciones = lambda tel, plantilla_id, msg_id: _programar_aviso(
+    lambda t: _enviar_lista_opciones(t, plantilla_id, msg_id), tel)
+whatsapp_service.al_responder_opcion = lambda tel, plantilla_id, version, indice, msg_id: _programar_aviso(
+    lambda t: _responder_opcion_lista(t, plantilla_id, version, indice, msg_id), tel)
+
 
 def _registrar_template_meta(p: dict, nombre_anterior: str | None = None,
                              lang_anterior: str | None = None,
@@ -3012,6 +3074,7 @@ def _registrar_template_meta(p: dict, nombre_anterior: str | None = None,
             media_id=p.get("encabezado_media_id"),
             encabezado_texto=p.get("encabezado_texto"),
             pie_texto=p.get("pie_texto"),
+            botones=p.get("botones"),
         )
     except Exception as e:
         log_error(f"_registrar_template_meta({nombre_template!r})", e)
@@ -3022,10 +3085,8 @@ def _registrar_template_meta(p: dict, nombre_anterior: str | None = None,
     p["whatsapp_template_error"] = resultado.get("error")
     p["encabezado_meta_registrado"] = bool(resultado.get("ok")) if p.get("encabezado_media_id") else None
     if resultado.get("ok"):
-        # El payload que acabamos de registrar usa los botones fijos del
-        # editor; no conservar una descripción vieja importada desde Meta.
-        p["botones"] = [{"tipo": "respuesta", "texto": b["text"]}
-                        for b in whatsapp_service.BOTONES_RESPUESTA]
+        # Los botones configurados forman parte de la versión enviada a Meta.
+        p["botones"] = presentar_plantilla(p)["botones"]
         p["whatsapp_header_format"] = (obtener_media(p["encabezado_media_id"])["formato_meta"]
                                          if p.get("encabezado_media_id") else
                                          "TEXT" if p.get("encabezado_texto") else None)
@@ -3491,6 +3552,22 @@ def sincronizar_plantillas_meta(body: SincronizarPlantillasIn,
         if match:
             usados_id.add(match.get("id"))
             media_importada = medios_meta.get(match.get("id"))
+            componentes_meta = componentes_para_vista(match.get("components"))
+            if componentes_meta["botones"] is None:
+                componentes_meta["botones"] = []
+            # Meta conserva la forma del botón, pero no nuestra acción local
+            # (interés, baja, consulta). Retenerla si el botón sigue igual.
+            botones_meta = componentes_meta.get("botones")
+            if botones_meta is not None:
+                for boton_meta in botones_meta:
+                    for boton_local in p.get("botones") or []:
+                        if (boton_meta.get("tipo") == "respuesta"
+                                and boton_local.get("tipo") == "respuesta"
+                                and boton_meta.get("texto") == boton_local.get("texto")):
+                            boton_meta["accion"] = boton_local.get("accion") or boton_meta.get("accion")
+                            if boton_meta["accion"] == "opciones":
+                                boton_meta["opciones"] = boton_local.get("opciones")
+                            break
 
             # Meta es la fuente de verdad: el texto que realmente se envía es
             # el que está aprobado allá, no esta copia local. Por eso el
@@ -3512,6 +3589,7 @@ def sincronizar_plantillas_meta(body: SincronizarPlantillasIn,
                 or p.get("whatsapp_template_categoria") != match.get("category")
                 or p.get("whatsapp_template_quality_score") != match.get("quality_score")
                 or texto_nuevo != texto_actual
+                or p.get("botones") != botones_meta
                 or (media_importada is not None and
                     (p.get("encabezado_media_id") != media_importada
                      or not p.get("encabezado_meta_registrado")))
@@ -3535,7 +3613,7 @@ def sincronizar_plantillas_meta(body: SincronizarPlantillasIn,
                                              else p.get("whatsapp_template_error")
                                              or "El encabezado aún no se registró en Meta.")
             p["texto"] = texto_nuevo
-            p.update(componentes_para_vista(match.get("components")))
+            p.update(componentes_meta)
         # Un borrador local sin vínculo con Meta se conserva sin modificar.
 
     nombres_ocupados = {p["nombre"].lower() for p in plantillas}
@@ -3549,6 +3627,9 @@ def sincronizar_plantillas_meta(body: SincronizarPlantillasIn,
         nombre = _nombre_libre(nombre_base, nombres_ocupados)
         clave = _clave_libre(slug(nombre), claves_ocupadas)
 
+        componentes_nuevos = componentes_para_vista(t.get("components"))
+        if componentes_nuevos["botones"] is None:
+            componentes_nuevos["botones"] = []
         plantillas.append({
             "id": siguiente_id,
             "clave": clave,
@@ -3566,7 +3647,7 @@ def sincronizar_plantillas_meta(body: SincronizarPlantillasIn,
             "whatsapp_template_error": None,
             "encabezado_media_id": medios_meta.get(t["id"]),
             "encabezado_meta_registrado": bool(medios_meta.get(t["id"])),
-            **componentes_para_vista(t.get("components")),
+            **componentes_nuevos,
             "actualizada": int(time.time() * 1000),
         })
         siguiente_id += 1
@@ -3654,12 +3735,8 @@ def previsualizar_plantilla(body: PlantillaPreviaIn,
     borrador["encabezado_media_id"] = media_id
     borrador["encabezado_texto"] = encabezado_texto
     borrador["pie_texto"] = pie_texto
-    if actual and (body.texto != actual.get("texto") or
-                   media_id != actual.get("encabezado_media_id") or
-                   encabezado_texto != (actual.get("encabezado_texto") or "") or
-                   pie_texto != (actual.get("pie_texto") or "")):
-        # Los botones importados aún se reemplazan por los fijos al editar.
-        borrador["botones"] = None
+    if "botones" in body.model_fields_set:
+        borrador["botones"] = body.botones
     if (media_id != (actual or {}).get("encabezado_media_id") or
             encabezado_texto != ((actual or {}).get("encabezado_texto") or "")):
         borrador["whatsapp_header_format"] = None
@@ -3678,7 +3755,10 @@ def previsualizar_plantilla(body: PlantillaPreviaIn,
     if actual and (body.texto != actual.get("texto") or
                    media_id != actual.get("encabezado_media_id") or
                    encabezado_texto != (actual.get("encabezado_texto") or "") or
-                   pie_texto != (actual.get("pie_texto") or "")):
+                   pie_texto != (actual.get("pie_texto") or "") or
+                   ("botones" in body.model_fields_set and
+                    presentar_plantilla({**actual, "botones": body.botones})["botones"] !=
+                    presentar_plantilla(actual)["botones"])):
         vista["avisos"].append("Estos cambios requieren guardar y esperar una nueva revisión de Meta.")
     vista["puede_enviar_prueba"] = bool(actual and not vista["errores"]
                                       and not vista["avisos"]
@@ -3800,8 +3880,9 @@ def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(exigir("plantillas
     media_id = _validar_media_plantilla(body.encabezado_media_id, sesion)
     encabezado_texto = (body.encabezado_texto or "").strip()
     pie_texto = (body.pie_texto or "").strip()
-    _exigir_revision_valida({"texto": body.texto, "encabezado_media_id": media_id,
-                             "encabezado_texto": encabezado_texto, "pie_texto": pie_texto}, body.ejemplos)
+    vista = _exigir_revision_valida({"texto": body.texto, "encabezado_media_id": media_id,
+                                     "encabezado_texto": encabezado_texto,
+                                     "pie_texto": pie_texto, "botones": body.botones}, body.ejemplos)
 
     plantillas = leer_plantillas()
     clave = slug(body.clave or body.nombre)
@@ -3824,6 +3905,7 @@ def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(exigir("plantillas
         "encabezado_media_id": media_id,
         "encabezado_texto": encabezado_texto or None,
         "pie_texto": pie_texto or None,
+        "botones": vista["botones"],
         # El nombre del template de Meta se deriva SIEMPRE del nombre de la
         # plantilla (no se acepta uno arbitrario desde el cliente).
         "whatsapp_template": slug(body.nombre) or None,
@@ -3908,6 +3990,9 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
                      else p.get("encabezado_media_id")) == p.get("encabezado_media_id")
                 and encabezado_texto == (p.get("encabezado_texto") or "")
                 and pie_texto == (p.get("pie_texto") or "")
+                and ("botones" not in body.model_fields_set or
+                     presentar_plantilla({**p, "botones": body.botones})["botones"]
+                     == presentar_plantilla(p)["botones"])
                 and "area_id" in body.model_fields_set
                 and body.area_id != p.get("area_id")
             )
@@ -3925,11 +4010,9 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
             if (media_id != p.get("encabezado_media_id") or
                     encabezado_texto != (p.get("encabezado_texto") or "")):
                 revision_borrador["whatsapp_header_format"] = None
-            if (body.texto != p.get("texto") or media_id != p.get("encabezado_media_id") or
-                    encabezado_texto != (p.get("encabezado_texto") or "") or
-                    pie_texto != (p.get("pie_texto") or "")):
-                revision_borrador["botones"] = None
-            _exigir_revision_valida(revision_borrador, body.ejemplos)
+            if "botones" in body.model_fields_set:
+                revision_borrador["botones"] = body.botones
+            vista = _exigir_revision_valida(revision_borrador, body.ejemplos)
             if _aprobacion_plantilla(p) != "aprobada":
                 # Pendiente/rechazada: aún no existe en Meta. Si la edita su
                 # creador y estaba rechazada, vuelve a pendiente (pide revisión
@@ -3950,6 +4033,7 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
                     or media_id != p.get("encabezado_media_id")
                     or encabezado_texto != (p.get("encabezado_texto") or "")
                     or pie_texto != (p.get("pie_texto") or "")
+                    or vista["botones"] != presentar_plantilla(p)["botones"]
                 )
                 if _aprobacion_plantilla(p) == "rechazada" and not hubo_cambio:
                     raise HTTPException(
@@ -3963,6 +4047,7 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
                 p["encabezado_media_id"] = media_id
                 p["encabezado_texto"] = encabezado_texto or None
                 p["pie_texto"] = pie_texto or None
+                p["botones"] = vista["botones"]
                 p["actualizada"] = int(time.time() * 1000)
                 if _aprobacion_plantilla(p) == "rechazada":
                     p["aprobacion_estado"] = "pendiente"
@@ -4017,6 +4102,7 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
                 or media_id != p.get("encabezado_media_id")
                 or encabezado_texto != (p.get("encabezado_texto") or "")
                 or pie_texto != (p.get("pie_texto") or "")
+                or vista["botones"] != presentar_plantilla(p)["botones"]
             )
             p["texto"] = body.texto
             p["area_id"] = _validar_plantilla_area(sesion, body.area_id)
@@ -4026,6 +4112,7 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
             p["encabezado_media_id"] = media_id
             p["encabezado_texto"] = encabezado_texto or None
             p["pie_texto"] = pie_texto or None
+            p["botones"] = vista["botones"]
             p["actualizada"] = int(time.time() * 1000)
             if meta_cambio:
                 p = _registrar_template_meta(p, nombre_template_anterior, lang_anterior, template_id_anterior)
@@ -7993,7 +8080,8 @@ _SOLO_DEV = (
 
 # Respuestas automáticas del sistema (texto libre, ventana de 24 h): no son
 # parte de un lote (envio_id NULL) y siempre cuentan como servicio.
-_CLAVES_RESPUESTA_AUTO = ("call_center", "baja_aviso", "retractacion_aviso")
+_CLAVES_RESPUESTA_AUTO = ("call_center", "baja_aviso", "retractacion_aviso",
+                          "lista_opciones", "lista_respuesta")
 # En costos entran aunque no tengan lote: si salieron por api_oficial, Meta
 # las cobró de verdad (las simuladas se excluyen por no tener message_id).
 _SOLO_PROD_O_AUTO = (

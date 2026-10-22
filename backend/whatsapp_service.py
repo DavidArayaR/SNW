@@ -28,7 +28,8 @@ from whatsapp_channel_verification import verificar_canal_meta
 from corpus_respuestas import guardar_mensaje_completo
 from intenciones_call_center import clasificar, patrones_configurados
 from plantilla_media import obtener_media, ruta_media
-from plantilla_revision import presentar_plantilla, variables_del_cuerpo
+from plantilla_revision import (botones_para_meta, presentar_plantilla,
+                               variables_del_cuerpo, version_opciones)
 from supresion import (esta_suprimido, es_exento, es_numero_prueba, solicitar_eliminacion,
                       oferta_eliminacion_enviada)
 import servicio_areas
@@ -231,6 +232,8 @@ al_detectar_baja = None
 al_detectar_retractacion = None
 al_detectar_insulto = None
 al_derivar_crm = None
+al_mostrar_opciones = None
+al_responder_opcion = None
 
 # Texto exacto de los 3 botones de respuesta rápida que se agregan a toda
 # plantilla normal (no de call center). Los presses de estos botones se
@@ -240,9 +243,14 @@ al_derivar_crm = None
 BOTON_TEXTO_INTERES = "Me interesa"
 BOTON_TEXTO_NO_INTERES = "No me interesa"
 BOTON_TEXTO_BAJA = "Dar de baja"
-BOTON_TEXTO_EJECUTIVA = "Hablar con ejecutiva"
+BOTON_TEXTO_EJECUTIVA = "Ir al callcenter"
+BOTON_TEXTO_EJECUTIVA_ANTERIOR = "Hablar con ejecutiva"
 BOTON_ID_EJECUTIVA = "snw_hablar_ejecutiva"
 BOTON_ID_BAJA_INSULTO = "snw_dar_de_baja"
+ACCIONES_BOTON_TEMPLATE = {
+    "interes": "snw_tpl_interes", "desinteres": "snw_tpl_desinteres",
+    "baja": "snw_tpl_baja", "consulta": "snw_tpl_consulta",
+}
 BOTONES_RESPUESTA = [
     {"type": "QUICK_REPLY", "text": BOTON_TEXTO_INTERES},
     {"type": "QUICK_REPLY", "text": BOTON_TEXTO_NO_INTERES},
@@ -650,7 +658,8 @@ class WhatsAppService:
     def crear_template_meta(self, nombre: str, texto: str, lang: str = "es",
                             category: str = "UTILITY", media_id: str | None = None,
                             encabezado_texto: str | None = None,
-                            pie_texto: str | None = None) -> dict:
+                            pie_texto: str | None = None,
+                            botones: list[dict] | None = None) -> dict:
         """Crea el template en Meta. Devuelve {ok, template_id, status, error}.
 
         Los templates en Meta quedan en estado PENDING hasta ser aprobados."""
@@ -673,7 +682,11 @@ class WhatsAppService:
         if pie_texto:
             components.append({"type": "FOOTER", "text": pie_texto.strip()})
         if category != "AUTHENTICATION":
-            components.append({"type": "BUTTONS", "buttons": BOTONES_RESPUESTA})
+            vista = presentar_plantilla({"texto": texto, "botones": botones})
+            if vista["errores"]:
+                return {"ok": False, "template_id": None, "status": None,
+                        "error": " ".join(vista["errores"])}
+            components.append({"type": "BUTTONS", "buttons": botones_para_meta(vista["botones"])})
 
         payload = {
             "name": nombre,
@@ -695,7 +708,8 @@ class WhatsAppService:
     def editar_template_meta(self, template_id: str, texto: str, category: str = "UTILITY",
                             media_id: str | None = None,
                             encabezado_texto: str | None = None,
-                            pie_texto: str | None = None) -> dict:
+                            pie_texto: str | None = None,
+                            botones: list[dict] | None = None) -> dict:
         """Edita un template ya existente en Meta usando su ID.
 
         Importante: Meta NO permite cambiar la categoría de un template ya
@@ -737,7 +751,11 @@ class WhatsAppService:
         if pie_texto:
             components.append({"type": "FOOTER", "text": pie_texto.strip()})
         if categoria_real != "AUTHENTICATION":
-            components.append({"type": "BUTTONS", "buttons": BOTONES_RESPUESTA})
+            vista = presentar_plantilla({"texto": texto, "botones": botones})
+            if vista["errores"]:
+                return {"ok": False, "template_id": template_id, "status": None,
+                        "error": " ".join(vista["errores"])}
+            components.append({"type": "BUTTONS", "buttons": botones_para_meta(vista["botones"])})
 
         payload = {"category": categoria_real, "components": components}
         aviso_categoria = None
@@ -800,7 +818,8 @@ class WhatsAppService:
                               template_id_conocido: str | None = None,
                               media_id: str | None = None,
                               encabezado_texto: str | None = None,
-                              pie_texto: str | None = None) -> dict:
+                              pie_texto: str | None = None,
+                              botones: list[dict] | None = None) -> dict:
         """Crea el template en Meta, o lo edita si ya existe.
 
         Si no se pasa un template_id_conocido, primero intenta encontrarlo en
@@ -809,9 +828,9 @@ class WhatsAppService:
         tid = template_id_conocido or self.id_template_meta(nombre, lang)
         if tid:
             return self.editar_template_meta(tid, texto, category, media_id,
-                                             encabezado_texto, pie_texto)
+                                             encabezado_texto, pie_texto, botones)
         return self.crear_template_meta(nombre, texto, lang, category, media_id,
-                                        encabezado_texto, pie_texto)
+                                        encabezado_texto, pie_texto, botones)
 
     def estado_template_meta(self, nombre_template: str, lang: str) -> dict:
         """Consulta en Meta el estado actual de un template por nombre + idioma.
@@ -921,7 +940,7 @@ class WhatsAppService:
         return payload, "cta_url"
 
     def construir_payload_opciones_insulto(self, telefono: str, mensaje: str) -> tuple:
-        """Respuesta de servicio con elección explícita de ejecutiva o baja."""
+        """Respuesta de servicio con elección explícita de callcenter o baja."""
         payload = {
             "messaging_product": "whatsapp",
             "recipient_type": "individual",
@@ -939,6 +958,28 @@ class WhatsAppService:
             },
         }
         return payload, "botones_servicio"
+
+    def construir_payload_lista(self, telefono: str, plantilla_id: int,
+                                boton: dict) -> tuple:
+        """Lista interactiva posterior a una respuesta rápida de la plantilla."""
+        opciones = boton["opciones"]
+        version = version_opciones(opciones)
+        payload = {
+            "messaging_product": "whatsapp", "recipient_type": "individual",
+            "to": telefono.lstrip("+"), "type": "interactive",
+            "interactive": {
+                "type": "list",
+                "body": {"text": "Selecciona una opción para recibir más información."},
+                "action": {
+                    "button": boton["texto"],
+                    "sections": [{"title": "Opciones", "rows": [
+                        {"id": f"snw_lista_{plantilla_id}_{version}_{indice}",
+                         "title": opcion["texto"]}
+                        for indice, opcion in enumerate(opciones)]}],
+                },
+            },
+        }
+        return payload, "lista_opciones"
 
     def construir_payload_template(self, telefono: str, nombre: str, lang: str,
                                    variables: list[str] | None = None,
@@ -1009,9 +1050,26 @@ class WhatsAppService:
             if valores:
                 componentes.append({"type": "body", "parameters": [
                     {"type": "text", "text": valor} for valor in valores]})
+            for indice, boton in enumerate(revision.get("botones", [])):
+                if boton["tipo"] != "respuesta":
+                    continue
+                accion = boton.get("accion") or "ninguna"
+                if accion == "opciones":
+                    if not isinstance(msg.get("id"), int):
+                        return False, None, "La plantilla no tiene ID para mostrar opciones", "failed"
+                    payload_boton = f"snw_tpl_opciones_{msg['id']}"
+                else:
+                    payload_boton = ACCIONES_BOTON_TEMPLATE.get(accion, "snw_tpl_respuesta")
+                componentes.append({"type": "button", "sub_type": "quick_reply",
+                                    "index": str(indice), "parameters": [
+                                        {"type": "payload", "payload": payload_boton}]})
             payload_, _ = self.construir_payload_template(
                 telefono, nombre_template, idioma, componentes=componentes or None,
             )
+        elif msg.get("lista_opciones"):
+            lista = msg["lista_opciones"]
+            payload_, _ = self.construir_payload_lista(
+                telefono, lista["plantilla_id"], lista["boton"])
         elif msg.get("opciones_insulto"):
             payload_, _ = self.construir_payload_opciones_insulto(telefono, mensaje)
         elif cta and cta.get("url"):
@@ -1198,8 +1256,8 @@ class WhatsAppService:
             # poder retirarlo de todas las áreas al recibir ELIMINAR.
             self._guardar_corpus_respuesta(cuerpo, telefono)
 
-            # Los 3 botones de la plantilla normal se identifican por su texto
-            # exacto; el resto pasa por los clasificadores de texto libre.
+            # El payload identifica la acción de botones personalizados;
+            # el texto exacto conserva compatibilidad con botones antiguos.
             es_boton = tipo in ("button", "interactive")
             boton = (texto or "").strip().casefold()
             clasificacion = clasificar(cuerpo, patrones_configurados(
@@ -1221,20 +1279,26 @@ class WhatsAppService:
                     acciones.append("opciones_baja_ofrecidas")
                 except Exception as exc:
                     log_error("al_detectar_insulto", exc)
-            interes = es_mensaje_interes(cuerpo)
-            baja = self._es_baja(texto) or self._es_baja(extra)
+            accion_payload = next((accion for accion, payload in ACCIONES_BOTON_TEMPLATE.items()
+                                   if es_boton and extra == payload), None)
+            interes = es_mensaje_interes(cuerpo) if accion_payload is None else accion_payload == "interes"
+            baja = ((self._es_baja(texto) or self._es_baja(extra)) if accion_payload is None
+                    else accion_payload == "baja")
             if clasificacion and clasificacion.cancela and any(
                     frase in cuerpo.casefold() for frase in ("cancelar mi hora", "cancelo mi hora")):
                 # «Cancelar mi hora» es una cancelación de cita, no una baja de
                 # notificaciones; una baja explícita en el mismo texto sí gana.
                 if not any(f in cuerpo.casefold() for f in BAJA_FRASES):
                     baja = False
-            fue_interes = interes or (es_boton and boton == BOTON_TEXTO_INTERES.casefold())
-            fue_baja = baja or (es_boton and boton == BOTON_TEXTO_BAJA.casefold())
+            fue_interes = interes or (es_boton and accion_payload is None
+                                     and boton == BOTON_TEXTO_INTERES.casefold())
+            fue_baja = baja or (es_boton and accion_payload is None
+                               and boton == BOTON_TEXTO_BAJA.casefold())
             # "no me interesa" / "no estoy interesada"…: NO es una baja, el
             # paciente sigue pudiendo recibir futuras plantillas. Una baja
             # explícita en el mismo mensaje gana sobre esto.
-            no_interes = (not interes) and (not baja) and (
+            no_interes = (not fue_interes) and (not fue_baja) and (
+                accion_payload == "desinteres" if accion_payload else
                 es_mensaje_no_interes(texto) or es_mensaje_no_interes(extra)
             )
 
@@ -1268,16 +1332,51 @@ class WhatsAppService:
             info = self._registrar_respuesta(telefono, cuerpo, mensaje.get("timestamp"))
             acciones.append(f"respuesta_{info}")
 
+            if es_boton and re.fullmatch(r"snw_tpl_opciones_\d+", extra or ""):
+                if callable(al_mostrar_opciones):
+                    try:
+                        al_mostrar_opciones(telefono, int(extra.rsplit("_", 1)[1]), mensaje.get("id"))
+                        acciones.append("lista_solicitada")
+                    except Exception as exc:
+                        log_error("mostrar opciones de plantilla", exc)
+                continue
+            if tipo == "interactive" and (mensaje.get("interactive") or {}).get("type") == "list_reply":
+                coincidencia = re.fullmatch(r"snw_lista_(\d+)_([0-9a-f]{12})_(\d+)", extra or "")
+                if coincidencia:
+                    if fue_baja:
+                        self._registrar_baja(telefono, aviso=False)
+                        hubo_baja = True
+                        acciones.append("baja_lista")
+                    elif callable(al_responder_opcion):
+                        try:
+                            al_responder_opcion(telefono, int(coincidencia[1]), coincidencia[2],
+                                               int(coincidencia[3]), mensaje.get("id"))
+                            acciones.append("opcion_lista_elegida")
+                        except Exception as exc:
+                            log_error("responder opción de lista", exc)
+                    continue
+
             if es_boton and (extra == BOTON_ID_EJECUTIVA or
-                            boton == BOTON_TEXTO_EJECUTIVA.casefold()):
+                            (accion_payload is None and boton in (
+                                BOTON_TEXTO_EJECUTIVA.casefold(),
+                                BOTON_TEXTO_EJECUTIVA_ANTERIOR.casefold()))):
                 if callable(al_detectar_consulta):
                     try:
                         resultado = al_detectar_consulta(
-                            telefono, "Solicita hablar con ejecutiva", mensaje.get("id"),
+                            telefono, "Solicita hablar con callcenter", mensaje.get("id"),
                             ("SOLICITA_CONTACTO",), True)
                         acciones.append(f"derivacion_{resultado}")
                     except Exception as exc:
                         log_error("al_detectar_consulta: ejecutiva", exc)
+                continue
+            if es_boton and extra == ACCIONES_BOTON_TEMPLATE["consulta"]:
+                if callable(al_detectar_consulta):
+                    try:
+                        resultado = al_detectar_consulta(
+                            telefono, cuerpo, mensaje.get("id"), ("SOLICITA_CONTACTO",))
+                        acciones.append(f"derivacion_{resultado}")
+                    except Exception as exc:
+                        log_error("al_detectar_consulta: botón de plantilla", exc)
                 continue
 
             # Las bajas y la supresión siempre tienen prioridad. Una consulta
@@ -1298,7 +1397,8 @@ class WhatsAppService:
                         acciones.append("derivacion_error")
                 continue
 
-            if es_boton and boton == BOTON_TEXTO_INTERES.casefold():
+            if es_boton and (accion_payload == "interes" or
+                            (accion_payload is None and boton == BOTON_TEXTO_INTERES.casefold())):
                 self._registrar_interes(telefono)
                 hubo_interes = True
                 acciones.append("interes_boton")
@@ -1311,11 +1411,13 @@ class WhatsAppService:
                     except Exception as e:
                         log_error(f"al_detectar_interes({telefono})", e)
                 continue
-            if es_boton and boton == BOTON_TEXTO_NO_INTERES.casefold():
+            if es_boton and (accion_payload == "desinteres" or
+                            (accion_payload is None and boton == BOTON_TEXTO_NO_INTERES.casefold())):
                 self._registrar_no_interes(telefono)
                 acciones.append("no_interes_boton")
                 continue
-            if es_boton and boton == BOTON_TEXTO_BAJA.casefold():
+            if es_boton and (accion_payload == "baja" or
+                            (accion_payload is None and boton == BOTON_TEXTO_BAJA.casefold())):
                 self._registrar_baja(telefono, aviso=False)
                 hubo_baja = True
                 acciones.append("baja_boton")
@@ -1516,7 +1618,8 @@ class WhatsAppService:
             "  AND estado_envio = 'enviado'"
             "  AND COALESCE(plantilla_clave, '') NOT IN"
             "      ('respuesta', 'ajuste_manual', 'call_center', 'interes_boton',"
-            "       'no_interes_boton', 'baja_aviso', 'retractacion_aviso')"
+            "       'no_interes_boton', 'baja_aviso', 'retractacion_aviso',"
+            "       'lista_opciones', 'lista_respuesta')"
             " ORDER BY id DESC LIMIT 1",
             (paciente_id, *args_t),
         )

@@ -130,6 +130,204 @@ let filtroArea = localStorage.getItem("snw_filtro_tpl") || "todas";
 const formEl = $("#formPlantilla");
 const inpNombre = $("#inpNombre");
 const inpMensaje = $("#inpMensaje");
+const editorBotones = $("#editorBotones");
+const btnAgregarBoton = $("#btnAgregarBoton");
+const BOTONES_INICIALES = [
+  { tipo: "respuesta", texto: "Me interesa", accion: "interes" },
+  { tipo: "respuesta", texto: "No me interesa", accion: "desinteres" },
+  { tipo: "respuesta", texto: "Dar de baja", accion: "baja" },
+];
+
+function botonesDelEditor() {
+  return [...editorBotones.querySelectorAll(".tpl-boton")].map((fila) => {
+    const tipo = fila.querySelector(".tpl-boton__tipo").value;
+    if (tipo === "baja") return { tipo: "respuesta", texto: "Dar de baja", accion: "baja" };
+    if (tipo === "interes") return { tipo: "respuesta", texto: "Me interesa", accion: "interes" };
+    if (tipo === "nointeres") return { tipo: "respuesta", texto: "No me interesa", accion: "desinteres" };
+    const boton = { tipo, texto: fila.querySelector(".tpl-boton__texto").value.trim() };
+    if (tipo === "respuesta") {
+      boton.accion = fila.querySelector(".tpl-boton__accion").value;
+      if (boton.accion === "opciones") boton.opciones = [...fila.querySelectorAll(".tpl-boton__opcion")]
+        .map((opcion) => ({ texto: opcion.querySelector(".tpl-boton__opcion-texto").value.trim(),
+          mensaje: opcion.querySelector(".tpl-boton__opcion-mensaje").value.trim() }));
+    }
+    if (tipo === "url") boton.url = fila.querySelector(".tpl-boton__destino").value.trim();
+    if (tipo === "telefono") boton.telefono = fila.querySelector(".tpl-boton__destino").value.trim();
+    return boton;
+  });
+}
+
+function agregarOpcionLista(panel, datos = {}) {
+  const lista = panel.querySelector(".tpl-boton__opciones-lista");
+  if (lista.children.length >= 10) return;
+  const fila = document.createElement("div");
+  fila.className = "tpl-boton__opcion";
+  fila.innerHTML = `<label class="tpl-boton__campo"><span class="tpl-boton__opcion-numero">Título de la opción</span>
+      <input type="text" class="tpl-boton__opcion-texto" maxlength="24" placeholder="Por ejemplo: Conocer precios"></label>
+    <label class="tpl-boton__campo"><span>Respuesta que recibirá el paciente</span>
+      <textarea class="tpl-boton__opcion-mensaje" maxlength="1024" rows="2" placeholder="Mensaje enviado al elegir esta opción"></textarea></label>
+    <button type="button" class="btn btn--ghost tpl-boton__opcion-quitar" aria-label="Quitar opción" title="Quitar opción"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>`;
+  lista.appendChild(fila);
+  fila.querySelector(".tpl-boton__opcion-texto").value = datos.texto || "";
+  fila.querySelector(".tpl-boton__opcion-mensaje").value = datos.mensaje || "";
+  fila.querySelectorAll("input, textarea").forEach((control) => control.addEventListener("input", refrescarEditor));
+  fila.querySelector(".tpl-boton__opcion-quitar").addEventListener("click", () => {
+    fila.remove();
+    actualizarBotonAgregar();
+    refrescarEditor();
+  });
+  actualizarBotonAgregar();
+}
+
+function agregarFilaBoton(datos = {}) {
+  if (editorBotones.children.length >= 3) return;
+  const fila = document.createElement("div");
+  fila.className = "tpl-boton";
+  fila.innerHTML = `<div class="tpl-boton__encabezado"><strong class="tpl-boton__numero">Botón</strong>
+      <span class="tpl-boton__ayuda"></span></div>
+    <button type="button" class="btn btn--ghost tpl-boton__quitar" aria-label="Quitar botón" title="Quitar botón"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+    <label class="tpl-boton__campo"><span>Tipo de botón</span><select class="tpl-boton__tipo">
+      <option value="respuesta">Respuesta rápida</option><option value="url">Abrir enlace</option>
+      <option value="interes">Me interesa</option>
+      <option value="nointeres">No interesa</option>
+      <option value="baja">Baja</option></select></label>
+    <label class="tpl-boton__campo"><span>Texto visible para el paciente</span>
+      <input type="text" class="tpl-boton__texto" maxlength="20" placeholder="Texto del botón"></label>
+    <label class="tpl-boton__campo tpl-boton__accion-campo"><span>Qué ocurre al pulsarlo</span>
+      <select class="tpl-boton__accion">
+        <option value="ninguna">Solo responder</option><option value="interes">Interés</option>
+        <option value="desinteres">Desinterés</option><option value="consulta">Hablar con callcenter</option>
+        <option value="opciones">Ver opciones (lista)</option>
+        <option value="baja">Baja</option></select></label>
+    <label class="tpl-boton__campo tpl-boton__destino-campo"><span class="tpl-boton__destino-label">Destino</span>
+      <input class="tpl-boton__destino"></label>
+    <button type="button" class="btn tpl-boton__crear-lista"><i class="fa-solid fa-list" aria-hidden="true"></i> Convertir en lista de opciones</button>
+    <div class="tpl-boton__opciones" hidden><h4>Opciones de este botón</h4><p class="field__hint">Al tocar «Ver opciones», el paciente recibirá una lista. Agrega hasta 10 opciones y el mensaje de respuesta de cada una.</p>
+      <div class="tpl-boton__opciones-lista"></div>
+      <button type="button" class="btn btn--ghost tpl-boton__agregar-opcion">+ Agregar opción</button></div>`;
+  editorBotones.appendChild(fila);
+  const tipo = fila.querySelector(".tpl-boton__tipo");
+  const texto = fila.querySelector(".tpl-boton__texto");
+  const accion = fila.querySelector(".tpl-boton__accion");
+  const destino = fila.querySelector(".tpl-boton__destino");
+  const crearLista = fila.querySelector(".tpl-boton__crear-lista");
+  const panelOpciones = fila.querySelector(".tpl-boton__opciones");
+  // Las llamadas existentes siguen siendo editables, pero ya no pueden
+  // elegirse como tipo para botones nuevos.
+  if (datos.tipo === "telefono") {
+    const opcionExistente = new Option("Llamar (existente)", "telefono");
+    opcionExistente.disabled = true;
+    tipo.add(opcionExistente);
+  }
+  tipo.value = datos.accion === "baja" || datos.tipo === "baja" ? "baja" :
+    (datos.tipo === "interes" || (datos.tipo === "respuesta" && datos.accion === "interes" && datos.texto === "Me interesa")
+      ? "interes" : (datos.tipo === "nointeres" ||
+        (datos.tipo === "respuesta" && datos.accion === "desinteres" && datos.texto === "No me interesa")
+        ? "nointeres" : (["respuesta", "url", "telefono"].includes(datos.tipo) ? datos.tipo : "respuesta")));
+  texto.value = datos.texto || "";
+  accion.value = datos.accion || ({ "Me interesa": "interes", "No me interesa": "desinteres",
+    "Dar de baja": "baja" }[datos.texto] || "ninguna");
+  destino.value = datos.url || datos.telefono || "";
+  for (const opcion of datos.opciones || []) agregarOpcionLista(panelOpciones, opcion);
+  const sincronizarTipo = () => {
+    if (["baja", "interes", "nointeres"].includes(tipo.value)) {
+      texto.value = { baja: "Dar de baja", interes: "Me interesa", nointeres: "No me interesa" }[tipo.value];
+      accion.value = { baja: "baja", interes: "interes", nointeres: "desinteres" }[tipo.value];
+    }
+    texto.readOnly = ["baja", "interes", "nointeres"].includes(tipo.value);
+    fila.querySelector(".tpl-boton__accion-campo").hidden = tipo.value !== "respuesta";
+    fila.querySelector(".tpl-boton__destino-campo").hidden = !["url", "telefono"].includes(tipo.value);
+    crearLista.hidden = tipo.value !== "respuesta" || ["baja", "opciones"].includes(accion.value);
+    panelOpciones.hidden = tipo.value !== "respuesta" || accion.value !== "opciones";
+    if (!panelOpciones.hidden && !panelOpciones.querySelector(".tpl-boton__opcion")) {
+      agregarOpcionLista(panelOpciones);
+    }
+    destino.placeholder = tipo.value === "url" ? "https://ejemplo.cl" : "+56912345678";
+    destino.type = tipo.value === "url" ? "url" : "tel";
+    fila.querySelector(".tpl-boton__destino-label").textContent = tipo.value === "url" ? "Enlace que abrirá" : "Número al que llamará";
+    fila.querySelector(".tpl-boton__ayuda").textContent = ({
+      respuesta: "Escribe el texto y elige qué hará el sistema al recibir la respuesta.",
+      url: "El paciente abrirá el enlace indicado.",
+      telefono: "El paciente podrá llamar al número indicado.",
+      interes: "Se mostrará «Me interesa» y la respuesta se marcará como interés.",
+      nointeres: "Se mostrará «No me interesa» y la respuesta se marcará como desinterés.",
+      baja: "Se mostrará «Dar de baja» y se solicitará la baja del paciente.",
+    })[tipo.value] || "";
+    tipo.dataset.tipoAnterior = tipo.value;
+  };
+  tipo.addEventListener("change", () => {
+    if (tipo.dataset.tipoAnterior === "telefono" && tipo.value !== "telefono") {
+      tipo.querySelector('option[value="telefono"]')?.remove();
+    }
+    if (["baja", "interes", "nointeres"].includes(tipo.dataset.tipoAnterior) && tipo.value !== tipo.dataset.tipoAnterior) {
+      texto.value = "";
+      accion.value = "ninguna";
+    }
+    sincronizarTipo();
+    refrescarEditor();
+  });
+  accion.addEventListener("change", () => {
+    if (accion.value === "baja") tipo.value = "baja";
+    sincronizarTipo();
+    refrescarEditor();
+  });
+  crearLista.addEventListener("click", () => {
+    if (crearLista.disabled) return;
+    accion.value = "opciones";
+    texto.value = "Ver opciones";
+    sincronizarTipo();
+    actualizarBotonAgregar();
+    refrescarEditor();
+    panelOpciones.querySelector(".tpl-boton__opcion-texto")?.focus();
+  });
+  [texto, destino].forEach((control) => control.addEventListener("input", refrescarEditor));
+  panelOpciones.querySelector(".tpl-boton__agregar-opcion").addEventListener("click", () => {
+    agregarOpcionLista(panelOpciones);
+    refrescarEditor();
+  });
+  fila.querySelector(".tpl-boton__quitar").addEventListener("click", () => {
+    fila.remove();
+    actualizarBotonAgregar();
+    refrescarEditor();
+  });
+  sincronizarTipo();
+  actualizarBotonAgregar();
+}
+
+function actualizarBotonAgregar() {
+  editorBotones.querySelectorAll(".tpl-boton").forEach((fila, indice) => {
+    fila.querySelector(".tpl-boton__numero").textContent = `Botón ${indice + 1}`;
+    fila.querySelector(".tpl-boton__quitar").setAttribute("aria-label", `Quitar botón ${indice + 1}`);
+  });
+  btnAgregarBoton.disabled = editorBotones.children.length >= 3 ||
+    !PUEDE_EDITAR_PLANTILLAS || formEl.querySelector("#inpMensaje")?.disabled;
+  editorBotones.querySelectorAll(".tpl-boton__quitar").forEach((b) => {
+    b.disabled = !!inpMensaje.disabled;
+  });
+  editorBotones.querySelectorAll(".tpl-boton__crear-lista").forEach((b) => {
+    b.disabled = !!inpMensaje.disabled;
+  });
+  editorBotones.querySelectorAll(".tpl-boton__opciones").forEach((panel) => {
+    panel.querySelectorAll(".tpl-boton__opcion").forEach((fila, indice) => {
+      fila.querySelector(".tpl-boton__opcion-numero").textContent = `Opción ${indice + 1}: título visible`;
+      fila.querySelector(".tpl-boton__opcion-quitar").setAttribute("aria-label", `Quitar opción ${indice + 1}`);
+    });
+    panel.querySelector(".tpl-boton__agregar-opcion").disabled = !!inpMensaje.disabled ||
+      panel.querySelectorAll(".tpl-boton__opcion").length >= 10;
+    panel.querySelectorAll(".tpl-boton__opcion-quitar").forEach((b) => { b.disabled = !!inpMensaje.disabled; });
+  });
+}
+
+function establecerBotones(botones) {
+  editorBotones.replaceChildren();
+  for (const boton of botones || BOTONES_INICIALES) agregarFilaBoton(boton);
+  actualizarBotonAgregar();
+}
+
+btnAgregarBoton.addEventListener("click", () => {
+  agregarFilaBoton({ tipo: "respuesta", texto: "", accion: "ninguna" });
+  refrescarEditor();
+});
 const btnAbrirIA = $("#btnAbrirIA");
 const panelIA = $("#panelIA");
 const inpInstruccionIA = $("#inpInstruccionIA");
@@ -506,11 +704,11 @@ async function revisarPlantillasEnSegundoPlano() {
   }
 }
 
-async function crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezado_media_id, encabezado_texto, pie_texto, ejemplos, centro) {
+async function crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezado_media_id, encabezado_texto, pie_texto, ejemplos, centro, botones) {
   const res = await fetch(API_URL, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ clave: slug(nombre), nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezado_media_id, encabezado_texto, pie_texto, ejemplos, centro }),
+    body: JSON.stringify({ clave: slug(nombre), nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezado_media_id, encabezado_texto, pie_texto, ejemplos, centro, botones }),
   });
   if (res.status === 401) { window.snwSesionExpirada(); return Promise.reject(new Error("Sesión expirada")); }
   const data = await res.json().catch(() => ({}));
@@ -518,11 +716,11 @@ async function crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_te
   return data;
 }
 
-async function actualizarPlantilla(id, nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezado_media_id, encabezado_texto, pie_texto, ejemplos, centro) {
+async function actualizarPlantilla(id, nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezado_media_id, encabezado_texto, pie_texto, ejemplos, centro, botones) {
   const res = await fetch(`${API_URL}/${id}`, {
     method: "PUT",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezado_media_id, encabezado_texto, pie_texto, ejemplos, centro }),
+    body: JSON.stringify({ nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezado_media_id, encabezado_texto, pie_texto, ejemplos, centro, botones }),
   });
   if (res.status === 401) { window.snwSesionExpirada(); return Promise.reject(new Error("Sesión expirada")); }
   const data = await res.json().catch(() => ({}));
@@ -914,9 +1112,15 @@ function mostrarPreviewServidor(data) {
     nodo.className = "bubble__boton";
     const icono = document.createElement("i");
     icono.className = `fa-solid ${boton.tipo === "url" ? "fa-arrow-up-right-from-square" :
-      boton.tipo === "telefono" ? "fa-phone" : "fa-reply"}`;
+      boton.tipo === "telefono" ? "fa-phone" : boton.accion === "opciones" ? "fa-list" : "fa-reply"}`;
     nodo.append(icono, document.createTextNode(` ${boton.texto}`));
     previewBotones.appendChild(nodo);
+    if (boton.accion === "opciones" && boton.opciones?.length) {
+      const lista = document.createElement("div");
+      lista.className = "bubble__opciones-preview";
+      lista.textContent = `Al tocarlo: ${boton.opciones.map((o) => o.texto).join(" · ")}`;
+      previewBotones.appendChild(lista);
+    }
   }
   erroresPreview = data.errores || [];
   puedeEnviarPrueba = !!data.puede_enviar_prueba;
@@ -933,7 +1137,7 @@ async function consultarPreview(solicitud) {
       body: JSON.stringify({ plantilla_id: activaId, texto: inpMensaje.value,
         encabezado_media_id: encabezadoMediaActivo(),
         encabezado_texto: encabezadoTextoActivo(),
-        pie_texto: inpPieTexto.value.trim(), ejemplos: ejemplosPreview() }),
+        pie_texto: inpPieTexto.value.trim(), ejemplos: ejemplosPreview(), botones: botonesDelEditor() }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.detail || `Error ${res.status}`);
@@ -1154,7 +1358,7 @@ if (inpArea) inpArea.addEventListener("change", refrescarEditor);
 inpCentroPlantilla?.addEventListener("change", refrescarEditor);
 
 function estadoActualEditor() {
-  return JSON.stringify([inpNombre.value, inpMensaje.value, valTemplate(), valTemplateLang(), valTemplateCategoria(), inpArea ? inpArea.value : "", encabezadoMediaActivo(), encabezadoTextoActivo(), inpPieTexto.value, inpCentroPlantilla?.value || ""]);
+  return JSON.stringify([inpNombre.value, inpMensaje.value, valTemplate(), valTemplateLang(), valTemplateCategoria(), inpArea ? inpArea.value : "", encabezadoMediaActivo(), encabezadoTextoActivo(), inpPieTexto.value, inpCentroPlantilla?.value || "", botonesDelEditor()]);
 }
 
 function marcarSnapshot() {
@@ -1170,7 +1374,8 @@ function soloCambioArea() {
   if (!activaId || snapshot === null || !hayCambios()) return false;
   const antes = JSON.parse(snapshot);
   const ahora = JSON.parse(estadoActualEditor());
-  return antes[5] !== ahora[5] && antes.every((valor, i) => i === 5 || valor === ahora[i]);
+  return antes[5] !== ahora[5] && antes.every((valor, i) =>
+    i === 5 || JSON.stringify(valor) === JSON.stringify(ahora[i]));
 }
 
 // El botón «Guardar» solo se habilita si hubo algún cambio desde que se abrió
@@ -1406,6 +1611,7 @@ function actualizarBloqueoCampos() {
     btnQuitarEncabezado.disabled = true;
     btnAbrirIA.hidden = true;
     cerrarPanelIA(true);
+    actualizarBotonAgregar();
     if (p && PUEDE_EDITAR_PLANTILLAS && puedeEditarEsta(p) &&
         esPlantillaEditable(p) && !esPlantillaProtegida(p)) {
       refrescarAvisoSinArea();
@@ -1418,6 +1624,8 @@ function actualizarBloqueoCampos() {
   // disabled para siempre después de abrir la primera no editable.
   inpMensaje.disabled = false;
   inpCentroPlantilla.disabled = esExistente;
+  editorBotones.querySelectorAll("input, select, textarea").forEach((el) => { el.disabled = false; });
+  actualizarBotonAgregar();
   btnAbrirIA.hidden = false;
   inpInstruccionIA.disabled = false;
   inpEjemploNombre.disabled = false;
@@ -1475,6 +1683,7 @@ function abrir(id) {
   checkEncabezadoMultimedia.checked = !!p.encabezado_media_id;
   grupoEncabezadoTexto.hidden = checkEncabezadoMultimedia.checked;
   grupoEncabezadoMedia.hidden = !checkEncabezadoMultimedia.checked;
+  establecerBotones(p.botones || (esPlantillaProtegida(p) ? [] : null));
   inpEjemploNombre.value = "David";
   inpEjemploApellido.value = "Araya";
   establecerEncabezado(p.encabezado_media_id);
@@ -1537,6 +1746,7 @@ function modoNueva() {
   checkEncabezadoMultimedia.checked = false;
   grupoEncabezadoTexto.hidden = false;
   grupoEncabezadoMedia.hidden = true;
+  establecerBotones(null);
   inpEjemploNombre.value = "David";
   inpEjemploApellido.value = "Araya";
   establecerEncabezado(null);
@@ -1825,11 +2035,11 @@ formEl.addEventListener("submit", async (e) => {
     }
     let fila;
     if (activaId) {
-      fila = await actualizarPlantilla(activaId, nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezadoMediaActivo(), encabezadoTextoActivo(), inpPieTexto.value.trim(), ejemplosPreview(), centroPlantilla);
+      fila = await actualizarPlantilla(activaId, nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezadoMediaActivo(), encabezadoTextoActivo(), inpPieTexto.value.trim(), ejemplosPreview(), centroPlantilla, botonesDelEditor());
       const i = plantillas.findIndex((x) => x.id === activaId);
       if (i >= 0) plantillas[i] = fila;
     } else {
-      fila = await crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezadoMediaActivo(), encabezadoTextoActivo(), inpPieTexto.value.trim(), ejemplosPreview(), centroPlantilla);
+      fila = await crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezadoMediaActivo(), encabezadoTextoActivo(), inpPieTexto.value.trim(), ejemplosPreview(), centroPlantilla, botonesDelEditor());
       plantillas.push(fila);
     }
     setGuardando(false);

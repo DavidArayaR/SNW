@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
 import main
 import plantilla_media
-from plantilla_revision import componentes_para_vista, presentar_plantilla, variables_del_cuerpo
+from plantilla_revision import botones_para_meta, componentes_para_vista, presentar_plantilla, variables_del_cuerpo
 from routes import plantillas as rutas_plantillas
 from whatsapp_service import WhatsAppApiClient, WhatsAppService
 
@@ -56,12 +56,13 @@ class PresentacionPlantillaTests(unittest.TestCase):
             {"type": "HEADER", "format": "TEXT", "text": "Salud Mental"},
             {"type": "FOOTER", "text": "Responde BAJA"},
             {"type": "BUTTONS", "buttons": [{"type": "QUICK_REPLY", "text": "Sí"},
-                                              {"type": "URL", "text": "Abrir", "url": "https://example.org"}]},
+                                              {"type": "URL", "text": "Abrir", "url": "https://example.org"},
+                                              {"type": "QUICK_REPLY", "text": "Dar de baja"}]},
         ])
         vista = presentar_plantilla({"texto": "Hola", **partes})
         self.assertEqual(vista["encabezado"]["texto"], "Salud Mental")
         self.assertEqual(vista["pie"], "Responde BAJA")
-        self.assertEqual([b["texto"] for b in vista["botones"]], ["Sí", "Abrir"])
+        self.assertEqual([b["texto"] for b in vista["botones"]], ["Sí", "Abrir", "Dar de baja"])
         self.assertFalse(vista["errores"])
 
     def test_multimedia_importado_sin_archivo_se_bloquea(self):
@@ -71,6 +72,53 @@ class PresentacionPlantillaTests(unittest.TestCase):
     def test_hello_world_no_inventa_botones(self):
         vista = presentar_plantilla({"texto": "Welcome", "whatsapp_template": "hello_world"})
         self.assertEqual(vista["botones"], [])
+
+    def test_baja_es_obligatoria_y_debe_ser_respuesta_rapida(self):
+        for botones in ([], [{"tipo": "url", "texto": "Baja", "url": "https://example.org"}],
+                        [{"tipo": "respuesta", "texto": "Salir", "accion": "ninguna"}]):
+            with self.subTest(botones=botones):
+                vista = presentar_plantilla({"texto": "Hola", "botones": botones})
+                self.assertTrue(any("acción Baja" in e for e in vista["errores"]))
+                with self.assertRaises(HTTPException) as error:
+                    main._exigir_revision_valida({"texto": "Hola", "botones": botones})
+                self.assertEqual(error.exception.status_code, 400)
+
+    def test_baja_personalizada_con_enlace_y_llamada(self):
+        botones = [{"tipo": "url", "texto": "Sitio", "url": "https://example.org"},
+                   {"tipo": "telefono", "texto": "Llamar", "telefono": "+56912345678"},
+                   {"tipo": "respuesta", "texto": "Salir", "accion": "baja"}]
+        vista = presentar_plantilla({"texto": "Hola", "botones": botones})
+        self.assertFalse(vista["errores"])
+        self.assertEqual(botones_para_meta(vista["botones"]), [
+            {"type": "URL", "text": "Sitio", "url": "https://example.org"},
+            {"type": "PHONE_NUMBER", "text": "Llamar", "phone_number": "+56912345678"},
+            {"type": "QUICK_REPLY", "text": "Salir"},
+        ])
+
+    def test_no_interesa_se_guarda_como_respuesta_de_desinteres(self):
+        botones = [{"tipo": "respuesta", "texto": "No me interesa", "accion": "desinteres"},
+                   {"tipo": "respuesta", "texto": "Dar de baja", "accion": "baja"}]
+        vista = presentar_plantilla({"texto": "Hola", "botones": botones})
+        self.assertFalse(vista["errores"])
+        self.assertEqual(vista["botones"][0]["accion"], "desinteres")
+        self.assertEqual(botones_para_meta(vista["botones"])[0],
+                         {"type": "QUICK_REPLY", "text": "No me interesa"})
+
+    def test_rechaza_mas_de_tres_botones(self):
+        botones = [{"tipo": "respuesta", "texto": str(n), "accion": "baja"}
+                   for n in range(4)]
+        vista = presentar_plantilla({"texto": "Hola", "botones": botones})
+        self.assertTrue(any("máximo 3" in e for e in vista["errores"]))
+
+    def test_no_permite_usar_comando_de_borrado_como_boton(self):
+        vista = presentar_plantilla({"texto": "Hola", "botones": [
+            {"tipo": "respuesta", "texto": "ELIMINAR", "accion": "baja"}]})
+        self.assertTrue(any("reservado" in e for e in vista["errores"]))
+
+    def test_botones_malformados_no_causan_error_interno(self):
+        vista = presentar_plantilla({"texto": "Hola", "botones": [
+            {"tipo": "respuesta", "texto": 123, "accion": "baja"}]})
+        self.assertTrue(any("no son válidos" in e for e in vista["errores"]))
 
     def test_enlace_dinamico_no_soportado_se_advierte(self):
         vista = presentar_plantilla({"texto": "Hola", "botones": [{
@@ -388,6 +436,45 @@ class SincronizarAreaTests(unittest.TestCase):
             self.assertEqual(self.cliente.get("/api/plantillas/sincronizar-meta").json()["nuevas"], [])
             self.assertEqual(guardar.call_count, 2)
 
+    def test_sincronizar_conserva_accion_baja_de_boton_personalizado(self):
+        local = {**PLANTILLA, "whatsapp_template_id": "meta-7", "texto": "Hola",
+                 "botones": [{"tipo": "respuesta", "texto": "Salir", "accion": "baja",
+                              "url": None, "telefono": None}]}
+        meta = {"id": "meta-7", "name": "saludo", "language": "es", "status": "APPROVED",
+                "components": [{"type": "BODY", "text": "Hola"},
+                               {"type": "BUTTONS", "buttons": [
+                                   {"type": "QUICK_REPLY", "text": "Salir"}]}]}
+        with patch.object(main, "leer_plantillas", return_value=[local]), \
+             patch.object(main, "escribir_plantillas"), \
+             patch.object(main.WhatsAppService, "listar_templates_meta", return_value={
+                 "ok": True, "templates": [meta]}):
+            respuesta = self.cliente.post("/api/plantillas/sincronizar-meta", json={
+                "asignaciones": {}})
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(local["botones"][0]["accion"], "baja")
+        self.assertFalse(presentar_plantilla(local)["errores"])
+
+    def test_sincronizar_conserva_opciones_locales(self):
+        opciones = [{"texto": "Horarios", "mensaje": "Atendemos de lunes a viernes."}]
+        local = {**PLANTILLA, "whatsapp_template_id": "meta-7", "texto": "Hola",
+                 "botones": [{"tipo": "respuesta", "texto": "Ver opciones", "accion": "opciones",
+                              "opciones": opciones},
+                             {"tipo": "respuesta", "texto": "Dar de baja", "accion": "baja"}]}
+        meta = {"id": "meta-7", "name": "saludo", "language": "es", "status": "APPROVED",
+                "components": [{"type": "BODY", "text": "Hola"},
+                               {"type": "BUTTONS", "buttons": [
+                                   {"type": "QUICK_REPLY", "text": "Ver opciones"},
+                                   {"type": "QUICK_REPLY", "text": "Dar de baja"}]}]}
+        with patch.object(main, "leer_plantillas", return_value=[local]), \
+             patch.object(main, "escribir_plantillas"), \
+             patch.object(main.WhatsAppService, "listar_templates_meta", return_value={
+                 "ok": True, "templates": [meta]}):
+            respuesta = self.cliente.post("/api/plantillas/sincronizar-meta", json={
+                "asignaciones": {}})
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(local["botones"][0]["opciones"], opciones)
+        self.assertEqual(local["botones"][0]["accion"], "opciones")
+
     def test_sincronizacion_descarga_imagen_y_video_y_reutiliza_archivos(self):
         imagen = io.BytesIO()
         Image.new("RGB", (4, 4), "green").save(imagen, format="PNG")
@@ -588,6 +675,42 @@ class EndpointPruebaPlantillaTests(unittest.TestCase):
         self.assertEqual(respuesta.status_code, 200)
         self.assertFalse(respuesta.json()["puede_enviar_prueba"])
         self.assertTrue(respuesta.json()["errores"])
+
+    def test_preview_ignora_campos_opcionales_vacios_de_botones_guardados(self):
+        botones_editor = [
+            {"tipo": "respuesta", "texto": "Me interesa", "accion": "interes"},
+            {"tipo": "respuesta", "texto": "No me interesa", "accion": "desinteres"},
+            {"tipo": "respuesta", "texto": "Dar de baja", "accion": "baja"},
+        ]
+        botones_guardados = [{**boton, "url": None, "telefono": None, "opciones": None}
+                            for boton in botones_editor]
+        plantilla = {**PLANTILLA, "botones": botones_guardados}
+        with patch.object(main, "leer_plantillas", return_value=[plantilla]), \
+             patch.object(main, "config_get", side_effect=self._config):
+            respuesta = self.cliente.post("/api/plantillas/previsualizar", json={
+                "plantilla_id": 7, "texto": plantilla["texto"],
+                "ejemplos": {"nombre": "Ana", "apellido": "Pérez"},
+                "botones": botones_editor})
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertNotIn("Estos cambios requieren guardar", " ".join(respuesta.json()["avisos"]))
+        self.assertTrue(respuesta.json()["puede_enviar_prueba"])
+
+    def test_preview_sigue_detectando_cambios_reales_en_botones(self):
+        guardados = [
+            {"tipo": "respuesta", "texto": "Me interesa", "accion": "interes"},
+            {"tipo": "respuesta", "texto": "Dar de baja", "accion": "baja"},
+        ]
+        plantilla = {**PLANTILLA, "botones": guardados}
+        cambiados = [{**guardados[0], "texto": "Quiero información"}, guardados[1]]
+        with patch.object(main, "leer_plantillas", return_value=[plantilla]), \
+             patch.object(main, "config_get", side_effect=self._config):
+            respuesta = self.cliente.post("/api/plantillas/previsualizar", json={
+                "plantilla_id": 7, "texto": plantilla["texto"],
+                "ejemplos": {"nombre": "Ana", "apellido": "Pérez"},
+                "botones": cambiados})
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertIn("Estos cambios requieren guardar", " ".join(respuesta.json()["avisos"]))
+        self.assertFalse(respuesta.json()["puede_enviar_prueba"])
 
     def test_destinatarios_son_solo_los_de_prueba_del_entorno(self):
         with patch.object(main, "config_get", side_effect=self._config), \

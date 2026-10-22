@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="css/styles.css?v=carga-plantillas1">
   <link rel="stylesheet" href="css/componentes.css?v=paginador-cinco1">
   <link rel="stylesheet" href="css/layout.css?v=navcolor1">
-  <link rel="stylesheet" href="css/mensajeria.css?v=centros1">
+  <link rel="stylesheet" href="css/mensajeria.css?v=botones2">
   <link rel="stylesheet" href="css/calendario.css?v=base1">
   <link rel="stylesheet" href="css/calendario-programados.css?v=programados2">
   <link rel="stylesheet" href="css/refinamiento.css?v=merge-frontend1">
@@ -163,6 +163,16 @@
           <label for="inpPieTexto">Pie de plantilla (opcional)</label>
           <input type="text" id="inpPieTexto" maxlength="60" placeholder="Ej.: Notificaciones SNW" autocomplete="off">
           <p class="field__hint">Se muestra debajo del mensaje. Máximo 60 caracteres.</p>
+        </div>
+
+        <div class="field tpl-botones">
+          <div class="tpl-botones__cabecera">
+            <label>Botones de la plantilla</label>
+            <button type="button" id="btnAgregarBoton" class="btn btn--ghost">+ Agregar botón</button>
+          </div>
+          <p class="field__hint">Hasta 3 botones. Los tipos «Me interesa» y «Baja» completan su texto y acción automáticamente. Debe haber al menos uno de Baja; al cambiar botones, Meta volverá a revisar la plantilla.</p>
+          <div class="tpl-botones__guia"><i class="fa-solid fa-list" aria-hidden="true"></i><span><strong>¿Quieres mostrar una lista de opciones?</strong> Pulsa «Convertir en lista» en uno de los botones de respuesta de abajo. Se abrirá el editor para agregar las opciones y sus mensajes.</span></div>
+          <div id="editorBotones" class="tpl-botones__lista" aria-label="Botones configurados"></div>
         </div>
 
         <div class="preview-wrap">
@@ -594,7 +604,7 @@
   <script src="js/layout.js?v=permisos-acciones1"></script>
   <script src="js/pass-toggle.js"></script>
   <script src="js/plantilla-ia.js?v=sin-confirmacion1"></script>
-  <script src="js/app.js?v=despacho1"></script>
+  <script src="js/app.js?v=botones2"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>
