@@ -4496,10 +4496,10 @@ _CONFIG_SECCIONES = [
         "campos": [
             {"clave": "reagendar_envio_activo", "etiqueta": "Procesar envíos de citas atendidas", "tipo": "bool",
              "ayuda": "Apagado inicialmente. Solo envía en Producción por api_oficial con consentimiento por fila y plantilla aprobada de la clínica."},
-            {"clave": "reagendar_plantillas_json", "etiqueta": "Plantillas por clínica (JSON)", "tipo": "textarea",
-             "ayuda": "Ejemplo: {\"SMPT\":\"clave_plantilla\"}. Usa claves de plantillas aprobadas para cada centro; no se inventa ningún texto."},
-            {"clave": "reagendar_clinicas_ids", "etiqueta": "ID externo por clínica (JSON)", "tipo": "textarea",
-             "ayuda": "Opcional. Ejemplo: {\"1\":\"SMPT\"}. Si el ID contradice al nombre de clínica, el registro queda para revisión."},
+            {"clave": "reagendar_plantillas_json", "etiqueta": "Plantilla de reagendamiento por clínica", "tipo": "textarea",
+             "ayuda": "Selecciona una plantilla aprobada para cada clínica. También puedes crear un borrador desde aquí; no se enviará hasta que lo aprueben SNW y Meta."},
+            {"clave": "reagendar_clinicas_ids", "etiqueta": "IDs de Reservo por clínica", "tipo": "textarea",
+             "ayuda": "Opcional. Asocia cada ID externo a una clínica de SNW. Si el ID contradice al nombre recibido, el registro queda para revisión."},
         ],
     },
     {

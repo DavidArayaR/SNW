@@ -28,6 +28,7 @@ try {
   if (idsTabs.includes(guardada)) tabConfig = guardada;
 } catch { /* sin almacenamiento */ }
 let centrosConfig = [];
+let plantillasReagendar = [];
 let tokenGlobalConfigurado = false;
 let valores = {};          // valor guardado (servidor)
 let estadoSupresion = {};  // solo conteos; nunca teléfonos ni huellas
@@ -120,6 +121,193 @@ function leerPatrones(valor) {
       !conocidas.has(clave) || !Array.isArray(frases) || frases.some((f) => typeof f !== "string"))) return null;
     return obj;
   } catch { return null; }
+}
+
+const CLAVES_REAGENDAR = ["reagendar_plantillas_json", "reagendar_clinicas_ids"];
+
+function leerMapaReagendar(valor) {
+  try {
+    const mapa = JSON.parse(valor || "{}");
+    return mapa && typeof mapa === "object" && !Array.isArray(mapa) &&
+      Object.entries(mapa).every(([clave, dato]) => clave && typeof dato === "string" && dato)
+      ? mapa : null;
+  } catch { return null; }
+}
+
+function mapasEquivalentes(a, b) {
+  const primero = leerMapaReagendar(a);
+  const segundo = leerMapaReagendar(b);
+  if (!primero || !segundo) return a.trim() === b.trim();
+  const claves = Object.keys(primero).sort();
+  return claves.length === Object.keys(segundo).length &&
+    claves.every((clave) => primero[clave] === segundo[clave]);
+}
+
+function opcionesCentro(valor = "") {
+  const centros = centrosConfig.map((c) => ({ codigo: c.codigo, nombre: c.nombre }));
+  if (valor && !centros.some((c) => c.codigo === valor)) {
+    centros.push({ codigo: valor, nombre: `${valor} · no disponible` });
+  }
+  return `<option value="">— Seleccione clínica —</option>` + centros.map((c) =>
+    `<option value="${escaparAtributo(c.codigo)}"${c.codigo === valor ? " selected" : ""}>${escaparHtml(c.nombre)} (${escaparHtml(c.codigo)})</option>`
+  ).join("");
+}
+
+function opcionesPlantilla(centro, valor = "") {
+  const disponibles = plantillasReagendar.filter((p) => p.centro_codigo === centro &&
+    p.whatsapp_template_status === "APPROVED" &&
+    (p.aprobacion_estado || "aprobada") === "aprobada" &&
+    !p.especial && p.clave !== "hello_world" && p.whatsapp_template !== "hello_world" &&
+    (!p.encabezado_media_id || p.encabezado_meta_registrado));
+  const opciones = disponibles.map((p) => ({ clave: p.clave, nombre: p.nombre }));
+  if (valor && !opciones.some((p) => p.clave === valor)) {
+    opciones.unshift({ clave: valor, nombre: `${valor} · pendiente o no disponible` });
+  }
+  return `<option value="">— Sin plantilla —</option>` + opciones.map((p) =>
+    `<option value="${escaparAtributo(p.clave)}"${p.clave === valor ? " selected" : ""}>${escaparHtml(p.nombre)} (${escaparHtml(p.clave)})</option>`
+  ).join("");
+}
+
+function filaMapaReagendar(clave, llave = "", valor = "") {
+  const fila = document.createElement("div");
+  fila.className = "config-reagendar__fila";
+  if (clave === "reagendar_plantillas_json") {
+    fila.innerHTML = `<label>Clínica<select data-reagendar-centro>${opcionesCentro(llave)}</select></label>` +
+      `<label>Plantilla aprobada<select data-reagendar-plantilla>${opcionesPlantilla(llave, valor)}</select></label>` +
+      `<a class="btn btn--ghost config-reagendar__crear" href="mensajeria.html?tab=plantillas&amp;crear=reagendar&amp;centro=${encodeURIComponent(llave)}"` +
+      ` data-reagendar-crear>Crear plantilla</a>`;
+    fila.querySelector("[data-reagendar-centro]").addEventListener("change", (evento) => {
+      fila.querySelector("[data-reagendar-plantilla]").innerHTML = opcionesPlantilla(evento.target.value);
+      fila.querySelector("[data-reagendar-crear]").href =
+        `mensajeria.html?tab=plantillas&crear=reagendar&centro=${encodeURIComponent(evento.target.value)}`;
+      sincronizarMapaReagendar(fila.closest(".config-campo"));
+    });
+    fila.querySelector("[data-reagendar-plantilla]").addEventListener("change", () =>
+      sincronizarMapaReagendar(fila.closest(".config-campo")));
+    fila.querySelector("[data-reagendar-crear]").addEventListener("click", (evento) => {
+      if (!fila.querySelector("[data-reagendar-centro]").value) {
+        evento.preventDefault();
+        toast("Selecciona una clínica antes de crear su plantilla.", "error");
+      }
+    });
+  } else {
+    fila.innerHTML = `<label>ID de clínica en Reservo<input type="text" inputmode="numeric" maxlength="30" data-reagendar-id value="${escaparAtributo(llave)}" placeholder="Ej.: 1"></label>` +
+      `<label>Clínica en SNW<select data-reagendar-centro>${opcionesCentro(valor)}</select></label>` +
+      `<button type="button" class="btn btn--ghost" data-reagendar-quitar aria-label="Quitar asociación">Quitar</button>`;
+    fila.querySelectorAll("input, select").forEach((control) =>
+      control.addEventListener("input", () => sincronizarMapaReagendar(fila.closest(".config-campo"))));
+    fila.querySelector("[data-reagendar-quitar]").addEventListener("click", () => {
+      const wrap = fila.closest(".config-campo");
+      fila.remove();
+      sincronizarMapaReagendar(wrap);
+    });
+  }
+  return fila;
+}
+
+function htmlEditorReagendar(clave, valor) {
+  const mapa = leerMapaReagendar(valor);
+  return `<div class="config-reagendar" data-modo="${mapa ? "facil" : "json"}">` +
+    `<label class="config-reagendar__toggle"><input type="checkbox" data-reagendar-json${mapa ? "" : " checked"}> Pegar JSON</label>` +
+    `<div data-reagendar-facil${mapa ? "" : " hidden"}>` +
+      `<div class="config-reagendar__filas"></div>` +
+      (clave === "reagendar_clinicas_ids" ? `<button type="button" class="btn btn--ghost" data-reagendar-agregar>Añadir ID externo</button>` : "") +
+      `<p class="field__hint">${clave === "reagendar_plantillas_json" ? "Elige una plantilla aprobada por clínica. Crear plantilla abre un borrador en Mensajería; después debes guardarlo y esperar su aprobación." : "Relaciona los IDs de clínica que envía Reservo con las clínicas de SNW."}</p></div>` +
+    `<div data-reagendar-raw${mapa ? " hidden" : ""}><label for="raw_${clave}">JSON completo</label>` +
+      `<textarea id="raw_${clave}" rows="6" data-reagendar-valor spellcheck="false">${escaparHtml(mapa ? JSON.stringify(mapa, null, 2) : valor)}</textarea></div>` +
+    `<p class="config-reagendar__error" role="alert" hidden></p>` +
+    `<textarea id="cf_${clave}" data-clave="${clave}" hidden>${escaparHtml(valor)}</textarea></div>`;
+}
+
+function sincronizarMapaReagendar(wrap) {
+  const editor = wrap.querySelector(".config-reagendar");
+  const clave = editor.querySelector("[data-clave]").dataset.clave;
+  const json = editor.querySelector("[data-reagendar-json]").checked;
+  const error = editor.querySelector(".config-reagendar__error");
+  let mensaje = "";
+  if (json) {
+    const valor = editor.querySelector("[data-reagendar-valor]").value.trim();
+    const mapa = leerMapaReagendar(valor);
+    mensaje = !mapa ? "Escribe un objeto JSON con claves y valores de texto." : "";
+    editor.querySelector("[data-clave]").value = valor;
+  } else {
+    const mapa = Object.create(null);
+    for (const fila of editor.querySelectorAll(".config-reagendar__fila")) {
+      const llave = clave === "reagendar_plantillas_json"
+        ? fila.querySelector("[data-reagendar-centro]").value
+        : fila.querySelector("[data-reagendar-id]").value.trim();
+      const valor = clave === "reagendar_plantillas_json"
+        ? fila.querySelector("[data-reagendar-plantilla]").value
+        : fila.querySelector("[data-reagendar-centro]").value;
+      if (clave === "reagendar_clinicas_ids" && llave && !/^\d+$/.test(llave)) mensaje = "El ID externo debe contener solo números.";
+      if (clave === "reagendar_plantillas_json" && llave && !valor) continue;
+      if (llave && valor) {
+        if (Object.hasOwn(mapa, llave)) mensaje = "Hay una clínica o ID repetido.";
+        mapa[llave] = valor;
+      } else if (llave || valor) mensaje = "Completa ambos campos o quita la fila.";
+    }
+    editor.querySelector("[data-clave]").value = JSON.stringify(mapa);
+    editor.querySelector("[data-reagendar-valor]").value = JSON.stringify(mapa, null, 2);
+  }
+  error.textContent = mensaje;
+  error.hidden = !mensaje;
+  editor.classList.toggle("config-reagendar--invalido", !!mensaje);
+  marcarCambios();
+}
+
+function restaurarMapaReagendar(wrap, valor) {
+  const editor = wrap.querySelector(".config-reagendar");
+  const clave = editor.querySelector("[data-clave]").dataset.clave;
+  const mapa = leerMapaReagendar(valor);
+  const usarJson = !mapa;
+  editor.querySelector("[data-reagendar-json]").checked = usarJson;
+  editor.querySelector("[data-reagendar-facil]").hidden = usarJson;
+  editor.querySelector("[data-reagendar-raw]").hidden = !usarJson;
+  editor.querySelector(".config-reagendar__filas").replaceChildren();
+  if (mapa) {
+    if (clave === "reagendar_plantillas_json") {
+      for (const centro of centrosConfig) {
+        editor.querySelector(".config-reagendar__filas").appendChild(
+          filaMapaReagendar(clave, centro.codigo, mapa[centro.codigo] || ""));
+      }
+      for (const [codigo, plantilla] of Object.entries(mapa)) {
+        if (!centrosConfig.some((c) => c.codigo === codigo)) {
+          editor.querySelector(".config-reagendar__filas").appendChild(filaMapaReagendar(clave, codigo, plantilla));
+        }
+      }
+    } else {
+      for (const [id, centro] of Object.entries(mapa)) {
+        editor.querySelector(".config-reagendar__filas").appendChild(filaMapaReagendar(clave, id, centro));
+      }
+    }
+  }
+  editor.querySelector("[data-reagendar-valor]").value = mapa ? JSON.stringify(mapa, null, 2) : valor;
+  editor.querySelector("[data-clave]").value = valor;
+  sincronizarMapaReagendar(wrap);
+}
+
+function prepararEditorReagendar(wrap, valor) {
+  const editor = wrap.querySelector(".config-reagendar");
+  restaurarMapaReagendar(wrap, valor);
+  editor.querySelector("[data-reagendar-valor]").addEventListener("input", () => sincronizarMapaReagendar(wrap));
+  editor.querySelector("[data-reagendar-agregar]")?.addEventListener("click", () => {
+    editor.querySelector(".config-reagendar__filas").appendChild(
+      filaMapaReagendar("reagendar_clinicas_ids"));
+  });
+  editor.querySelector("[data-reagendar-json]").addEventListener("change", (evento) => {
+    const usarJson = evento.target.checked;
+    if (!usarJson && !leerMapaReagendar(editor.querySelector("[data-reagendar-valor]").value)) {
+      evento.target.checked = true;
+      toast("Corrige el JSON antes de abrir el formulario.", "error");
+      return;
+    }
+    if (!usarJson) restaurarMapaReagendar(wrap, editor.querySelector("[data-reagendar-valor]").value);
+    else {
+      editor.querySelector("[data-reagendar-facil]").hidden = true;
+      editor.querySelector("[data-reagendar-raw]").hidden = false;
+      sincronizarMapaReagendar(wrap);
+    }
+  });
 }
 
 function patronesEquivalentes(a, b) {
@@ -269,6 +457,11 @@ async function cargar() {
     const d = await res.json();
     valores = d.valores || {};
     centrosConfig = d.centros || [];
+    try {
+      const respuesta = await fetch("api/plantillas", { headers: authHeaders(), cache: "no-store" });
+      plantillasReagendar = respuesta.ok ? await respuesta.json() : [];
+      if (!Array.isArray(plantillasReagendar)) plantillasReagendar = [];
+    } catch { plantillasReagendar = []; }
     tokenGlobalConfigurado = !!d.wa_token_configurado;
     estadoSupresion = d.supresion || {};
     render(d.secciones || []);
@@ -587,13 +780,16 @@ function render(secciones) {
       const val = valores[c.clave] ?? "";
       const wrap = document.createElement("div");
       wrap.className = "field config-campo" +
-        (c.clave === "call_center_patrones_consulta" ? " config-campo--patrones" : "");
+        (c.clave === "call_center_patrones_consulta" ? " config-campo--patrones" : "") +
+        (CLAVES_REAGENDAR.includes(c.clave) ? " config-campo--reagendar" : "");
 
       const id = "cf_" + c.clave;
       let control = "";
 
       if (c.clave === "call_center_patrones_consulta") {
         control = htmlEditorPatrones(c.clave, val);
+      } else if (CLAVES_REAGENDAR.includes(c.clave)) {
+        control = htmlEditorReagendar(c.clave, val);
       } else if (c.tipo === "select") {
         control =
           `<select id="${id}" data-clave="${c.clave}">` +
@@ -614,7 +810,7 @@ function render(secciones) {
       }
 
       wrap.innerHTML =
-        `<label${c.clave === "call_center_patrones_consulta" ? "" : ` for="${id}"`}>${escaparHtml(c.etiqueta)} <span class="config-clave">${c.clave}</span></label>` +
+        `<label${c.clave === "call_center_patrones_consulta" || CLAVES_REAGENDAR.includes(c.clave) ? "" : ` for="${id}"`}>${escaparHtml(c.etiqueta)} <span class="config-clave">${c.clave}</span></label>` +
         control +
         (c.ayuda ? `<p class="field__hint">${escaparHtml(c.ayuda)}</p>` : "");
       grid.appendChild(wrap);
@@ -631,6 +827,7 @@ function render(secciones) {
         if (wrap.querySelector("[data-pegar-json]").checked) actualizarJsonPatrones(wrap);
         else actualizarEditorPatrones(wrap);
       }
+      if (CLAVES_REAGENDAR.includes(c.clave)) prepararEditorReagendar(wrap, val);
 
     }
     paneles[tabDeSeccion(s.id)].appendChild(panel);
@@ -656,8 +853,9 @@ function diff() {
   for (const clave of Object.keys(campos)) {
     const nuevo = String(valorActual(clave));
     const viejo = String(valores[clave] ?? "");
-    if (clave === "call_center_patrones_consulta" ?
-        !patronesEquivalentes(nuevo, viejo) : nuevo.trim() !== viejo.trim()) {
+    if (clave === "call_center_patrones_consulta" ? !patronesEquivalentes(nuevo, viejo)
+        : CLAVES_REAGENDAR.includes(clave) ? !mapasEquivalentes(nuevo, viejo)
+        : nuevo.trim() !== viejo.trim()) {
       cambios[clave] = nuevo.trim();
     }
   }
@@ -674,18 +872,18 @@ function marcarCambios() {
   }
 
   const hay = n > 0;
-  const invalido = !!cont.querySelector(".config-patrones--invalido");
+  const invalido = !!cont.querySelector(".config-patrones--invalido, .config-reagendar--invalido");
   $("#btnGuardar").disabled = !hay || invalido;
   $("#btnGuardarFijo").disabled = !hay || invalido;
   $("#barraGuardar").hidden = !hay;
   $("#cambiosResumen").textContent = hay
-    ? `${n} cambio${n === 1 ? "" : "s"} sin guardar${invalido ? " · Corrige las frases marcadas en Integraciones" : ""}: ${Object.keys(cambios).join(", ")}`
+    ? `${n} cambio${n === 1 ? "" : "s"} sin guardar${invalido ? " · Corrige los campos marcados en Integraciones" : ""}: ${Object.keys(cambios).join(", ")}`
     : "Sin cambios";
 }
 
 async function guardar() {
-  if (cont.querySelector(".config-patrones--invalido")) {
-    toast("Corrige las frases marcadas antes de guardar.", "error");
+  if (cont.querySelector(".config-patrones--invalido, .config-reagendar--invalido")) {
+    toast("Corrige los campos marcados antes de guardar.", "error");
     return;
   }
   const cambios = diff();
@@ -730,6 +928,7 @@ async function guardar() {
       if (clave === "call_center_patrones_consulta" && input.closest(".config-patrones")) {
         restaurarPatrones(input.closest(".config-campo"), v);
       }
+      if (CLAVES_REAGENDAR.includes(clave)) restaurarMapaReagendar(input.closest(".config-campo"), v);
     }
     marcarCambios();
     toast(
@@ -756,6 +955,7 @@ function descartar() {
     if (clave === "call_center_patrones_consulta" && input.closest(".config-patrones")) {
       restaurarPatrones(input.closest(".config-campo"), v);
     }
+    if (CLAVES_REAGENDAR.includes(clave)) restaurarMapaReagendar(input.closest(".config-campo"), v);
   }
   marcarCambios();
 }

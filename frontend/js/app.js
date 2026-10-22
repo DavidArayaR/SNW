@@ -137,7 +137,7 @@ async function cargarCentrosEmisores() {
     }
   }
 }
-cargarCentrosEmisores();
+const cargaInicialCentrosEmisores = cargarCentrosEmisores();
 $("#selCentroConf")?.addEventListener("change", () => { actualizarPasosManual(); actualizarResumenConf(); });
 $("#selProgCentro")?.addEventListener("change", () => { actualizarPasosProg(); cargarCupoProg(true); });
 
@@ -4345,7 +4345,30 @@ cargarMiUsuario();
 // Las áreas primero: la restauración de la plantilla seleccionada necesita
 // misAreas (card de envío / formulario de programar).
 const inicioCargaInicialPlantillas = iniciarCargaPlantillas();
-cargarAreas().then(cargar).finally(() => terminarCargaPlantillas(inicioCargaInicialPlantillas));
+const cargaInicialPlantillas = cargarAreas().then(cargar)
+  .finally(() => terminarCargaPlantillas(inicioCargaInicialPlantillas));
+Promise.all([cargaInicialCentrosEmisores, cargaInicialPlantillas]).then(() => {
+  const parametros = new URLSearchParams(location.search);
+  if (parametros.get("crear") !== "reagendar") return;
+  const codigo = parametros.get("centro") || "";
+  const centro = cuentasPlantillas.find((c) => c.codigo === codigo && c.activa !== false);
+  if (!PUEDE_EDITAR_PLANTILLAS || !centro) {
+    toast("No se pudo abrir el borrador para esa clínica.", "error");
+    return;
+  }
+  modoNueva();
+  inpCentroPlantilla.value = codigo;
+  inpNombre.value = `Reagendamiento ${centro.nombre}`;
+  inpMensaje.value = "Hola {nombre},\n\nSi quieres agendar una nueva atención, responde «Me interesa» y te enviaremos el número del call center para obtener más información.";
+  sincronizarTemplateConNombre();
+  pintarCuentaPlantillaEditor();
+  refrescarEditor();
+  // El enlace crea solo un borrador local: guardar y obtener aprobación en Meta
+  // siguen siendo pasos explícitos antes de poder asignarlo a reagendamiento.
+  parametros.delete("crear");
+  parametros.delete("centro");
+  history.replaceState(null, "", `${location.pathname}?${parametros.toString()}`);
+});
 cargarProgramados().then(() => {
   if (tabMsg === "programados") revisarProgs();
 });

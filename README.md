@@ -58,6 +58,10 @@ misma clínica aprobada por Meta y SNW, vinculada en
 `reagendar_plantillas_json` (`{"SMPT":"clave_plantilla"}`). Luego el
 desarrollador puede activar `reagendar_envio_activo`. La plantilla debe usar
 solo `{nombre}` y `{apellido}` como variables; no se inventa un texto.
+En **Configuración → Integraciones**, estas asociaciones se editan con
+selectores por clínica o, si se prefiere, pegando el JSON. **Crear plantilla**
+abre un borrador de reagendamiento en Mensajería con la clínica preseleccionada;
+hay que guardarlo, obtener las aprobaciones y luego elegirlo en Configuración.
 
 El worker reserva la cita atómicamente, usa el Phone Number ID, WABA ID y
 Access Token **propios de su clínica**, aplica el control de ritmo vigente y

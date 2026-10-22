@@ -255,6 +255,52 @@ body[data-pagina="configuracion"] #secciones {
   font-size: .8rem;
   line-height: 1.5;
 }
+
+/* Reagendamiento: asignaciones legibles por clínica sin escribir JSON. */
+.config-campo--reagendar { grid-column: 1 / -1; min-width: 0; }
+.config-reagendar {
+  padding: 14px;
+  border: 1px solid var(--borde);
+  border-radius: 12px;
+  background: var(--panel-2);
+}
+.config-campo .config-reagendar__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 14px;
+  cursor: pointer;
+}
+.config-reagendar__toggle input { width: 18px; height: 18px; accent-color: var(--verde); }
+.config-reagendar [hidden] { display: none; }
+.config-reagendar__filas { display: grid; gap: 10px; margin-bottom: 12px; }
+.config-reagendar__fila {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) auto;
+  align-items: end;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+  background: var(--panel);
+}
+.config-campo .config-reagendar__fila label { display: grid; gap: 6px; min-width: 0; }
+.config-reagendar__fila select,
+.config-reagendar__fila input { width: 100%; min-width: 0; }
+.config-reagendar__crear { white-space: nowrap; text-decoration: none; }
+.config-reagendar [data-reagendar-raw] textarea {
+  width: 100%;
+  min-height: 170px;
+  font-family: Consolas, "SFMono-Regular", monospace;
+  font-size: .85rem;
+  line-height: 1.5;
+}
+.config-reagendar__error { margin: 10px 0 0; color: var(--rojo); font-size: .85rem; }
+.config-reagendar--invalido { border-color: var(--rojo); }
+@media (max-width: 760px) {
+  .config-reagendar__fila { grid-template-columns: minmax(0, 1fr); }
+  .config-reagendar__crear { width: fit-content; }
+}
 @media (max-width: 700px) {
   .config-patrones__grupos { grid-template-columns: 1fr; }
 }
