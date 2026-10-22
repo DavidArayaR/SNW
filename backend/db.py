@@ -261,8 +261,22 @@ def asegurar_tabla_config() -> None:
             cur.execute("DELETE FROM configuracion WHERE clave = 'wa_business_account_id'")
             _migrar_claves_centro(cur)
             cur.execute(
+                "CREATE TABLE IF NOT EXISTS reagendar_lotes ("
+                " id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,"
+                " fecha DATE NOT NULL, ventana VARCHAR(5) NOT NULL,"
+                " recibido_en DATETIME NOT NULL, programado_para DATETIME NULL,"
+                " estado VARCHAR(20) NOT NULL DEFAULT 'REVISION',"
+                " aplazado_en DATETIME NULL, aplazado_por VARCHAR(100) NULL,"
+                " motivo_aplazamiento VARCHAR(255) NULL,"
+                " creados INT UNSIGNED NOT NULL DEFAULT 0,"
+                " rechazados INT UNSIGNED NOT NULL DEFAULT 0,"
+                " KEY idx_reagendar_lote_vencimiento (estado, programado_para)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+            )
+            cur.execute(
                 "CREATE TABLE IF NOT EXISTS paciente_reagendar ("
                 " id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,"
+                " lote_id BIGINT UNSIGNED NULL,"
                 " fecha DATE NOT NULL, ventana VARCHAR(5) NOT NULL,"
                 " clinica_id INT NULL, clinica_nombre VARCHAR(100) NOT NULL,"
                 " reservo_cita_uuid VARCHAR(80) COLLATE utf8mb4_bin NOT NULL,"
@@ -272,6 +286,7 @@ def asegurar_tabla_config() -> None:
                 " doctor_nombre VARCHAR(200) NULL, inicio_cita DATETIME NOT NULL,"
                 " centro_codigo VARCHAR(10) NULL,"
                 " autorizado_contacto TINYINT(1) NOT NULL DEFAULT 0,"
+                " whatsapp_opt_out TINYINT(1) NOT NULL DEFAULT 0,"
                 " estado_envio VARCHAR(20) NOT NULL DEFAULT 'PENDIENTE',"
                 " intentos_envio INT UNSIGNED NOT NULL DEFAULT 0,"
                 " reservado_en DATETIME NULL, reserva_token CHAR(32) NULL,"
@@ -297,6 +312,43 @@ def asegurar_tabla_config() -> None:
                         " AND COLUMN_NAME='envio_id'")
             if not cur.fetchone():
                 cur.execute("ALTER TABLE paciente_reagendar ADD COLUMN envio_id INT NULL")
+            cur.execute("SELECT COLUMN_NAME FROM information_schema.COLUMNS"
+                        " WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='paciente_reagendar'"
+                        " AND COLUMN_NAME='lote_id'")
+            if not cur.fetchone():
+                cur.execute("ALTER TABLE paciente_reagendar ADD COLUMN lote_id BIGINT UNSIGNED NULL")
+            cur.execute("SELECT COLUMN_NAME FROM information_schema.COLUMNS"
+                        " WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='paciente_reagendar'"
+                        " AND COLUMN_NAME='whatsapp_opt_out'")
+            if not cur.fetchone():
+                cur.execute("ALTER TABLE paciente_reagendar ADD COLUMN whatsapp_opt_out"
+                            " TINYINT(1) NOT NULL DEFAULT 0")
+            cur.execute("SELECT INDEX_NAME FROM information_schema.STATISTICS"
+                        " WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='paciente_reagendar'"
+                        " AND INDEX_NAME='idx_reagendar_lote'")
+            if not cur.fetchone():
+                cur.execute("ALTER TABLE paciente_reagendar ADD KEY idx_reagendar_lote (lote_id)")
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS reagendar_flujo ("
+                " cita_id BIGINT UNSIGNED NOT NULL PRIMARY KEY,"
+                " estado VARCHAR(30) NOT NULL, actualizado_en DATETIME NOT NULL,"
+                " ultimo_mensaje_id VARCHAR(255) NULL,"
+                " CONSTRAINT fk_reagendar_flujo_cita FOREIGN KEY (cita_id)"
+                " REFERENCES paciente_reagendar(id) ON DELETE CASCADE"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+            )
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS reagendar_interacciones ("
+                " mensaje_id VARCHAR(255) COLLATE utf8mb4_bin NOT NULL PRIMARY KEY,"
+                " cita_id BIGINT UNSIGNED NOT NULL, accion VARCHAR(30) NOT NULL,"
+                " texto TEXT NULL, respuesta_id VARCHAR(255) NULL,"
+                " respuesta_estado VARCHAR(20) NOT NULL DEFAULT 'PENDIENTE',"
+                " creado_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                " KEY idx_reagendar_interaccion_cita (cita_id),"
+                " CONSTRAINT fk_reagendar_interaccion_cita FOREIGN KEY (cita_id)"
+                " REFERENCES paciente_reagendar(id) ON DELETE CASCADE"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+            )
             cur.execute(
                 "CREATE TABLE IF NOT EXISTS reagendar_import_quota ("
                 " actor_hash CHAR(64) NOT NULL, ventana BIGINT NOT NULL,"

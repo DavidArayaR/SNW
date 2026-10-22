@@ -2616,9 +2616,8 @@ def _registrar_derivacion_consulta(telefono: str, texto: str, mensaje_id: str,
     tel = normalizar_telefono(telefono) or telefono
     if esta_suprimido(tel):
         return "suprimida"
-    # Una consulta entrante directa también debe quedar pendiente para el CRM,
-    # incluso si el teléfono todavía no figura en ninguna base de pacientes.
-    _encolar_derivacion_crm(tel, texto, mensaje_id, motivos)
+    # La cola CRM local no se utiliza. La consulta se gestiona mediante el
+    # botón que abre el WhatsApp del CRM; no se copian respuestas a esa cola.
     emisor = emisor_webhook_actual()
     nueva = False
     with conectar() as conn, conn.cursor() as cur:
@@ -2760,7 +2759,83 @@ def _encolar_derivacion_crm(telefono: str, texto: str, mensaje_id: str,
 
 
 whatsapp_service.al_detectar_consulta = _registrar_derivacion_consulta
-whatsapp_service.al_derivar_crm = _encolar_derivacion_crm
+# Decisión vigente: no producir nuevas entradas en crm_derivaciones_pendientes.
+# Se conserva la tabla histórica sin eliminar registros existentes.
+whatsapp_service.al_derivar_crm = None
+
+
+def _enviar_respuesta_reagendar(evento: dict) -> None:
+    """Respuesta de servicio al paciente; el contacto con CRM lo inicia él."""
+    cita = evento["cita"]
+    accion = evento["accion"]
+    mensaje_id = evento["mensaje_id"]
+    telefono = cita["paciente_telefono_normalizado"]
+    try:
+        if esta_suprimido(telefono):
+            paciente_reagendar.marcar_respuesta_reagendar(mensaje_id, None, "OMITIDO")
+            return
+        cfg = config_all(refresh=True)
+        canal = resolver_phone_id(cita["whatsapp_phone_number_id"], cfg)
+        if not canal or not canal["configured"] or canal["codigo"] != cita["centro_codigo"]:
+            raise ValueError("Emisor de la cita no disponible")
+        if cfg.get("metodo_envio") != "api_oficial":
+            raise ValueError("Motor oficial no disponible")
+        if cfg.get("entorno") == "desarrollo" and not es_numero_prueba(telefono):
+            raise ValueError("Destinatario no autorizado para desarrollo")
+        if accion == "SOLICITAR_CONSULTA":
+            texto = ("Escríbenos tu consulta para prepararla y abrir el WhatsApp "
+                     "del equipo de atención de tu clínica.")
+            extra = None
+        else:
+            if accion == "REAGENDAR":
+                if not cita.get("doctor_nombre"):
+                    raise ValueError("Falta el médico para preparar el reagendamiento")
+                preparado = ("Sí me gustaría agendar, mi nombre es "
+                             f"{cita['paciente_nombre']}, con el médico: "
+                             f"{cita['doctor_nombre']}, clínica: {cita['clinica_nombre']}")
+            else:
+                preparado = "Hola, esta es mi consulta: " + evento["texto"].strip()[:500]
+            numero = re.sub(r"\D", "", cfg.get(f"{canal['codigo']}_CRM_PHONE_NUMBER") or "")
+            if not re.fullmatch(r"[1-9]\d{7,14}", numero):
+                raise ValueError("Número CRM de la clínica no disponible")
+            url = f"https://wa.me/{numero}?text={urllib.parse.quote(preparado, safe='')}"
+            texto = ("Pulsa «Ir a call center» para abrir WhatsApp con el equipo de tu clínica. "
+                     "El mensaje ya estará preparado; debes enviarlo allí para que puedan atenderte.")
+            extra = {"cta": {"texto": "Ir a call center", "url": url}}
+        ok, respuesta_id, _error, _ = asyncio.run(
+            WhatsAppService(phone_number_id=canal["phoneNumberId"]).enviar(
+                telefono, texto, plantilla=extra))
+        paciente_reagendar.marcar_respuesta_reagendar(
+            mensaje_id, respuesta_id, "ENVIADO" if ok else "ERROR")
+    except Exception as exc:
+        # No registrar el texto, URL ni detalle de la excepción: pueden incluir PII.
+        log_error(f"respuesta de reagendamiento: {type(exc).__name__}")
+        paciente_reagendar.marcar_respuesta_reagendar(mensaje_id, None, "ERROR")
+
+
+def _registrar_respuesta_reagendar(telefono: str, texto: str, mensaje_id: str,
+                                   referencia_id: str | None,
+                                   declina: str | None) -> str | None:
+    emisor = emisor_webhook_actual()
+    if not emisor:
+        return None
+    evento = paciente_reagendar.registrar_respuesta_reagendar(
+        telefono, emisor["phoneNumberId"], mensaje_id, referencia_id, texto,
+        declina=declina)
+    if not evento:
+        return None
+    if evento["accion"] == "DUPLICADO":
+        return "gestionado"
+    if evento["accion"] in ("BAJA", "DESINTERES"):
+        paciente_reagendar.marcar_respuesta_reagendar(mensaje_id, None, "OMITIDO")
+        return "declinado"
+    if evento["accion"] == "REACTIVADO":
+        return "gestionado"
+    threading.Thread(target=_enviar_respuesta_reagendar, args=(evento,), daemon=True).start()
+    return "gestionado"
+
+
+whatsapp_service.al_respuesta_reagendar = _registrar_respuesta_reagendar
 
 
 _MENSAJE_BAJA_DESPEDIDA = (
@@ -7577,13 +7652,20 @@ async def _procesar_cita_reagendar(cita: dict, plantillas_por_centro: dict) -> N
         if not cita["autorizado_contacto"] or not cita["paciente_telefono_normalizado"]:
             paciente_reagendar.marcar_fallo(cita, "NO_ELEGIBLE")
             return
+        if cita.get("whatsapp_opt_out"):
+            paciente_reagendar.marcar_fallo(cita, "PACIENTE_DE_BAJA")
+            return
         telefono = cita["paciente_telefono_normalizado"]
         servicio = WhatsAppService(phone_number_id=canal["phoneNumberId"])
         if await asyncio.to_thread(esta_suprimido, telefono):
             paciente_reagendar.marcar_fallo(cita, "PACIENTE_ELIMINADO")
             return
         with conectar() as conn, conn.cursor() as cur:
-            if any(p.get("whatsapp_opt_out") for p in servicio._pacientes_con_tel(cur, telefono)):
+            cur.execute("SELECT 1 FROM paciente_reagendar"
+                        " WHERE paciente_telefono_normalizado=%s AND whatsapp_opt_out=1 LIMIT 1",
+                        (telefono,))
+            if (cur.fetchone() or any(p.get("whatsapp_opt_out")
+                                      for p in servicio._pacientes_con_tel(cur, telefono))):
                 paciente_reagendar.marcar_fallo(cita, "PACIENTE_DE_BAJA")
                 return
         nombre, _, apellido = cita["paciente_nombre"].partition(" ")
@@ -7597,6 +7679,13 @@ async def _procesar_cita_reagendar(cita: dict, plantillas_por_centro: dict) -> N
         if await asyncio.to_thread(esta_suprimido, telefono):
             paciente_reagendar.marcar_fallo(cita, "PACIENTE_ELIMINADO")
             return
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM paciente_reagendar"
+                        " WHERE paciente_telefono_normalizado=%s AND whatsapp_opt_out=1 LIMIT 1",
+                        (telefono,))
+            if cur.fetchone():
+                paciente_reagendar.marcar_fallo(cita, "PACIENTE_DE_BAJA")
+                return
         cfg_final = config_all(refresh=True)
         if (cfg_final.get("reagendar_envio_activo") != "true"
                 or cfg_final.get("entorno") != "produccion"
@@ -7622,6 +7711,10 @@ async def _procesar_cita_reagendar(cita: dict, plantillas_por_centro: dict) -> N
         # aceptó el mensaje: detener para conciliación, nunca reintentar solo.
         log_error("reagendar: revisar envío", exc)
         paciente_reagendar.marcar_fallo(cita, "RESULTADO_INCIERTO")
+    finally:
+        if cita.get("lote_id"):
+            await asyncio.to_thread(paciente_reagendar.completar_lote_si_corresponde,
+                                    cita["lote_id"])
 
 
 async def _loop_reagendar() -> None:
@@ -9099,6 +9192,7 @@ async def importar_citas_reagendar(request: Request, file: UploadFile = File(...
 
 @app.get("/api/v1/paciente-reagendar")
 def listar_citas_reagendar(centro: str | None = Query(None),
+                          lote_id: int | None = Query(None, ge=1),
                           fecha: datetime.date | None = Query(None),
                           ventana: str | None = Query(None),
                           estado: str | None = Query(None),
@@ -9106,6 +9200,9 @@ def listar_citas_reagendar(centro: str | None = Query(None),
                           limite: int = Query(25, ge=1, le=100),
                           sesion: dict = Depends(solo_admin)):
     condiciones, args = [], []
+    if lote_id:
+        condiciones.append("lote_id = %s")
+        args.append(lote_id)
     if centro:
         if centro not in catalogo_centros():
             raise HTTPException(422, detail="Clínica inválida.")
@@ -9131,11 +9228,98 @@ def listar_citas_reagendar(centro: str | None = Query(None),
         cur.execute(
             "SELECT id, fecha, ventana, clinica_nombre, centro_codigo,"
             " paciente_nombre, paciente_telefono_normalizado, doctor_nombre,"
+            " inicio_cita, lote_id, plantilla_clave,"
             " estado_envio, intentos_envio, ultimo_error_codigo, importado_en,"
-            " enviado_en, whatsapp_message_id FROM paciente_reagendar" + where +
+            " enviado_en, whatsapp_message_id,"
+            " (SELECT i.accion FROM reagendar_interacciones i"
+            " WHERE i.cita_id=paciente_reagendar.id ORDER BY i.creado_en DESC,"
+            " i.mensaje_id DESC LIMIT 1) AS ultima_respuesta"
+            " FROM paciente_reagendar" + where +
             " ORDER BY id DESC LIMIT %s OFFSET %s", (*args, limite, (pagina - 1) * limite))
         filas = cur.fetchall()
     return {"total": total, "pagina": pagina, "limite": limite, "items": filas}
+
+
+@app.get("/api/v1/paciente-reagendar/lotes")
+def listar_lotes_reagendar(limite: int = Query(50, ge=1, le=200),
+                          sesion: dict = Depends(solo_admin)):
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT l.id, l.fecha, l.ventana, l.recibido_en, l.programado_para,"
+            " l.estado, l.aplazado_en, l.aplazado_por, l.motivo_aplazamiento,"
+            " l.creados, l.rechazados,"
+            " SUM(CASE WHEN r.estado_envio='ENVIADO' THEN 1 ELSE 0 END) AS enviados,"
+            " SUM(CASE WHEN r.estado_envio='OMITIDO' THEN 1 ELSE 0 END) AS omitidos,"
+            " SUM(CASE WHEN r.estado_envio IN ('PENDIENTE','REINTENTO','PROCESANDO')"
+            " THEN 1 ELSE 0 END) AS pendientes,"
+            " SUM(CASE WHEN r.ultimo_error_codigo IS NOT NULL THEN 1 ELSE 0 END) AS con_error"
+            " FROM reagendar_lotes l LEFT JOIN paciente_reagendar r ON r.lote_id=l.id"
+            " GROUP BY l.id ORDER BY l.id DESC LIMIT %s", (limite,))
+        return cur.fetchall()
+
+
+@app.get("/api/v1/paciente-reagendar/lotes/{lote_id}/vista-previa")
+def vista_previa_lote_reagendar(lote_id: int, sesion: dict = Depends(solo_admin)):
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("SELECT id, estado FROM reagendar_lotes WHERE id=%s", (lote_id,))
+        if not cur.fetchone():
+            raise HTTPException(404, detail="Carga no encontrada.")
+        cur.execute("SELECT r.centro_codigo, r.paciente_nombre, r.doctor_nombre, r.clinica_nombre"
+                    " FROM paciente_reagendar r JOIN (SELECT centro_codigo, MIN(id) AS id"
+                    " FROM paciente_reagendar WHERE lote_id=%s AND centro_codigo IS NOT NULL"
+                    " GROUP BY centro_codigo) primero ON primero.id=r.id"
+                    " ORDER BY r.centro_codigo", (lote_id,))
+        ejemplos = cur.fetchall()
+    cfg = config_all(refresh=True)
+    try:
+        mapa = json.loads(cfg.get("reagendar_plantillas_json") or "{}")
+    except ValueError:
+        mapa = {}
+    plantillas = {p.get("clave"): p for p in leer_plantillas()}
+    items = []
+    for cita in ejemplos:
+        codigo = cita["centro_codigo"]
+        try:
+            canal = resolver_centro(codigo, cfg)
+        except ValueError:
+            canal = None
+        plantilla = plantillas.get(mapa.get(codigo))
+        estado = "Disponible" if (canal and canal.get("configured") and plantilla
+                 and plantilla.get("centro_codigo") == codigo
+                 and plantilla.get("whatsapp_template_status") == "APPROVED"
+                 and _aprobacion_plantilla(plantilla) == "aprobada") else "No disponible"
+        vista = None
+        if plantilla:
+            nombre, _, apellido = cita["paciente_nombre"].partition(" ")
+            vista = presentar_plantilla(plantilla, {"nombre": nombre, "apellido": apellido})
+        items.append({"centro": codigo, "clinica": cita["clinica_nombre"],
+                      "emisor": canal.get("phoneNumber") if canal else None,
+                      "plantilla": plantilla.get("nombre") if plantilla else None,
+                      "idioma": plantilla.get("idioma") if plantilla else None,
+                      "estado": estado, "ejemplo": vista.get("cuerpo") if vista else None,
+                      "errores": vista.get("errores") if vista else []})
+    return {"items": items}
+
+
+class AplazarReagendarIn(BaseModel):
+    fecha_local: str = Field(..., max_length=16)
+    motivo: str = Field("", max_length=255)
+
+
+@app.post("/api/v1/paciente-reagendar/lotes/{lote_id}/aplazar")
+def aplazar_lote_reagendar(lote_id: int, body: AplazarReagendarIn,
+                          sesion: dict = Depends(solo_admin)):
+    try:
+        nueva_fecha_utc = paciente_reagendar.fecha_local_a_utc(body.fecha_local)
+        resultado = paciente_reagendar.aplazar_lote(
+            lote_id, nueva_fecha_utc, sesion.get("usuario", ""), body.motivo)
+    except LookupError as exc:
+        raise HTTPException(404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, detail=str(exc)) from exc
+    auditoria_registrar(sesion.get("usuario", ""), "reagendar_aplazar", str(lote_id),
+                       f"Nueva programación UTC: {resultado['programado_para']}; motivo: {body.motivo[:100]}")
+    return resultado
 
 
 # Cada módulo mantiene el contrato HTTP de su dominio. `main.py` conserva los

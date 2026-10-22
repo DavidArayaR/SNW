@@ -9,6 +9,7 @@ import re
 import secrets
 import time
 import unicodedata
+from zoneinfo import ZoneInfo
 
 import pymysql
 
@@ -20,6 +21,38 @@ CSV_MAX_BYTES = 5 * 1024 * 1024
 CSV_MAX_FILAS = 10000
 REQUERIDAS = {"fecha", "ventana", "clinica_nombre", "reservo_cita_uuid",
              "paciente_nombre", "inicio_cita"}
+ZONA_CHILE = ZoneInfo("America/Santiago")
+UTC = dt.timezone.utc
+
+
+def programacion_carga(fecha: dt.date, ventana: str,
+                       recibido: dt.datetime) -> dt.datetime | None:
+    """Devuelve la hora de despacho UTC, solo para la carga habitual válida."""
+    if recibido.tzinfo is None:
+        raise ValueError("recibido debe tener zona horaria")
+    local = recibido.astimezone(ZONA_CHILE)
+    if local.date() != fecha:
+        return None
+    horarios = {"08-14": ((14, 30), (15, 0)), "14-20": ((20, 30), (21, 0))}
+    horario = horarios.get(ventana)
+    if not horario:
+        return None
+    desde = dt.datetime.combine(fecha, dt.time(*horario[0]), ZONA_CHILE)
+    salida = dt.datetime.combine(fecha, dt.time(*horario[1]), ZONA_CHILE)
+    return salida.astimezone(UTC).replace(tzinfo=None) if desde <= local < salida else None
+
+
+def fecha_local_a_utc(valor: str) -> dt.datetime:
+    """Interpreta fecha/hora de Chile; rechaza horas inexistentes o ambiguas."""
+    local_sin_zona = dt.datetime.strptime(valor, "%Y-%m-%d %H:%M")
+    primera = local_sin_zona.replace(tzinfo=ZONA_CHILE, fold=0)
+    segunda = local_sin_zona.replace(tzinfo=ZONA_CHILE, fold=1)
+    if primera.utcoffset() != segunda.utcoffset():
+        raise ValueError("Esa hora es ambigua o no existe por el cambio de horario de Chile.")
+    vuelta = primera.astimezone(UTC).astimezone(ZONA_CHILE).replace(tzinfo=None)
+    if vuelta != local_sin_zona:
+        raise ValueError("Esa hora no existe por el cambio de horario de Chile.")
+    return primera.astimezone(UTC)
 
 
 class CsvInvalido(ValueError):
@@ -101,6 +134,7 @@ def analizar_csv(datos: bytes, cfg: dict) -> tuple[list[dict], list[dict], int]:
                 centro = resolver_clinica(clinica, clinica_id, cfg)
                 problema = ("CLINICA_DESCONOCIDA" if not centro else
                             "TELEFONO_INVALIDO" if not normalizado else
+                            "DOCTOR_FALTANTE" if not doctor else
                             "SIN_AUTORIZACION" if not autorizado else None)
                 registros.append({"fecha": fecha, "ventana": ventana,
                                   "_row": numero,
@@ -129,11 +163,28 @@ _COLUMNAS = ("fecha", "ventana", "clinica_id", "clinica_nombre", "reservo_cita_u
              "ultimo_error_codigo")
 
 
-def importar(datos: bytes, cfg: dict) -> dict:
+def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None) -> dict:
     registros, errores, recibidas = analizar_csv(datos, cfg)
-    insertados = duplicados = 0
+    pares = {(r["fecha"], r["ventana"]) for r in registros}
+    if not pares:
+        return {"success": True, "summary": {"received": recibidas, "inserted": 0,
+                "alreadyExists": 0, "rejected": len(errores), "batchId": None,
+                "batchStatus": None, "scheduledAtUtc": None}, "errors": errores[:50]}
+    if len(pares) != 1:
+        raise CsvInvalido("Cada archivo debe corresponder a una sola fecha y ventana de Reservo.")
+    recibido = recibido or dt.datetime.now(UTC)
+    if recibido.tzinfo is None:
+        raise ValueError("La recepción debe tener zona horaria")
+    fecha, ventana = next(iter(pares))
+    programado = programacion_carga(fecha, ventana, recibido)
+    insertados = duplicados = elegibles = 0
     from supresion import huella_telefono
     with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO reagendar_lotes (fecha, ventana, recibido_en, estado)"
+            " VALUES (%s, %s, %s, 'REVISION')",
+            (fecha, ventana, recibido.astimezone(UTC).replace(tzinfo=None)))
+        lote_id = cur.lastrowid
         for registro in registros:
             telefono = registro["paciente_telefono_normalizado"]
             if telefono:
@@ -143,21 +194,47 @@ def importar(datos: bytes, cfg: dict) -> dict:
                 if cur.fetchone():
                     errores.append({"row": registro["_row"], "code": "paciente_eliminado"})
                     continue
+                cur.execute("SELECT 1 FROM paciente_reagendar"
+                            " WHERE paciente_telefono_normalizado=%s AND whatsapp_opt_out=1"
+                            " LIMIT 1", (telefono,))
+                if cur.fetchone():
+                    registro["ultimo_error_codigo"] = "PACIENTE_DE_BAJA"
             try:
                 cur.execute(
-                    "INSERT INTO paciente_reagendar (" + ",".join(_COLUMNAS) + ")"
-                    " VALUES (" + ",".join(["%s"] * len(_COLUMNAS)) + ")",
-                    tuple(registro[col] for col in _COLUMNAS),
+                    "INSERT INTO paciente_reagendar (lote_id," + ",".join(_COLUMNAS) + ")"
+                    " VALUES (" + ",".join(["%s"] * (len(_COLUMNAS) + 1)) + ")",
+                    (lote_id, *(registro[col] for col in _COLUMNAS)),
                 )
+                if registro["ultimo_error_codigo"]:
+                    cur.execute("UPDATE paciente_reagendar SET estado_envio='OMITIDO'"
+                                " WHERE id=%s", (cur.lastrowid,))
+                else:
+                    elegibles += 1
                 insertados += 1
             except pymysql.err.IntegrityError as exc:
                 if exc.args[0] != 1062:
                     raise
                 # Conserva íntegros estado, intentos, emisor e ID de Meta.
                 duplicados += 1
+        if insertados:
+            # Si la validación/inserción cruzó la hora de salida, revisión manual:
+            # jamás disparar inmediatamente una programación ya vencida.
+            vigente = (elegibles > 0 and programado is not None
+                       and programado > dt.datetime.now(UTC).replace(tzinfo=None))
+            estado = "PROGRAMADO" if vigente else "REVISION"
+            cur.execute(
+                "UPDATE reagendar_lotes SET estado=%s, programado_para=%s,"
+                " creados=%s, rechazados=%s WHERE id=%s",
+                (estado, programado if vigente else None, insertados, len(errores), lote_id))
+        else:
+            cur.execute("DELETE FROM reagendar_lotes WHERE id=%s", (lote_id,))
+            lote_id = None
+            estado = None
         conn.commit()
     return {"success": True, "summary": {"received": recibidas, "inserted": insertados,
-            "alreadyExists": duplicados, "rejected": len(errores)},
+            "eligible": elegibles, "alreadyExists": duplicados, "rejected": len(errores),
+            "batchId": lote_id, "batchStatus": estado,
+            "scheduledAtUtc": programado.isoformat() + "Z" if lote_id and estado == "PROGRAMADO" else None},
             "errors": errores[:50]}
 
 
@@ -183,11 +260,16 @@ def reclamar_pendiente(centros: list[str]) -> dict | None:
     marcadores = ",".join(["%s"] * len(centros))
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT * FROM paciente_reagendar WHERE estado_envio IN ('PENDIENTE','REINTENTO')"
-            " AND autorizado_contacto = 1 AND paciente_telefono_normalizado IS NOT NULL"
-            f" AND centro_codigo IN ({marcadores})"
-            " AND (proximo_reintento_en IS NULL OR proximo_reintento_en <= UTC_TIMESTAMP())"
-            " ORDER BY id LIMIT 1 FOR UPDATE", tuple(centros))
+            "SELECT r.* FROM paciente_reagendar r"
+            " JOIN reagendar_lotes l ON l.id=r.lote_id"
+            " WHERE r.estado_envio IN ('PENDIENTE','REINTENTO')"
+            " AND r.autorizado_contacto = 1 AND r.whatsapp_opt_out=0"
+            " AND r.paciente_telefono_normalizado IS NOT NULL"
+            f" AND r.centro_codigo IN ({marcadores})"
+            " AND l.estado IN ('PROGRAMADO','APLAZADO','EN_CURSO')"
+            " AND l.programado_para <= UTC_TIMESTAMP()"
+            " AND (r.proximo_reintento_en IS NULL OR r.proximo_reintento_en <= UTC_TIMESTAMP())"
+            " ORDER BY r.id LIMIT 1 FOR UPDATE", tuple(centros))
         fila = cur.fetchone()
         if not fila:
             return None
@@ -197,10 +279,158 @@ def reclamar_pendiente(centros: list[str]) -> dict | None:
             " reservado_en=UTC_TIMESTAMP(), ultimo_intento_en=UTC_TIMESTAMP(),"
             " intentos_envio=intentos_envio+1 WHERE id=%s",
             (token, fila["id"]))
+        cur.execute("UPDATE reagendar_lotes SET estado='EN_CURSO'"
+                    " WHERE id=%s AND estado IN ('PROGRAMADO','APLAZADO')", (fila["lote_id"],))
         conn.commit()
     fila["reserva_token"] = token
     fila["intentos_envio"] += 1
     return fila
+
+
+def aplazar_lote(lote_id: int, nueva_fecha_utc: dt.datetime,
+                 usuario: str, motivo: str = "") -> dict:
+    """No cambia citas ya reclamadas; serializa el aplazamiento con el claim."""
+    if nueva_fecha_utc.tzinfo is None or nueva_fecha_utc <= dt.datetime.now(UTC):
+        raise ValueError("La nueva fecha debe estar en el futuro.")
+    nueva = nueva_fecha_utc.astimezone(UTC).replace(tzinfo=None)
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("SELECT id, estado FROM reagendar_lotes WHERE id=%s FOR UPDATE", (lote_id,))
+        lote = cur.fetchone()
+        if not lote:
+            raise LookupError("Carga no encontrada.")
+        if lote["estado"] not in ("PROGRAMADO", "APLAZADO", "REVISION"):
+            raise ValueError("Esta carga ya comenzó a despacharse; no puede aplazarse completa.")
+        cur.execute("UPDATE reagendar_lotes SET estado='APLAZADO', programado_para=%s,"
+                    " aplazado_en=UTC_TIMESTAMP(), aplazado_por=%s, motivo_aplazamiento=%s"
+                    " WHERE id=%s", (nueva, usuario[:100], motivo[:255] or None, lote_id))
+        conn.commit()
+    return {"id": lote_id, "estado": "APLAZADO", "programado_para": nueva.isoformat() + "Z"}
+
+
+def completar_lote_si_corresponde(lote_id: int) -> None:
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("SELECT estado FROM reagendar_lotes WHERE id=%s FOR UPDATE", (lote_id,))
+        lote = cur.fetchone() or {}
+        if lote.get("estado") != "EN_CURSO":
+            return
+        cur.execute("SELECT COUNT(*) AS n FROM paciente_reagendar"
+                    " WHERE lote_id=%s AND estado_envio IN ('PENDIENTE','REINTENTO','PROCESANDO')"
+                    " AND autorizado_contacto=1 AND paciente_telefono_normalizado IS NOT NULL"
+                    " AND centro_codigo IS NOT NULL", (lote_id,))
+        if cur.fetchone()["n"] == 0:
+            cur.execute("UPDATE reagendar_lotes SET estado='COMPLETADO' WHERE id=%s", (lote_id,))
+        conn.commit()
+
+
+def registrar_respuesta_reagendar(telefono: str, phone_id: str, mensaje_id: str,
+                                  referencia_id: str | None, texto: str,
+                                  *, declina: str | None = None) -> dict | None:
+    """Asocia una respuesta al envío exacto (o a una consulta en curso).
+
+    No consume respuestas genéricas sin contexto: una conversación de otra
+    campaña no puede heredar los datos de una cita por compartir teléfono.
+    """
+    if not mensaje_id or not phone_id or not telefono:
+        return None
+    with conectar() as conn, conn.cursor() as cur:
+        cita = None
+        if referencia_id:
+            cur.execute(
+                "SELECT * FROM paciente_reagendar WHERE whatsapp_message_id=%s"
+                " AND paciente_telefono_normalizado=%s AND whatsapp_phone_number_id=%s"
+                " AND estado_envio='ENVIADO' ORDER BY id DESC LIMIT 1",
+                (referencia_id, telefono, phone_id))
+            cita = cur.fetchone()
+            if not cita:
+                cur.execute(
+                    "SELECT r.* FROM reagendar_interacciones i"
+                    " JOIN paciente_reagendar r ON r.id=i.cita_id"
+                    " WHERE i.respuesta_id=%s AND r.paciente_telefono_normalizado=%s"
+                    " AND r.whatsapp_phone_number_id=%s AND r.estado_envio='ENVIADO'"
+                    " ORDER BY r.id DESC LIMIT 1", (referencia_id, telefono, phone_id))
+                cita = cur.fetchone()
+            if not cita:
+                return None
+        if not cita:
+            cur.execute(
+                "SELECT r.* FROM reagendar_flujo f JOIN paciente_reagendar r ON r.id=f.cita_id"
+                " WHERE r.paciente_telefono_normalizado=%s AND r.whatsapp_phone_number_id=%s"
+                " AND f.estado='ESPERANDO_CONSULTA'"
+                " AND f.actualizado_en >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 24 HOUR)"
+                " ORDER BY f.actualizado_en DESC LIMIT 1",
+                (telefono, phone_id))
+            cita = cur.fetchone()
+        if not cita:
+            if declina:
+                return None
+            cur.execute(
+                "SELECT * FROM paciente_reagendar WHERE paciente_telefono_normalizado=%s"
+                " AND whatsapp_phone_number_id=%s AND whatsapp_opt_out=1"
+                " ORDER BY id DESC LIMIT 1", (telefono, phone_id))
+            cita = cur.fetchone()
+            if cita:
+                cur.execute("UPDATE paciente_reagendar SET whatsapp_opt_out=0"
+                            " WHERE paciente_telefono_normalizado=%s", (telefono,))
+                conn.commit()
+                return {"accion": "REACTIVADO"}
+        if not cita:
+            return None
+        cur.execute("SELECT 1 FROM reagendar_interacciones WHERE mensaje_id=%s", (mensaje_id[:255],))
+        if cur.fetchone():
+            return {"accion": "DUPLICADO"}
+        cur.execute("SELECT estado FROM reagendar_flujo WHERE cita_id=%s FOR UPDATE", (cita["id"],))
+        flujo = cur.fetchone() or {}
+        normalizado = _normalizar_nombre(texto)
+        if declina:
+            accion, estado = declina, "FINALIZADO"
+        elif flujo.get("estado") == "ESPERANDO_CONSULTA":
+            accion, estado = "CONSULTA", "CONTACTO_OFRECIDO"
+        elif normalizado == "reagendar":
+            accion, estado = "REAGENDAR", "CONTACTO_OFRECIDO"
+        elif ("?" in texto or "¿" in texto) and len(texto.strip()) >= 15:
+            accion, estado = "CONSULTA", "CONTACTO_OFRECIDO"
+        elif flujo.get("estado") in ("CONTACTO_OFRECIDO", "FINALIZADO"):
+            return None
+        else:
+            accion, estado = "SOLICITAR_CONSULTA", "ESPERANDO_CONSULTA"
+        cur.execute(
+            "INSERT IGNORE INTO reagendar_interacciones"
+            " (mensaje_id, cita_id, accion, texto) VALUES (%s, %s, %s, %s)",
+            (mensaje_id[:255], cita["id"], accion, texto[:2000]))
+        if cur.rowcount != 1:
+            return {"accion": "DUPLICADO"}
+        cur.execute(
+            "INSERT INTO reagendar_flujo (cita_id, estado, actualizado_en, ultimo_mensaje_id)"
+            " VALUES (%s, %s, UTC_TIMESTAMP(), %s)"
+            " ON DUPLICATE KEY UPDATE estado=VALUES(estado),"
+            " actualizado_en=VALUES(actualizado_en), ultimo_mensaje_id=VALUES(ultimo_mensaje_id)",
+            (cita["id"], estado, mensaje_id[:255]))
+        if accion == "BAJA":
+            cur.execute("UPDATE paciente_reagendar SET whatsapp_opt_out=1"
+                        " WHERE paciente_telefono_normalizado=%s", (telefono,))
+        conn.commit()
+    return {"accion": accion, "cita": cita, "texto": texto, "mensaje_id": mensaje_id}
+
+
+def marcar_opt_out_reagendar(telefono: str, valor: bool) -> None:
+    """Replica la preferencia global del webhook en citas importadas."""
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("UPDATE paciente_reagendar SET whatsapp_opt_out=%s"
+                    " WHERE paciente_telefono_normalizado=%s", (int(valor), telefono))
+        conn.commit()
+
+
+def marcar_respuesta_reagendar(mensaje_id: str, respuesta_id: str | None,
+                                estado: str) -> None:
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("UPDATE reagendar_interacciones SET respuesta_id=%s, respuesta_estado=%s"
+                    " WHERE mensaje_id=%s", (respuesta_id, estado, mensaje_id))
+        if estado == "ERROR":
+            cur.execute("UPDATE reagendar_flujo f JOIN reagendar_interacciones i"
+                        " ON i.cita_id=f.cita_id SET f.estado='ERROR_RESPUESTA'"
+                        " WHERE i.mensaje_id=%s AND f.ultimo_mensaje_id=%s",
+                        (mensaje_id, mensaje_id))
+        conn.commit()
 
 
 def registrar_lote(cita: dict, plantilla: dict, canal: dict) -> int:

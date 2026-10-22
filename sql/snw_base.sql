@@ -93,8 +93,24 @@ CREATE TABLE IF NOT EXISTS log_envios (
 
 -- Importación idempotente de citas atendidas recibidas por API externa.
 -- Nunca se guarda el RUT ni se activa el envío por crear esta tabla.
+CREATE TABLE IF NOT EXISTS reagendar_lotes (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  fecha DATE NOT NULL,
+  ventana VARCHAR(5) NOT NULL,
+  recibido_en DATETIME NOT NULL,
+  programado_para DATETIME NULL,
+  estado VARCHAR(20) NOT NULL DEFAULT 'REVISION',
+  aplazado_en DATETIME NULL,
+  aplazado_por VARCHAR(100) NULL,
+  motivo_aplazamiento VARCHAR(255) NULL,
+  creados INT UNSIGNED NOT NULL DEFAULT 0,
+  rechazados INT UNSIGNED NOT NULL DEFAULT 0,
+  KEY idx_reagendar_lote_vencimiento (estado, programado_para)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS paciente_reagendar (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  lote_id BIGINT UNSIGNED NULL,
   fecha DATE NOT NULL,
   ventana VARCHAR(5) NOT NULL,
   clinica_id INT NULL,
@@ -107,6 +123,7 @@ CREATE TABLE IF NOT EXISTS paciente_reagendar (
   inicio_cita DATETIME NOT NULL,
   centro_codigo VARCHAR(10) NULL,
   autorizado_contacto TINYINT(1) NOT NULL DEFAULT 0,
+  whatsapp_opt_out TINYINT(1) NOT NULL DEFAULT 0,
   estado_envio VARCHAR(20) NOT NULL DEFAULT 'PENDIENTE',
   intentos_envio INT UNSIGNED NOT NULL DEFAULT 0,
   reservado_en DATETIME NULL,
@@ -128,7 +145,30 @@ CREATE TABLE IF NOT EXISTS paciente_reagendar (
   KEY idx_reagendar_estado (estado_envio, proximo_reintento_en),
   KEY idx_reagendar_centro (centro_codigo, estado_envio),
   KEY idx_reagendar_fecha (fecha, ventana),
-  KEY idx_reagendar_wa_id (whatsapp_message_id)
+  KEY idx_reagendar_wa_id (whatsapp_message_id),
+  KEY idx_reagendar_lote (lote_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS reagendar_flujo (
+  cita_id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  estado VARCHAR(30) NOT NULL,
+  actualizado_en DATETIME NOT NULL,
+  ultimo_mensaje_id VARCHAR(255) NULL,
+  CONSTRAINT fk_reagendar_flujo_cita FOREIGN KEY (cita_id)
+    REFERENCES paciente_reagendar(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS reagendar_interacciones (
+  mensaje_id VARCHAR(255) COLLATE utf8mb4_bin NOT NULL PRIMARY KEY,
+  cita_id BIGINT UNSIGNED NOT NULL,
+  accion VARCHAR(30) NOT NULL,
+  texto TEXT NULL,
+  respuesta_id VARCHAR(255) NULL,
+  respuesta_estado VARCHAR(20) NOT NULL DEFAULT 'PENDIENTE',
+  creado_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_reagendar_interaccion_cita (cita_id),
+  CONSTRAINT fk_reagendar_interaccion_cita FOREIGN KEY (cita_id)
+    REFERENCES paciente_reagendar(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS reagendar_import_quota (

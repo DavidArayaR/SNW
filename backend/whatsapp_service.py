@@ -232,6 +232,7 @@ al_detectar_baja = None
 al_detectar_retractacion = None
 al_detectar_insulto = None
 al_derivar_crm = None
+al_respuesta_reagendar = None
 al_mostrar_opciones = None
 al_responder_opcion = None
 
@@ -1302,6 +1303,24 @@ class WhatsAppService:
                 es_mensaje_no_interes(texto) or es_mensaje_no_interes(extra)
             )
 
+            # El reagendamiento tiene su propio contexto de cita y número CRM.
+            # No copiarlo a la cola local ni disparar el call center genérico.
+            reagendar = None
+            estaba_opt_out = self._estaba_opt_out(telefono)
+            if callable(al_respuesta_reagendar) and not estaba_opt_out:
+                try:
+                    reagendar = al_respuesta_reagendar(
+                        telefono, cuerpo, mensaje.get("id"),
+                        (mensaje.get("context") or {}).get("id"),
+                        "BAJA" if fue_baja else "DESINTERES" if no_interes else None)
+                except Exception as exc:
+                    log_error("al_respuesta_reagendar", exc)
+            if reagendar == "gestionado":
+                info = self._registrar_respuesta(telefono, cuerpo, mensaje.get("timestamp"))
+                acciones.append(f"respuesta_{info}")
+                acciones.append("reagendar_gestionado")
+                continue
+
             # La cola CRM registra cualquier respuesta humana, con independencia
             # de si el clasificador también dispara un aviso de call center.
             # ELIMINAR ya salió antes de este punto y nunca se copia a la cola.
@@ -1311,7 +1330,7 @@ class WhatsAppService:
                            ("SOLICITA_CONTACTO",) if es_boton and extra == BOTON_ID_EJECUTIVA else
                            tuple(clasificacion.motivos) if clasificacion and clasificacion.motivos else
                            ("GENERAL",))
-            if callable(al_derivar_crm):
+            if callable(al_derivar_crm) and reagendar != "declinado":
                 try:
                     al_derivar_crm(telefono, "Solicitud de baja" if fue_baja else cuerpo,
                                   mensaje.get("id"), motivos_crm,
@@ -1323,7 +1342,6 @@ class WhatsAppService:
             # El aviso de baja informa que cualquier nueva respuesta distinta
             # de BAJA/ELIMINAR reincorpora al paciente. Una nueva baja jamás
             # se interpreta como reactivación.
-            estaba_opt_out = self._estaba_opt_out(telefono)
             if estaba_opt_out and not fue_baja:
                 self._registrar_retractacion(telefono, aviso=False)
                 hubo_retract = True
@@ -1603,7 +1621,12 @@ class WhatsAppService:
         try:
             with conectar() as conn, conn.cursor() as cur:
                 pacientes = self._pacientes_con_tel(cur, telefono)
-                return any(p.get("whatsapp_opt_out") for p in pacientes)
+                if any(p.get("whatsapp_opt_out") for p in pacientes):
+                    return True
+                cur.execute("SELECT 1 FROM paciente_reagendar"
+                            " WHERE paciente_telefono_normalizado=%s AND whatsapp_opt_out=1"
+                            " LIMIT 1", (telefono,))
+                return bool(cur.fetchone())
         except Exception as e:
             log_error(f"_estaba_opt_out({telefono})", e)
             return False
@@ -1716,6 +1739,8 @@ class WhatsAppService:
                        simulada: bool = False) -> None:
         match = _TEL_MATCH.format(col="telefono")
         try:
+            from paciente_reagendar import marcar_opt_out_reagendar
+            marcar_opt_out_reagendar(telefono, True)
             with conectar() as conn, conn.cursor() as cur:
                 pacientes = self._pacientes_con_tel(cur, telefono)
                 if not pacientes:
@@ -1779,6 +1804,8 @@ class WhatsAppService:
         la baja fue explícita o puesta a mano por un admin/dev."""
         match = _TEL_MATCH.format(col="telefono")
         try:
+            from paciente_reagendar import marcar_opt_out_reagendar
+            marcar_opt_out_reagendar(telefono, False)
             with conectar() as conn, conn.cursor() as cur:
                 pacientes = self._pacientes_con_tel(cur, telefono)
                 if not pacientes:

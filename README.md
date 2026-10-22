@@ -3,7 +3,10 @@
 ## Integración de citas atendidas para reagendar
 
 SNW recibe el CSV del sistema externo por `POST /api/v1/paciente-reagendar/importar-csv`.
-**No programa la carga**: el externo puede enviarla a cualquier hora. `08-14` y
+**No programa la carga**: el externo la envía a las 14:30 y 20:30 (hora de Chile).
+SNW programa los lotes normales a las 15:00 y 21:00, respectivamente. Una
+carga tardía o fuera de ventana queda en `REVISION` y no se envía sola.
+`08-14` y
 `14-20` identifican los tramos en que el sistema externo busca registros en
 Reservo (08:00–14:00 y 14:00–20:00). No son la hora de la cita ni los horarios
 en que SNW exige recibir el archivo.
@@ -41,7 +44,10 @@ autorización para esta comunicación. Sin esa columna, la fila se conserva,
 pero no se envía.
 
 Respuesta: `{"success":true,"summary":{"received":2,"inserted":1,
-"alreadyExists":1,"rejected":0},"errors":[]}`. Los errores por fila
+"eligible":1,"alreadyExists":1,"rejected":0,"batchId":12,
+"batchStatus":"PROGRAMADO","scheduledAtUtc":"2026-10-22T18:00:00Z"},"errors":[]}`.
+La hora del ejemplo es orientativa; el valor real refleja la zona horaria chilena.
+Los errores por fila
 incluyen solo número y código, no datos de pacientes. Un UUID ya importado
 no crea otro envío ni modifica estado, intentos, fecha de envío o ID de Meta.
 Errores HTTP: `401` credencial incorrecta, `413` archivo >5 MB, `422` CSV
@@ -68,12 +74,24 @@ Access Token **propios de su clínica**, aplica el control de ritmo vigente y
 registra el resultado en `paciente_reagendar`, `envios` y `log_envios`.
 `ENVIADO` significa aceptado por Meta, no entregado. Un timeout o resultado
 incierto se deja en `ERROR` para conciliación, sin reenvío automático.
-Administradores y desarrolladores pueden ver las citas en **Base de datos →
-Citas atendidas · reagendar** o consultar `GET /api/v1/paciente-reagendar`
+Administradores y desarrolladores pueden revisar las cargas, pacientes y
+plantillas vigentes en **Base de datos → Citas atendidas · reagendar** y
+aplazar una carga completa antes del despacho. API:
+`GET /api/v1/paciente-reagendar/lotes`,
+`GET /api/v1/paciente-reagendar/lotes/{id}/vista-previa` y
+`POST /api/v1/paciente-reagendar/lotes/{id}/aplazar` con
+`{"fecha_local":"AAAA-MM-DD HH:MM","motivo":"..."}` en hora de Chile.
+Las citas se consultan por `GET /api/v1/paciente-reagendar`
 filtrando por `centro`, `fecha`, `ventana`, `estado`, `pagina` y `limite`.
-Las respuestas siguen entrando por los webhooks existentes y su contexto
-puede pasar a la cola local de CRM. No existe aún un contrato para transmitir
-esa cola al CRM externo.
+Las respuestas de este flujo entran por los webhooks existentes. Si el paciente
+elige «Reagendar», SNW prepara el texto con nombre, médico y clínica y ofrece
+«Ir a call center» hacia el WhatsApp CRM de **esa misma clínica**. Si formula
+otra consulta, se le pide el detalle cuando haga falta y el botón prepara
+`Hola, esta es mi consulta: ...`. El paciente debe enviar el mensaje preparado
+en el nuevo chat; pulsar el botón no transfiere la conversación ni confirma
+una cita. La cola local de CRM no se utiliza para nuevas respuestas; se
+conservan sus datos históricos sin eliminarlos.
+«Dar de baja» y «No me interesa» conservan su tratamiento normal.
 
 Módulo web para gestionar y enviar notificaciones de WhatsApp a pacientes. Backend en
 **Python (FastAPI)**, una única base de datos **MySQL/MariaDB** con tablas separadas para
