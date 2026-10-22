@@ -51,11 +51,10 @@ function cuentaDePlantilla(codigo) {
   return cuentasPlantillas.find((c) => c.codigo === codigo) || null;
 }
 function descripcionCuentaPlantilla(codigo) {
-  if (!codigo) return "Cuenta de WhatsApp sin identificar · sincroniza desde la clínica correcta";
+  if (!codigo) return "Centro emisor sin identificar · sincroniza desde la clínica correcta";
   const cuenta = cuentaDePlantilla(codigo);
-  if (!cuenta) return `Clínica ${codigo} · cuenta de WhatsApp no disponible en Configuración`;
-  return `${cuenta.nombre} · WABA ID ${cuenta.wabaId || "pendiente"}` +
-    (cuenta.phoneNumber ? ` · ${cuenta.phoneNumber}` : "") +
+  if (!cuenta) return `Centro ${codigo} · número no disponible en Configuración`;
+  return `${cuenta.nombre} · ${cuenta.phoneNumber || "número pendiente"}` +
     (cuenta.activa === false ? " · clínica inactiva" : "");
 }
 function pintarCuentaPlantillaEditor() {
@@ -64,10 +63,10 @@ function pintarCuentaPlantillaEditor() {
   const codigo = $("#inpCentroPlantilla")?.value ||
     (activaId ? plantillas.find((p) => p.id === activaId)?.centro_codigo : "");
   aviso.textContent = codigo
-    ? `Cuenta de WhatsApp asociada en SNW: ${descripcionCuentaPlantilla(codigo)}.`
+    ? `Centro emisor asociado: ${descripcionCuentaPlantilla(codigo)}.`
     : activaId
-      ? "Cuenta de WhatsApp sin identificar. Sincroniza esta plantilla desde su clínica en Meta."
-      : "Selecciona una clínica para identificar la cuenta de WhatsApp (WABA).";
+      ? "Centro emisor sin identificar. Sincroniza esta plantilla desde su clínica en Meta."
+      : "Selecciona una clínica para identificar el centro emisor.";
   aviso.classList.toggle("tpl-cuenta-editor--pendiente", !codigo || !cuentaDePlantilla(codigo)?.wabaId);
 }
 function pintarCentrosEmisores() {
@@ -98,7 +97,7 @@ function pintarCentrosEmisores() {
     selector.replaceChildren(new Option("— Seleccione clínica —", ""));
     const opciones = id === "#inpCentroPlantilla" ? cuentasPlantillas : centrosEmisores;
     for (const centro of opciones) {
-      const opcion = new Option(`${centro.nombre} · WABA ${centro.wabaId || "pendiente"}` +
+      const opcion = new Option(`${centro.nombre} · ${centro.phoneNumber || "número pendiente"}` +
         (centro.activa === false ? " · inactiva" : ""), centro.codigo);
       opcion.disabled = centro.activa === false;
       selector.add(opcion);

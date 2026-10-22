@@ -18,4 +18,9 @@ const bloqueo = app.split("function actualizarBloqueoCampos() {")[1]?.split("fun
 assert(bloqueo, "Debe existir el control de bloqueo del editor");
 assert.equal((bloqueo.match(/selCentroPrueba\.disabled = false;/g) || []).length, 2,
   "El centro emisor de prueba debe quedar habilitado tanto en solo lectura como al editar");
+const descripcionCuenta = app.split("function descripcionCuentaPlantilla(codigo) {")[1]?.split("function pintarCuentaPlantillaEditor()")[0];
+assert(descripcionCuenta, "Debe existir la descripción del centro de la plantilla");
+assert.match(descripcionCuenta, /cuenta\.nombre.*cuenta\.phoneNumber/);
+assert.doesNotMatch(descripcionCuenta, /wabaId|WABA ID/);
+assert.doesNotMatch(html, /La plantilla se registra en la WABA|Selecciona la WABA/);
 console.log("Orden y exclusividad del encabezado: OK");
