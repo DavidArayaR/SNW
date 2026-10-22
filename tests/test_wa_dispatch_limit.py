@@ -5,11 +5,12 @@ import threading
 import unittest
 import uuid
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
 from db import conectar
+import wa_dispatch_limit as dispatch
 from wa_dispatch_limit import bloquear, politica, registrar_aceptado, reservar, huella_pareja
 
 
@@ -27,6 +28,20 @@ def configuracion():
 
 
 class PoliticaDespachoTests(unittest.TestCase):
+    def test_config_actual_lee_token_clinica_sin_requerir_default(self):
+        conexion = MagicMock()
+        conexion.__enter__.return_value = conexion
+        cursor = conexion.cursor.return_value
+        cursor.__enter__.return_value = cursor
+        cursor.fetchall.return_value = [
+            {"clave": "SMPT_WSP_ACCESS_TOKEN", "valor": "token-prueba"},
+        ]
+        with patch.object(dispatch, "_config_cache", (0, {})), \
+                patch.object(dispatch, "conectar", return_value=conexion):
+            cfg = dispatch._config_actual()
+        self.assertEqual(cfg["SMPT_WSP_ACCESS_TOKEN"], "token-prueba")
+        self.assertEqual(cfg["wa_dispatch_pair_seconds"], "6")
+
     def test_cada_centro_tiene_su_propia_capacidad(self):
         cfg = configuracion()
         cfg["SMPT_WSP_RATE_LIMIT_MPS"] = "50"

@@ -50,7 +50,7 @@ _CLAVES = tuple(
      "wa_dispatch_max_retries", "wa_dispatch_backoff_base_seconds",
      "wa_dispatch_backoff_max_seconds"] +
     [f"{centro}_WSP_{campo}" for centro in CENTROS
-     for campo in ("PHONE_NUMBER", "PHONE_NUMBER_ID", "WABA_ID", "ACCESS_TOKEN", "RATE_LIMIT_MPS", "RATE_LIMIT_MODE",
+     for campo in ("PHONE_NUMBER", "PHONE_NUMBER_ID", "WABA_ID", "RATE_LIMIT_MPS", "RATE_LIMIT_MODE",
                    "RATE_LIMIT_VERIFIED")]
 )
 
