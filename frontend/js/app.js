@@ -43,8 +43,32 @@ function nombreArea(id) {
 const $ = (sel) => document.querySelector(sel);
 
 let centrosEmisores = [];
+let cuentasPlantillas = [];
 function centroElegido(id) {
   return centrosEmisores.find((c) => c.codigo === $(id)?.value && c.configured) || null;
+}
+function cuentaDePlantilla(codigo) {
+  return cuentasPlantillas.find((c) => c.codigo === codigo) || null;
+}
+function descripcionCuentaPlantilla(codigo) {
+  if (!codigo) return "Cuenta de WhatsApp sin identificar · sincroniza desde la clínica correcta";
+  const cuenta = cuentaDePlantilla(codigo);
+  if (!cuenta) return `Clínica ${codigo} · cuenta de WhatsApp no disponible en Configuración`;
+  return `${cuenta.nombre} · WABA ID ${cuenta.wabaId || "pendiente"}` +
+    (cuenta.phoneNumber ? ` · ${cuenta.phoneNumber}` : "") +
+    (cuenta.activa === false ? " · clínica inactiva" : "");
+}
+function pintarCuentaPlantillaEditor() {
+  const aviso = $("#cuentaWhatsappPlantilla");
+  if (!aviso) return;
+  const codigo = $("#inpCentroPlantilla")?.value ||
+    (activaId ? plantillas.find((p) => p.id === activaId)?.centro_codigo : "");
+  aviso.textContent = codigo
+    ? `Cuenta de WhatsApp asociada en SNW: ${descripcionCuentaPlantilla(codigo)}.`
+    : activaId
+      ? "Cuenta de WhatsApp sin identificar. Sincroniza esta plantilla desde su clínica en Meta."
+      : "Selecciona una clínica para identificar la cuenta de WhatsApp (WABA).";
+  aviso.classList.toggle("tpl-cuenta-editor--pendiente", !codigo || !cuentaDePlantilla(codigo)?.wabaId);
 }
 function pintarCentrosEmisores() {
   for (const id of ["#selCentroConf", "#selProgCentro", "#selCentroPrueba"]) {
@@ -72,13 +96,18 @@ function pintarCentrosEmisores() {
     if (!selector) continue;
     const anterior = selector.value;
     selector.replaceChildren(new Option("— Seleccione clínica —", ""));
-    for (const centro of centrosEmisores) {
-      selector.add(new Option(`${centro.nombre}${centro.configured ? "" : " · pendiente"}`, centro.codigo));
+    const opciones = id === "#inpCentroPlantilla" ? cuentasPlantillas : centrosEmisores;
+    for (const centro of opciones) {
+      const opcion = new Option(`${centro.nombre} · WABA ${centro.wabaId || "pendiente"}` +
+        (centro.activa === false ? " · inactiva" : ""), centro.codigo);
+      opcion.disabled = centro.activa === false;
+      selector.add(opcion);
     }
     const elegido = id === "#inpCentroPlantilla" && activaId
       ? plantillas.find((p) => p.id === activaId)?.centro_codigo : anterior;
-    selector.value = centrosEmisores.some((c) => c.codigo === elegido) ? elegido : "";
+    selector.value = opciones.some((c) => c.codigo === elegido) ? elegido : "";
   }
+  pintarCuentaPlantillaEditor();
   actualizarPasosManual();
   actualizarPasosProg();
   actualizarEstadoBotonPrueba();
@@ -88,7 +117,16 @@ async function cargarCentrosEmisores() {
     const res = await fetch("api/whatsapp/centros", { headers: authHeaders(), cache: "no-store" });
     if (!res.ok) throw new Error("No se pudieron consultar los centros emisores.");
     centrosEmisores = await res.json();
+    try {
+      const historicos = await fetch("api/whatsapp/centros?incluir_inactivas=true", {
+        headers: authHeaders(), cache: "no-store",
+      });
+      cuentasPlantillas = historicos.ok ? await historicos.json() : centrosEmisores;
+    } catch {
+      cuentasPlantillas = centrosEmisores;
+    }
     pintarCentrosEmisores();
+    if (plantillas.length) renderLista(buscadorEl.value);
   } catch (error) {
     for (const id of ["#centroErrorConf", "#progCentroError"]) {
       const aviso = $(id);
@@ -809,8 +847,13 @@ function crearItemPlantilla(p) {
     const nombreEsp = nombreArea(p.area_id) || "Área";
     estadoTag += ` <span class="tpl-item__estado">${escaparHtml(nombreEsp)}</span>`;
   }
+  const cuentaTexto = descripcionCuentaPlantilla(p.centro_codigo);
+  const cuentaPendiente = !p.centro_codigo || !cuentaDePlantilla(p.centro_codigo)?.wabaId;
   btn.innerHTML =
     `<span class="tpl-item__nombre">${escaparHtml(p.nombre ?? "(sin nombre)")}${estadoTag}</span>` +
+    `<span class="tpl-item__cuenta${cuentaPendiente ? " tpl-item__cuenta--pendiente" : ""}" ` +
+      `title="Cuenta vinculada en SNW según la Configuración actual">` +
+      `<i class="fa-brands fa-whatsapp" aria-hidden="true"></i> ${escaparHtml(cuentaTexto)}</span>` +
     `<span class="tpl-item__vista">${escaparHtml(primeraLinea)}</span>`;
   btn.addEventListener("click", () => clicPlantilla(p.id));
   if (p.id !== tplSelId) return btn;
@@ -1010,7 +1053,8 @@ function renderLista(filtro = "") {
           (fEsp === "global" ? p.area_id == null : String(p.area_id) === fEsp)) &&
         (!q ||
           String(p.nombre || "").toLowerCase().includes(q) ||
-          String(p.texto || "").toLowerCase().includes(q))
+          String(p.texto || "").toLowerCase().includes(q) ||
+          descripcionCuentaPlantilla(p.centro_codigo).toLowerCase().includes(q))
     );
 
   listaEl.innerHTML = "";
@@ -1355,7 +1399,10 @@ function refrescarEditor() {
 }
 
 if (inpArea) inpArea.addEventListener("change", refrescarEditor);
-inpCentroPlantilla?.addEventListener("change", refrescarEditor);
+inpCentroPlantilla?.addEventListener("change", () => {
+  pintarCuentaPlantillaEditor();
+  refrescarEditor();
+});
 
 function estadoActualEditor() {
   return JSON.stringify([inpNombre.value, inpMensaje.value, valTemplate(), valTemplateLang(), valTemplateCategoria(), inpArea ? inpArea.value : "", encabezadoMediaActivo(), encabezadoTextoActivo(), inpPieTexto.value, inpCentroPlantilla?.value || "", botonesDelEditor()]);
@@ -1696,6 +1743,7 @@ function abrir(id) {
     inpArea.value = espVal;
   }
   if (inpCentroPlantilla) inpCentroPlantilla.value = p.centro_codigo || "";
+  pintarCuentaPlantillaEditor();
   if (hayTemplateMeta) {
     inpTemplateLang.value = p.whatsapp_template_lang || "es";
     // Todas las plantillas son categoría Marketing; una plantilla antigua con
@@ -1752,6 +1800,7 @@ function modoNueva() {
   establecerEncabezado(null);
   if (inpArea) inpArea.value = "";
   if (inpCentroPlantilla) inpCentroPlantilla.value = "";
+  pintarCuentaPlantillaEditor();
   if (hayTemplateMeta) {
     inpTemplateLang.value = "es";
     inpTemplateCategoria.value = "MARKETING";

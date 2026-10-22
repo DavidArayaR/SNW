@@ -1,4 +1,31 @@
 /* Estilos específicos de estados y modales de Mensajería. */
+.tpl-item__cuenta {
+  display: block;
+  margin-top: 5px;
+  color: var(--verde-oscuro);
+  font-size: .76rem;
+  font-weight: 650;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.tpl-item__cuenta i { margin-right: 4px; }
+.tpl-item__cuenta--pendiente { color: var(--warn-fg); }
+.tpl-cuenta-editor {
+  margin: 9px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--brand-tint-bd);
+  border-radius: 10px;
+  background: var(--brand-tint);
+  color: var(--brand-tint-fg);
+  font-size: .83rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.tpl-cuenta-editor--pendiente {
+  border-color: var(--warn-bd);
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+}
 .tpl-botones__cabecera { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .tpl-botones__cabecera label { margin: 0; }
 .tpl-botones__guia { display: flex; align-items: flex-start; gap: 10px; margin-top: 10px; padding: 11px 13px; border: 1px solid var(--brand-tint-bd); border-radius: 10px; background: var(--brand-tint); color: var(--brand-tint-fg); font-size: .875rem; line-height: 1.45; }
