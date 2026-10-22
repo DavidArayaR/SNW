@@ -420,6 +420,7 @@ const previewBotones = $("#previewBotones");
 const inpEjemploNombre = $("#inpEjemploNombre");
 const inpEjemploApellido = $("#inpEjemploApellido");
 const previewValidaciones = $("#previewValidaciones");
+const selCentroPrueba = $("#selCentroPrueba");
 const selNumeroPrueba = $("#selNumeroPrueba");
 const btnRecargarNumerosPrueba = $("#btnRecargarNumerosPrueba");
 const btnEnviarPrueba = $("#btnEnviarPrueba");
@@ -1654,6 +1655,7 @@ function actualizarBloqueoCampos() {
     // Una plantilla aprobada puede estar en solo lectura y aun así probarse.
     inpEjemploNombre.disabled = false;
     inpEjemploApellido.disabled = false;
+    selCentroPrueba.disabled = false;
     selNumeroPrueba.disabled = false;
     btnQuitarEncabezado.disabled = true;
     btnAbrirIA.hidden = true;
@@ -1677,6 +1679,7 @@ function actualizarBloqueoCampos() {
   inpInstruccionIA.disabled = false;
   inpEjemploNombre.disabled = false;
   inpEjemploApellido.disabled = false;
+  selCentroPrueba.disabled = false;
   selNumeroPrueba.disabled = false;
   checkEncabezadoMultimedia.disabled = subiendoEncabezado;
   inpEncabezadoTexto.disabled = checkEncabezadoMultimedia.checked;
