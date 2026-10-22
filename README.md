@@ -3,9 +3,11 @@
 ## Integración de citas atendidas para reagendar
 
 SNW recibe el CSV del sistema externo por `POST /api/v1/paciente-reagendar/importar-csv`.
-**No programa la carga**: el externo la envía a las 14:30 y 20:30 (hora de Chile).
-SNW programa los lotes normales a las 15:00 y 21:00, respectivamente. Una
+**No programa la carga**: el externo la envía a las 14:00 y 20:00 (hora de Chile).
+SNW programa los lotes normales a las 14:30 y 20:30, respectivamente. Una
 carga tardía o fuera de ventana queda en `REVISION` y no se envía sola.
+Si no hay citas nuevas elegibles, no se programa un envío ni se crea una
+campaña vacía; la respuesta indica «Sin registros nuevos pendientes de envío».
 `08-14` y
 `14-20` identifican los tramos en que el sistema externo busca registros en
 Reservo (08:00–14:00 y 14:00–20:00). No son la hora de la cita ni los horarios

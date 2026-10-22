@@ -33,7 +33,7 @@ def programacion_carga(fecha: dt.date, ventana: str,
     local = recibido.astimezone(ZONA_CHILE)
     if local.date() != fecha:
         return None
-    horarios = {"08-14": ((14, 30), (15, 0)), "14-20": ((20, 30), (21, 0))}
+    horarios = {"08-14": ((14, 0), (14, 30)), "14-20": ((20, 0), (20, 30))}
     horario = horarios.get(ventana)
     if not horario:
         return None
@@ -176,7 +176,8 @@ def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None,
     if not pares:
         return {"success": True, "testMode": modo_prueba, "summary": {"received": recibidas, "inserted": 0,
                 "alreadyExists": 0, "rejected": len(errores), "batchId": None,
-                "batchStatus": None, "scheduledAtUtc": None}, "errors": errores[:50]}
+                "batchStatus": None, "scheduledAtUtc": None}, "errors": errores[:50],
+                "message": "Sin registros nuevos pendientes de envío"}
     if len(pares) != 1:
         raise CsvInvalido("Cada archivo debe corresponder a una sola fecha y ventana de Reservo.")
     recibido = recibido or dt.datetime.now(UTC)
@@ -254,7 +255,9 @@ def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None,
             "eligible": elegibles, "alreadyExists": duplicados, "rejected": len(errores),
             "batchId": lote_id, "batchStatus": estado,
             "scheduledAtUtc": programado.isoformat() + "Z" if lote_id and estado == "PROGRAMADO" else None},
-            "errors": errores[:50]}
+            "errors": errores[:50],
+            "message": ("Sin registros nuevos pendientes de envío" if not elegibles and not modo_prueba
+                        else None)}
 
 
 def consumir_cuota(actor: str, maximo: int, ventana_s: int = 900) -> bool:
