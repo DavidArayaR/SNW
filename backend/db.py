@@ -142,6 +142,7 @@ CONFIG_DEFAULTS = {
     # Integración de citas atendidas: la credencial se genera por API y solo
     # su huella se conserva aquí. El despacho permanece apagado por defecto.
     "reagendar_api_token_hash": "",
+    "reagendar_cors_origen": "https://clientes.crmaxion.cl",
     "reagendar_envio_activo": "false",
     "reagendar_plantillas_json": "{}",
     "reagendar_clinicas_ids": "{}",

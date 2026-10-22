@@ -144,6 +144,36 @@ class ApiCitasTests(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(main.app)
 
+    def test_cors_csv_solo_permite_crm_y_no_reemplaza_bearer(self):
+        ruta = "/api/v1/paciente-reagendar/importar-csv"
+        origen = "https://clientes.crmaxion.cl"
+        preflight = {"Origin": origen, "Access-Control-Request-Method": "POST",
+                     "Access-Control-Request-Headers": "authorization,content-type"}
+        with patch.object(main, "config_get", return_value=origen), \
+                patch.object(main, "config_all", return_value={"reagendar_api_token_hash": "hash"}), \
+                patch.object(reagendar, "consumir_cuota", return_value=True):
+            permitido = self.client.options(ruta, headers=preflight)
+            self.assertEqual(permitido.status_code, 204)
+            self.assertEqual(permitido.headers["access-control-allow-origin"], origen)
+            self.assertIn("Authorization", permitido.headers["access-control-allow-headers"])
+            ajeno = self.client.options(ruta, headers={**preflight,
+                "Origin": "https://otro.example"})
+            self.assertEqual(ajeno.status_code, 403)
+            self.assertNotIn("access-control-allow-origin", ajeno.headers)
+            cabecera_extra = self.client.options(ruta, headers={**preflight,
+                "Access-Control-Request-Headers": "authorization,x-admin"})
+            self.assertEqual(cabecera_extra.status_code, 403)
+            otra_ruta = self.client.options("/api/v1/paciente-reagendar", headers=preflight)
+            self.assertNotIn("access-control-allow-origin", otra_ruta.headers)
+            sin_bearer = self.client.post(ruta, headers={"Origin": origen},
+                files={"file": ("prueba.csv", PRUEBA_CSV, "text/csv")})
+            self.assertEqual(sin_bearer.status_code, 401)
+            self.assertEqual(sin_bearer.headers["access-control-allow-origin"], origen)
+            no_permitido = self.client.post(ruta, headers={"Origin": "https://otro.example"},
+                files={"file": ("prueba.csv", PRUEBA_CSV, "text/csv")})
+            self.assertEqual(no_permitido.status_code, 401)
+            self.assertNotIn("access-control-allow-origin", no_permitido.headers)
+
     def test_cola_local_crm_desconectada(self):
         import whatsapp_service
         self.assertIsNone(whatsapp_service.al_derivar_crm)

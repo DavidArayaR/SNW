@@ -26,7 +26,7 @@ import ssl
 import httpx
 from fastapi import (BackgroundTasks, Depends, FastAPI, File, Form, HTTPException,
                      Query, Request, UploadFile, status)
-from fastapi.responses import HTMLResponse, PlainTextResponse, FileResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, FileResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
@@ -155,6 +155,39 @@ async def sin_cache(request, call_next):
         log_error(f"{request.method} {request.url.path}", e)
         raise
     respuesta.headers["Cache-Control"] = "no-store"
+    return respuesta
+
+
+_RUTA_IMPORTACION_REAGENDAR = "/api/v1/paciente-reagendar/importar-csv"
+_CABECERAS_CSV_PERMITIDAS = {"authorization", "content-type"}
+
+
+@app.middleware("http")
+async def cors_importacion_reagendar(request: Request, call_next):
+    """CORS limitado al CSV del CRM; no concede acceso sin el Bearer propio."""
+    if request.url.path != _RUTA_IMPORTACION_REAGENDAR:
+        return await call_next(request)
+    origen = request.headers.get("origin", "")
+    configurado = str(config_get("reagendar_cors_origen") or "").strip()
+    permitido = bool(origen and configurado and origen == configurado)
+    if request.method == "OPTIONS":
+        solicitadas = {h.strip().lower() for h in request.headers.get(
+            "access-control-request-headers", "").split(",") if h.strip()}
+        if (not permitido or request.headers.get("access-control-request-method") != "POST"
+                or not solicitadas.issubset(_CABECERAS_CSV_PERMITIDAS)):
+            return Response(status_code=403, headers={"Cache-Control": "no-store"})
+        return Response(status_code=204, headers={
+            "Access-Control-Allow-Origin": origen,
+            "Access-Control-Allow-Methods": "POST",
+            "Access-Control-Allow-Headers": "Authorization, Content-Type",
+            "Access-Control-Max-Age": "600",
+            "Vary": "Origin",
+            "Cache-Control": "no-store",
+        })
+    respuesta = await call_next(request)
+    if permitido:
+        respuesta.headers["Access-Control-Allow-Origin"] = origen
+        respuesta.headers["Vary"] = "Origin"
     return respuesta
 
 
@@ -4569,6 +4602,9 @@ _CONFIG_SECCIONES = [
     {
         "id": "reagendar", "titulo": "Citas atendidas · integración CSV", "icono": "fa-calendar-check",
         "campos": [
+            {"clave": "reagendar_cors_origen", "etiqueta": "Origen web autorizado para importar CSV", "tipo": "text",
+             "ayuda": "Origen exacto del CRM que sube archivos desde el navegador; sin barra final. "
+                      "Por defecto: https://clientes.crmaxion.cl. El token de integración sigue siendo obligatorio."},
             {"clave": "reagendar_envio_activo", "etiqueta": "Procesar envíos de citas atendidas", "tipo": "bool",
              "ayuda": "Apagado inicialmente. Solo envía en Producción por api_oficial con consentimiento por fila y plantilla aprobada de la clínica."},
             {"clave": "reagendar_plantillas_json", "etiqueta": "Plantilla de reagendamiento por clínica", "tipo": "textarea",
@@ -4892,6 +4928,9 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
         if clave not in CONFIG_DEFAULTS and clave not in claves_clinicas:
             raise HTTPException(400, detail=f"Clave de configuración desconocida: «{clave}»")
         v = "" if valor is None else str(valor).strip()
+        if clave == "reagendar_cors_origen" and v:
+            if not re.fullmatch(r"https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?", v):
+                raise HTTPException(400, detail="El origen CSV debe ser un dominio HTTPS sin ruta ni barra final.")
         if clave in _CONFIG_ENUM and v not in _CONFIG_ENUM[clave]:
             raise HTTPException(400, detail=f"«{clave}»: usa uno de {', '.join(_CONFIG_ENUM[clave])}")
         if clave in ("intervalo_ms", "smtp_port", "groq_limite_hora",

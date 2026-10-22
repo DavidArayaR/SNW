@@ -19,6 +19,17 @@ con el Bearer de sesión de desarrollador. Este token es independiente de las
 credenciales de Meta. Usa HTTPS en producción y nunca coloques el token en
 la URL o en logs.
 
+La importación desde la página `https://clientes.crmaxion.cl` está permitida
+para **este endpoint solamente** mediante CORS. El origen exacto se guarda
+en `configuracion` como `reagendar_cors_origen` y se puede revisar en
+**Configuración → Integraciones → Citas atendidas**. Se acepta la petición
+previa `OPTIONS` con método `POST` y encabezados `Authorization` y
+`Content-Type`; la petición `POST` sigue exigiendo el mismo token de
+integración. CORS no autoriza por sí solo a importar ni sustituye el token.
+Lo más seguro es que el servidor del CRM haga el `POST` directamente y
+mantenga el token fuera del código JavaScript y de los navegadores de sus
+usuarios; las peticiones entre servidores no necesitan CORS.
+
 Envía `multipart/form-data`, campo `file`, con un CSV UTF-8 (BOM opcional),
 máximo 5 MB y 10.000 filas. Ejemplo:
 
