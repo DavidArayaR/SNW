@@ -1,5 +1,15 @@
 /* Página de Configuración (solo admin) */
 
+body[data-pagina="configuracion"] .layout {
+  width: 100%;
+  min-width: 0;
+}
+body[data-pagina="configuracion"] .layout > .panel,
+body[data-pagina="configuracion"] #secciones {
+  width: 100%;
+  min-width: 0;
+}
+
 .app-topbar .config-tabs {
   flex: 0 1 auto;
   min-width: 0;
