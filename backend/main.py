@@ -4638,9 +4638,22 @@ def obtener_configuracion_completa(sesion: dict = Depends(solo_dev)):
 
 
 def listar_centros_whatsapp(incluir_inactivas: bool = Query(False),
+                           solo_con_envios: bool = Query(False),
                            sesion: dict = Depends(sesion_actual)):
     """Canales visibles para elegir emisor; nunca incluye el token compartido."""
-    return listar_canales(config_all(refresh=True), incluir_inactivas=incluir_inactivas)
+    canales = listar_canales(config_all(refresh=True), incluir_inactivas=incluir_inactivas)
+    if solo_con_envios:
+        # El selector de estadísticas solo ofrece emisores con campañas enviadas.
+        # Las filas históricas sin clínica siguen formando parte de «Todas».
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT DISTINCT centro_codigo FROM log_envios"
+                " WHERE envio_id IS NOT NULL AND estado_envio = 'enviado'"
+                " AND centro_codigo IS NOT NULL AND centro_codigo <> ''"
+            )
+            con_envios = {fila["centro_codigo"] for fila in cur.fetchall()}
+        canales = [canal for canal in canales if canal["codigo"] in con_envios]
+    return canales
 
 
 def verificar_meta_clinica_whatsapp(codigo: str, sesion: dict = Depends(solo_dev)):

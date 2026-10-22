@@ -151,7 +151,7 @@ async function cargarClinicasEst() {
   if (!selCentroEst) return;
   selCentroEst.disabled = true;
   try {
-    const res = await fetch("api/whatsapp/centros?incluir_inactivas=true", {
+    const res = await fetch("api/whatsapp/centros?incluir_inactivas=true&solo_con_envios=true", {
       headers: authHeaders(), cache: "no-store",
     });
     if (!res.ok) throw new Error();

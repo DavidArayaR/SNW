@@ -40,6 +40,21 @@ class CursorFalso:
 
 
 class EstadisticasAreaTests(unittest.TestCase):
+    def test_selector_estadisticas_oculta_clinicas_sin_campanas_enviadas(self):
+        cursor = CursorFalso(filas=([{"centro_codigo": "SMPT"}],))
+        canales = [{"codigo": "SMPT", "nombre": "Salud Mental Para Todos"},
+                   {"codigo": "CABC1234", "nombre": "asd"},
+                   {"codigo": "CDEF5678", "nombre": "Mas Vida y Salud"}]
+        with patch.object(main, "config_all", return_value={}), \
+             patch.object(main, "listar_canales", return_value=canales) as listar, \
+             patch.object(main, "conectar", return_value=cursor):
+            visibles = main.listar_centros_whatsapp(incluir_inactivas=True,
+                                                    solo_con_envios=True, sesion={})
+        self.assertEqual([c["codigo"] for c in visibles], ["SMPT"])
+        listar.assert_called_once_with({}, incluir_inactivas=True)
+        self.assertIn("envio_id IS NOT NULL", cursor.consultas[0][0])
+        self.assertIn("estado_envio = 'enviado'", cursor.consultas[0][0])
+
     def test_resumen_filtra_clinica_inactiva_y_todas_no_filtran(self):
         catalogo = {"SMPT": "Salud Mental Para Todos"}
         conexiones = []
