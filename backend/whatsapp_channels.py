@@ -71,11 +71,12 @@ def credenciales_centro(phone_id: str, config: dict | None = None) -> dict:
     }
 
 
-def listar_canales(config: dict | None = None) -> list[dict]:
+def listar_canales(config: dict | None = None, *, incluir_inactivas: bool = False) -> list[dict]:
     from db import config_all
     valores = config if config is not None else config_all()
     canales = []
-    for codigo, nombre in catalogo_centros(valores).items():
+    activos = catalogo_centros(valores)
+    for codigo, nombre in catalogo_centros(valores, incluir_inactivas=incluir_inactivas).items():
         clave_numero, clave_id = claves_centro(codigo)
         numero = str(valores.get(clave_numero) or "").strip()
         phone_id = str(valores.get(clave_id) or "").strip()
@@ -101,7 +102,8 @@ def listar_canales(config: dict | None = None) -> list[dict]:
             avisos.append("Número CRM pendiente")
         elif not re.fullmatch(r"\+?[1-9]\d{7,14}", crm_numero):
             avisos.append("Número CRM inválido")
-        canales.append({"codigo": codigo, "nombre": nombre, "phoneNumber": numero or None,
+        canales.append({"codigo": codigo, "nombre": nombre, "activa": codigo in activos,
+                        "phoneNumber": numero or None,
                         "phoneNumberId": phone_id or None, "wabaId": waba_id or None,
                         "crmPhoneNumber": crm_numero or None,
                         "configured": not razones, "problemas": razones, "avisos": avisos})

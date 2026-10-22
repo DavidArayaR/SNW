@@ -4637,9 +4637,10 @@ def obtener_configuracion_completa(sesion: dict = Depends(solo_dev)):
             "supresion": resumen_supresion()}
 
 
-def listar_centros_whatsapp(sesion: dict = Depends(sesion_actual)):
+def listar_centros_whatsapp(incluir_inactivas: bool = Query(False),
+                           sesion: dict = Depends(sesion_actual)):
     """Canales visibles para elegir emisor; nunca incluye el token compartido."""
-    return listar_canales(config_all(refresh=True))
+    return listar_canales(config_all(refresh=True), incluir_inactivas=incluir_inactivas)
 
 
 def verificar_meta_clinica_whatsapp(codigo: str, sesion: dict = Depends(solo_dev)):
@@ -8121,13 +8122,32 @@ def _alcance_estadisticas(sesion: dict, area_id: int | None, base: str):
     return _SOLO_PROD, _SOLO_PROD_O_AUTO, filtro_esp, args_esp, esp
 
 
+def _resumen_pacientes_estadisticas(base: str, esp: dict | None,
+                                   centro_codigo: str | None) -> tuple[dict, dict]:
+    """Suma la base general y las áreas cuando el alcance es toda producción."""
+    tablas = [esp["nombre_tabla_base"]] if esp else [None]
+    if base == "produccion" and esp is None:
+        tablas.extend(a["nombre_tabla_base"] for a in servicio_areas.listar_tablas_areas()
+                      if servicio_areas.tabla_valida(a.get("nombre_tabla_base", "")))
+    respuestas = {"pendiente": 0, "respondio": 0, "baja": 0, "total": 0}
+    interes = {"interesado": 0, "no_interesado": 0, "sin_clasificar": 0, "total": 0}
+    for tabla in dict.fromkeys(tablas):
+        for destino, valores in (
+            (respuestas, _pacientes_por_respuesta(base, tabla=tabla, centro_codigo=centro_codigo)),
+            (interes, _pacientes_por_interes(base, tabla=tabla, centro_codigo=centro_codigo)),
+        ):
+            for clave in destino:
+                destino[clave] += int(valores.get(clave) or 0)
+    return respuestas, interes
+
+
 def estadisticas(area_id: int | None = Query(None), base: str = "produccion",
                  centro: str = Query("todos"),
                  sesion: dict = Depends(solo_admin)):
     """Resumen de producción/área o de la base de desarrollo."""
     alcance, _, filtro_esp, args_esp, esp = _alcance_estadisticas(sesion, area_id, base)
     centro = centro if isinstance(centro, str) else "todos"
-    if centro != "todos" and centro not in catalogo_centros():
+    if centro != "todos" and centro not in catalogo_centros(incluir_inactivas=True):
         raise HTTPException(422, detail="Centro emisor inválido.")
     filtro_centro = " AND centro_codigo = %s" if centro != "todos" else ""
     args_centro = (centro,) if filtro_centro else ()
@@ -8217,6 +8237,8 @@ def estadisticas(area_id: int | None = Query(None), base: str = "produccion",
 
     enviados_mes = int(mes.get("enviados") or 0)
     centro_estadisticas = centro if centro != "todos" else None
+    pacientes_respuesta, pacientes_interes = _resumen_pacientes_estadisticas(
+        base, esp, centro_estadisticas)
     return {
         "mes": time.strftime("%Y-%m"),
         "base": base,
@@ -8229,10 +8251,8 @@ def estadisticas(area_id: int | None = Query(None), base: str = "produccion",
         "baja_mes": int(mes.get("baja") or 0),
         "total_enviados_historico": total_enviados,
         "total_batches": total_batches,
-        "pacientes_por_respuesta": _pacientes_por_respuesta(
-            base, tabla=(esp["nombre_tabla_base"] if esp else None), centro_codigo=centro_estadisticas),
-        "pacientes_por_interes": _pacientes_por_interes(
-            base, tabla=(esp["nombre_tabla_base"] if esp else None), centro_codigo=centro_estadisticas),
+        "pacientes_por_respuesta": pacientes_respuesta,
+        "pacientes_por_interes": pacientes_interes,
         "webhook": webhook,
     }
 
@@ -8251,7 +8271,7 @@ def estadisticas_envios(granularidad: str = Query("mes"), area_id: int | None = 
         raise HTTPException(400, detail=str(exc)) from exc
     alcance, _, filtro_esp, args_esp, esp = _alcance_estadisticas(sesion, area_id, base)
     centro = centro if isinstance(centro, str) else "todos"
-    if centro != "todos" and centro not in catalogo_centros():
+    if centro != "todos" and centro not in catalogo_centros(incluir_inactivas=True):
         raise HTTPException(422, detail="Centro emisor inválido.")
     filtro_centro = " AND centro_codigo = %s" if centro != "todos" else ""
     args_centro = (centro,) if filtro_centro else ()
@@ -8722,7 +8742,7 @@ def estadisticas_costos(granularidad: str = Query("mes"), area_id: int | None = 
     valores_periodos = tuple(sorted(seleccion))
     _, alcance_costos, filtro_esp, args_esp, esp = _alcance_estadisticas(sesion, area_id, base)
     centro = centro if isinstance(centro, str) else "todos"
-    if centro != "todos" and centro not in catalogo_centros():
+    if centro != "todos" and centro not in catalogo_centros(incluir_inactivas=True):
         raise HTTPException(422, detail="Centro emisor inválido.")
     filtro_centro = " AND centro_codigo = %s" if centro != "todos" else ""
     args_centro = (centro,) if filtro_centro else ()

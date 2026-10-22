@@ -39,6 +39,17 @@ class MultiNumerosTests(unittest.TestCase):
             self.assertEqual(credenciales_centro(canal["phoneNumberId"], cfg),
                              {"token": "global", "waba_id": canal["wabaId"]})
 
+    def test_estadisticas_pueden_elegir_clinica_inactiva_con_historial(self):
+        cfg = configuracion()
+        cfg["wa_clinicas_adicionales"] = json.dumps([
+            {"codigo": "CA123456", "nombre": "Clínica histórica", "activo": False}
+        ])
+        self.assertNotIn("CA123456", {c["codigo"] for c in listar_canales(cfg)})
+        canales = listar_canales(cfg, incluir_inactivas=True)
+        historica = next(c for c in canales if c["codigo"] == "CA123456")
+        self.assertFalse(historica["activa"])
+        self.assertEqual(historica["nombre"], "Clínica histórica")
+
     def test_falta_waba_bloquea_solo_clinica_afectada(self):
         cfg = configuracion()
         cfg.pop("SMPT_WSP_WABA_ID")

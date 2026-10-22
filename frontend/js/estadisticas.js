@@ -70,6 +70,7 @@ const selEntornoEst = $("#selEntornoEst");
 const selAreaEst = $("#selAreaEst");
 const selCentroEst = $("#selCentroEst");
 const campoAreaEst = $("#campoAreaEst");
+let clinicasEst = [];
 
 function entornoEst() {
   return selEntornoEst?.value === "desarrollo" ? "desarrollo" : "produccion";
@@ -90,7 +91,7 @@ function qsEspEst() {
 }
 
 function nombreAreaEst() {
-  if (entornoEst() === "desarrollo") return "desarrollo";
+  if (entornoEst() === "desarrollo") return "";
   const esp = areaEstActual();
   const e = areasEst.find((x) => x.id === esp);
   return e ? e.nombre_visible : "";
@@ -146,16 +147,29 @@ if (selAreaEst) selAreaEst.addEventListener("change", () => {
   recargarTodo();
 });
 
+async function cargarClinicasEst() {
+  if (!selCentroEst) return;
+  selCentroEst.disabled = true;
+  try {
+    const res = await fetch("api/whatsapp/centros?incluir_inactivas=true", {
+      headers: authHeaders(), cache: "no-store",
+    });
+    if (!res.ok) throw new Error();
+    clinicasEst = await res.json();
+    selCentroEst.innerHTML = '<option value="todos">Todas las clínicas</option>' +
+      clinicasEst.map((c) => `<option value="${escaparHtml(c.codigo)}">${escaparHtml(c.nombre)}${c.activa ? "" : " (inactiva)"}</option>`).join("");
+    const anterior = localStorage.getItem("snw_centro_est") || "todos";
+    if (clinicasEst.some((c) => c.codigo === anterior)) selCentroEst.value = anterior;
+    else localStorage.removeItem("snw_centro_est");
+  } catch {
+    console.error("[estadisticas.js cargarClinicasEst()]");
+    toast("No se pudo cargar la lista de clínicas.", "error");
+  } finally {
+    selCentroEst.disabled = false;
+  }
+}
+
 if (selCentroEst) {
-  fetch("api/whatsapp/centros", { headers: authHeaders(), cache: "no-store" })
-    .then((r) => r.ok ? r.json() : [])
-    .then((centros) => {
-      selCentroEst.innerHTML = '<option value="todos">Todos los centros</option>' +
-        centros.map((c) => `<option value="${escaparHtml(c.codigo)}">${escaparHtml(c.nombre)}</option>`).join("");
-      const anterior = localStorage.getItem("snw_centro_est") || "todos";
-      if (centros.some((c) => c.codigo === anterior)) selCentroEst.value = anterior;
-      if (selCentroEst.value !== "todos") recargarTodo();
-    }).catch(() => {});
   selCentroEst.addEventListener("change", () => {
     localStorage.setItem("snw_centro_est", selCentroEst.value);
     limpiarFiltroCalendarioCostos();
@@ -203,15 +217,14 @@ function render(d) {
   $("#enviadosMes").textContent = num(d.enviados_mes);
 
   const espNombre = (d.area && d.area.nombre_visible) || nombreAreaEst();
+  const clinicaNombre = clinicasEst.find((c) => c.codigo === d.centro)?.nombre || "Todas las clínicas";
+  const descripcionAlcance = `${entornoEst() === "desarrollo" ? "Desarrollo" : "Producción"} · ${clinicaNombre}` +
+    (espNombre ? ` · ${espNombre}` : "");
   const heroSub = document.querySelector("#stabEnvios .hero-sub");
-  if (heroSub) {
-    heroSub.textContent = espNombre
-      ? `mensajes enviados este mes · ${espNombre}`
-      : "mensajes enviados este mes · producción";
-  }
+  if (heroSub) heroSub.textContent = `mensajes enviados este mes · ${descripcionAlcance}`;
   const hintResp = $("#hintRespuestas");
   if (hintResp) {
-    const alcance = espNombre ? `de <strong>${escaparHtml(espNombre)}</strong>` : "de producción";
+    const alcance = `de <strong>${escaparHtml(descripcionAlcance)}</strong>`;
     hintResp.innerHTML = `Estado actual de los pacientes ${alcance} ` +
       `<strong>a los que ya se les envió un mensaje</strong>. Sin una señal explícita de interés o rechazo de la oferta quedan «Sin clasificar». ` +
       `En <a href="historial.html">Historial</a> puedes ver quiénes son.`;
@@ -999,7 +1012,7 @@ window.snwCargarEstadisticas = function () {
   (async () => {
     const inicioCarga = iniciarCargaEstadisticas();
     try {
-      await cargarAreasEst();
+      await Promise.all([cargarAreasEst(), cargarClinicasEst()]);
       await recargarTodo();
     } finally {
       await terminarCargaEstadisticas(inicioCarga);

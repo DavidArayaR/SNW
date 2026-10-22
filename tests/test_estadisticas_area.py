@@ -40,6 +40,67 @@ class CursorFalso:
 
 
 class EstadisticasAreaTests(unittest.TestCase):
+    def test_resumen_filtra_clinica_inactiva_y_todas_no_filtran(self):
+        catalogo = {"SMPT": "Salud Mental Para Todos"}
+        conexiones = []
+        def nueva_conexion():
+            cursor = CursorFalso()
+            conexiones.append(cursor)
+            return cursor
+        with patch.object(main, "catalogo_centros", return_value=catalogo), \
+             patch.object(main, "conectar", side_effect=nueva_conexion), \
+             patch.object(main.servicio_areas, "listar_tablas_areas", return_value=[]), \
+             patch.object(main, "_pacientes_por_respuesta", return_value={"total": 0}), \
+             patch.object(main, "_pacientes_por_interes", return_value={"total": 0}):
+            filtrado = main.estadisticas(area_id=None, base="produccion", centro="SMPT", sesion={})
+            total = main.estadisticas(area_id=None, base="produccion", centro="todos", sesion={})
+        self.assertEqual(filtrado["centro"], "SMPT")
+        self.assertEqual(total["centro"], "todos")
+        self.assertIn("centro_codigo = %s", conexiones[0].consultas[0][0])
+        self.assertEqual(conexiones[0].consultas[0][1], ("%Y-%m-01", "SMPT"))
+        self.assertNotIn("centro_codigo = %s", conexiones[1].consultas[0][0])
+
+    def test_calendario_por_clinica_no_mezcla_fechas(self):
+        cursor = CursorFalso(filas=(
+            [{"dia": "2026-10-03"}],
+            [{"periodo": "2026-10", "enviados": 2}],
+        ))
+        with patch.object(main, "catalogo_centros", return_value={"SMPT": "SMPT"}), \
+             patch.object(main, "conectar", return_value=cursor):
+            resultado = main.estadisticas_envios(granularidad="mes", area_id=None,
+                                                  base="produccion", centro="SMPT",
+                                                  periodos=None, sesion={})
+        self.assertEqual(resultado["dias_disponibles"], ["2026-10-03"])
+        self.assertEqual(resultado["total"], 2)
+        self.assertTrue(all("centro_codigo = %s" in sql for sql, _ in cursor.consultas))
+        self.assertEqual(cursor.consultas[0][1], ("%Y-%m-%d", "SMPT"))
+
+    def test_respuestas_de_todas_las_clinicas_incluyen_bases_de_area(self):
+        areas = [{"nombre_tabla_base": "pacientes_psicologia"},
+                 {"nombre_tabla_base": "pacientes_psiquiatria"}]
+        respuestas = [
+            {"pendiente": 1, "respondio": 2, "baja": 0, "total": 3},
+            {"pendiente": 0, "respondio": 3, "baja": 1, "total": 4},
+            {"pendiente": 2, "respondio": 0, "baja": 0, "total": 2},
+        ]
+        interes = [
+            {"interesado": 1, "no_interesado": 1, "sin_clasificar": 1, "total": 3},
+            {"interesado": 3, "no_interesado": 0, "sin_clasificar": 1, "total": 4},
+            {"interesado": 0, "no_interesado": 0, "sin_clasificar": 2, "total": 2},
+        ]
+        with patch.object(main.servicio_areas, "listar_tablas_areas", return_value=areas), \
+             patch.object(main.servicio_areas, "tabla_valida", return_value=True), \
+             patch.object(main, "_pacientes_por_respuesta", side_effect=respuestas) as por_respuesta, \
+             patch.object(main, "_pacientes_por_interes", side_effect=interes):
+            r, i = main._resumen_pacientes_estadisticas("produccion", None, "SMPT")
+        self.assertEqual(r, {"pendiente": 3, "respondio": 5, "baja": 1, "total": 9})
+        self.assertEqual(i, {"interesado": 4, "no_interesado": 1,
+                             "sin_clasificar": 4, "total": 9})
+        self.assertEqual([c.kwargs["tabla"] for c in por_respuesta.call_args_list],
+                         [None, "pacientes_psicologia", "pacientes_psiquiatria"])
+        self.assertTrue(all(c.kwargs["centro_codigo"] == "SMPT"
+                            for c in por_respuesta.call_args_list))
+
     def test_desarrollo_no_se_combina_con_area(self):
         with self.assertRaises(main.HTTPException) as error:
             main._alcance_estadisticas({}, 7, "desarrollo")
@@ -107,6 +168,33 @@ class EstadisticasAreaTests(unittest.TestCase):
         self.assertIn("base_datos = 'pacientes_dev'", cursor.consultas[0][0])
         self.assertIn("base_lote", cursor.consultas[1][0])
         self.assertNotIn("base_datos = 'pacientes_dev'", cursor.consultas[1][0])
+
+    def test_costos_filtran_clinica_sin_descontar_su_cupo_compartido(self):
+        cursor = CursorFalso(filas=(
+            [],
+            [{"id": 1, "base_lote": "pacientes_prod", "tabla_pacientes": "pacientes_prod",
+              "centro_codigo": "SMPT", "wa_phone_id": "emisor-a", "area_id": None,
+              "envio_id": 10, "fecha_entrega": datetime.datetime(2026, 10, 8)},
+             {"id": 2, "base_lote": "pacientes_prod", "tabla_pacientes": "pacientes_prod",
+              "centro_codigo": "MS", "wa_phone_id": "emisor-b", "area_id": None,
+              "envio_id": 11, "fecha_entrega": datetime.datetime(2026, 10, 8)}],
+        ))
+        with patch.object(main, "catalogo_centros", return_value={"SMPT": "SMPT"}), \
+             patch.object(main, "conectar", return_value=cursor), \
+             patch.object(main, "_moneda_cuenta", return_value="USD"), \
+             patch.object(main, "_tarifas_guardadas", return_value=[]), \
+             patch.object(main, "_tarifa_vigente", return_value=None), \
+             patch.object(main, "_categorias_por_clave", return_value={"baja_aviso": "service"}), \
+             patch.object(main, "columnas_tabla", return_value={"whatsapp_message_id"}), \
+             patch.object(main, "clasificar_entregas_servicio",
+                          side_effect=lambda filas: [(fila, True) for fila in filas]):
+            resultado = main.estadisticas_costos(granularidad="mes", area_id=None,
+                                                  base="produccion", centro="SMPT",
+                                                  categoria=None, fecha=None, periodos=None,
+                                                  sesion={})
+        self.assertEqual(resultado["total"]["mensajes"], 1)
+        self.assertIn("centro_codigo = %s", cursor.consultas[0][0])
+        self.assertNotIn("centro_codigo = %s", cursor.consultas[1][0])
 
     def test_resumen_con_area_no_interpreta_formato_fecha_como_parametro(self):
         cursor = CursorFalso()
