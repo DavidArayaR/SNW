@@ -5,6 +5,43 @@
   let pagina = 1;
   let paginas = 1;
   let loteActual = null;
+  const formularioAplazar = $("reagendarAplazarForm");
+  // Fuera del panel animado para que position:fixed se ancle al viewport.
+  document.body.appendChild(formularioAplazar);
+  let botonAplazarActual = null;
+  function cerrarAplazamiento(devolverFoco = false) {
+    if (formularioAplazar.hidden) return;
+    formularioAplazar.hidden = true;
+    const boton = botonAplazarActual;
+    boton?.setAttribute("aria-expanded", "false");
+    botonAplazarActual = null;
+    if (devolverFoco && boton?.isConnected) boton.focus();
+  }
+  function posicionarAplazamiento() {
+    if (formularioAplazar.hidden || !botonAplazarActual) return;
+    if (!botonAplazarActual.isConnected) { cerrarAplazamiento(); return; }
+    const boton = botonAplazarActual.getBoundingClientRect();
+    if (boton.bottom < 0 || boton.top > window.innerHeight) { cerrarAplazamiento(); return; }
+    const ancho = formularioAplazar.offsetWidth;
+    const alto = formularioAplazar.offsetHeight;
+    const izquierda = Math.min(Math.max(12, boton.left + boton.width / 2 - ancho / 2),
+      Math.max(12, window.innerWidth - ancho - 12));
+    const arriba = boton.top - alto - 10;
+    const abajo = boton.bottom + 10;
+    const top = arriba >= 12 ? arriba : Math.min(abajo, Math.max(12, window.innerHeight - alto - 12));
+    formularioAplazar.style.left = `${Math.round(izquierda)}px`;
+    formularioAplazar.style.top = `${Math.round(Math.max(12, top))}px`;
+  }
+  window.snwCerrarAplazamiento = cerrarAplazamiento;
+  window.addEventListener("resize", posicionarAplazamiento);
+  window.addEventListener("scroll", posicionarAplazamiento, true);
+  document.addEventListener("keydown", (evento) => {
+    if (evento.key === "Escape" && !formularioAplazar.hidden) cerrarAplazamiento(true);
+  });
+  document.addEventListener("pointerdown", (evento) => {
+    if (!formularioAplazar.hidden && !formularioAplazar.contains(evento.target)
+        && !botonAplazarActual?.contains(evento.target)) cerrarAplazamiento();
+  });
   const tbody = $("tablaReagendar").querySelector("tbody");
   const mensaje = $("reagendarMensaje");
   const celda = (tr, valor) => {
@@ -30,6 +67,7 @@
       const res = await fetch("api/v1/paciente-reagendar/lotes", { headers: auth(), cache: "no-store" });
       if (!res.ok) throw new Error("No se pudieron cargar las programaciones.");
       const lotes = await res.json();
+      cerrarAplazamiento();
       cuerpo.replaceChildren();
       for (const lote of lotes) {
         const tr = document.createElement("tr");
@@ -44,10 +82,22 @@
         if (["PROGRAMADO", "APLAZADO", "REVISION"].includes(lote.estado)) {
           const aplazar = document.createElement("button");
           aplazar.type = "button"; aplazar.className = "btn btn--ghost"; aplazar.textContent = "Aplazar";
+          aplazar.setAttribute("aria-haspopup", "dialog");
+          aplazar.setAttribute("aria-controls", "reagendarAplazarForm");
+          aplazar.setAttribute("aria-expanded", "false");
           aplazar.addEventListener("click", () => {
+            if (botonAplazarActual === aplazar && !formularioAplazar.hidden) {
+              cerrarAplazamiento(true); return;
+            }
+            cerrarAplazamiento();
             loteActual = lote.id;
             $("reagendarAplazarTitulo").textContent = `Aplazar carga #${lote.id}`;
-            $("reagendarAplazarForm").hidden = false;
+            botonAplazarActual = aplazar;
+            aplazar.setAttribute("aria-expanded", "true");
+            formularioAplazar.style.visibility = "hidden";
+            formularioAplazar.hidden = false;
+            posicionarAplazamiento();
+            formularioAplazar.style.visibility = "";
             $("reagendarAplazarMensaje").textContent = "";
             $("reagendarNuevaFecha").focus();
           });
@@ -135,15 +185,15 @@
   }
   $("reagendarFiltrar").addEventListener("click", () => { pagina = 1; cargar(); });
   $("reagendarActualizar").addEventListener("click", () => { cargarLotes(); cargar(); });
-  $("reagendarCerrarAplazar").addEventListener("click", () => { $("reagendarAplazarForm").hidden = true; });
-  $("reagendarAplazarForm").addEventListener("submit", async e => {
+  $("reagendarCerrarAplazar").addEventListener("click", () => cerrarAplazamiento(true));
+  formularioAplazar.addEventListener("submit", async e => {
     e.preventDefault();
     const input = $("reagendarNuevaFecha").value.trim();
     const msg = $("reagendarAplazarMensaje");
     if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(input)) {
       msg.textContent = "Escribe la fecha y hora como AAAA-MM-DD HH:MM."; return;
     }
-    const boton = e.submitter || $("reagendarAplazarForm").querySelector('[type="submit"]');
+    const boton = e.submitter || formularioAplazar.querySelector('[type="submit"]');
     boton.disabled = true; msg.textContent = "Guardando…";
     try {
       const res = await fetch(`api/v1/paciente-reagendar/lotes/${loteActual}/aplazar`, {
@@ -151,7 +201,7 @@
         body: JSON.stringify({ fecha_local: input, motivo: $("reagendarMotivo").value.trim() }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "No se pudo aplazar la carga.");
-      $("reagendarAplazarForm").hidden = true; await cargarLotes();
+      cerrarAplazamiento(); await cargarLotes();
       $("reagendarLotesMensaje").textContent = "Aplazamiento guardado.";
     } catch (error) { msg.textContent = error.message; }
     finally { boton.disabled = false; }

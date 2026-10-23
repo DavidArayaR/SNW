@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="css/tema.css?v=tokens1">
   <link rel="stylesheet" href="css/styles.css">
   <link rel="stylesheet" href="css/componentes.css?v=paginador-cinco1">
-  <link rel="stylesheet" href="css/pacientes.css?v=tabs-reagendar1">
+  <link rel="stylesheet" href="css/pacientes.css?v=aplazar-flotante1">
   <link rel="stylesheet" href="css/layout.css?v=navcolor1">
   <link rel="stylesheet" href="css/admin.css?v=tokens1">
   <link rel="stylesheet" href="css/refinamiento.css?v=merge-frontend1">
@@ -209,7 +209,7 @@
             </table></div>
             <p id="reagendarLotesMensaje" class="field__hint" role="status" aria-live="polite"></p>
             <div id="reagendarVistaPrevia" class="reagendar__vista" hidden></div>
-            <form id="reagendarAplazarForm" class="reagendar__aplazar" hidden>
+            <form id="reagendarAplazarForm" class="reagendar__aplazar" role="dialog" aria-labelledby="reagendarAplazarTitulo" hidden>
               <strong id="reagendarAplazarTitulo"></strong>
               <div class="field"><label for="reagendarNuevaFecha">Nueva fecha y hora de Chile (AAAA-MM-DD HH:MM)</label><input id="reagendarNuevaFecha" type="text" inputmode="numeric" maxlength="16" placeholder="2026-10-22 16:00" required></div>
               <div class="field"><label for="reagendarMotivo">Motivo (opcional)</label><input id="reagendarMotivo" type="text" maxlength="255"></div>
@@ -295,8 +295,8 @@
   <script src="js/pass-toggle.js"></script>
   <script src="js/csv-chunks.js?v=filas2000-1"></script>
   <script src="js/pacientes.js?v=permisos-acciones1"></script>
-  <script src="js/reagendar.js?v=tab-reagendar1"></script>
-  <script src="js/pacientes-tabs.js?v=1"></script>
+  <script src="js/reagendar.js?v=aplazar-flotante1"></script>
+  <script src="js/pacientes-tabs.js?v=aplazar-flotante1"></script>
   <script>
     (function () {
       // Botón para ocultar/mostrar los filtros en móvil (con contador de

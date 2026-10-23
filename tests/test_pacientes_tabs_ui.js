@@ -6,13 +6,21 @@ const vm = require("node:vm");
 const raiz = join(__dirname, "..");
 const html = readFileSync(join(raiz, "frontend", "pacientes.html"), "utf8");
 const script = readFileSync(join(raiz, "frontend", "js", "pacientes-tabs.js"), "utf8");
+const reagendarScript = readFileSync(join(raiz, "frontend", "js", "reagendar.js"), "utf8");
+const css = readFileSync(join(raiz, "frontend", "css", "pacientes.css"), "utf8");
 assert.match(html, /id="pacientes-tab-pacientes"[^>]*aria-controls="panelBaseDatos"/);
 assert.match(html, /id="pacientes-tab-reagendar"[^>]*aria-controls="cardReagendar"[^>]*hidden/);
 assert.match(html, /id="panelBaseDatos"[^>]*role="tabpanel"/);
 assert.match(html, /id="cardReagendar"[^>]*role="tabpanel"[^>]*hidden/);
+assert.match(html, /id="reagendarAplazarForm"[^>]*role="dialog"/);
+assert.match(reagendarScript, /document\.body\.appendChild\(formularioAplazar\)/);
+assert.match(reagendarScript, /boton\.top - alto - 10/);
+assert.match(css, /\.reagendar__aplazar\s*\{\s*position:\s*fixed/);
+assert.match(css, /backdrop-filter:\s*blur\(/);
 
 function probar(privilegiado) {
   const cargas = { pacientes: 0, reagendar: 0 };
+  let cierresAplazamiento = 0;
   const estilo = { setProperty() {} };
   function boton(tipo) {
     const clases = new Set(tipo === "pacientes" ? ["activo"] : []);
@@ -46,6 +54,7 @@ function probar(privilegiado) {
     "pacientes-tab-reagendar": reagendar };
   const document = { querySelector: () => barra, getElementById: id => elementos[id] };
   const window = { snwEsPrivilegiado: privilegiado, addEventListener() {}, scrollTo() {},
+    snwCerrarAplazamiento() { cierresAplazamiento++; },
     snwCargarPacientes() { cargas.pacientes++; },
     ...(privilegiado ? { snwCargarReagendar() { cargas.reagendar++; } } : {}) };
   vm.runInNewContext(script, { document, window });
@@ -61,6 +70,7 @@ function probar(privilegiado) {
     assert.equal(base.hidden, false);
     assert.equal(citas.hidden, true);
     assert.equal(cargas.pacientes, 1);
+    assert.equal(cierresAplazamiento, 1);
   }
 }
 

@@ -38,6 +38,7 @@
     }
     panelPacientes.hidden = actual !== "pacientes";
     panelReagendar.hidden = actual !== "reagendar";
+    if (actual !== "reagendar") window.snwCerrarAplazamiento?.();
     const panel = actual === "pacientes" ? panelPacientes : panelReagendar;
     panel.style.setProperty("--pacientes-entrada-x", actual === "reagendar" ? "20px" : "-20px");
     posicionarIndicador();
