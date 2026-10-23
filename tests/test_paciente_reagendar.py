@@ -62,22 +62,32 @@ class ParserCitasTests(unittest.TestCase):
         chile = ZoneInfo("America/Santiago")
         fecha = dt.date(2026, 10, 22)
         for ventana, hora_carga, hora_salida in (
-                ("08-14", 14, 15), ("14-20", 20, 21)):
-            recibido = dt.datetime(2026, 10, 22, hora_carga, 30, tzinfo=chile)
+                ("08-14", 14, 14), ("14-20", 20, 20)):
+            recibido = dt.datetime(2026, 10, 22, hora_carga, 0, tzinfo=chile)
             salida = reagendar.programacion_carga(fecha, ventana, recibido)
-            self.assertEqual(salida.replace(tzinfo=dt.timezone.utc).astimezone(chile).hour,
-                             hora_salida)
+            local = salida.replace(tzinfo=dt.timezone.utc).astimezone(chile)
+            self.assertEqual((local.hour, local.minute), (hora_salida, 30))
+            self.assertEqual(reagendar.programacion_carga(
+                fecha, ventana, recibido + dt.timedelta(minutes=29)), salida)
             self.assertIsNone(reagendar.programacion_carga(
-                fecha, ventana, recibido + dt.timedelta(minutes=31)))
+                fecha, ventana, recibido + dt.timedelta(minutes=30)))
+            self.assertIsNone(reagendar.programacion_carga(
+                fecha, ventana, recibido - dt.timedelta(minutes=1)))
         self.assertIsNone(reagendar.programacion_carga(
-            fecha, "08-14", dt.datetime(2026, 10, 23, 14, 30, tzinfo=chile)))
+            fecha, "08-14", dt.datetime(2026, 10, 23, 14, 0, tzinfo=chile)))
 
     def test_cambio_de_horario_chile_y_hora_ambigua(self):
         chile = ZoneInfo("America/Santiago")
         fecha = dt.date(2026, 4, 4)
-        recibido = dt.datetime(2026, 4, 4, 14, 30, tzinfo=chile)
+        recibido = dt.datetime(2026, 4, 4, 14, 0, tzinfo=chile)
         salida = reagendar.programacion_carga(fecha, "08-14", recibido)
-        self.assertEqual(salida.replace(tzinfo=dt.timezone.utc).astimezone(chile).hour, 15)
+        local = salida.replace(tzinfo=dt.timezone.utc).astimezone(chile)
+        self.assertEqual((local.hour, local.minute), (14, 30))
+        primavera = dt.date(2026, 9, 6)
+        salida_primavera = reagendar.programacion_carga(
+            primavera, "14-20", dt.datetime(2026, 9, 6, 20, 0, tzinfo=chile))
+        local_primavera = salida_primavera.replace(tzinfo=dt.timezone.utc).astimezone(chile)
+        self.assertEqual((local_primavera.hour, local_primavera.minute), (20, 30))
         with self.assertRaises(ValueError):
             reagendar.fecha_local_a_utc("2026-04-04 23:30")
 
@@ -478,17 +488,23 @@ class MariaDbCitasTests(unittest.TestCase):
         chile = ZoneInfo("America/Santiago")
         fecha = dt.datetime.now(chile).date() + dt.timedelta(days=1)
         datos = csv_fila(clave, extra="si").replace(b"2026-10-22", fecha.isoformat().encode())
-        recibido = dt.datetime.combine(fecha, dt.time(14, 30), chile)
+        recibido = dt.datetime.combine(fecha, dt.time(14, 0), chile)
         lote_id = None
         try:
             primero = reagendar.importar(datos, CFG, recibido=recibido)
             lote_id = primero["summary"]["batchId"]
             self.assertEqual(primero["summary"]["batchStatus"], "PROGRAMADO")
+            programado = dt.datetime.combine(fecha, dt.time(14, 30), chile)
+            self.assertEqual(primero["summary"]["scheduledAtUtc"],
+                             programado.astimezone(dt.timezone.utc).replace(
+                                 tzinfo=None).isoformat() + "Z")
             nueva = dt.datetime.combine(fecha, dt.time(16, 0), chile).astimezone(dt.timezone.utc)
             aplazado = reagendar.aplazar_lote(lote_id, nueva, "prueba", "Revisión")
             self.assertEqual(aplazado["estado"], "APLAZADO")
             segundo = reagendar.importar(datos, CFG, recibido=recibido)
             self.assertEqual(segundo["summary"]["alreadyExists"], 1)
+            self.assertEqual(segundo["message"], "Sin registros nuevos pendientes de envío")
+            self.assertIsNone(segundo["summary"]["batchId"])
             with conectar() as conn, conn.cursor() as cur:
                 cur.execute("SELECT estado, programado_para FROM reagendar_lotes WHERE id=%s", (lote_id,))
                 lote = cur.fetchone()
@@ -506,6 +522,42 @@ class MariaDbCitasTests(unittest.TestCase):
                     cur.execute("DELETE FROM reagendar_lotes WHERE id=%s", (lote_id,))
                 conn.commit()
 
+    def test_carga_vespertina_y_tardia_no_despacha_de_inmediato(self):
+        chile = ZoneInfo("America/Santiago")
+        fecha = dt.datetime.now(chile).date() + dt.timedelta(days=1)
+        claves = ["TEST-" + uuid.uuid4().hex for _ in range(2)]
+        lotes = []
+        try:
+            for clave, minuto, estado_esperado in (
+                    (claves[0], 0, "PROGRAMADO"),
+                    (claves[1], 31, "REVISION")):
+                datos = csv_fila(clave, extra="si").replace(
+                    b"2026-10-22", fecha.isoformat().encode()).replace(b"08-14", b"14-20")
+                recibido = dt.datetime.combine(fecha, dt.time(20, minuto), chile)
+                resultado = reagendar.importar(datos, CFG, recibido=recibido)
+                lotes.append(resultado["summary"]["batchId"])
+                self.assertEqual(resultado["summary"]["batchStatus"], estado_esperado)
+                if minuto == 0:
+                    esperado = dt.datetime.combine(fecha, dt.time(20, 30), chile)
+                    self.assertEqual(resultado["summary"]["scheduledAtUtc"],
+                        esperado.astimezone(dt.timezone.utc).replace(tzinfo=None).isoformat() + "Z")
+                else:
+                    self.assertIsNone(resultado["summary"]["scheduledAtUtc"])
+            with conectar() as conn, conn.cursor() as cur:
+                cur.execute("SELECT estado, programado_para FROM reagendar_lotes WHERE id=%s",
+                            (lotes[1],))
+                tardio = cur.fetchone()
+            self.assertEqual(tardio["estado"], "REVISION")
+            self.assertIsNone(tardio["programado_para"])
+        finally:
+            with conectar() as conn, conn.cursor() as cur:
+                for clave in claves:
+                    cur.execute("DELETE FROM paciente_reagendar WHERE reservo_cita_uuid=%s", (clave,))
+                for lote in lotes:
+                    if lote:
+                        cur.execute("DELETE FROM reagendar_lotes WHERE id=%s", (lote,))
+                conn.commit()
+
     def test_dos_importaciones_cinco_clinicas_y_una_cita_nueva(self):
         prefijo = "TEST-" + uuid.uuid4().hex
         nombres = ["Salud Mental Para Todos", "Centro Mentalidad Saludable",
@@ -519,6 +571,9 @@ class MariaDbCitasTests(unittest.TestCase):
         try:
             primero = reagendar.importar(archivo(5), CFG)
             self.assertEqual(primero["summary"]["inserted"], 5)
+            self.assertEqual(primero["summary"]["eligible"], 0)
+            self.assertIsNone(primero["summary"]["scheduledAtUtc"])
+            self.assertEqual(primero["message"], "Sin registros nuevos pendientes de envío")
             with conectar() as conn, conn.cursor() as cur:
                 cur.execute("UPDATE paciente_reagendar SET estado_envio='ENVIADO',"
                             " whatsapp_message_id='wamid.test'"
