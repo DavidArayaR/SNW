@@ -7,7 +7,9 @@ import sys
 import threading
 import time
 import traceback
-from datetime import datetime
+from contextlib import contextmanager
+from contextvars import ContextVar
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -23,6 +25,30 @@ LOGS_DIR = BASE_DIR / "logs"
 _LOG_LOCK = threading.Lock()
 _ZONA_LOG = ZoneInfo("America/Santiago")
 _SECUENCIA_LOG = itertools.count(1)
+_ACCION_ERROR = ContextVar("snw_accion_error", default=None)
+_NOMBRE_ERROR_RECIENTE = re.compile(
+    r"errores-(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-\d{6})-\d+-\d+\.log\Z")
+_MAX_ERRORES_CONTEXTO = 100
+
+
+@contextmanager
+def accion_de_error(accion):
+    """Asocia una acción a este request o trabajo sin contaminar otros."""
+    token = _ACCION_ERROR.set(accion)
+    try:
+        yield
+    finally:
+        _ACCION_ERROR.reset(token)
+
+
+def _accion_actual(contexto: str) -> str:
+    accion = _ACCION_ERROR.get()
+    if callable(accion):
+        try:
+            accion = accion()
+        except Exception:
+            accion = None
+    return _texto_log_seguro(accion or contexto or "No identificada")
 
 
 def _nombre_log_para(ahora: datetime, secuencia: int) -> str:
@@ -33,17 +59,47 @@ def _nombre_log_para(ahora: datetime, secuencia: int) -> str:
 def _texto_log_seguro(valor: str) -> str:
     """Reduce PII y secretos antes de persistir un diagnóstico."""
     texto = re.sub(r"(?i)\bBearer\s+\S+", "Bearer [oculto]", str(valor))
-    texto = re.sub(r"(?i)\b(token|secret|password|clave|api[_-]?key)\s*[:=]\s*[^\s,;]+",
+    texto = re.sub(r"(?i)\b(token|secret|password|clave|api[_-]?key)\s*(?:[:=]|\s)\s*[^\s,;)]+",
                    r"\1=[oculto]", texto)
     texto = re.sub(r"(?i)[\w.+-]+@[\w.-]+\.[a-z]{2,}", "[correo]", texto)
     texto = re.sub(r"(?<!\d)\+?\d[\d ().-]{8,}\d(?!\d)", "[numero]", texto)
     return texto[:1500]
 
 
+def _errores_ultimos_cinco_minutos(ahora: datetime) -> tuple[list[str], int]:
+    """Lee solo el encabezado de cada archivo previo; nunca anida logs completos."""
+    recientes = []
+    desde = ahora - timedelta(minutes=5)
+    if not LOGS_DIR.is_dir():
+        return [], 0
+    for ruta in LOGS_DIR.iterdir():
+        coincidencia = _NOMBRE_ERROR_RECIENTE.fullmatch(ruta.name)
+        if not coincidencia or ruta.is_symlink() or not ruta.is_file():
+            continue
+        try:
+            fecha = datetime.strptime(coincidencia.group(1), "%Y-%m-%d_%H-%M-%S-%f")
+            fecha = fecha.replace(tzinfo=_ZONA_LOG)
+            if not desde <= fecha < ahora:
+                continue
+            with ruta.open("rb") as archivo:
+                resumen = archivo.readline(2048).decode("utf-8", errors="replace").strip()
+                accion = archivo.readline(2048).decode("utf-8", errors="replace").strip()
+            if not accion.startswith("Acción: "):
+                accion = "Acción: no registrada"
+            recientes.append((fecha, f"{resumen} | {accion}"))
+        except (OSError, ValueError):
+            continue
+    recientes.sort(key=lambda item: item[0], reverse=True)
+    omitidos = max(0, len(recientes) - _MAX_ERRORES_CONTEXTO)
+    return [item[1] for item in recientes[:_MAX_ERRORES_CONTEXTO]], omitidos
+
+
 def _guardar_error_archivo(contexto: str, exc: BaseException | None = None) -> None:
     """Crea un archivo exclusivo por error; crea logs/ al necesitarlo."""
     ahora = datetime.now(_ZONA_LOG)
+    accion = _accion_actual(contexto)
     mensaje = f"[{ahora:%Y-%m-%d %H:%M:%S%z}] [ERROR] {_texto_log_seguro(contexto)}"
+    traza = ""
     if exc is not None:
         codigo = exc.args[0] if exc.args and isinstance(exc.args[0], int) else None
         mensaje += f" | {type(exc).__name__}" + (f" ({codigo})" if codigo is not None else "")
@@ -51,12 +107,18 @@ def _guardar_error_archivo(contexto: str, exc: BaseException | None = None) -> N
             # format_tb incluye líneas de código que pueden contener valores
             # sensibles; conservar solo la ubicación de cada frame.
             for frame in traceback.extract_tb(exc.__traceback__):
-                mensaje += (f"\n  {Path(frame.filename).name}:{frame.lineno} "
-                            f"en {frame.name}")
-    entrada = (mensaje + "\n").encode("utf-8", errors="replace")
+                traza += (f"\n  {Path(frame.filename).name}:{frame.lineno} "
+                          f"en {frame.name}")
     try:
         with _LOG_LOCK:
             LOGS_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+            recientes, omitidos = _errores_ultimos_cinco_minutos(ahora)
+            seccion = "\nErrores anteriores de los últimos 5 minutos:\n"
+            seccion += "\n".join(f"- {item}" for item in recientes) if recientes else "(ninguno)"
+            if omitidos:
+                seccion += f"\n({omitidos} errores anteriores omitidos)"
+            entrada = (mensaje + f"\nAcción: {accion}" + traza + seccion + "\n").encode(
+                "utf-8", errors="replace")
             while True:
                 ruta = LOGS_DIR / _nombre_log_para(ahora, next(_SECUENCIA_LOG))
                 try:
@@ -70,6 +132,11 @@ def _guardar_error_archivo(contexto: str, exc: BaseException | None = None) -> N
                     restante = restante[os.write(descriptor, restante):]
             finally:
                 os.close(descriptor)
+        print(f"[ACCIÓN] {accion}", file=sys.stderr, flush=True)
+        print(f"[ERRORES ÚLTIMOS 5 MIN] {len(recientes)} anteriores"
+              + (f"; {omitidos} omitidos" if omitidos else ""), file=sys.stderr, flush=True)
+        for resumen in recientes:
+            print(f"  {resumen}", file=sys.stderr, flush=True)
     except OSError as error:
         print(f"[ERROR] No se pudo guardar el archivo de errores ({type(error).__name__}).",
               file=sys.stderr, flush=True)

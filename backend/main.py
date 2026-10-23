@@ -33,7 +33,7 @@ from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from pydantic import BaseModel, Field
 
 from db import (
-    conectar, entorno_valido, log_error, instalar_registro_errores, LOGS_DIR,
+    conectar, entorno_valido, log_error, instalar_registro_errores, accion_de_error, LOGS_DIR,
     nombre_base, columnas_tabla, columna_existe,
     tabla_pacientes, asegurar_tabla_config, config_all, config_get, config_set,
     agregar_numero_prueba_ambos, quitar_numero_prueba_ambos,
@@ -209,6 +209,18 @@ async def cors_importacion_reagendar(request: Request, call_next):
         respuesta.headers["Access-Control-Allow-Origin"] = origen
         respuesta.headers["Vary"] = "Origin"
     return respuesta
+
+
+@app.middleware("http")
+async def contexto_accion_errores(request: Request, call_next):
+    """Vincula los fallos a la ruta HTTP sin registrar tokens ni parámetros."""
+    def accion():
+        ruta = request.scope.get("route")
+        plantilla = getattr(ruta, "path", None)
+        return f"HTTP {request.method} {plantilla or '(ruta no resuelta)'}"
+
+    with accion_de_error(accion):
+        return await call_next(request)
 
 
 MAX_TEXTO_PLANTILLA = MAX_CUERPO  # representación común de preview y envío
@@ -5726,14 +5738,15 @@ def actualizar_envio_batch(envio_id, ambiente, enviados=0, fallidos=0, invalidos
 def procesar_job(job_id: str) -> None:
     """Wrapper: garantiza que cualquier error del envío quede en consola y
     marque el job como fallido en vez de morir en silencio."""
-    try:
-        _procesar_job(job_id)
-    except Exception as e:
-        log_error(f"procesar_job({job_id})", e)
-        job = JOBS.get(job_id)
-        if job is not None:
-            job["estado"] = "error"
-            job["detalle"] = f"Error interno del envío: {e}"
+    with accion_de_error("procesar envío manual"):
+        try:
+            _procesar_job(job_id)
+        except Exception as e:
+            log_error(f"procesar_job({job_id})", e)
+            job = JOBS.get(job_id)
+            if job is not None:
+                job["estado"] = "error"
+                job["detalle"] = f"Error interno del envío: {e}"
 
 
 def _exigir_centro_envio(codigo: str | None) -> dict:
@@ -7708,11 +7721,12 @@ def _revisar_programados() -> None:
             conn.commit()
             if cur.rowcount != 1:
                 continue
-        try:
-            _ejecutar_programado(f)
-        except Exception as e:
-            log_error(f"scheduler programado {f['id']}", e)
-            _marcar_prog(f["id"], "error", str(e)[:255])
+        with accion_de_error(f"procesar envío programado #{f['id']}"):
+            try:
+                _ejecutar_programado(f)
+            except Exception as e:
+                log_error(f"scheduler programado {f['id']}", e)
+                _marcar_prog(f["id"], "error", str(e)[:255])
 
 
 async def _loop_programados() -> None:
@@ -7849,7 +7863,8 @@ async def _loop_reagendar() -> None:
                 cita = await asyncio.to_thread(
                     paciente_reagendar.reclamar_pendiente, list(disponibles))
                 if cita:
-                    await _procesar_cita_reagendar(cita, disponibles)
+                    with accion_de_error("procesar envío de reagendamiento"):
+                        await _procesar_cita_reagendar(cita, disponibles)
                     continue
         except Exception as exc:
             log_error("scheduler reagendar", exc)
