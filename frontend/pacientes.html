@@ -197,17 +197,18 @@
 
         <section class="panel pacientes-tab-panel" id="cardReagendar" role="tabpanel" aria-labelledby="pacientes-tab-reagendar" hidden>
           <div class="panel__head">
-            <h2>Citas atendidas · reagendar</h2>
+            <h2>Pacientes de reagendamientos</h2>
             <button id="reagendarActualizar" type="button" class="btn btn--ghost">Actualizar</button>
           </div>
-          <p class="field__hint reagendar__ayuda">Aquí ves los CSV recibidos desde Reservo y los mensajes que SNW preparó. Las horas de búsqueda no son las horas de las citas.</p>
+          <p class="field__hint reagendar__ayuda">Aquí ves a cada paciente una sola vez y, por separado, el historial de CSV recibidos desde Reservo. Un paciente al que ya se envió un reagendamiento no volverá a recibir otro.</p>
           <div class="reagendar__lotes">
             <h3>Archivos recibidos y envíos</h3>
-            <p class="field__hint reagendar__explicacion">Cada fila representa un CSV con citas nuevas. Si llega a tiempo, el envío se programa para las 14:30 o 20:30; si llega tarde, queda para revisión. Para enviar, la automatización debe estar activa y la clínica debe tener una plantilla aprobada.</p>
+            <p class="field__hint reagendar__explicacion">Cada fila representa un CSV recibido, aunque todos sus pacientes ya estuvieran registrados. Si hay pacientes nuevos y llega a tiempo, el envío se programa para las 14:30 o 20:30; si llega tarde, queda para revisión.</p>
             <div class="tabla-wrap"><table id="tablaReagendarLotes" aria-busy="false">
-              <thead><tr><th>CSV de Reservo</th><th>Recibido en SNW</th><th>Envío previsto</th><th>Situación</th><th>Citas</th><th>Mensajes aceptados</th><th>Acciones</th></tr></thead><tbody></tbody>
+              <thead><tr><th>CSV de Reservo</th><th>Recibido en SNW</th><th>Envío previsto</th><th>Situación</th><th>Pacientes nuevos</th><th>Mensajes aceptados</th><th>Acciones</th></tr></thead><tbody></tbody>
             </table></div>
             <p id="reagendarLotesMensaje" class="field__hint" role="status" aria-live="polite"></p>
+            <button id="reagendarMasLotes" class="btn btn--ghost" type="button" hidden>Ver cargas anteriores</button>
             <div id="reagendarVistaPrevia" class="reagendar__vista" tabindex="-1" hidden></div>
             <form id="reagendarAplazarForm" class="reagendar__aplazar" role="dialog" aria-labelledby="reagendarAplazarTitulo" hidden>
               <strong id="reagendarAplazarTitulo"></strong>
@@ -219,7 +220,7 @@
             </form>
           </div>
           <div class="reagendar__detalle-head">
-            <div><h3>Citas importadas</h3><p id="reagendarSeleccionLote" class="field__hint" role="status">Sin carga seleccionada. Se aplican los filtros de abajo.</p></div>
+            <div><h3>Pacientes de reagendamientos</h3><p id="reagendarSeleccionLote" class="field__hint" role="status">Todos los pacientes, sin duplicados. Se aplican los filtros de abajo.</p></div>
             <button id="reagendarVerTodas" class="btn btn--ghost" type="button" hidden>Quitar selección de carga</button>
           </div>
           <div class="reagendar__filtros">
@@ -300,7 +301,7 @@
   <script src="js/pass-toggle.js"></script>
   <script src="js/csv-chunks.js?v=filas2000-1"></script>
   <script src="js/pacientes.js?v=permisos-acciones1"></script>
-  <script src="js/reagendar.js?v=cargas-claras1"></script>
+  <script src="js/reagendar.js?v=pacientes-reagendar2"></script>
   <script src="js/pacientes-tabs.js?v=aplazar-flotante1"></script>
   <script>
     (function () {

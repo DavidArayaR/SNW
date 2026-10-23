@@ -9251,63 +9251,69 @@ def listar_citas_reagendar(centro: str | None = Query(None),
                           sesion: dict = Depends(solo_admin)):
     condiciones, args = [], []
     if lote_id:
-        condiciones.append("lote_id = %s")
+        condiciones.append("r.lote_id = %s")
         args.append(lote_id)
     if modo_prueba is not None:
-        condiciones.append("modo_prueba = %s")
+        condiciones.append("r.modo_prueba = %s")
         args.append(int(modo_prueba))
     if centro:
         if centro not in catalogo_centros():
             raise HTTPException(422, detail="Clínica inválida.")
-        condiciones.append("centro_codigo = %s")
+        condiciones.append("r.centro_codigo = %s")
         args.append(centro)
     if fecha:
-        condiciones.append("fecha = %s")
+        condiciones.append("r.fecha = %s")
         args.append(fecha)
     if ventana:
         if ventana not in ("08-14", "14-20"):
             raise HTTPException(422, detail="Ventana inválida.")
-        condiciones.append("ventana = %s")
+        condiciones.append("r.ventana = %s")
         args.append(ventana)
     if estado:
         if estado not in ("PENDIENTE", "PROCESANDO", "ENVIADO", "REINTENTO", "ERROR", "OMITIDO"):
             raise HTTPException(422, detail="Estado inválido.")
-        condiciones.append("estado_envio = %s")
+        condiciones.append("r.estado_envio = %s")
         args.append(estado)
-    where = " WHERE " + " AND ".join(condiciones) if condiciones else ""
+    condiciones.insert(0, "(r.paciente_telefono_normalizado IS NULL OR d.cita_id=r.id)")
+    where = " WHERE " + " AND ".join(condiciones)
+    origen = (" paciente_reagendar r LEFT JOIN reagendar_destinatarios d"
+              " ON d.telefono=r.paciente_telefono_normalizado"
+              " AND d.modo_prueba=r.modo_prueba")
     with conectar() as conn, conn.cursor() as cur:
-        cur.execute("SELECT COUNT(*) AS n FROM paciente_reagendar" + where, tuple(args))
+        cur.execute("SELECT COUNT(*) AS n FROM" + origen + where, tuple(args))
         total = cur.fetchone()["n"]
         cur.execute(
-            "SELECT id, fecha, ventana, clinica_nombre, centro_codigo,"
-            " paciente_nombre, paciente_telefono_normalizado, doctor_nombre,"
-            " inicio_cita, lote_id, plantilla_clave, modo_prueba,"
-            " estado_envio, intentos_envio, ultimo_error_codigo, importado_en,"
-            " enviado_en, whatsapp_message_id,"
+            "SELECT r.id, r.fecha, r.ventana, r.clinica_nombre, r.centro_codigo,"
+            " r.paciente_nombre, r.paciente_telefono_normalizado, r.doctor_nombre,"
+            " r.inicio_cita, r.lote_id, r.plantilla_clave, r.modo_prueba,"
+            " r.estado_envio, r.intentos_envio, r.ultimo_error_codigo, r.importado_en,"
+            " r.enviado_en, r.whatsapp_message_id,"
             " (SELECT i.accion FROM reagendar_interacciones i"
-            " WHERE i.cita_id=paciente_reagendar.id ORDER BY i.creado_en DESC,"
+            " WHERE i.cita_id=r.id ORDER BY i.creado_en DESC,"
             " i.mensaje_id DESC LIMIT 1) AS ultima_respuesta"
-            " FROM paciente_reagendar" + where +
-            " ORDER BY id DESC LIMIT %s OFFSET %s", (*args, limite, (pagina - 1) * limite))
+            " FROM" + origen + where +
+            " ORDER BY r.id DESC LIMIT %s OFFSET %s", (*args, limite, (pagina - 1) * limite))
         filas = cur.fetchall()
     return {"total": total, "pagina": pagina, "limite": limite, "items": filas}
 
 
 @app.get("/api/v1/paciente-reagendar/lotes")
 def listar_lotes_reagendar(limite: int = Query(50, ge=1, le=200),
+                          pagina: int = Query(1, ge=1),
                           sesion: dict = Depends(solo_admin)):
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT l.id, l.fecha, l.ventana, l.recibido_en, l.programado_para,"
             " l.estado, l.aplazado_en, l.aplazado_por, l.motivo_aplazamiento,"
-            " l.creados, l.rechazados,"
+            " l.creados, l.rechazados, l.repetidos, l.recibidos,"
             " SUM(CASE WHEN r.estado_envio='ENVIADO' THEN 1 ELSE 0 END) AS enviados,"
             " SUM(CASE WHEN r.estado_envio='OMITIDO' THEN 1 ELSE 0 END) AS omitidos,"
             " SUM(CASE WHEN r.estado_envio IN ('PENDIENTE','REINTENTO','PROCESANDO')"
             " THEN 1 ELSE 0 END) AS pendientes,"
             " SUM(CASE WHEN r.ultimo_error_codigo IS NOT NULL THEN 1 ELSE 0 END) AS con_error"
             " FROM reagendar_lotes l LEFT JOIN paciente_reagendar r ON r.lote_id=l.id"
-            " GROUP BY l.id ORDER BY l.id DESC LIMIT %s", (limite,))
+            " GROUP BY l.id ORDER BY l.id DESC LIMIT %s OFFSET %s",
+            (limite, (pagina - 1) * limite))
         return cur.fetchall()
 
 

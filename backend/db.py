@@ -271,9 +271,18 @@ def asegurar_tabla_config() -> None:
                 " motivo_aplazamiento VARCHAR(255) NULL,"
                 " creados INT UNSIGNED NOT NULL DEFAULT 0,"
                 " rechazados INT UNSIGNED NOT NULL DEFAULT 0,"
+                " repetidos INT UNSIGNED NOT NULL DEFAULT 0,"
+                " recibidos INT UNSIGNED NOT NULL DEFAULT 0,"
                 " KEY idx_reagendar_lote_vencimiento (estado, programado_para)"
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
             )
+            cur.execute("SELECT COLUMN_NAME FROM information_schema.COLUMNS"
+                        " WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='reagendar_lotes'")
+            _columnas_lote = {r["COLUMN_NAME"] for r in cur.fetchall()}
+            for _columna in ("repetidos", "recibidos"):
+                if _columna not in _columnas_lote:
+                    cur.execute(f"ALTER TABLE reagendar_lotes ADD COLUMN {_columna}"
+                                " INT UNSIGNED NOT NULL DEFAULT 0")
             cur.execute(
                 "CREATE TABLE IF NOT EXISTS paciente_reagendar ("
                 " id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,"
@@ -305,6 +314,7 @@ def asegurar_tabla_config() -> None:
                 " UNIQUE KEY uq_paciente_reagendar_cita (reservo_cita_uuid),"
                 " KEY idx_reagendar_estado (estado_envio, proximo_reintento_en),"
                 " KEY idx_reagendar_centro (centro_codigo, estado_envio),"
+                " KEY idx_reagendar_telefono (paciente_telefono_normalizado, modo_prueba),"
                 " KEY idx_reagendar_fecha (fecha, ventana),"
                 " KEY idx_reagendar_wa_id (whatsapp_message_id)"
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
@@ -336,6 +346,57 @@ def asegurar_tabla_config() -> None:
                         " AND INDEX_NAME='idx_reagendar_lote'")
             if not cur.fetchone():
                 cur.execute("ALTER TABLE paciente_reagendar ADD KEY idx_reagendar_lote (lote_id)")
+            cur.execute("SELECT INDEX_NAME FROM information_schema.STATISTICS"
+                        " WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='paciente_reagendar'"
+                        " AND INDEX_NAME='idx_reagendar_telefono'")
+            if not cur.fetchone():
+                cur.execute("ALTER TABLE paciente_reagendar ADD KEY idx_reagendar_telefono"
+                            " (paciente_telefono_normalizado, modo_prueba)")
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS reagendar_destinatarios ("
+                " telefono VARCHAR(20) NOT NULL,"
+                " modo_prueba TINYINT(1) NOT NULL DEFAULT 0,"
+                " cita_id BIGINT UNSIGNED NOT NULL,"
+                " estado VARCHAR(20) NOT NULL DEFAULT 'PENDIENTE',"
+                " PRIMARY KEY (telefono, modo_prueba),"
+                " KEY idx_reagendar_destinatario_cita (cita_id)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+            )
+            # Conserva la primera cita enviada si existían duplicados anteriores.
+            # La clave única impide nuevos destinatarios duplicados entre instancias.
+            cur.execute(
+                "INSERT IGNORE INTO reagendar_destinatarios"
+                " (telefono, modo_prueba, cita_id, estado)"
+                " SELECT paciente_telefono_normalizado, modo_prueba, id,"
+                " CASE WHEN estado_envio='ENVIADO' THEN 'ENVIADO' ELSE 'PENDIENTE' END"
+                " FROM paciente_reagendar"
+                " WHERE paciente_telefono_normalizado IS NOT NULL"
+                " ORDER BY CASE WHEN estado_envio='ENVIADO' THEN 0"
+                " WHEN estado_envio IN ('PENDIENTE','REINTENTO','PROCESANDO')"
+                " AND autorizado_contacto=1 AND centro_codigo IS NOT NULL"
+                " AND ultimo_error_codigo IS NULL THEN 1 ELSE 2 END, id"
+            )
+            cur.execute(
+                "UPDATE paciente_reagendar r JOIN reagendar_destinatarios d"
+                " ON d.telefono=r.paciente_telefono_normalizado"
+                " AND d.modo_prueba=r.modo_prueba"
+                " SET r.estado_envio='OMITIDO',"
+                " r.ultimo_error_codigo='PACIENTE_DUPLICADO'"
+                " WHERE r.id<>d.cita_id"
+                " AND r.estado_envio IN ('PENDIENTE','REINTENTO')"
+            )
+            cur.execute(
+                "UPDATE reagendar_destinatarios d JOIN ("
+                " SELECT paciente_telefono_normalizado AS telefono, modo_prueba,"
+                " MIN(id) AS cita_id FROM paciente_reagendar"
+                " WHERE estado_envio='ENVIADO'"
+                " AND paciente_telefono_normalizado IS NOT NULL"
+                " GROUP BY paciente_telefono_normalizado, modo_prueba"
+                " ) enviados ON enviados.telefono=d.telefono"
+                " AND enviados.modo_prueba=d.modo_prueba"
+                " SET d.estado='ENVIADO', d.cita_id=enviados.cita_id"
+                " WHERE d.estado<>'ENVIADO'"
+            )
             cur.execute(
                 "CREATE TABLE IF NOT EXISTS reagendar_flujo ("
                 " cita_id BIGINT UNSIGNED NOT NULL PRIMARY KEY,"

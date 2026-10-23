@@ -4,6 +4,7 @@
   const $ = id => document.getElementById(id);
   let pagina = 1;
   let paginas = 1;
+  let paginaLotes = 1;
   let loteActual = null;
   let loteAplazarId = null;
   const formularioAplazar = $("reagendarAplazarForm");
@@ -68,8 +69,8 @@
     PROGRAMADO: ["Programado", "Espera la hora indicada y las condiciones de envío.", "info"],
     APLAZADO: ["Fecha cambiada", "Se intentará enviar en la nueva fecha.", "info"],
     REVISION: ["Requiere revisión", "No se programó automáticamente; revisa antes de elegir una fecha.", "warn"],
+    COMPLETADO: ["Procesado", "No hay pacientes pendientes en esta carga.", "ok"],
     EN_CURSO: ["En proceso", "SNW está procesando los mensajes.", "info"],
-    COMPLETADO: ["Procesado", "Revisa abajo el resultado de cada paciente.", "ok"],
   };
   function celdaResumen(tr, principal, detalle = "") {
     const td = document.createElement("td");
@@ -86,24 +87,28 @@
   }
   function actualizarSeleccionLote() {
     $("reagendarSeleccionLote").textContent = loteActual
-      ? `Mostrando solo las citas de la carga #${loteActual}.`
-      : "Sin carga seleccionada. Se aplican los filtros de abajo.";
+      ? `Mostrando pacientes nuevos de la carga #${loteActual}. Los repetidos figuran en el resumen del CSV.`
+      : "Todos los pacientes, sin duplicados. Se aplican los filtros de abajo.";
     $("reagendarVerTodas").hidden = !loteActual;
     $("tablaReagendarLotes").querySelectorAll("tbody tr[data-lote-id]").forEach((fila) => {
       fila.classList.toggle("reagendar__lote--seleccionado", fila.dataset.loteId === String(loteActual));
     });
   }
-  async function cargarLotes() {
+  async function cargarLotes(agregar = false) {
     const tabla = $("tablaReagendarLotes");
     const cuerpo = tabla.querySelector("tbody");
+    const botonMas = $("reagendarMasLotes");
     tabla.setAttribute("aria-busy", "true");
+    botonMas.disabled = true;
+    if (!agregar) paginaLotes = 1;
     $("reagendarLotesMensaje").textContent = "Cargando archivos recibidos…";
     try {
-      const res = await fetch("api/v1/paciente-reagendar/lotes", { headers: auth(), cache: "no-store" });
+      const destino = `api/v1/paciente-reagendar/lotes?pagina=${paginaLotes}&limite=50`;
+      const res = await fetch(destino, { headers: auth(), cache: "no-store" });
       if (!res.ok) throw new Error("No se pudieron cargar las programaciones.");
       const lotes = await res.json();
       cerrarAplazamiento();
-      cuerpo.replaceChildren();
+      if (!agregar) cuerpo.replaceChildren();
       for (const lote of lotes) {
         const tr = document.createElement("tr");
         tr.dataset.loteId = String(lote.id);
@@ -115,14 +120,14 @@
         const estado = estadosLote[lote.estado] || [lote.estado || "Sin estado", "", "info"];
         const celdaEstado = celdaResumen(tr, estado[0], estado[1]);
         celdaEstado.classList.add(`reagendar__estado--${estado[2]}`);
-        celdaResumen(tr, `${lote.creados || 0} cargadas`,
-          `${lote.omitidos || 0} excluidos · ${lote.rechazados || 0} rechazados`);
+        celdaResumen(tr, `${lote.creados || 0} nuevos`,
+          `${lote.repetidos || 0} ya registrados · ${lote.rechazados || 0} rechazados`);
         celdaResumen(tr, String(lote.enviados || 0), "Meta aceptó; no implica entrega");
         const acciones = document.createElement("td");
         acciones.className = "reagendar__acciones-lote";
         const revisar = document.createElement("button");
         revisar.type = "button"; revisar.className = "btn btn--ghost"; revisar.textContent = "Ver detalle";
-        revisar.title = "Ver citas y plantilla de esta carga";
+        revisar.title = "Ver pacientes nuevos y plantilla de esta carga";
         revisar.addEventListener("click", () => {
           loteActual = lote.id; pagina = 1; actualizarSeleccionLote(); cargar(); cargarVista(lote.id);
         });
@@ -155,11 +160,17 @@
         tr.appendChild(acciones); cuerpo.appendChild(tr);
       }
       actualizarSeleccionLote();
-      $("reagendarLotesMensaje").textContent = lotes.length
-        ? "«Ver detalle» muestra las citas y la plantilla de la carga seleccionada."
-        : "Aún no hay cargas con citas nuevas. Aparecerán cuando Reservo envíe un CSV.";
-    } catch (e) { $("reagendarLotesMensaje").textContent = e.message; }
-    finally { tabla.setAttribute("aria-busy", "false"); }
+      botonMas.hidden = lotes.length < 50;
+      $("reagendarLotesMensaje").textContent = cuerpo.rows.length
+        ? "«Ver detalle» muestra los pacientes nuevos de esa carga; los ya registrados no se duplican."
+        : "Aún no hay cargas. Aparecerán cuando Reservo envíe un CSV.";
+    } catch (e) {
+      if (agregar) paginaLotes -= 1;
+      $("reagendarLotesMensaje").textContent = e.message;
+    } finally {
+      botonMas.disabled = false;
+      tabla.setAttribute("aria-busy", "false");
+    }
   }
   async function cargarVista(id) {
     const caja = $("reagendarVistaPrevia");
@@ -210,12 +221,12 @@
       const valor = $(id).value.trim();
       if (valor) params.set(clave, valor);
     }
-    mensaje.textContent = "Cargando citas…";
+    mensaje.textContent = "Cargando pacientes…";
     $("tablaReagendar").setAttribute("aria-busy", "true");
     try {
       const res = await fetch(`api/v1/paciente-reagendar?${params}`, {
         headers: { Authorization: "Bearer " + (localStorage.getItem("snw_token") || "") }, cache: "no-store" });
-      if (!res.ok) throw new Error("No se pudieron cargar las citas.");
+      if (!res.ok) throw new Error("No se pudieron cargar los pacientes.");
       const datos = await res.json();
       tbody.replaceChildren();
       for (const r of datos.items || []) {
@@ -232,7 +243,7 @@
       $("reagendarIr").max = String(paginas);
       $("reagendarPrimera").disabled = $("reagendarAnterior").disabled = pagina <= 1;
       $("reagendarUltima").disabled = $("reagendarSiguiente").disabled = pagina >= paginas;
-      mensaje.textContent = datos.total ? `Página ${pagina} de ${paginas} · ${datos.total} citas` : "No hay citas para estos filtros.";
+      mensaje.textContent = datos.total ? `Página ${pagina} de ${paginas} · ${datos.total} pacientes` : "No hay pacientes para estos filtros.";
     } catch (e) {
       mensaje.textContent = e.message;
     } finally {
@@ -254,6 +265,9 @@
     } catch (_) { /* La tabla puede cargarse sin el selector. */ }
   }
   $("reagendarFiltrar").addEventListener("click", () => { pagina = 1; cargar(); });
+  $("reagendarMasLotes").addEventListener("click", () => {
+    paginaLotes += 1; cargarLotes(true);
+  });
   $("reagendarActualizar").addEventListener("click", () => { cargarLotes(); cargar(); if (loteActual) cargarVista(loteActual); });
   $("reagendarVerTodas").addEventListener("click", () => {
     loteActual = null; pagina = 1;

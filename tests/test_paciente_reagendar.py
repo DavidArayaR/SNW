@@ -42,6 +42,11 @@ def csv_fila(identificador="CITA-001", clinica="Salud Mental Para Todos",
     ).encode()
 
 
+def telefono_prueba(clave):
+    """Un destinatario distinto por prueba de integración."""
+    return "569" + str(int(hashlib.sha256(clave.encode()).hexdigest(), 16) % 100000000).zfill(8)
+
+
 class ParserCitasTests(unittest.TestCase):
     def test_csv_ficticio_tiene_una_fila_sin_datos_de_contacto(self):
         filas, errores, recibidas = reagendar.analizar_csv(PRUEBA_CSV, CFG)
@@ -447,13 +452,58 @@ class ApiCitasTests(unittest.TestCase):
 
 
 class MariaDbCitasTests(unittest.TestCase):
+    def test_paciente_repetido_pendiente_y_enviado_no_se_reimporta(self):
+        claves = ["TEST-" + uuid.uuid4().hex for _ in range(3)]
+        telefono = telefono_prueba(claves[0])
+        lotes = []
+        try:
+            for indice, clave in enumerate(claves):
+                resultado = reagendar.importar(
+                    csv_fila(clave, extra="si", telefono=telefono), CFG)
+                lotes.append(resultado["summary"]["batchId"])
+                if indice == 0:
+                    self.assertEqual(resultado["summary"]["inserted"], 1)
+                else:
+                    self.assertEqual(resultado["summary"]["inserted"], 0)
+                    self.assertEqual(resultado["summary"]["alreadyExists"], 1)
+                    self.assertEqual(resultado["summary"]["batchStatus"], "COMPLETADO")
+                    self.assertIsNotNone(resultado["summary"]["batchId"])
+                if indice == 1:
+                    with conectar() as conn, conn.cursor() as cur:
+                        cur.execute("UPDATE paciente_reagendar SET estado_envio='ENVIADO'"
+                                    " WHERE reservo_cita_uuid=%s", (claves[0],))
+                        cur.execute("UPDATE reagendar_destinatarios SET estado='ENVIADO'"
+                                    " WHERE telefono=%s AND modo_prueba=0", ("+" + telefono,))
+                        conn.commit()
+            self.assertEqual(resultado["summary"]["alreadySent"], 1)
+            with conectar() as conn, conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) AS n FROM paciente_reagendar"
+                            " WHERE reservo_cita_uuid IN (%s,%s,%s)", tuple(claves))
+                self.assertEqual(cur.fetchone()["n"], 1)
+            vista = main.listar_citas_reagendar(
+                centro=None, lote_id=lotes[0], fecha=None, ventana=None, estado=None,
+                modo_prueba=False, pagina=1, limite=100, sesion={})
+            self.assertEqual(sum(r["paciente_telefono_normalizado"] == "+" + telefono
+                                 for r in vista["items"]), 1)
+        finally:
+            with conectar() as conn, conn.cursor() as cur:
+                cur.execute("DELETE FROM paciente_reagendar"
+                            " WHERE reservo_cita_uuid IN (%s,%s,%s)", tuple(claves))
+                cur.execute("DELETE FROM reagendar_destinatarios WHERE telefono=%s",
+                            ("+" + telefono,))
+                for lote in lotes:
+                    if lote:
+                        cur.execute("DELETE FROM reagendar_lotes WHERE id=%s", (lote,))
+                conn.commit()
+
     def test_respuestas_asociadas_al_emisor_y_duplicados(self):
         clave = "TEST-" + uuid.uuid4().hex
+        telefono = "+" + telefono_prueba(clave)
         mensaje_origen = "wamid." + uuid.uuid4().hex
         mensaje_entrada = "wamid." + uuid.uuid4().hex
         lote_id = None
         try:
-            primero = reagendar.importar(csv_fila(clave, extra="si"), CFG)
+            primero = reagendar.importar(csv_fila(clave, extra="si", telefono=telefono[1:]), CFG)
             lote_id = primero["summary"]["batchId"]
             with conectar() as conn, conn.cursor() as cur:
                 cur.execute("UPDATE paciente_reagendar SET estado_envio='ENVIADO',"
@@ -461,15 +511,15 @@ class MariaDbCitasTests(unittest.TestCase):
                             " WHERE reservo_cita_uuid=%s", (mensaje_origen, clave))
                 conn.commit()
             self.assertIsNone(reagendar.registrar_respuesta_reagendar(
-                "+56911111111", "otro_emisor", mensaje_entrada, mensaje_origen, "Reagendar"))
+                telefono, "otro_emisor", mensaje_entrada, mensaje_origen, "Reagendar"))
             evento = reagendar.registrar_respuesta_reagendar(
-                "+56911111111", "1234567890", mensaje_entrada, mensaje_origen, "Reagendar")
+                telefono, "1234567890", mensaje_entrada, mensaje_origen, "Reagendar")
             self.assertEqual(evento["accion"], "REAGENDAR")
             self.assertEqual(reagendar.registrar_respuesta_reagendar(
-                "+56911111111", "1234567890", mensaje_entrada,
+                telefono, "1234567890", mensaje_entrada,
                 mensaje_origen, "Reagendar")["accion"], "DUPLICADO")
             baja = reagendar.registrar_respuesta_reagendar(
-                "+56911111111", "1234567890", "wamid." + uuid.uuid4().hex,
+                telefono, "1234567890", "wamid." + uuid.uuid4().hex,
                 mensaje_origen, "Dar de baja", declina="BAJA")
             self.assertEqual(baja["accion"], "BAJA")
             with conectar() as conn, conn.cursor() as cur:
@@ -479,15 +529,17 @@ class MariaDbCitasTests(unittest.TestCase):
         finally:
             with conectar() as conn, conn.cursor() as cur:
                 cur.execute("DELETE FROM paciente_reagendar WHERE reservo_cita_uuid=%s", (clave,))
+                cur.execute("DELETE FROM reagendar_destinatarios WHERE telefono=%s", (telefono,))
                 if lote_id:
                     cur.execute("DELETE FROM reagendar_lotes WHERE id=%s", (lote_id,))
                 conn.commit()
 
     def test_lote_programado_aplazado_y_csv_duplicado(self):
         clave = "TEST-" + uuid.uuid4().hex
+        telefono = telefono_prueba(clave)
         chile = ZoneInfo("America/Santiago")
         fecha = dt.datetime.now(chile).date() + dt.timedelta(days=1)
-        datos = csv_fila(clave, extra="si").replace(b"2026-10-22", fecha.isoformat().encode())
+        datos = csv_fila(clave, extra="si", telefono=telefono).replace(b"2026-10-22", fecha.isoformat().encode())
         recibido = dt.datetime.combine(fecha, dt.time(14, 0), chile)
         lote_id = None
         try:
@@ -504,7 +556,8 @@ class MariaDbCitasTests(unittest.TestCase):
             segundo = reagendar.importar(datos, CFG, recibido=recibido)
             self.assertEqual(segundo["summary"]["alreadyExists"], 1)
             self.assertEqual(segundo["message"], "Sin registros nuevos pendientes de envío")
-            self.assertIsNone(segundo["summary"]["batchId"])
+            self.assertIsNotNone(segundo["summary"]["batchId"])
+            self.assertEqual(segundo["summary"]["batchStatus"], "COMPLETADO")
             with conectar() as conn, conn.cursor() as cur:
                 cur.execute("SELECT estado, programado_para FROM reagendar_lotes WHERE id=%s", (lote_id,))
                 lote = cur.fetchone()
@@ -518,8 +571,11 @@ class MariaDbCitasTests(unittest.TestCase):
         finally:
             with conectar() as conn, conn.cursor() as cur:
                 cur.execute("DELETE FROM paciente_reagendar WHERE reservo_cita_uuid=%s", (clave,))
+                cur.execute("DELETE FROM reagendar_destinatarios WHERE telefono=%s", ("+" + telefono,))
                 if lote_id:
                     cur.execute("DELETE FROM reagendar_lotes WHERE id=%s", (lote_id,))
+                if 'segundo' in locals() and segundo["summary"]["batchId"]:
+                    cur.execute("DELETE FROM reagendar_lotes WHERE id=%s", (segundo["summary"]["batchId"],))
                 conn.commit()
 
     def test_carga_vespertina_y_tardia_no_despacha_de_inmediato(self):
@@ -532,6 +588,7 @@ class MariaDbCitasTests(unittest.TestCase):
                     (claves[0], 0, "PROGRAMADO"),
                     (claves[1], 31, "REVISION")):
                 datos = csv_fila(clave, extra="si").replace(
+                    b"56911111111", telefono_prueba(clave).encode()).replace(
                     b"2026-10-22", fecha.isoformat().encode()).replace(b"08-14", b"14-20")
                 recibido = dt.datetime.combine(fecha, dt.time(20, minuto), chile)
                 resultado = reagendar.importar(datos, CFG, recibido=recibido)
@@ -553,6 +610,7 @@ class MariaDbCitasTests(unittest.TestCase):
             with conectar() as conn, conn.cursor() as cur:
                 for clave in claves:
                     cur.execute("DELETE FROM paciente_reagendar WHERE reservo_cita_uuid=%s", (clave,))
+                    cur.execute("DELETE FROM reagendar_destinatarios WHERE telefono=%s", ("+" + telefono_prueba(clave),))
                 for lote in lotes:
                     if lote:
                         cur.execute("DELETE FROM reagendar_lotes WHERE id=%s", (lote,))
@@ -565,7 +623,7 @@ class MariaDbCitasTests(unittest.TestCase):
         encabezado = csv_fila().split(b"\n", 1)[0].decode() + "\n"
         def archivo(cantidad):
             filas = [f"{i},2026-10-22,08-14,,{nombres[4 if i == 6 else (i - 1) % 5]},"
-                    f"{prefijo}-{i},,Persona Prueba,56911111111,Doctor Prueba,"
+                    f"{prefijo}-{i},,Persona Prueba,{telefono_prueba(prefijo + '-' + str(i))},Doctor Prueba,"
                     "2026-10-22 10:00:00,,\n" for i in range(1, cantidad + 1)]
             return (encabezado + "".join(filas)).encode()
         try:
@@ -601,6 +659,9 @@ class MariaDbCitasTests(unittest.TestCase):
                 lotes = [r["lote_id"] for r in cur.fetchall() if r["lote_id"]]
                 cur.execute("DELETE FROM paciente_reagendar WHERE reservo_cita_uuid LIKE %s",
                             (prefijo + "-%",))
+                for i in range(1, 7):
+                    cur.execute("DELETE FROM reagendar_destinatarios WHERE telefono=%s",
+                                ("+" + telefono_prueba(prefijo + '-' + str(i)),))
                 if lotes:
                     cur.execute("DELETE FROM reagendar_lotes WHERE id IN (" +
                                 ",".join(["%s"] * len(lotes)) + ")", tuple(lotes))
@@ -608,7 +669,8 @@ class MariaDbCitasTests(unittest.TestCase):
 
     def test_reimportacion_no_reinicia_estado_ni_id_meta(self):
         key = "TEST-" + uuid.uuid4().hex
-        datos = csv_fila(key)
+        telefono = telefono_prueba(key)
+        datos = csv_fila(key, telefono=telefono)
         try:
             with conectar() as conn, conn.cursor() as cur:
                 cur.execute("SELECT 1 FROM information_schema.TABLES"
@@ -624,6 +686,7 @@ class MariaDbCitasTests(unittest.TestCase):
                 conn.commit()
             segundo = reagendar.importar(datos, CFG)
             self.assertEqual(segundo["summary"]["alreadyExists"], 1)
+            self.assertEqual(segundo["summary"]["alreadySent"], 1)
             with conectar() as conn, conn.cursor() as cur:
                 cur.execute("SELECT estado_envio, whatsapp_message_id, intentos_envio"
                             " FROM paciente_reagendar WHERE reservo_cita_uuid=%s", (key,))
@@ -641,8 +704,12 @@ class MariaDbCitasTests(unittest.TestCase):
                                 " WHERE reservo_cita_uuid=%s", (key,))
                     lote = cur.fetchone()
                     cur.execute("DELETE FROM paciente_reagendar WHERE reservo_cita_uuid=%s", (key,))
+                    cur.execute("DELETE FROM reagendar_destinatarios WHERE telefono=%s", ("+" + telefono,))
                     if lote and lote["lote_id"]:
                         cur.execute("DELETE FROM reagendar_lotes WHERE id=%s", (lote["lote_id"],))
+                    if 'segundo' in locals() and segundo["summary"]["batchId"]:
+                        cur.execute("DELETE FROM reagendar_lotes WHERE id=%s",
+                                    (segundo["summary"]["batchId"],))
                     conn.commit()
             except Exception:
                 pass

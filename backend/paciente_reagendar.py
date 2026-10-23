@@ -185,7 +185,7 @@ def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None,
         raise ValueError("La recepción debe tener zona horaria")
     fecha, ventana = next(iter(pares))
     programado = None if modo_prueba else programacion_carga(fecha, ventana, recibido)
-    insertados = duplicados = elegibles = 0
+    insertados = duplicados = ya_enviados = elegibles = 0
     from supresion import huella_telefono
     with conectar() as conn, conn.cursor() as cur:
         lote_id = None
@@ -198,6 +198,16 @@ def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None,
         for registro in registros:
             registro["modo_prueba"] = int(modo_prueba)
             telefono = registro["paciente_telefono_normalizado"]
+            cur.execute("SELECT modo_prueba, estado_envio FROM paciente_reagendar"
+                        " WHERE reservo_cita_uuid=%s", (registro["reservo_cita_uuid"],))
+            existente = cur.fetchone()
+            if existente:
+                if bool(existente["modo_prueba"]) != modo_prueba:
+                    raise ModoImportacionIncompatible(
+                        "El identificador de cita ya pertenece a otro modo de importación.")
+                duplicados += 1
+                ya_enviados += int(existente["estado_envio"] == "ENVIADO")
+                continue
             if telefono:
                 cur.execute("SELECT 1 FROM supresion_telefonos"
                             " WHERE huella=%s AND estado <> 'exento' FOR UPDATE",
@@ -210,21 +220,54 @@ def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None,
                             " LIMIT 1", (telefono,))
                 if cur.fetchone():
                     registro["ultimo_error_codigo"] = "PACIENTE_DE_BAJA"
+                cur.execute("SELECT d.estado, r.estado_envio AS envio_estado"
+                            " FROM reagendar_destinatarios d"
+                            " LEFT JOIN paciente_reagendar r ON r.id=d.cita_id"
+                            " WHERE d.telefono=%s AND d.modo_prueba=%s FOR UPDATE",
+                            (telefono, int(modo_prueba)))
+                destinatario = cur.fetchone()
+                if destinatario:
+                    duplicados += 1
+                    enviado = (destinatario["estado"] == "ENVIADO"
+                               or destinatario["envio_estado"] == "ENVIADO")
+                    ya_enviados += int(enviado)
+                    if enviado and destinatario["estado"] != "ENVIADO":
+                        cur.execute("UPDATE reagendar_destinatarios SET estado='ENVIADO'"
+                                    " WHERE telefono=%s AND modo_prueba=%s",
+                                    (telefono, int(modo_prueba)))
+                    continue
+                # Se reserva antes de insertar la cita: la clave única serializa
+                # importaciones concurrentes del mismo teléfono en MySQL.
+                cur.execute("INSERT IGNORE INTO reagendar_destinatarios"
+                            " (telefono, modo_prueba, cita_id) VALUES (%s, %s, 0)",
+                            (telefono, int(modo_prueba)))
+                if not cur.rowcount:
+                    duplicados += 1
+                    continue
             try:
                 cur.execute(
                     "INSERT INTO paciente_reagendar (lote_id," + ",".join(_COLUMNAS) + ")"
                     " VALUES (" + ",".join(["%s"] * (len(_COLUMNAS) + 1)) + ")",
                     (lote_id, *(registro[col] for col in _COLUMNAS)),
                 )
+                cita_id = cur.lastrowid
+                if telefono:
+                    cur.execute("UPDATE reagendar_destinatarios SET cita_id=%s"
+                                " WHERE telefono=%s AND modo_prueba=%s",
+                                (cita_id, telefono, int(modo_prueba)))
                 if registro["ultimo_error_codigo"] or modo_prueba:
                     cur.execute("UPDATE paciente_reagendar SET estado_envio='OMITIDO'"
-                                " WHERE id=%s", (cur.lastrowid,))
+                                " WHERE id=%s", (cita_id,))
                 else:
                     elegibles += 1
                 insertados += 1
             except pymysql.err.IntegrityError as exc:
                 if exc.args[0] != 1062:
                     raise
+                if telefono:
+                    cur.execute("DELETE FROM reagendar_destinatarios"
+                                " WHERE telefono=%s AND modo_prueba=%s AND cita_id=0",
+                                (telefono, int(modo_prueba)))
                 cur.execute("SELECT modo_prueba FROM paciente_reagendar"
                             " WHERE reservo_cita_uuid=%s", (registro["reservo_cita_uuid"],))
                 existente = cur.fetchone()
@@ -235,24 +278,22 @@ def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None,
                 duplicados += 1
         if modo_prueba:
             estado = None
-        elif insertados:
+        else:
             # Si la validación/inserción cruzó la hora de salida, revisión manual:
             # jamás disparar inmediatamente una programación ya vencida.
             vigente = (elegibles > 0 and programado is not None
                        and programado > dt.datetime.now(UTC).replace(tzinfo=None))
-            estado = "PROGRAMADO" if vigente else "REVISION"
+            estado = "PROGRAMADO" if vigente else "REVISION" if insertados else "COMPLETADO"
             cur.execute(
                 "UPDATE reagendar_lotes SET estado=%s, programado_para=%s,"
-                " creados=%s, rechazados=%s WHERE id=%s",
-                (estado, programado if vigente else None, insertados, len(errores), lote_id))
-        else:
-            cur.execute("DELETE FROM reagendar_lotes WHERE id=%s", (lote_id,))
-            lote_id = None
-            estado = None
+                " creados=%s, rechazados=%s, repetidos=%s, recibidos=%s WHERE id=%s",
+                (estado, programado if vigente else None, insertados, len(errores),
+                 duplicados, recibidas, lote_id))
         conn.commit()
     return {"success": True, "testMode": modo_prueba,
             "summary": {"received": recibidas, "inserted": insertados,
-            "eligible": elegibles, "alreadyExists": duplicados, "rejected": len(errores),
+            "eligible": elegibles, "alreadyExists": duplicados,
+            "alreadySent": ya_enviados, "rejected": len(errores),
             "batchId": lote_id, "batchStatus": estado,
             "scheduledAtUtc": programado.isoformat() + "Z" if lote_id and estado == "PROGRAMADO" else None},
             "errors": errores[:50],
@@ -295,7 +336,25 @@ def reclamar_pendiente(centros: list[str]) -> dict | None:
         fila = cur.fetchone()
         if not fila:
             return None
+        telefono = fila["paciente_telefono_normalizado"]
+        cur.execute("INSERT IGNORE INTO reagendar_destinatarios"
+                    " (telefono, modo_prueba, cita_id) VALUES (%s, 0, %s)",
+                    (telefono, fila["id"]))
+        cur.execute("SELECT cita_id, estado FROM reagendar_destinatarios"
+                    " WHERE telefono=%s AND modo_prueba=0 FOR UPDATE", (telefono,))
+        destinatario = cur.fetchone()
+        if (destinatario["cita_id"] != fila["id"]
+                or destinatario["estado"] in ("ENVIADO", "ERROR")):
+            cur.execute("UPDATE paciente_reagendar SET estado_envio='OMITIDO',"
+                        " ultimo_error_codigo='PACIENTE_DUPLICADO' WHERE id=%s",
+                        (fila["id"],))
+            conn.commit()
+            return None
+        if destinatario["estado"] == "PROCESANDO":
+            return None
         token = secrets.token_hex(16)
+        cur.execute("UPDATE reagendar_destinatarios SET estado='PROCESANDO'"
+                    " WHERE telefono=%s AND modo_prueba=0", (telefono,))
         cur.execute(
             "UPDATE paciente_reagendar SET estado_envio='PROCESANDO', reserva_token=%s,"
             " reservado_en=UTC_TIMESTAMP(), ultimo_intento_en=UTC_TIMESTAMP(),"
@@ -488,6 +547,11 @@ def marcar_fallo(cita: dict, codigo: str, *, reintentar: bool = False) -> None:
             " THEN DATE_ADD(UTC_TIMESTAMP(), INTERVAL %s SECOND) ELSE NULL END"
             " WHERE id=%s AND reserva_token=%s AND estado_envio='PROCESANDO'",
             (estado, codigo, estado, demora, cita["id"], cita["reserva_token"]))
+        if cur.rowcount and cita.get("paciente_telefono_normalizado"):
+            cur.execute("UPDATE reagendar_destinatarios SET estado=%s"
+                        " WHERE telefono=%s AND modo_prueba=0 AND cita_id=%s"
+                        " AND estado='PROCESANDO'",
+                        (estado, cita["paciente_telefono_normalizado"], cita["id"]))
         if cita.get("envio_id") and cur.rowcount:
             cur.execute("UPDATE envios SET fallidos=fallidos+1 WHERE id=%s", (cita["envio_id"],))
         conn.commit()
@@ -523,6 +587,9 @@ def marcar_enviado(cita: dict, canal: dict, plantilla: dict,
             (message_id, canal["phoneNumberId"], canal["phoneNumber"],
              log_id, cita["id"]))
         cur.execute("UPDATE envios SET enviados=enviados+1 WHERE id=%s", (cita["envio_id"],))
+        cur.execute("UPDATE reagendar_destinatarios SET estado='ENVIADO'"
+                    " WHERE telefono=%s AND modo_prueba=0 AND cita_id=%s",
+                    (cita["paciente_telefono_normalizado"], cita["id"]))
         conn.commit()
 
 
@@ -537,5 +604,10 @@ def recuperar_abandonados() -> int:
             " WHERE estado_envio='PROCESANDO'"
             " AND reservado_en < DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 HOUR)")
         cantidad = cur.rowcount
+        cur.execute("UPDATE reagendar_destinatarios d"
+                    " JOIN paciente_reagendar r ON r.id=d.cita_id"
+                    " SET d.estado='ERROR' WHERE d.estado='PROCESANDO'"
+                    " AND r.estado_envio='ERROR'"
+                    " AND r.ultimo_error_codigo='RESULTADO_INCIERTO'")
         conn.commit()
     return cantidad
