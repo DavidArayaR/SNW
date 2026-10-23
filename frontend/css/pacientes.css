@@ -44,11 +44,37 @@
 .reagendar__paginador { display: flex; justify-content: flex-end; align-items: center; gap: 6px; margin: 12px 18px 18px; }
 .reagendar__lotes { margin: 18px; padding: 16px; border: 1px solid var(--borde); border-radius: 14px; }
 .reagendar__lotes h3 { margin: 0 0 8px; }
+.reagendar__explicacion { max-width: 78ch; margin: 0; line-height: 1.45; }
 .reagendar__lotes .tabla-wrap { margin-top: 14px; overflow-x: auto; }
-.reagendar__lotes table { width: 100%; }
-.reagendar__lotes td:last-child { min-width: 170px; }
-.reagendar__lotes td:last-child .btn { margin: 2px; }
+.reagendar__lotes table { width: 100%; min-width: 880px; }
+.reagendar__lotes th, .reagendar__lotes td { text-align: left; vertical-align: top; }
+.reagendar__lotes td strong { display: block; color: var(--texto); font-weight: 700; }
+.reagendar__lotes td small { display: block; margin-top: 4px; color: var(--texto-suave); font-size: .78rem; line-height: 1.35; }
+.reagendar__lote--seleccionado { background: var(--brand-tint); }
+.reagendar__lotes .reagendar__estado--info strong,
+.reagendar__lotes .reagendar__estado--warn strong,
+.reagendar__lotes .reagendar__estado--ok strong {
+  display: inline-block;
+  padding: 4px 8px;
+  border: 1px solid;
+  border-radius: 8px;
+  font-size: .8rem;
+}
+.reagendar__lotes .reagendar__estado--info strong { background: var(--info-bg); color: var(--info-fg); border-color: var(--info-bd); }
+.reagendar__lotes .reagendar__estado--warn strong { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--warn-bd); }
+.reagendar__lotes .reagendar__estado--ok strong { background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-bd); }
+.reagendar__acciones-lote { min-width: 195px; }
+.reagendar__acciones-lote .btn { margin: 2px; white-space: nowrap; }
+.reagendar__detalle-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 26px 18px 0; }
+.reagendar__detalle-head h3 { margin: 0 0 4px; font-size: 1rem; }
+.reagendar__detalle-head .field__hint { margin: 0; }
+.reagendar__detalle-head .btn { flex: 0 0 auto; }
+.reagendar__detalle-head .btn[hidden] { display: none; }
+@media (max-width: 600px) {
+  .reagendar__detalle-head { align-items: flex-start; flex-direction: column; }
+}
 .reagendar__vista, .reagendar__aplazar { margin-top: 16px; padding: 16px; border: 1px solid var(--borde); border-radius: 12px; }
+.reagendar__vista .field__hint { margin: 6px 0 0; }
 .reagendar__aplazar {
   position: fixed;
   z-index: 1100;
@@ -70,6 +96,7 @@
   to { opacity: 1; transform: translateY(0); }
 }
 .reagendar__ejemplo { margin-top: 10px; padding: 12px; border-radius: 10px; background: var(--surface, transparent); }
+.reagendar__ejemplo small { display: block; margin-top: 4px; color: var(--texto-suave); }
 .reagendar__ejemplo p { margin: 8px 0 0; white-space: pre-wrap; }
 .reagendar__aplazar .field { margin-top: 12px; }
 .reagendar__aplazar input { width: 100%; }

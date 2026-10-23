@@ -13,8 +13,15 @@ assert.match(html, /id="pacientes-tab-reagendar"[^>]*aria-controls="cardReagenda
 assert.match(html, /id="panelBaseDatos"[^>]*role="tabpanel"/);
 assert.match(html, /id="cardReagendar"[^>]*role="tabpanel"[^>]*hidden/);
 assert.match(html, /id="reagendarAplazarForm"[^>]*role="dialog"/);
+assert.match(html, /Archivos recibidos y envíos/);
+assert.match(html, /id="reagendarVerTodas"[^>]*hidden/);
+assert.match(html, /Mensajes aceptados/);
 assert.match(reagendarScript, /document\.body\.appendChild\(formularioAplazar\)/);
 assert.match(reagendarScript, /boton\.top - alto - 10/);
+assert.match(reagendarScript, /PROGRAMADO: \["Programado"/);
+assert.match(reagendarScript, /REVISION: \["Requiere revisión"/);
+assert.match(reagendarScript, /loteAplazarId = lote\.id/);
+assert.match(reagendarScript, /loteActual = null; pagina = 1;/);
 assert.match(css, /\.reagendar__aplazar\s*\{\s*position:\s*fixed/);
 assert.match(css, /backdrop-filter:\s*blur\(/);
 

@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="css/tema.css?v=tokens1">
   <link rel="stylesheet" href="css/styles.css">
   <link rel="stylesheet" href="css/componentes.css?v=paginador-cinco1">
-  <link rel="stylesheet" href="css/pacientes.css?v=aplazar-flotante1">
+  <link rel="stylesheet" href="css/pacientes.css?v=cargas-claras1">
   <link rel="stylesheet" href="css/layout.css?v=navcolor1">
   <link rel="stylesheet" href="css/admin.css?v=tokens1">
   <link rel="stylesheet" href="css/refinamiento.css?v=merge-frontend1">
@@ -200,22 +200,27 @@
             <h2>Citas atendidas · reagendar</h2>
             <button id="reagendarActualizar" type="button" class="btn btn--ghost">Actualizar</button>
           </div>
-          <p class="field__hint reagendar__ayuda">La ventana indica cuándo Reservo buscó los registros, no la hora de la cita. «Enviado» indica aceptación por Meta, no entrega al paciente.</p>
+          <p class="field__hint reagendar__ayuda">Aquí ves los CSV recibidos desde Reservo y los mensajes que SNW preparó. Las horas de búsqueda no son las horas de las citas.</p>
           <div class="reagendar__lotes">
-            <h3>Cargas y programación</h3>
-            <p class="field__hint">Las cargas fuera de horario quedan en revisión. El envío requiere estar activado y tener una plantilla aprobada para cada clínica.</p>
+            <h3>Archivos recibidos y envíos</h3>
+            <p class="field__hint reagendar__explicacion">Cada fila representa un CSV con citas nuevas. Si llega a tiempo, el envío se programa para las 14:30 o 20:30; si llega tarde, queda para revisión. Para enviar, la automatización debe estar activa y la clínica debe tener una plantilla aprobada.</p>
             <div class="tabla-wrap"><table id="tablaReagendarLotes" aria-busy="false">
-              <thead><tr><th>Carga</th><th>Tramo</th><th>Recibido</th><th>Programado</th><th>Estado</th><th>Citas</th><th>Enviados</th><th>Acciones</th></tr></thead><tbody></tbody>
+              <thead><tr><th>CSV de Reservo</th><th>Recibido en SNW</th><th>Envío previsto</th><th>Situación</th><th>Citas</th><th>Mensajes aceptados</th><th>Acciones</th></tr></thead><tbody></tbody>
             </table></div>
             <p id="reagendarLotesMensaje" class="field__hint" role="status" aria-live="polite"></p>
-            <div id="reagendarVistaPrevia" class="reagendar__vista" hidden></div>
+            <div id="reagendarVistaPrevia" class="reagendar__vista" tabindex="-1" hidden></div>
             <form id="reagendarAplazarForm" class="reagendar__aplazar" role="dialog" aria-labelledby="reagendarAplazarTitulo" hidden>
               <strong id="reagendarAplazarTitulo"></strong>
+              <p class="field__hint">Cambia cuándo se intentará enviar el mensaje. No modifica la hora de las citas.</p>
               <div class="field"><label for="reagendarNuevaFecha">Nueva fecha y hora de Chile (AAAA-MM-DD HH:MM)</label><input id="reagendarNuevaFecha" type="text" inputmode="numeric" maxlength="16" placeholder="2026-10-22 16:00" required></div>
               <div class="field"><label for="reagendarMotivo">Motivo (opcional)</label><input id="reagendarMotivo" type="text" maxlength="255"></div>
               <div class="reagendar__acciones"><button class="btn btn--primary" type="submit">Guardar aplazamiento</button><button id="reagendarCerrarAplazar" class="btn btn--ghost" type="button">Cancelar</button></div>
               <p id="reagendarAplazarMensaje" class="field__hint" role="alert"></p>
             </form>
+          </div>
+          <div class="reagendar__detalle-head">
+            <div><h3>Citas importadas</h3><p id="reagendarSeleccionLote" class="field__hint" role="status">Sin carga seleccionada. Se aplican los filtros de abajo.</p></div>
+            <button id="reagendarVerTodas" class="btn btn--ghost" type="button" hidden>Quitar selección de carga</button>
           </div>
           <div class="reagendar__filtros">
             <div class="field"><label for="reagendarCentro">Clínica</label><select id="reagendarCentro"><option value="">Todas</option></select></div>
@@ -295,7 +300,7 @@
   <script src="js/pass-toggle.js"></script>
   <script src="js/csv-chunks.js?v=filas2000-1"></script>
   <script src="js/pacientes.js?v=permisos-acciones1"></script>
-  <script src="js/reagendar.js?v=aplazar-flotante1"></script>
+  <script src="js/reagendar.js?v=cargas-claras1"></script>
   <script src="js/pacientes-tabs.js?v=aplazar-flotante1"></script>
   <script>
     (function () {
