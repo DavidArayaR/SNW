@@ -1,9 +1,14 @@
 import json
+import logging
 import os
+import re
 import sys
+import threading
 import time
 import traceback
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pymysql
 from dotenv import load_dotenv
@@ -13,18 +18,91 @@ from whatsapp_channels import CENTROS, claves_centro
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
+LOGS_DIR = BASE_DIR / "logs"
+_LOG_LOCK = threading.Lock()
+_ZONA_LOG = ZoneInfo("America/Santiago")
 
 
-def log_error(contexto: str, exc: BaseException | None = None) -> None:
+def _texto_log_seguro(valor: str) -> str:
+    """Reduce PII y secretos antes de persistir un diagnóstico."""
+    texto = re.sub(r"(?i)\bBearer\s+\S+", "Bearer [oculto]", str(valor))
+    texto = re.sub(r"(?i)\b(token|secret|password|clave|api[_-]?key)\s*[:=]\s*[^\s,;]+",
+                   r"\1=[oculto]", texto)
+    texto = re.sub(r"(?i)[\w.+-]+@[\w.-]+\.[a-z]{2,}", "[correo]", texto)
+    texto = re.sub(r"(?<!\d)\+?\d[\d ().-]{8,}\d(?!\d)", "[numero]", texto)
+    return texto[:1500]
+
+
+def _guardar_error_archivo(contexto: str, exc: BaseException | None = None) -> None:
+    """Anexa cada error al archivo del día; crea logs/ solo al necesitarlo."""
+    ahora = datetime.now(_ZONA_LOG)
+    mensaje = f"[{ahora:%Y-%m-%d %H:%M:%S%z}] [ERROR] {_texto_log_seguro(contexto)}"
+    if exc is not None:
+        codigo = exc.args[0] if exc.args and isinstance(exc.args[0], int) else None
+        mensaje += f" | {type(exc).__name__}" + (f" ({codigo})" if codigo is not None else "")
+        if exc.__traceback__ is not None:
+            # format_tb incluye líneas de código que pueden contener valores
+            # sensibles; conservar solo la ubicación de cada frame.
+            for frame in traceback.extract_tb(exc.__traceback__):
+                mensaje += (f"\n  {Path(frame.filename).name}:{frame.lineno} "
+                            f"en {frame.name}")
+    entrada = (mensaje + "\n").encode("utf-8", errors="replace")
+    try:
+        with _LOG_LOCK:
+            LOGS_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+            ruta = LOGS_DIR / f"errores-{ahora:%Y-%m-%d}.log"
+            descriptor = os.open(ruta, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            try:
+                while entrada:
+                    entrada = entrada[os.write(descriptor, entrada):]
+            finally:
+                os.close(descriptor)
+    except OSError as error:
+        print(f"[ERROR] No se pudo guardar el archivo de errores ({type(error).__name__}).",
+              file=sys.stderr, flush=True)
+
+
+class _ErroresEstandarArchivo(logging.Handler):
+    """Guarda también errores emitidos por logging/ASGI sin alterar su consola."""
+
+    def __init__(self):
+        super().__init__(level=logging.ERROR)
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if getattr(record, "_snw_archivado", False):
+            return
+        record._snw_archivado = True
+        excepcion = record.exc_info[1] if record.exc_info else None
+        _guardar_error_archivo(f"{record.name}: {record.getMessage()}", excepcion)
+
+
+_ARCHIVO_ERRORES_HANDLER = _ErroresEstandarArchivo()
+
+
+def instalar_registro_errores() -> None:
+    """Cubre errores del logger estándar y de Uvicorn en este proceso."""
+    for nombre in ("", "uvicorn.error"):
+        logger = logging.getLogger(nombre)
+        if _ARCHIVO_ERRORES_HANDLER not in logger.handlers:
+            logger.addHandler(_ARCHIVO_ERRORES_HANDLER)
+
+
+def log_error(contexto: str, exc: BaseException | None = None,
+              *, solo_tipo: bool = False) -> None:
     """Registra en consola (stderr) cualquier error, con su traza completa.
 
     Se usa en todos los bloques try/except del backend para que ningún
     fallo quede silenciado, aunque el flujo continúe."""
-    print(f"[ERROR] {contexto}: {exc!r}" if exc is not None else f"[ERROR] {contexto}",
+    descripcion = type(exc).__name__ if solo_tipo and exc is not None else repr(exc)
+    print(f"[ERROR] {contexto}: {descripcion}" if exc is not None else f"[ERROR] {contexto}",
           file=sys.stderr, flush=True)
     if exc is not None and exc.__traceback__ is not None:
-        traceback.print_exception(type(exc), exc, exc.__traceback__)
+        if solo_tipo:
+            traceback.print_tb(exc.__traceback__)
+        else:
+            traceback.print_exception(type(exc), exc, exc.__traceback__)
         sys.stderr.flush()
+    _guardar_error_archivo(contexto, exc)
 
 
 def _migrar_numeros_prueba_a_produccion(cur) -> None:

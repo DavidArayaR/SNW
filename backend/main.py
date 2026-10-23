@@ -15,7 +15,6 @@ import secrets
 import shutil
 import threading
 import time
-import traceback
 import unicodedata
 import urllib.parse
 import uuid
@@ -34,7 +33,8 @@ from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from pydantic import BaseModel, Field
 
 from db import (
-    conectar, entorno_valido, log_error, nombre_base, columnas_tabla, columna_existe,
+    conectar, entorno_valido, log_error, instalar_registro_errores,
+    nombre_base, columnas_tabla, columna_existe,
     tabla_pacientes, asegurar_tabla_config, config_all, config_get, config_set,
     agregar_numero_prueba_ambos, quitar_numero_prueba_ambos,
     CONFIG_DEFAULTS,
@@ -164,7 +164,7 @@ _CABECERAS_CSV_PERMITIDAS = {"authorization", "content-type"}
 
 
 def _log_importacion_csv(request: Request, codigo: str, *, estado: int | None = None,
-                         detalle: str = "") -> None:
+                         detalle: str = "", exc: BaseException | None = None) -> None:
     """Diagnóstico de la integración sin token, contenido CSV ni datos del paciente."""
     request.state.csv_error_logeado = True
     partes = [f"importación CSV remota: {codigo}"]
@@ -172,7 +172,7 @@ def _log_importacion_csv(request: Request, codigo: str, *, estado: int | None = 
         partes.append(f"HTTP {estado}")
     if detalle:
         partes.append(detalle)
-    log_error(" | ".join(partes))
+    log_error(" | ".join(partes), exc, solo_tipo=exc is not None)
 
 
 @app.middleware("http")
@@ -5617,7 +5617,7 @@ def registrar_historial(paciente_id, nombre, telefono, clave_plantilla, mensaje,
             )
             conn.commit()
     except Exception as e:
-        print(f"[HISTORIAL] No se pudo registrar: {e}")
+        log_error("historial: no se pudo registrar", e)
 
 
 def crear_envio_batch(base_datos, plantilla_clave, plantilla_nombre, total, ambiente, usuario: str = "",
@@ -5650,7 +5650,7 @@ def crear_envio_batch(base_datos, plantilla_clave, plantilla_nombre, total, ambi
             conn.commit()
             return cur.lastrowid
     except Exception as e:
-        print(f"[ENVIO] No se pudo crear batch: {e}")
+        log_error("envío: no se pudo crear batch", e)
         return None
 
 
@@ -5673,7 +5673,7 @@ def actualizar_envio_batch(envio_id, ambiente, enviados=0, fallidos=0, invalidos
                 )
             conn.commit()
     except Exception as e:
-        print(f"[ENVIO] No se pudo actualizar batch: {e}")
+        log_error("envío: no se pudo actualizar batch", e)
 
 
 def procesar_job(job_id: str) -> None:
@@ -7811,6 +7811,7 @@ async def _loop_reagendar() -> None:
 
 @app.on_event("startup")
 async def _arrancar_scheduler_programados() -> None:
+    instalar_registro_errores()
     asyncio.create_task(_loop_programados())
     asyncio.create_task(_loop_supresion())
     asyncio.create_task(_loop_reagendar())
@@ -9290,8 +9291,8 @@ async def importar_citas_reagendar(request: Request, file: UploadFile = File(...
         detalle = f"fase={fase}; tipo={type(exc).__name__}"
         if numero is not None:
             detalle += f"; codigo={numero}"
-        _log_importacion_csv(request, "FALLO_INTERNO", estado=500, detalle=detalle)
-        traceback.print_tb(exc.__traceback__)
+        _log_importacion_csv(request, "FALLO_INTERNO", estado=500, detalle=detalle,
+                             exc=exc)
         raise HTTPException(500, detail="No se pudo importar el CSV. Revisa el registro del servidor.") from None
 
 

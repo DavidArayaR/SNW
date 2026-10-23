@@ -26,6 +26,7 @@ Thumbs.db
 desktop.ini
 
 # Logs y respaldos locales
+logs/
 *.log
 *.bak
 dump_*.sql
