@@ -19,6 +19,8 @@ from whatsapp_channels import catalogo_centros
 
 CSV_MAX_BYTES = 5 * 1024 * 1024
 CSV_MAX_FILAS = 10000
+CSV_CARGA_MAX_BYTES = 50 * 1024 * 1024
+CSV_CARGA_MAX_FILAS = 100000
 REQUERIDAS = {"fecha", "ventana", "clinica_nombre", "reservo_cita_uuid",
              "paciente_nombre", "inicio_cita"}
 ZONA_CHILE = ZoneInfo("America/Santiago")
@@ -159,6 +161,105 @@ def analizar_csv(datos: bytes, cfg: dict) -> tuple[list[dict], list[dict], int]:
         return registros, errores, recibidas
     except csv.Error as exc:
         raise CsvInvalido("El CSV está mal formado.") from exc
+
+
+def dividir_csv(datos: bytes) -> list[tuple[bytes, int]]:
+    """Divide un CSV UTF-8 en partes de hasta 10.000 filas y 5 MB.
+
+    Conserva el encabezado en cada parte y respeta campos entrecomillados con
+    saltos de línea. El segundo valor es la primera fila lógica del original.
+    """
+    if len(datos) > CSV_CARGA_MAX_BYTES:
+        raise CsvInvalido("El archivo supera los 50 MB.")
+    try:
+        lector = csv.reader(io.StringIO(datos.decode("utf-8-sig"), newline=""), strict=True)
+        encabezado = next(lector, None)
+        if not encabezado:
+            raise CsvInvalido("El archivo CSV está vacío.")
+        def escribir(fila: list[str]) -> bytes:
+            salida = io.StringIO(newline="")
+            csv.writer(salida, lineterminator="\n").writerow(fila)
+            return salida.getvalue().encode("utf-8")
+
+        cabecera = escribir(encabezado)
+        if len(cabecera) >= CSV_MAX_BYTES:
+            raise CsvInvalido("El encabezado CSV supera los 5 MB.")
+        partes = []
+        bloque = bytearray(cabecera)
+        filas_bloque = filas_total = 0
+        fila_inicial = 2
+        for fila in lector:
+            if not fila:  # DictReader también ignora líneas vacías.
+                continue
+            filas_total += 1
+            if filas_total > CSV_CARGA_MAX_FILAS:
+                raise CsvInvalido("El CSV supera el máximo de 100.000 filas por carga.")
+            codificada = escribir(fila)
+            if len(cabecera) + len(codificada) > CSV_MAX_BYTES:
+                raise CsvInvalido("Una fila CSV supera los 5 MB.")
+            if filas_bloque and (filas_bloque >= CSV_MAX_FILAS
+                                or len(bloque) + len(codificada) > CSV_MAX_BYTES):
+                partes.append((bytes(bloque), fila_inicial))
+                bloque = bytearray(cabecera)
+                filas_bloque = 0
+                fila_inicial = filas_total + 1
+            bloque.extend(codificada)
+            filas_bloque += 1
+        if not filas_total:
+            raise CsvInvalido("El CSV no contiene registros.")
+        partes.append((bytes(bloque), fila_inicial))
+        return partes
+    except UnicodeDecodeError as exc:
+        raise CsvInvalido("El CSV debe estar codificado en UTF-8.") from exc
+    except csv.Error as exc:
+        raise CsvInvalido("El CSV está mal formado.") from exc
+
+
+def importar_por_partes(datos: bytes, cfg: dict, *, modo_prueba: bool = False) -> dict:
+    """Valida el archivo completo y luego importa bloques idempotentes."""
+    partes = dividir_csv(datos)
+    fechas_ventanas = set()
+    total_filas = 0
+    for bloque, _ in partes:
+        registros, _, recibidas = analizar_csv(bloque, cfg)
+        total_filas += recibidas
+        fechas_ventanas.update((r["fecha"], r["ventana"]) for r in registros)
+    if modo_prueba and total_filas != 1:
+        raise CsvInvalido("El modo de prueba requiere un CSV de una sola cita.")
+    if len(fechas_ventanas) > 1:
+        raise CsvInvalido("Cada archivo debe corresponder a una sola fecha y ventana de Reservo.")
+
+    recibido = dt.datetime.now(UTC)
+    resumen = {clave: 0 for clave in ("received", "inserted", "eligible", "alreadyExists",
+                                     "alreadySent", "rejected")}
+    resumen["omittedReasons"] = {}
+    ids_lote, estados, horarios, errores, resultados = [], [], [], [], []
+    for indice, (bloque, fila_inicial) in enumerate(partes, 1):
+        resultado = importar(bloque, cfg, recibido=recibido, modo_prueba=modo_prueba)
+        parcial = resultado["summary"]
+        for clave in ("received", "inserted", "eligible", "alreadyExists",
+                      "alreadySent", "rejected"):
+            resumen[clave] += parcial.get(clave, 0)
+        for motivo, cantidad in (parcial.get("omittedReasons") or {}).items():
+            resumen["omittedReasons"][motivo] = resumen["omittedReasons"].get(motivo, 0) + cantidad
+        if parcial.get("batchId") is not None:
+            ids_lote.append(parcial["batchId"])
+        if parcial.get("batchStatus"):
+            estados.append(parcial["batchStatus"])
+        if parcial.get("scheduledAtUtc"):
+            horarios.append(parcial["scheduledAtUtc"])
+        errores.extend({**error, "row": error["row"] + fila_inicial - 2}
+                       for error in resultado.get("errors", []) if len(errores) < 50)
+        resultados.append({"part": indice, "firstRow": fila_inicial, "summary": parcial})
+    resumen.update({"parts": len(partes), "batchIds": ids_lote,
+                    "batchId": ids_lote[0] if len(ids_lote) == 1 else None,
+                    "batchStatus": (estados[0] if estados and len(set(estados)) == 1
+                                    else "VARIOS" if estados else None),
+                    "scheduledAtUtc": horarios[0] if horarios and len(set(horarios)) == 1 else None})
+    return {"success": True, "testMode": modo_prueba, "summary": resumen,
+            "parts": resultados, "errors": errores[:50],
+            "message": "Sin registros nuevos pendientes de envío" if not resumen["eligible"]
+            and not modo_prueba else None}
 
 
 _COLUMNAS = ("fecha", "ventana", "clinica_id", "clinica_nombre", "reservo_cita_uuid",

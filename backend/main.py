@@ -9315,10 +9315,15 @@ async def importar_citas_reagendar(request: Request, file: UploadFile = File(...
             _log_importacion_csv(request, "CUOTA_TOKEN", estado=429)
             raise HTTPException(429, detail="Demasiadas importaciones. Inténtalo más tarde.")
         fase = "lectura_csv"
-        datos = await file.read(paciente_reagendar.CSV_MAX_BYTES + 1)
+        datos = await file.read(paciente_reagendar.CSV_CARGA_MAX_BYTES + 1)
+        if len(datos) > paciente_reagendar.CSV_CARGA_MAX_BYTES:
+            raise paciente_reagendar.CsvInvalido("El archivo supera los 50 MB.")
         fase = "validacion_o_guardado"
+        dividir = (len(datos) > 5 * 1024 * 1024
+                   or datos.count(b"\n") > paciente_reagendar.CSV_MAX_FILAS)
         resultado = await asyncio.to_thread(
-            paciente_reagendar.importar, datos, cfg, modo_prueba=modo_prueba)
+            paciente_reagendar.importar_por_partes if dividir else paciente_reagendar.importar,
+            datos, cfg, modo_prueba=modo_prueba)
         if modo_prueba and not (resultado["summary"]["inserted"] or
                                resultado["summary"]["alreadyExists"]):
             _log_importacion_csv(request, "PRUEBA_SIN_REGISTROS", estado=422)
@@ -9338,7 +9343,7 @@ async def importar_citas_reagendar(request: Request, file: UploadFile = File(...
                            json.dumps({"testMode": modo_prueba, **resumen}, ensure_ascii=False))
         return resultado
     except paciente_reagendar.CsvInvalido as exc:
-        estado = 413 if len(datos) > paciente_reagendar.CSV_MAX_BYTES else 422
+        estado = 413 if "supera los" in str(exc) and "MB" in str(exc) else 422
         _log_importacion_csv(request, "CSV_INVALIDO", estado=estado, detalle=str(exc))
         raise HTTPException(estado, detail=str(exc)) from exc
     except paciente_reagendar.ModoImportacionIncompatible as exc:

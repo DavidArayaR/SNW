@@ -48,6 +48,62 @@ def telefono_prueba(clave):
 
 
 class ParserCitasTests(unittest.TestCase):
+    def test_csv_mas_de_diez_mil_filas_se_divide_sin_perder_filas(self):
+        encabezado, ejemplo = csv_fila().decode().splitlines()
+        filas = [ejemplo.replace("CITA-001", f"CITA-{i:05d}") for i in range(10001)]
+        datos = (encabezado + "\n" + "\n".join(filas) + "\n").encode()
+        partes = reagendar.dividir_csv(datos)
+        self.assertEqual(len(partes), 2)
+        self.assertEqual([inicio for _, inicio in partes], [2, 10002])
+        self.assertEqual([reagendar.analizar_csv(bloque, CFG)[2] for bloque, _ in partes],
+                         [10000, 1])
+        self.assertTrue(all(len(bloque) <= reagendar.CSV_MAX_BYTES for bloque, _ in partes))
+
+    def test_valida_ventana_global_antes_de_guardar_ninguna_parte(self):
+        encabezado, ejemplo = csv_fila().decode().splitlines()
+        filas = [ejemplo.replace("CITA-001", f"CITA-{i:05d}") for i in range(10000)]
+        filas.append(ejemplo.replace("CITA-001", "CITA-ULTIMA").replace("08-14", "14-20"))
+        datos = (encabezado + "\n" + "\n".join(filas) + "\n").encode()
+        with patch.object(reagendar, "importar") as guardar, \
+                self.assertRaises(reagendar.CsvInvalido):
+            reagendar.importar_por_partes(datos, CFG)
+        guardar.assert_not_called()
+
+    def test_divide_tambien_por_tamano_y_respeta_campos_entrecomillados(self):
+        datos = ("fecha,ventana,clinica_nombre,reservo_cita_uuid,paciente_nombre,inicio_cita\n"
+                 "2026-10-22,08-14,VIDA Y SALUD,uno,\"Nombre\nCon salto\",2026-10-22 10:00:00\n"
+                 "2026-10-22,08-14,VIDA Y SALUD,dos,Otro,2026-10-22 11:00:00\n").encode()
+        with patch.object(reagendar, "CSV_MAX_BYTES", 155):
+            partes = reagendar.dividir_csv(datos)
+        self.assertEqual(len(partes), 2)
+        self.assertIn(b"Nombre\nCon salto", partes[0][0])
+        self.assertEqual([inicio for _, inicio in partes], [2, 3])
+
+    def test_importacion_por_partes_suma_resultados_y_filas_originales(self):
+        encabezado, ejemplo = csv_fila().decode().splitlines()
+        filas = [ejemplo.replace("CITA-001", f"CITA-{i:05d}") for i in range(10001)]
+        datos = (encabezado + "\n" + "\n".join(filas) + "\n").encode()
+        llamadas = 0
+
+        def simular(bloque, cfg, *, recibido, modo_prueba):
+            nonlocal llamadas
+            llamadas += 1
+            cantidad = reagendar.analizar_csv(bloque, cfg)[2]
+            return {"summary": {"received": cantidad, "inserted": cantidad,
+                                "eligible": cantidad, "batchId": llamadas,
+                                "batchStatus": "PROGRAMADO",
+                                "scheduledAtUtc": "2026-10-22T17:30:00Z"},
+                    "errors": [{"row": 2, "code": "dato_invalido"}] if llamadas == 2 else []}
+
+        with patch.object(reagendar, "importar", side_effect=simular):
+            resultado = reagendar.importar_por_partes(datos, CFG)
+        self.assertEqual(llamadas, 2)
+        self.assertEqual(resultado["summary"]["received"], 10001)
+        self.assertEqual(resultado["summary"]["inserted"], 10001)
+        self.assertEqual(resultado["summary"]["batchIds"], [1, 2])
+        self.assertEqual(resultado["summary"]["parts"], 2)
+        self.assertEqual(resultado["errors"][0]["row"], 10002)
+
     def test_csv_ficticio_tiene_una_fila_sin_datos_de_contacto(self):
         filas, errores, recibidas = reagendar.analizar_csv(PRUEBA_CSV, CFG)
         self.assertEqual((recibidas, errores), (1, []))
@@ -211,6 +267,28 @@ class ApiCitasTests(unittest.TestCase):
                                   headers={"Authorization": "Bearer token-correcto"}, files=files)
             self.assertEqual(ok.status_code, 200)
             self.assertEqual(ok.json()["summary"]["inserted"], 1)
+
+    def test_api_envia_csv_con_mas_de_diez_mil_filas_al_importador_por_partes(self):
+        encabezado, ejemplo = csv_fila().decode().splitlines()
+        datos = (encabezado + "\n" + "\n".join(
+            ejemplo.replace("CITA-001", f"CITA-{i:05d}") for i in range(10001)) + "\n").encode()
+        token = "token-prueba-grande"
+        cfg = {**CFG, "reagendar_api_token_hash": hashlib.sha256(token.encode()).hexdigest()}
+        simulado = {"success": True, "summary": {"received": 10001, "inserted": 10001,
+                    "eligible": 10001, "alreadyExists": 0, "rejected": 0,
+                    "parts": 2, "batchIds": [1, 2]}, "errors": []}
+        with patch.object(main, "config_all", return_value=cfg), \
+                patch.object(reagendar, "consumir_cuota", return_value=True), \
+                patch.object(reagendar, "importar_por_partes", return_value=simulado) as importar, \
+                patch.object(reagendar, "importar") as simple, \
+                patch.object(main, "auditoria_registrar"):
+            respuesta = self.client.post("/api/v1/paciente-reagendar/importar-csv",
+                headers={"Authorization": f"Bearer {token}"},
+                files={"file": ("citas.csv", datos, "text/csv")})
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(respuesta.json()["summary"]["parts"], 2)
+        importar.assert_called_once()
+        simple.assert_not_called()
 
     def test_importacion_remota_registra_fallos_sin_datos_sensibles(self):
         token = "token-secreto-de-prueba"

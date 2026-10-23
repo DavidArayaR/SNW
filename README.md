@@ -32,8 +32,13 @@ Lo más seguro es que el servidor del CRM haga el `POST` directamente y
 mantenga el token fuera del código JavaScript y de los navegadores de sus
 usuarios; las peticiones entre servidores no necesitan CORS.
 
-Envía `multipart/form-data`, campo `file`, con un CSV UTF-8 (BOM opcional),
-máximo 5 MB y 10.000 filas. Ejemplo:
+Envía `multipart/form-data`, campo `file`, con un CSV UTF-8 (BOM opcional).
+El endpoint acepta hasta **50 MB o 100.000 filas** por solicitud y divide
+automáticamente el archivo en partes de hasta **5 MB y 10.000 filas**,
+repitiendo el encabezado en cada parte sin romper campos entrecomillados.
+El sistema externo puede seguir enviando un único archivo por fecha y ventana;
+si supera el máximo total, debe dividirlo antes de subirlo, manteniendo la misma
+fecha y ventana en cada envío. Ejemplo:
 
 ```bash
 curl -X POST "https://DOMINIO-SNW/api/v1/paciente-reagendar/importar-csv" \
@@ -63,7 +68,14 @@ La hora del ejemplo es orientativa; el valor real refleja la zona horaria chilen
 Los errores por fila
 incluyen solo número y código, no datos de pacientes. Un UUID ya importado
 no crea otro envío ni modifica estado, intentos, fecha de envío o ID de Meta.
-Errores HTTP: `401` credencial incorrecta, `413` archivo >5 MB, `422` CSV
+En una carga dividida, la respuesta agrega `summary.parts`, `summary.batchIds`
+y `parts` con los resultados por bloque; `summary.batchId` es `null` si hay
+varios lotes. Los números de fila de los errores se refieren al CSV original.
+Antes de guardar se valida que todas las partes correspondan a la misma fecha
+y ventana. Si una parte falla durante el guardado, las anteriores pueden haber
+quedado confirmadas: reintentar el mismo CSV es seguro por la deduplicación de
+UUID y teléfono, y permite completar las partes pendientes.
+Errores HTTP: `401` credencial incorrecta, `413` archivo >50 MB o fila >5 MB, `422` CSV
 inválido, `429` límite de 30 solicitudes por IP o 20 por credencial cada
 15 minutos, `503` token aún no configurado. La cuota se comparte en MySQL
 entre instancias. El archivo CSV no se conserva después de importar.
