@@ -70,6 +70,26 @@
 .reagendar__detalle-head .field__hint { margin: 0; }
 .reagendar__detalle-head .btn { flex: 0 0 auto; }
 .reagendar__detalle-head .btn[hidden] { display: none; }
+.reagendar__detalle-head #reagendarVerTodas {
+  background: #f3d88e;
+  color: #5d4517;
+  border-color: #caa953;
+}
+.reagendar__detalle-head #reagendarVerTodas:hover {
+  background: #edd079;
+  color: #49360f;
+  border-color: #ab8732;
+}
+:root[data-tema="oscuro"] .reagendar__detalle-head #reagendarVerTodas {
+  background: #604b24;
+  color: #f7e1a8;
+  border-color: #a88742;
+}
+:root[data-tema="oscuro"] .reagendar__detalle-head #reagendarVerTodas:hover {
+  background: #735b2a;
+  color: #fff0c6;
+  border-color: #d5b261;
+}
 @media (max-width: 600px) {
   .reagendar__detalle-head { align-items: flex-start; flex-direction: column; }
 }

@@ -15,6 +15,8 @@ assert.match(html, /id="cardReagendar"[^>]*role="tabpanel"[^>]*hidden/);
 assert.match(html, /id="reagendarAplazarForm"[^>]*role="dialog"/);
 assert.match(html, /Archivos recibidos y envíos/);
 assert.match(html, /id="reagendarVerTodas"[^>]*hidden/);
+assert.match(css, /#reagendarVerTodas\s*\{\s*background:\s*#f3d88e/);
+assert.match(css, /:root\[data-tema="oscuro"\].*#reagendarVerTodas/);
 assert.match(html, /Mensajes aceptados/);
 assert.match(reagendarScript, /document\.body\.appendChild\(formularioAplazar\)/);
 assert.match(reagendarScript, /boton\.top - alto - 10/);
