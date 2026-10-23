@@ -1,7 +1,6 @@
 (function () {
   const card = document.getElementById("cardReagendar");
   if (!card || !window.snwEsPrivilegiado) return;
-  card.hidden = false;
   const $ = id => document.getElementById(id);
   let pagina = 1;
   let paginas = 1;
@@ -164,7 +163,12 @@
   $("reagendarIr").addEventListener("change", e => {
     pagina = Math.min(paginas, Math.max(1, Number(e.target.value) || 1)); cargar();
   });
-  centros();
-  cargarLotes();
-  cargar();
+  let iniciada = false;
+  window.snwCargarReagendar = function () {
+    if (iniciada) return;
+    iniciada = true;
+    centros();
+    cargarLotes();
+    cargar();
+  };
 })();

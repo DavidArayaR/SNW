@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="css/tema.css?v=tokens1">
   <link rel="stylesheet" href="css/styles.css">
   <link rel="stylesheet" href="css/componentes.css?v=paginador-cinco1">
-  <link rel="stylesheet" href="css/pacientes.css?v=tokens1">
+  <link rel="stylesheet" href="css/pacientes.css?v=tabs-reagendar1">
   <link rel="stylesheet" href="css/layout.css?v=navcolor1">
   <link rel="stylesheet" href="css/admin.css?v=tokens1">
   <link rel="stylesheet" href="css/refinamiento.css?v=merge-frontend1">
@@ -28,9 +28,16 @@
           <i class="fa-solid fa-bars"></i>
         </button>
         <span class="app-topbar__titulo">Base de datos</span>
+        <div class="msg-tabs pacientes-tabs" role="tablist" aria-label="Secciones de base de datos">
+          <button type="button" class="msg-tab activo" id="pacientes-tab-pacientes" data-pacientes-tab="pacientes" role="tab" aria-selected="true" aria-controls="panelBaseDatos">Pacientes</button>
+          <button type="button" class="msg-tab" id="pacientes-tab-reagendar" data-pacientes-tab="reagendar" role="tab" aria-selected="false" aria-controls="cardReagendar" hidden>Reagendamiento</button>
+        </div>
+        <span class="app-topbar__sep"></span>
       </header>
 
       <main class="layout layout--ancho">
+
+        <div class="pacientes-tab-panel" id="panelBaseDatos" role="tabpanel" aria-labelledby="pacientes-tab-pacientes">
 
         <section class="panel" id="tabPacientes">
           <div class="panel__head">
@@ -186,7 +193,9 @@
           <div id="csvResultado" class="gestion-resultado"></div>
         </section>
 
-        <section class="panel" id="cardReagendar" hidden>
+        </div>
+
+        <section class="panel pacientes-tab-panel" id="cardReagendar" role="tabpanel" aria-labelledby="pacientes-tab-reagendar" hidden>
           <div class="panel__head">
             <h2>Citas atendidas · reagendar</h2>
             <button id="reagendarActualizar" type="button" class="btn btn--ghost">Actualizar</button>
@@ -286,10 +295,10 @@
   <script src="js/pass-toggle.js"></script>
   <script src="js/csv-chunks.js?v=filas2000-1"></script>
   <script src="js/pacientes.js?v=permisos-acciones1"></script>
-  <script src="js/reagendar.js?v=3"></script>
+  <script src="js/reagendar.js?v=tab-reagendar1"></script>
+  <script src="js/pacientes-tabs.js?v=1"></script>
   <script>
     (function () {
-      if (window.snwCargarPacientes) window.snwCargarPacientes();
       // Botón para ocultar/mostrar los filtros en móvil (con contador de
       // filtros aplicados); en escritorio no hace falta y va oculto por CSS.
       const statsFiltros = document.getElementById("stats");
