@@ -73,6 +73,18 @@ class EnrutamientoWebhookTests(unittest.TestCase):
         flujo.assert_called_once_with(TELEFONO, "¿Cuánto cuesta?", "wamid.respuesta", None)
         derivar.assert_not_called()
 
+    def test_tengo_una_consulta_pide_un_solo_mensaje_antes_de_derivar(self):
+        with patch("whatsapp_service.al_consulta_campania",
+                   return_value="detalle_solicitado") as flujo, \
+                patch("whatsapp_service.al_detectar_consulta") as derivar:
+            acciones = self.procesar("Hola, tengo una consulta sobre mi atención")
+        self.assertIn("consulta_campania_detalle_solicitado", acciones)
+        flujo.assert_called_once_with(
+            TELEFONO, "Hola, tengo una consulta sobre mi atención", "wamid.respuesta", None)
+        derivar.assert_not_called()
+        self.assertIn("en un solo mensaje", main._AVISO_CONSULTA_CAMPANIA)
+        self.assertIn("registrar tu consulta", main._AVISO_CONSULTA_CAMPANIA)
+
     def test_intencion_de_agendar_en_texto_tambien_pide_detalle(self):
         with patch("whatsapp_service.al_consulta_campania",
                    return_value="detalle_solicitado") as flujo, \

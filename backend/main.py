@@ -2785,9 +2785,9 @@ def _registrar_derivacion_consulta(telefono: str, texto: str, mensaje_id: str,
 
 
 _AVISO_CONSULTA_CAMPANIA = (
-    "Para ayudarte, escribe cuál es tu consulta completa en un solo mensaje "
-    "de hasta 500 caracteres. "
-    "Luego te enviaremos un botón para continuarla en el WhatsApp del call center."
+    "Para registrar tu consulta correctamente, escríbela completa en un solo "
+    "mensaje de hasta 500 caracteres. Después te enviaremos un botón para "
+    "continuarla en el WhatsApp del call center."
 )
 _AVISO_CONSULTA_LARGA = (
     "Tu consulta supera los 500 caracteres. Resúmela en un solo mensaje "
