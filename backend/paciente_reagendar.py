@@ -186,6 +186,7 @@ def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None,
     fecha, ventana = next(iter(pares))
     programado = None if modo_prueba else programacion_carga(fecha, ventana, recibido)
     insertados = duplicados = ya_enviados = elegibles = 0
+    motivos_omitidos: dict[str, int] = {}
     from supresion import huella_telefono
     with conectar() as conn, conn.cursor() as cur:
         lote_id = None
@@ -258,6 +259,9 @@ def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None,
                 if registro["ultimo_error_codigo"] or modo_prueba:
                     cur.execute("UPDATE paciente_reagendar SET estado_envio='OMITIDO'"
                                 " WHERE id=%s", (cita_id,))
+                    if registro["ultimo_error_codigo"]:
+                        codigo = registro["ultimo_error_codigo"]
+                        motivos_omitidos[codigo] = motivos_omitidos.get(codigo, 0) + 1
                 else:
                     elegibles += 1
                 insertados += 1
@@ -294,6 +298,7 @@ def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None,
             "summary": {"received": recibidas, "inserted": insertados,
             "eligible": elegibles, "alreadyExists": duplicados,
             "alreadySent": ya_enviados, "rejected": len(errores),
+            "omittedReasons": motivos_omitidos,
             "batchId": lote_id, "batchStatus": estado,
             "scheduledAtUtc": programado.isoformat() + "Z" if lote_id and estado == "PROGRAMADO" else None},
             "errors": errores[:50],

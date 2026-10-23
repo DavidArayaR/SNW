@@ -212,6 +212,45 @@ class ApiCitasTests(unittest.TestCase):
             self.assertEqual(ok.status_code, 200)
             self.assertEqual(ok.json()["summary"]["inserted"], 1)
 
+    def test_importacion_remota_registra_fallos_sin_datos_sensibles(self):
+        token = "token-secreto-de-prueba"
+        cfg = {**CFG, "reagendar_api_token_hash": hashlib.sha256(token.encode()).hexdigest()}
+        ruta = "/api/v1/paciente-reagendar/importar-csv"
+        cabeceras = {"Authorization": f"Bearer {token}"}
+        with patch.object(main, "config_all", return_value=cfg), \
+                patch.object(reagendar, "consumir_cuota", return_value=True), \
+                patch.object(main, "auditoria_registrar"), \
+                patch.object(main, "log_error") as registrar:
+            faltante = self.client.post(ruta, headers=cabeceras)
+            self.assertEqual(faltante.status_code, 422)
+            invalido = self.client.post(ruta, headers=cabeceras,
+                                        files={"file": ("citas.csv", b"x,y\n1,2\n", "text/csv")})
+            self.assertEqual(invalido.status_code, 422)
+            with patch.object(reagendar, "CSV_MAX_BYTES", 4):
+                grande = self.client.post(ruta, headers=cabeceras,
+                                          files={"file": ("citas.csv", b"123456", "text/csv")})
+            self.assertEqual(grande.status_code, 413)
+            with patch.object(reagendar, "importar", return_value={
+                    "success": True, "summary": {"inserted": 1, "alreadyExists": 0,
+                    "rejected": 1, "omittedReasons": {"TELEFONO_INVALIDO": 1}},
+                    "errors": [{"row": 2, "code": "dato_invalido"}]}):
+                parcial = self.client.post(ruta, headers=cabeceras,
+                                           files={"file": ("citas.csv", b"csv", "text/csv")})
+            self.assertEqual(parcial.status_code, 200)
+            with patch.object(reagendar, "importar",
+                              side_effect=RuntimeError("NOMBRE_PRIVADO +56999999999")):
+                fallo = self.client.post(ruta, headers=cabeceras,
+                                         files={"file": ("citas.csv", b"csv", "text/csv")})
+            self.assertEqual(fallo.status_code, 500)
+            self.assertNotIn("NOMBRE_PRIVADO", fallo.text)
+            registro = " | ".join(str(c.args[0]) for c in registrar.call_args_list)
+            for codigo in ("SOLICITUD_RECHAZADA", "CSV_INVALIDO", "REGISTROS_EXCLUIDOS",
+                           "TELEFONO_INVALIDO=1", "FALLO_INTERNO", "tipo=RuntimeError"):
+                self.assertIn(codigo, registro)
+            self.assertNotIn(token, registro)
+            self.assertNotIn("NOMBRE_PRIVADO", registro)
+            self.assertNotIn("+56999999999", registro)
+
     def test_importacion_remota_de_prueba_persiste_y_no_duplica(self):
         clave = "TEST-CSV-REMOTO-" + uuid.uuid4().hex
         datos = PRUEBA_CSV.replace(b"TEST-CSV-REMOTO-001", clave.encode())

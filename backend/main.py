@@ -15,6 +15,7 @@ import secrets
 import shutil
 import threading
 import time
+import traceback
 import unicodedata
 import urllib.parse
 import uuid
@@ -162,6 +163,18 @@ _RUTA_IMPORTACION_REAGENDAR = "/api/v1/paciente-reagendar/importar-csv"
 _CABECERAS_CSV_PERMITIDAS = {"authorization", "content-type"}
 
 
+def _log_importacion_csv(request: Request, codigo: str, *, estado: int | None = None,
+                         detalle: str = "") -> None:
+    """Diagnóstico de la integración sin token, contenido CSV ni datos del paciente."""
+    request.state.csv_error_logeado = True
+    partes = [f"importación CSV remota: {codigo}"]
+    if estado is not None:
+        partes.append(f"HTTP {estado}")
+    if detalle:
+        partes.append(detalle)
+    log_error(" | ".join(partes))
+
+
 @app.middleware("http")
 async def cors_importacion_reagendar(request: Request, call_next):
     """CORS limitado al CSV del CRM; no concede acceso sin el Bearer propio."""
@@ -175,6 +188,7 @@ async def cors_importacion_reagendar(request: Request, call_next):
             "access-control-request-headers", "").split(",") if h.strip()}
         if (not permitido or request.headers.get("access-control-request-method") != "POST"
                 or not solicitadas.issubset(_CABECERAS_CSV_PERMITIDAS)):
+            _log_importacion_csv(request, "CORS_RECHAZADO", estado=403)
             return Response(status_code=403, headers={"Cache-Control": "no-store"})
         return Response(status_code=204, headers={
             "Access-Control-Allow-Origin": origen,
@@ -184,7 +198,13 @@ async def cors_importacion_reagendar(request: Request, call_next):
             "Vary": "Origin",
             "Cache-Control": "no-store",
         })
+    if origen and not permitido:
+        log_error("importación CSV remota: CORS_ORIGEN_NO_PERMITIDO")
     respuesta = await call_next(request)
+    if respuesta.status_code >= 400 and not getattr(request.state, "csv_error_logeado", False):
+        # Incluye errores de validación de FastAPI previos a ejecutar la ruta,
+        # por ejemplo cuando falta el archivo obligatorio.
+        _log_importacion_csv(request, "SOLICITUD_RECHAZADA", estado=respuesta.status_code)
     if permitido:
         respuesta.headers["Access-Control-Allow-Origin"] = origen
         respuesta.headers["Vary"] = "Origin"
@@ -9208,35 +9228,71 @@ def rotar_token_reagendar(sesion: dict = Depends(solo_dev)):
 @app.post("/api/v1/paciente-reagendar/importar-csv")
 async def importar_citas_reagendar(request: Request, file: UploadFile = File(...),
                                   modo_prueba: bool = Form(False)):
-    cfg = config_all(refresh=True)
-    esperado = str(cfg.get("reagendar_api_token_hash") or "")
-    if not esperado:
-        raise HTTPException(503, detail="La integración de citas no está habilitada.")
-    ip = request.client.host if request.client else "desconocida"
-    if not paciente_reagendar.consumir_cuota(f"ip:{esperado}:{ip}", 30):
-        raise HTTPException(429, detail="Demasiadas solicitudes. Inténtalo más tarde.")
-    cabecera = request.headers.get("Authorization", "")
-    proporcionado = cabecera[7:].strip() if cabecera.startswith("Bearer ") else ""
-    huella = hashlib.sha256(proporcionado.encode()).hexdigest()
-    if not proporcionado or not secrets.compare_digest(huella, esperado):
-        raise HTTPException(401, detail="Credencial de integración no válida.")
-    if not paciente_reagendar.consumir_cuota(f"token:{esperado}", 20):
-        raise HTTPException(429, detail="Demasiadas importaciones. Inténtalo más tarde.")
+    fase = "configuracion"
+    datos = b""
     try:
+        cfg = config_all(refresh=True)
+        esperado = str(cfg.get("reagendar_api_token_hash") or "")
+        if not esperado:
+            _log_importacion_csv(request, "INTEGRACION_INACTIVA", estado=503)
+            raise HTTPException(503, detail="La integración de citas no está habilitada.")
+        ip = request.client.host if request.client else "desconocida"
+        fase = "cuota_ip"
+        if not paciente_reagendar.consumir_cuota(f"ip:{esperado}:{ip}", 30):
+            _log_importacion_csv(request, "CUOTA_IP", estado=429)
+            raise HTTPException(429, detail="Demasiadas solicitudes. Inténtalo más tarde.")
+        cabecera = request.headers.get("Authorization", "")
+        proporcionado = cabecera[7:].strip() if cabecera.startswith("Bearer ") else ""
+        huella = hashlib.sha256(proporcionado.encode()).hexdigest()
+        if not proporcionado or not secrets.compare_digest(huella, esperado):
+            _log_importacion_csv(request, "TOKEN_INVALIDO", estado=401)
+            raise HTTPException(401, detail="Credencial de integración no válida.")
+        fase = "cuota_token"
+        if not paciente_reagendar.consumir_cuota(f"token:{esperado}", 20):
+            _log_importacion_csv(request, "CUOTA_TOKEN", estado=429)
+            raise HTTPException(429, detail="Demasiadas importaciones. Inténtalo más tarde.")
+        fase = "lectura_csv"
         datos = await file.read(paciente_reagendar.CSV_MAX_BYTES + 1)
+        fase = "validacion_o_guardado"
         resultado = await asyncio.to_thread(
             paciente_reagendar.importar, datos, cfg, modo_prueba=modo_prueba)
+        if modo_prueba and not (resultado["summary"]["inserted"] or
+                               resultado["summary"]["alreadyExists"]):
+            _log_importacion_csv(request, "PRUEBA_SIN_REGISTROS", estado=422)
+            raise HTTPException(422, detail="No se importó ningún registro de prueba válido.")
+        resumen = resultado["summary"]
+        if resumen.get("rejected") or resumen.get("omittedReasons"):
+            motivos = dict(resumen.get("omittedReasons") or {})
+            for error in resultado.get("errors") or []:
+                codigo = str(error.get("code") or "desconocido")
+                motivos[codigo] = motivos.get(codigo, 0) + 1
+            codigos = ", ".join(f"{codigo}={cantidad}" for codigo, cantidad in sorted(motivos.items()))
+            _log_importacion_csv(request, "REGISTROS_EXCLUIDOS", estado=200,
+                                 detalle=f"rechazados={resumen.get('rejected', 0)}; "
+                                         f"muestra_motivos={codigos}")
+        fase = "auditoria"
+        auditoria_registrar("integracion_reagendar", "reagendar_csv", "citas_atendidas",
+                           json.dumps({"testMode": modo_prueba, **resumen}, ensure_ascii=False))
+        return resultado
     except paciente_reagendar.CsvInvalido as exc:
-        raise HTTPException(413 if len(datos) > paciente_reagendar.CSV_MAX_BYTES else 422,
-                            detail=str(exc)) from exc
+        estado = 413 if len(datos) > paciente_reagendar.CSV_MAX_BYTES else 422
+        _log_importacion_csv(request, "CSV_INVALIDO", estado=estado, detalle=str(exc))
+        raise HTTPException(estado, detail=str(exc)) from exc
     except paciente_reagendar.ModoImportacionIncompatible as exc:
+        _log_importacion_csv(request, "UUID_MODO_INCOMPATIBLE", estado=409)
         raise HTTPException(409, detail=str(exc)) from exc
-    if modo_prueba and not (resultado["summary"]["inserted"] or
-                           resultado["summary"]["alreadyExists"]):
-        raise HTTPException(422, detail="No se importó ningún registro de prueba válido.")
-    auditoria_registrar("integracion_reagendar", "reagendar_csv", "citas_atendidas",
-                       json.dumps({"testMode": modo_prueba, **resultado["summary"]}, ensure_ascii=False))
-    return resultado
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # Las excepciones de BD pueden incluir parámetros SQL con datos del
+        # paciente. Registrar solo etapa, clase y código numérico seguro.
+        numero = exc.args[0] if exc.args and isinstance(exc.args[0], int) else None
+        detalle = f"fase={fase}; tipo={type(exc).__name__}"
+        if numero is not None:
+            detalle += f"; codigo={numero}"
+        _log_importacion_csv(request, "FALLO_INTERNO", estado=500, detalle=detalle)
+        traceback.print_tb(exc.__traceback__)
+        raise HTTPException(500, detail="No se pudo importar el CSV. Revisa el registro del servidor.") from None
 
 
 @app.get("/api/v1/paciente-reagendar")
