@@ -441,12 +441,13 @@ def solo_dev(sesion: dict = Depends(sesion_actual)) -> dict:
     return sesion
 
 
-_NOMBRE_LOG_ERROR = re.compile(r"errores-\d{4}-\d{2}-\d{2}\.log\Z")
+_NOMBRE_LOG_ERROR = re.compile(
+    r"errores-\d{4}-\d{2}-\d{2}(?:_\d{2}-\d{2}-\d{2}-\d{6}-\d+)?\.log\Z")
 _MAX_LOG_VISTA_BYTES = 5 * 1024 * 1024
 
 
 def listar_logs_consola(sesion: dict = Depends(solo_dev)):
-    """Lista solo los archivos diarios de errores, sin crear la carpeta."""
+    """Lista archivos nuevos y diarios antiguos, sin crear la carpeta."""
     if not LOGS_DIR.is_dir():
         return {"archivos": []}
     archivos = []

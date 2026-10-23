@@ -21,6 +21,17 @@ load_dotenv(BASE_DIR / ".env")
 LOGS_DIR = BASE_DIR / "logs"
 _LOG_LOCK = threading.Lock()
 _ZONA_LOG = ZoneInfo("America/Santiago")
+_FECHA_LOG_ACTUAL = None
+_NOMBRE_LOG_ACTUAL = None
+
+
+def _nombre_log_para(ahora: datetime) -> str:
+    """Un archivo por proceso y día, fechado a la hora de su primer error."""
+    global _FECHA_LOG_ACTUAL, _NOMBRE_LOG_ACTUAL
+    if _FECHA_LOG_ACTUAL != ahora.date():
+        _FECHA_LOG_ACTUAL = ahora.date()
+        _NOMBRE_LOG_ACTUAL = f"errores-{ahora:%Y-%m-%d_%H-%M-%S-%f}-{os.getpid()}.log"
+    return _NOMBRE_LOG_ACTUAL
 
 
 def _texto_log_seguro(valor: str) -> str:
@@ -34,7 +45,7 @@ def _texto_log_seguro(valor: str) -> str:
 
 
 def _guardar_error_archivo(contexto: str, exc: BaseException | None = None) -> None:
-    """Anexa cada error al archivo del día; crea logs/ solo al necesitarlo."""
+    """Anexa al archivo fechado de este proceso; crea logs/ al necesitarlo."""
     ahora = datetime.now(_ZONA_LOG)
     mensaje = f"[{ahora:%Y-%m-%d %H:%M:%S%z}] [ERROR] {_texto_log_seguro(contexto)}"
     if exc is not None:
@@ -50,7 +61,7 @@ def _guardar_error_archivo(contexto: str, exc: BaseException | None = None) -> N
     try:
         with _LOG_LOCK:
             LOGS_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
-            ruta = LOGS_DIR / f"errores-{ahora:%Y-%m-%d}.log"
+            ruta = LOGS_DIR / _nombre_log_para(ahora)
             descriptor = os.open(ruta, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
             try:
                 while entrada:

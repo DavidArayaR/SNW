@@ -21,13 +21,15 @@ class ConfigLogsTests(unittest.TestCase):
             with patch.object(main, "LOGS_DIR", carpeta):
                 self.assertEqual(main.listar_logs_consola(sesion={}), {"archivos": []})
                 carpeta.mkdir()
-                (carpeta / "errores-2026-10-23.log").write_text("error reciente\n", encoding="utf-8")
+                (carpeta / "errores-2026-10-23_11-15-54-123456-42.log").write_text(
+                    "error reciente\n", encoding="utf-8")
                 (carpeta / "errores-2026-10-22.log").write_text("error anterior\n", encoding="utf-8")
                 (carpeta / "otro.txt").write_text("no mostrar", encoding="utf-8")
                 lista = main.listar_logs_consola(sesion={})["archivos"]
                 self.assertEqual([item["nombre"] for item in lista], [
-                    "errores-2026-10-23.log", "errores-2026-10-22.log"])
-                resultado = main.leer_log_consola("errores-2026-10-23.log", sesion={})
+                    "errores-2026-10-23_11-15-54-123456-42.log", "errores-2026-10-22.log"])
+                resultado = main.leer_log_consola(
+                    "errores-2026-10-23_11-15-54-123456-42.log", sesion={})
                 self.assertEqual(resultado["contenido"].replace("\r\n", "\n"),
                                  "error reciente\n")
                 self.assertFalse(resultado["truncado"])

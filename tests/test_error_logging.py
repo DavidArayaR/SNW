@@ -6,6 +6,7 @@ import logging
 import sys
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -24,10 +25,23 @@ class RegistroErroresTests(unittest.TestCase):
                 db.log_error("segundo fallo")
             archivos = list(carpeta.glob("errores-*.log"))
             self.assertEqual(len(archivos), 1)
+            self.assertRegex(archivos[0].name,
+                             r"^errores-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-\d{6}-\d+\.log$")
             texto = archivos[0].read_text(encoding="utf-8")
             self.assertIn("primer fallo", texto)
             self.assertIn("segundo fallo", texto)
             self.assertLess(texto.index("primer fallo"), texto.index("segundo fallo"))
+
+    def test_nombre_se_conserva_en_el_dia_y_cambia_al_dia_siguiente(self):
+        with patch.object(db, "_FECHA_LOG_ACTUAL", None), \
+                patch.object(db, "_NOMBRE_LOG_ACTUAL", None):
+            primero = db._nombre_log_para(datetime(2026, 10, 23, 11, 15, 54, 123456))
+            mismo_dia = db._nombre_log_para(datetime(2026, 10, 23, 12, 0, 0))
+            otro_dia = db._nombre_log_para(datetime(2026, 10, 24, 8, 0, 0))
+        self.assertEqual(primero, mismo_dia)
+        self.assertTrue(primero.startswith("errores-2026-10-23_11-15-54-123456-"))
+        self.assertTrue(otro_dia.startswith("errores-2026-10-24_08-00-00-000000-"))
+        self.assertNotEqual(primero, otro_dia)
 
     def test_excepcion_conserva_tipo_y_traza_sin_mensaje_sensible(self):
         with tempfile.TemporaryDirectory() as temporal:
