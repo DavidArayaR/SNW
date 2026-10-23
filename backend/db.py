@@ -453,7 +453,6 @@ def asegurar_tabla_config() -> None:
                 " paciente_telefono_normalizado VARCHAR(20) NULL,"
                 " doctor_nombre VARCHAR(200) NULL, inicio_cita DATETIME NOT NULL,"
                 " centro_codigo VARCHAR(10) NULL,"
-                " autorizado_contacto TINYINT(1) NOT NULL DEFAULT 0,"
                 " modo_prueba TINYINT(1) NOT NULL DEFAULT 0,"
                 " whatsapp_opt_out TINYINT(1) NOT NULL DEFAULT 0,"
                 " estado_envio VARCHAR(20) NOT NULL DEFAULT 'PENDIENTE',"
@@ -477,6 +476,17 @@ def asegurar_tabla_config() -> None:
                 " KEY idx_reagendar_wa_id (whatsapp_message_id)"
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
             )
+            # Al retirar la columna del CSV, las filas históricas marcadas sin
+            # autorización no deben quedar habilitadas por la nueva consulta.
+            cur.execute("SELECT COLUMN_NAME FROM information_schema.COLUMNS"
+                        " WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='paciente_reagendar'"
+                        " AND COLUMN_NAME='autorizado_contacto'")
+            if cur.fetchone():
+                cur.execute("UPDATE paciente_reagendar SET estado_envio='OMITIDO',"
+                            " ultimo_error_codigo='SIN_AUTORIZACION'"
+                            " WHERE autorizado_contacto=0"
+                            " AND estado_envio IN ('PENDIENTE','REINTENTO')")
+                cur.execute("ALTER TABLE paciente_reagendar DROP COLUMN autorizado_contacto")
             cur.execute("SELECT COLUMN_NAME FROM information_schema.COLUMNS"
                         " WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='paciente_reagendar'"
                         " AND COLUMN_NAME='envio_id'")
@@ -531,7 +541,7 @@ def asegurar_tabla_config() -> None:
                 " WHERE paciente_telefono_normalizado IS NOT NULL"
                 " ORDER BY CASE WHEN estado_envio='ENVIADO' THEN 0"
                 " WHEN estado_envio IN ('PENDIENTE','REINTENTO','PROCESANDO')"
-                " AND autorizado_contacto=1 AND centro_codigo IS NOT NULL"
+                " AND centro_codigo IS NOT NULL"
                 " AND ultimo_error_codigo IS NULL THEN 1 ELSE 2 END, id"
             )
             cur.execute(

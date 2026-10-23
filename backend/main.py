@@ -4685,7 +4685,7 @@ _CONFIG_SECCIONES = [
              "ayuda": "Origen exacto del CRM que sube archivos desde el navegador; sin barra final. "
                       "Por defecto: https://clientes.crmaxion.cl. El token de integración sigue siendo obligatorio."},
             {"clave": "reagendar_envio_activo", "etiqueta": "Procesar envíos de citas atendidas", "tipo": "bool",
-             "ayuda": "Apagado inicialmente. Solo envía en Producción por api_oficial con consentimiento por fila y plantilla aprobada de la clínica."},
+             "ayuda": "Apagado inicialmente. El origen debe enviar solo pacientes autorizados y conservar esa evidencia. SNW exige Producción, api_oficial y plantilla aprobada de la clínica."},
             {"clave": "reagendar_plantillas_json", "etiqueta": "Plantilla de reagendamiento por clínica", "tipo": "textarea",
              "ayuda": "Selecciona una plantilla aprobada para cada clínica. También puedes crear un borrador desde aquí; no se enviará hasta que lo aprueben SNW y Meta."},
             {"clave": "reagendar_clinicas_ids", "etiqueta": "IDs de Reservo por clínica", "tipo": "textarea",
@@ -7772,7 +7772,7 @@ async def _procesar_cita_reagendar(cita: dict, plantillas_por_centro: dict) -> N
                 or _aprobacion_plantilla(plantilla) != "aprobada"):
             paciente_reagendar.marcar_fallo(cita, "CANAL_NO_DISPONIBLE")
             return
-        if not cita["autorizado_contacto"] or not cita["paciente_telefono_normalizado"]:
+        if not cita["paciente_telefono_normalizado"]:
             paciente_reagendar.marcar_fallo(cita, "NO_ELEGIBLE")
             return
         if cita.get("whatsapp_opt_out"):

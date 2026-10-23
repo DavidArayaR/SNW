@@ -48,7 +48,7 @@ curl -X POST "https://DOMINIO-SNW/api/v1/paciente-reagendar/importar-csv" \
 
 Columnas obligatorias: `fecha`, `ventana`, `clinica_nombre`,
 `reservo_cita_uuid`, `paciente_nombre`, `inicio_cita`. Opcionales:
-`clinica_id`, `paciente_telefono`, `doctor_nombre`, `autorizado_contacto`.
+`clinica_id`, `paciente_telefono`, `doctor_nombre`.
 Otras columnas de origen como `id`, `creado_en` o `paciente_rut` se ignoran;
 **SNW no almacena el RUT**. `fecha` tiene formato `AAAA-MM-DD`,
 `inicio_cita` tiene formato `AAAA-MM-DD HH:MM:SS` en hora local
@@ -56,10 +56,13 @@ Otras columnas de origen como `id`, `creado_en` o `paciente_rut` se ignoran;
 `14-20` según la búsqueda en Reservo. No se exige que la fecha de la cita
 coincida con `fecha`, que corresponde al registro del tramo de origen.
 El teléfono se normaliza con las reglas chilenas existentes.
-Para habilitar el envío de una fila, el origen debe declarar
-`autorizado_contacto=si` (o `true`/`1`) únicamente tras verificar la
-autorización para esta comunicación. Sin esa columna, la fila se conserva,
-pero no se envía.
+El sistema de origen debe filtrar antes de subir el CSV para incluir solo
+pacientes autorizados para esta comunicación y conservar allí la evidencia.
+SNW no recibe ni verifica esa autorización por fila: el token de integración
+identifica al sistema emisor, no constituye una autorización del paciente.
+Un CSV antiguo que aún contenga `autorizado_contacto` se rechaza para impedir
+que una exportación sin filtrar habilite envíos por accidente.
+Los registros históricos que estaban marcados sin autorización siguen omitidos.
 
 Respuesta: `{"success":true,"summary":{"received":2,"inserted":1,
 "eligible":1,"alreadyExists":1,"rejected":0,"batchId":12,
@@ -83,8 +86,8 @@ entre instancias. El archivo CSV no se conserva después de importar.
 ### Prueba de conexión e importación remota
 
 El archivo [tests/fixtures/paciente_reagendar_prueba.csv](tests/fixtures/paciente_reagendar_prueba.csv)
-contiene **una sola cita ficticia** de VIDA Y SALUD, sin RUT, teléfono,
-médico ni autorización de contacto. Ejecuta la prueba desde la raíz del
+contiene **una sola cita ficticia** de VIDA Y SALUD, sin RUT, teléfono ni
+médico. Ejecuta la prueba desde la raíz del
 repositorio. Usa como base la URL HTTPS pública de SNW, comprobada en
 **Configuración → General → URL base del servidor**; `localhost` solo sirve
 para una prueba desde el propio servidor. Genera el token de integración en

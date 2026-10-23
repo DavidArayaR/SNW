@@ -33,12 +33,12 @@ for codigo, nombre in (("SMPT", "Salud Mental Para Todos"),
 
 
 def csv_fila(identificador="CITA-001", clinica="Salud Mental Para Todos",
-             extra="", telefono="56911111111"):
+             telefono="56911111111"):
     return (
         "id,fecha,ventana,clinica_id,clinica_nombre,reservo_cita_uuid,paciente_rut,"
-        "paciente_nombre,paciente_telefono,doctor_nombre,inicio_cita,creado_en,autorizado_contacto\n"
+        "paciente_nombre,paciente_telefono,doctor_nombre,inicio_cita,creado_en\n"
         f"1,2026-10-22,08-14,,{clinica},{identificador},11111111-1,Persona Prueba,"
-        f"{telefono},Doctor Prueba,2026-10-22 10:00:00,2026-10-22 10:01:00,{extra}\n"
+        f"{telefono},Doctor Prueba,2026-10-22 10:00:00,2026-10-22 10:01:00\n"
     ).encode()
 
 
@@ -110,7 +110,7 @@ class ParserCitasTests(unittest.TestCase):
         self.assertEqual(filas[0]["reservo_cita_uuid"], "TEST-CSV-REMOTO-001")
         self.assertEqual(filas[0]["centro_codigo"], "VS")
         self.assertIsNone(filas[0]["paciente_telefono_normalizado"])
-        self.assertFalse(filas[0]["autorizado_contacto"])
+        self.assertEqual(filas[0]["ultimo_error_codigo"], "TELEFONO_INVALIDO")
 
     def test_modo_prueba_rechaza_multiples_citas(self):
         encabezado, fila = PRUEBA_CSV.split(b"\n", 1)
@@ -183,13 +183,15 @@ class ParserCitasTests(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertIsNone(rows[0]["centro_codigo"])
         self.assertEqual(rows[0]["ultimo_error_codigo"], "CLINICA_DESCONOCIDA")
-        self.assertFalse(rows[0]["autorizado_contacto"])
 
-    def test_autorizacion_explicita_y_validacion(self):
-        rows, errors, _ = reagendar.analizar_csv(csv_fila(extra="si"), CFG)
+    def test_csv_filtrado_en_origen_y_validacion(self):
+        rows, errors, _ = reagendar.analizar_csv(csv_fila(), CFG)
         self.assertEqual(errors, [])
-        self.assertTrue(rows[0]["autorizado_contacto"])
         self.assertIsNone(rows[0]["ultimo_error_codigo"])
+        self.assertNotIn("autorizado_contacto", rows[0])
+        legado = csv_fila().replace(b"creado_en\n", b"creado_en,autorizado_contacto\n")
+        with self.assertRaisesRegex(reagendar.CsvInvalido, "columna de autorización obsoleta"):
+            reagendar.analizar_csv(legado, CFG)
         with self.assertRaises(reagendar.CsvInvalido):
             reagendar.analizar_csv(b"x,y\n1,2\n", CFG)
         with self.assertRaises(reagendar.CsvInvalido):
@@ -502,7 +504,7 @@ class ApiCitasTests(unittest.TestCase):
 
     def test_envio_simulado_usa_emisor_de_la_clinica_y_guarda_id(self):
         cita = {"id": 1, "intentos_envio": 1, "reserva_token": "test",
-                "centro_codigo": "VS", "autorizado_contacto": 1,
+                "centro_codigo": "VS",
                 "paciente_telefono_normalizado": "+56911111111",
                 "paciente_nombre": "Persona Prueba"}
         plantilla = {"clave": "reagendar_vs", "centro_codigo": "VS",
@@ -537,7 +539,7 @@ class ApiCitasTests(unittest.TestCase):
 
     def test_resultado_incierto_no_se_reintenta(self):
         cita = {"id": 1, "intentos_envio": 1, "reserva_token": "test",
-                "centro_codigo": "VS", "autorizado_contacto": 1,
+                "centro_codigo": "VS",
                 "paciente_telefono_normalizado": "+56911111111",
                 "paciente_nombre": "Persona Prueba"}
         plantilla = {"clave": "reagendar_vs", "centro_codigo": "VS",
@@ -576,7 +578,7 @@ class MariaDbCitasTests(unittest.TestCase):
         try:
             for indice, clave in enumerate(claves):
                 resultado = reagendar.importar(
-                    csv_fila(clave, extra="si", telefono=telefono), CFG)
+                    csv_fila(clave, telefono=telefono), CFG)
                 lotes.append(resultado["summary"]["batchId"])
                 if indice == 0:
                     self.assertEqual(resultado["summary"]["inserted"], 1)
@@ -620,7 +622,7 @@ class MariaDbCitasTests(unittest.TestCase):
         mensaje_entrada = "wamid." + uuid.uuid4().hex
         lote_id = None
         try:
-            primero = reagendar.importar(csv_fila(clave, extra="si", telefono=telefono[1:]), CFG)
+            primero = reagendar.importar(csv_fila(clave, telefono=telefono[1:]), CFG)
             lote_id = primero["summary"]["batchId"]
             with conectar() as conn, conn.cursor() as cur:
                 cur.execute("UPDATE paciente_reagendar SET estado_envio='ENVIADO',"
@@ -656,7 +658,7 @@ class MariaDbCitasTests(unittest.TestCase):
         telefono = telefono_prueba(clave)
         chile = ZoneInfo("America/Santiago")
         fecha = dt.datetime.now(chile).date() + dt.timedelta(days=1)
-        datos = csv_fila(clave, extra="si", telefono=telefono).replace(b"2026-10-22", fecha.isoformat().encode())
+        datos = csv_fila(clave, telefono=telefono).replace(b"2026-10-22", fecha.isoformat().encode())
         recibido = dt.datetime.combine(fecha, dt.time(14, 0), chile)
         lote_id = None
         try:
@@ -704,7 +706,7 @@ class MariaDbCitasTests(unittest.TestCase):
             for clave, minuto, estado_esperado in (
                     (claves[0], 0, "PROGRAMADO"),
                     (claves[1], 31, "REVISION")):
-                datos = csv_fila(clave, extra="si").replace(
+                datos = csv_fila(clave).replace(
                     b"56911111111", telefono_prueba(clave).encode()).replace(
                     b"2026-10-22", fecha.isoformat().encode()).replace(b"08-14", b"14-20")
                 recibido = dt.datetime.combine(fecha, dt.time(20, minuto), chile)
@@ -741,14 +743,14 @@ class MariaDbCitasTests(unittest.TestCase):
         def archivo(cantidad):
             filas = [f"{i},2026-10-22,08-14,,{nombres[4 if i == 6 else (i - 1) % 5]},"
                     f"{prefijo}-{i},,Persona Prueba,{telefono_prueba(prefijo + '-' + str(i))},Doctor Prueba,"
-                    "2026-10-22 10:00:00,,\n" for i in range(1, cantidad + 1)]
+                    "2026-10-22 10:00:00,\n" for i in range(1, cantidad + 1)]
             return (encabezado + "".join(filas)).encode()
         try:
             primero = reagendar.importar(archivo(5), CFG)
             self.assertEqual(primero["summary"]["inserted"], 5)
-            self.assertEqual(primero["summary"]["eligible"], 0)
+            self.assertEqual(primero["summary"]["eligible"], 5)
             self.assertIsNone(primero["summary"]["scheduledAtUtc"])
-            self.assertEqual(primero["message"], "Sin registros nuevos pendientes de envío")
+            self.assertIsNone(primero["message"])
             with conectar() as conn, conn.cursor() as cur:
                 cur.execute("UPDATE paciente_reagendar SET estado_envio='ENVIADO',"
                             " whatsapp_message_id='wamid.test'"
@@ -768,7 +770,7 @@ class MariaDbCitasTests(unittest.TestCase):
                              ["SMPT", "MS", "PS", "CP", "VS", "VS"])
             self.assertTrue(all(r["estado_envio"] == "ENVIADO" and
                                 r["whatsapp_message_id"] == "wamid.test" for r in rows[:5]))
-            self.assertEqual(rows[5]["estado_envio"], "OMITIDO")
+            self.assertEqual(rows[5]["estado_envio"], "PENDIENTE")
         finally:
             with conectar() as conn, conn.cursor() as cur:
                 cur.execute("SELECT DISTINCT lote_id FROM paciente_reagendar"

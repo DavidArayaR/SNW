@@ -109,6 +109,9 @@ def analizar_csv(datos: bytes, cfg: dict) -> tuple[list[dict], list[dict], int]:
         columnas = {c.strip().lower(): c for c in encabezados if c and c.strip()}
         if len(columnas) != len(encabezados) or not REQUERIDAS.issubset(columnas):
             raise CsvInvalido("El CSV tiene encabezados duplicados o le faltan columnas obligatorias.")
+        if "autorizado_contacto" in columnas:
+            raise CsvInvalido("El CSV usa una columna de autorización obsoleta. "
+                              "El sistema de origen debe filtrar los pacientes autorizados antes de enviarlo.")
         registros, errores = [], []
         recibidas = 0
         for numero, fila in enumerate(lector, 2):
@@ -135,13 +138,10 @@ def analizar_csv(datos: bytes, cfg: dict) -> tuple[list[dict], list[dict], int]:
                 telefono = _texto(get("paciente_telefono"), 40) or None
                 normalizado = normalizar_telefono(telefono) if telefono else None
                 doctor = _texto(get("doctor_nombre"), 200) or None
-                permiso = _texto(get("autorizado_contacto"), 5).casefold()
-                autorizado = permiso in ("si", "sí", "true", "1")
                 centro = resolver_clinica(clinica, clinica_id, cfg)
                 problema = ("CLINICA_DESCONOCIDA" if not centro else
                             "TELEFONO_INVALIDO" if not normalizado else
-                            "DOCTOR_FALTANTE" if not doctor else
-                            "SIN_AUTORIZACION" if not autorizado else None)
+                            "DOCTOR_FALTANTE" if not doctor else None)
                 registros.append({"fecha": fecha, "ventana": ventana,
                                   "_row": numero,
                                   "clinica_id": clinica_id, "clinica_nombre": clinica,
@@ -149,7 +149,7 @@ def analizar_csv(datos: bytes, cfg: dict) -> tuple[list[dict], list[dict], int]:
                                   "paciente_telefono": telefono,
                                   "paciente_telefono_normalizado": normalizado,
                                   "doctor_nombre": doctor, "inicio_cita": inicio,
-                                  "centro_codigo": centro, "autorizado_contacto": autorizado,
+                                  "centro_codigo": centro,
                                   "ultimo_error_codigo": problema})
             except (ValueError, TypeError) as exc:
                 codigo = str(exc) if str(exc) in (
@@ -264,7 +264,7 @@ def importar_por_partes(datos: bytes, cfg: dict, *, modo_prueba: bool = False) -
 
 _COLUMNAS = ("fecha", "ventana", "clinica_id", "clinica_nombre", "reservo_cita_uuid",
              "paciente_nombre", "paciente_telefono", "paciente_telefono_normalizado",
-             "doctor_nombre", "inicio_cita", "centro_codigo", "autorizado_contacto",
+             "doctor_nombre", "inicio_cita", "centro_codigo",
              "ultimo_error_codigo", "modo_prueba")
 
 
@@ -432,7 +432,8 @@ def reclamar_pendiente(centros: list[str]) -> dict | None:
             "SELECT r.* FROM paciente_reagendar r"
             " JOIN reagendar_lotes l ON l.id=r.lote_id"
             " WHERE r.estado_envio IN ('PENDIENTE','REINTENTO')"
-            " AND r.autorizado_contacto = 1 AND r.whatsapp_opt_out=0 AND r.modo_prueba=0"
+            " AND r.whatsapp_opt_out=0 AND r.modo_prueba=0"
+            " AND r.ultimo_error_codigo IS NULL"
             " AND r.paciente_telefono_normalizado IS NOT NULL"
             f" AND r.centro_codigo IN ({marcadores})"
             " AND l.estado IN ('PROGRAMADO','APLAZADO','EN_CURSO')"
@@ -502,7 +503,8 @@ def completar_lote_si_corresponde(lote_id: int) -> None:
             return
         cur.execute("SELECT COUNT(*) AS n FROM paciente_reagendar"
                     " WHERE lote_id=%s AND estado_envio IN ('PENDIENTE','REINTENTO','PROCESANDO')"
-                    " AND autorizado_contacto=1 AND paciente_telefono_normalizado IS NOT NULL"
+                    " AND ultimo_error_codigo IS NULL"
+                    " AND paciente_telefono_normalizado IS NOT NULL"
                     " AND centro_codigo IS NOT NULL", (lote_id,))
         if cur.fetchone()["n"] == 0:
             cur.execute("UPDATE reagendar_lotes SET estado='COMPLETADO' WHERE id=%s", (lote_id,))
