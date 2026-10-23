@@ -74,6 +74,52 @@ body[data-pagina="configuracion"] #secciones {
   font-size: .85em;
 }
 
+.config-intro[hidden],
+.panel__head #btnGuardar[hidden] { display: none; }
+.config-logs { overflow: hidden; }
+.config-logs__ayuda {
+  margin: 14px 18px;
+  color: var(--texto-suave);
+  font-size: .9rem;
+}
+.config-logs__controles {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 18px 12px;
+}
+.config-logs__controles label { font-weight: 700; }
+.config-logs__controles select {
+  flex: 1 1 260px;
+  min-width: 0;
+  padding: 9px 12px;
+  border: 1px solid var(--borde);
+  border-radius: 9px;
+  background: var(--panel-2);
+  color: var(--texto);
+}
+.config-logs__estado {
+  min-height: 1.4em;
+  margin: 0 18px 8px;
+  color: var(--texto-suave);
+  font-size: .85rem;
+}
+.config-logs__contenido {
+  max-height: min(60vh, 680px);
+  min-height: 240px;
+  overflow: auto;
+  margin: 0 18px 18px;
+  padding: 16px;
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--texto);
+  font: .84rem/1.6 Consolas, "SFMono-Regular", monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .config-api-docs {
   display: flex;
   align-items: center;

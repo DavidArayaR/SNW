@@ -21,8 +21,10 @@ function toast(msg, tipo = "ok") {
 toastEl.addEventListener("click", () => toastEl.classList.remove("visible"));
 
 const cont = $("#secciones");
-const idsTabs = ["general", "whatsapp", "clinicas", "correo", "integraciones"];
+const idsTabs = ["general", "whatsapp", "clinicas", "correo", "integraciones", "logs"];
 let tabConfig = "general";
+let logSeleccionado = "";
+let peticionLog = 0;
 try {
   const guardada = localStorage.getItem("snw_tab_config");
   if (idsTabs.includes(guardada)) tabConfig = guardada;
@@ -75,6 +77,8 @@ function mostrarTabConfig(anterior = tabConfig) {
     panel.hidden = panel.dataset.configPanel !== tabConfig;
   });
   $("#configApiDocs").hidden = tabConfig !== "general";
+  $("#btnGuardar").hidden = tabConfig === "logs";
+  $(".config-intro").hidden = tabConfig === "logs";
 }
 
 function cambiarTabConfig(destino, { enfocar = false } = {}) {
@@ -83,6 +87,7 @@ function cambiarTabConfig(destino, { enfocar = false } = {}) {
   tabConfig = destino;
   try { localStorage.setItem("snw_tab_config", destino); } catch { /* sin almacenamiento */ }
   mostrarTabConfig(anterior);
+  if (destino === "logs") cargarLogs();
   if (enfocar) $(`#config-tab-${destino}`)?.focus();
   window.scrollTo(0, 0);
 }
@@ -838,8 +843,96 @@ function render(secciones) {
     vacio.innerHTML = '<p>No hay clínicas configuradas. Usa «Añadir clínica» para crear una.</p>';
     paneles.clinicas.appendChild(vacio);
   }
+  paneles.logs.innerHTML = `
+    <section class="panel config-seccion config-logs">
+      <div class="panel__head"><h2><i class="fa-solid fa-file-lines" aria-hidden="true"></i> Errores del servidor</h2></div>
+      <p class="config-logs__ayuda">Selecciona un archivo diario para ver y copiar sus errores registrados.</p>
+      <div class="config-logs__controles">
+        <label for="configLogArchivo">Archivo</label>
+        <select id="configLogArchivo" disabled><option value="">Cargando registros…</option></select>
+        <button class="btn btn--ghost" type="button" id="configLogActualizar"><i class="fa-solid fa-rotate" aria-hidden="true"></i> Actualizar</button>
+        <button class="btn btn--ghost" type="button" id="configLogCopiar" disabled><i class="fa-regular fa-copy" aria-hidden="true"></i> Copiar contenido</button>
+      </div>
+      <p class="config-logs__estado" id="configLogEstado" role="status" aria-live="polite"></p>
+      <pre class="config-logs__contenido" id="configLogContenido" tabindex="0">Selecciona un archivo para ver su contenido.</pre>
+    </section>`;
+  $("#configLogArchivo").addEventListener("change", (evento) => cargarLog(evento.target.value));
+  $("#configLogActualizar").addEventListener("click", cargarLogs);
+  $("#configLogCopiar").addEventListener("click", copiarLog);
   mostrarTabConfig();
+  if (tabConfig === "logs") cargarLogs();
   marcarCambios();
+}
+
+async function cargarLogs() {
+  const selector = $("#configLogArchivo");
+  if (!selector) return;
+  selector.disabled = true;
+  $("#configLogEstado").textContent = "Cargando registros…";
+  try {
+    const respuesta = await fetch("api/configuracion/logs", {
+      headers: authHeaders(), cache: "no-store",
+    });
+    if (respuesta.status === 401) { window.snwSesionExpirada(); return; }
+    if (!respuesta.ok) throw new Error("No se pudieron cargar los registros.");
+    const datos = await respuesta.json();
+    const archivos = datos.archivos || [];
+    selector.replaceChildren();
+    if (!archivos.length) {
+      selector.add(new Option("Aún no hay archivos de errores", ""));
+      logSeleccionado = "";
+      $("#configLogContenido").textContent = "Todavía no se han registrado errores.";
+      $("#configLogCopiar").disabled = true;
+      $("#configLogEstado").textContent = "";
+      return;
+    }
+    archivos.forEach(({ nombre, bytes }) => selector.add(
+      new Option(`${nombre} · ${(bytes / 1024).toFixed(1)} KB`, nombre)));
+    selector.disabled = false;
+    const elegido = archivos.some(({ nombre }) => nombre === logSeleccionado)
+      ? logSeleccionado : archivos[0].nombre;
+    selector.value = elegido;
+    await cargarLog(elegido);
+  } catch (error) {
+    $("#configLogEstado").textContent = error.message;
+    $("#configLogContenido").textContent = "";
+    $("#configLogCopiar").disabled = true;
+  }
+}
+
+async function cargarLog(nombre) {
+  const secuencia = ++peticionLog;
+  logSeleccionado = nombre;
+  $("#configLogCopiar").disabled = true;
+  $("#configLogContenido").textContent = "Cargando contenido…";
+  try {
+    const respuesta = await fetch(`api/configuracion/logs/${encodeURIComponent(nombre)}`, {
+      headers: authHeaders(), cache: "no-store",
+    });
+    if (respuesta.status === 401) { window.snwSesionExpirada(); return; }
+    if (!respuesta.ok) throw new Error("No se pudo leer el archivo seleccionado.");
+    const datos = await respuesta.json();
+    if (secuencia !== peticionLog) return;
+    $("#configLogContenido").textContent = datos.contenido || "El archivo está vacío.";
+    $("#configLogEstado").textContent = datos.truncado
+      ? "Archivo grande: se muestran y copian solo los últimos 5 MB." : "";
+    $("#configLogCopiar").disabled = !datos.contenido;
+  } catch (error) {
+    if (secuencia !== peticionLog) return;
+    $("#configLogEstado").textContent = error.message;
+    $("#configLogContenido").textContent = "";
+  }
+}
+
+async function copiarLog() {
+  const contenido = $("#configLogContenido").textContent;
+  if (!contenido) return;
+  try {
+    await navigator.clipboard.writeText(contenido);
+    toast("Contenido del registro copiado.");
+  } catch {
+    toast("No se pudo copiar. Selecciona el texto y cópialo manualmente.", "error");
+  }
 }
 
 function valorActual(clave) {

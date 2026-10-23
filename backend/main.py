@@ -33,7 +33,7 @@ from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from pydantic import BaseModel, Field
 
 from db import (
-    conectar, entorno_valido, log_error, instalar_registro_errores,
+    conectar, entorno_valido, log_error, instalar_registro_errores, LOGS_DIR,
     nombre_base, columnas_tabla, columna_existe,
     tabla_pacientes, asegurar_tabla_config, config_all, config_get, config_set,
     agregar_numero_prueba_ambos, quitar_numero_prueba_ambos,
@@ -439,6 +439,49 @@ def solo_dev(sesion: dict = Depends(sesion_actual)) -> dict:
     if sesion.get("rol") != "desarrollador":
         raise HTTPException(403, detail="Esta sección es exclusiva del rol desarrollador.")
     return sesion
+
+
+_NOMBRE_LOG_ERROR = re.compile(r"errores-\d{4}-\d{2}-\d{2}\.log\Z")
+_MAX_LOG_VISTA_BYTES = 5 * 1024 * 1024
+
+
+def listar_logs_consola(sesion: dict = Depends(solo_dev)):
+    """Lista solo los archivos diarios de errores, sin crear la carpeta."""
+    if not LOGS_DIR.is_dir():
+        return {"archivos": []}
+    archivos = []
+    for ruta in LOGS_DIR.iterdir():
+        if not _NOMBRE_LOG_ERROR.fullmatch(ruta.name) or not ruta.is_file():
+            continue
+        if ruta.resolve().parent != LOGS_DIR.resolve():
+            continue
+        archivos.append({"nombre": ruta.name, "bytes": ruta.stat().st_size})
+    archivos.sort(key=lambda item: item["nombre"], reverse=True)
+    return {"archivos": archivos}
+
+
+def leer_log_consola(nombre: str, sesion: dict = Depends(solo_dev)):
+    """Lee hasta los últimos 5 MiB de un log, sin permitir rutas arbitrarias."""
+    if not _NOMBRE_LOG_ERROR.fullmatch(nombre):
+        raise HTTPException(404, detail="Registro no encontrado.")
+    ruta = LOGS_DIR / nombre
+    if not ruta.is_file() or ruta.resolve().parent != LOGS_DIR.resolve():
+        raise HTTPException(404, detail="Registro no encontrado.")
+    try:
+        with ruta.open("rb") as archivo:
+            tamano = archivo.seek(0, 2)
+            truncado = tamano > _MAX_LOG_VISTA_BYTES
+            if truncado:
+                archivo.seek(-_MAX_LOG_VISTA_BYTES, 2)
+                archivo.readline()  # evitar comenzar a mitad de una entrada
+            else:
+                archivo.seek(0)
+            contenido = archivo.read().decode("utf-8", errors="replace")
+    except OSError as exc:
+        log_error("leer registro de errores", exc, solo_tipo=True)
+        raise HTTPException(500, detail="No se pudo leer el registro.") from None
+    return {"nombre": nombre, "contenido": contenido, "truncado": truncado,
+            "bytes": tamano}
 
 
 def _es_privilegiado(sesion: dict) -> bool:
