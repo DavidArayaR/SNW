@@ -442,23 +442,26 @@ def solo_dev(sesion: dict = Depends(sesion_actual)) -> dict:
 
 
 _NOMBRE_LOG_ERROR = re.compile(
-    r"errores-\d{4}-\d{2}-\d{2}(?:_\d{2}-\d{2}-\d{2}-\d{6}-\d+)?\.log\Z")
+    r"errores-(\d{4}-\d{2}-\d{2})(?:_(\d{2}-\d{2}-\d{2}-\d{6})-(\d+)(?:-(\d+))?)?\.log\Z")
 _MAX_LOG_VISTA_BYTES = 5 * 1024 * 1024
 
 
 def listar_logs_consola(sesion: dict = Depends(solo_dev)):
-    """Lista archivos nuevos y diarios antiguos, sin crear la carpeta."""
+    """Lista archivos por error y formatos anteriores, sin crear la carpeta."""
     if not LOGS_DIR.is_dir():
         return {"archivos": []}
     archivos = []
     for ruta in LOGS_DIR.iterdir():
-        if not _NOMBRE_LOG_ERROR.fullmatch(ruta.name) or not ruta.is_file():
+        coincidencia = _NOMBRE_LOG_ERROR.fullmatch(ruta.name)
+        if not coincidencia or not ruta.is_file():
             continue
         if ruta.resolve().parent != LOGS_DIR.resolve():
             continue
-        archivos.append({"nombre": ruta.name, "bytes": ruta.stat().st_size})
-    archivos.sort(key=lambda item: item["nombre"], reverse=True)
-    return {"archivos": archivos}
+        orden = (coincidencia.group(1), coincidencia.group(2) or "",
+                 int(coincidencia.group(4) or 0), int(coincidencia.group(3) or 0))
+        archivos.append((orden, {"nombre": ruta.name, "bytes": ruta.stat().st_size}))
+    archivos.sort(key=lambda item: item[0], reverse=True)
+    return {"archivos": [item[1] for item in archivos]}
 
 
 def leer_log_consola(nombre: str, sesion: dict = Depends(solo_dev)):

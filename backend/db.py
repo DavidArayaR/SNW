@@ -1,4 +1,5 @@
 import json
+import itertools
 import logging
 import os
 import re
@@ -21,17 +22,12 @@ load_dotenv(BASE_DIR / ".env")
 LOGS_DIR = BASE_DIR / "logs"
 _LOG_LOCK = threading.Lock()
 _ZONA_LOG = ZoneInfo("America/Santiago")
-_FECHA_LOG_ACTUAL = None
-_NOMBRE_LOG_ACTUAL = None
+_SECUENCIA_LOG = itertools.count(1)
 
 
-def _nombre_log_para(ahora: datetime) -> str:
-    """Un archivo por proceso y día, fechado a la hora de su primer error."""
-    global _FECHA_LOG_ACTUAL, _NOMBRE_LOG_ACTUAL
-    if _FECHA_LOG_ACTUAL != ahora.date():
-        _FECHA_LOG_ACTUAL = ahora.date()
-        _NOMBRE_LOG_ACTUAL = f"errores-{ahora:%Y-%m-%d_%H-%M-%S-%f}-{os.getpid()}.log"
-    return _NOMBRE_LOG_ACTUAL
+def _nombre_log_para(ahora: datetime, secuencia: int) -> str:
+    """Identifica un error por fecha, hora, proceso y secuencia."""
+    return f"errores-{ahora:%Y-%m-%d_%H-%M-%S-%f}-{os.getpid()}-{secuencia}.log"
 
 
 def _texto_log_seguro(valor: str) -> str:
@@ -45,7 +41,7 @@ def _texto_log_seguro(valor: str) -> str:
 
 
 def _guardar_error_archivo(contexto: str, exc: BaseException | None = None) -> None:
-    """Anexa al archivo fechado de este proceso; crea logs/ al necesitarlo."""
+    """Crea un archivo exclusivo por error; crea logs/ al necesitarlo."""
     ahora = datetime.now(_ZONA_LOG)
     mensaje = f"[{ahora:%Y-%m-%d %H:%M:%S%z}] [ERROR] {_texto_log_seguro(contexto)}"
     if exc is not None:
@@ -61,11 +57,17 @@ def _guardar_error_archivo(contexto: str, exc: BaseException | None = None) -> N
     try:
         with _LOG_LOCK:
             LOGS_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
-            ruta = LOGS_DIR / _nombre_log_para(ahora)
-            descriptor = os.open(ruta, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            while True:
+                ruta = LOGS_DIR / _nombre_log_para(ahora, next(_SECUENCIA_LOG))
+                try:
+                    descriptor = os.open(ruta, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                    break
+                except FileExistsError:
+                    continue
             try:
-                while entrada:
-                    entrada = entrada[os.write(descriptor, entrada):]
+                restante = entrada
+                while restante:
+                    restante = restante[os.write(descriptor, restante):]
             finally:
                 os.close(descriptor)
     except OSError as error:
