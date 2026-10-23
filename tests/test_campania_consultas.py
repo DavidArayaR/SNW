@@ -143,6 +143,51 @@ class EstadoConsultaTests(unittest.TestCase):
         timer.assert_called_once()
         timer.return_value.start.assert_called_once()
 
+    def test_frase_sin_campania_pide_detalle_antes_del_boton(self):
+        conn, cur = self.conexion(None)
+        with patch.object(main, "conectar", return_value=conn), \
+                patch.object(main, "emisor_webhook_actual", return_value=EMISOR), \
+                patch.object(main, "_ultima_campania_del_emisor", return_value=None), \
+                patch.object(main.threading, "Timer") as timer, \
+                patch.object(main, "_registrar_derivacion_consulta") as derivar:
+            resultado = main._gestionar_consulta_campania(
+                TELEFONO, "Hola, tengo una consulta", "wamid.primero", None)
+        self.assertEqual(resultado, "detalle_solicitado")
+        self.assertTrue(any("INSERT INTO campania_consultas" in c.args[0]
+                            and c.args[1][2] == 0 for c in cur.execute.call_args_list))
+        timer.assert_called_once()
+        derivar.assert_not_called()
+
+    def test_segundo_mensaje_sin_campania_registra_la_consulta(self):
+        conn, _ = self.conexion({
+            "campania_log_id": 0, "primer_mensaje_id": "wamid.primero",
+            "estado": "esperando", "actualizado": datetime.datetime.now()})
+        with patch.object(main, "conectar", return_value=conn), \
+                patch.object(main, "emisor_webhook_actual", return_value=EMISOR), \
+                patch.object(main, "_ultima_campania_del_emisor", return_value=None), \
+                patch.object(main, "_registrar_derivacion_consulta", return_value="nueva") as derivar:
+            resultado = main._gestionar_consulta_campania(
+                TELEFONO, "Necesito cambiar mi hora", "wamid.segundo", None)
+        self.assertEqual(resultado, "nueva")
+        derivar.assert_called_once_with(
+            TELEFONO, "Necesito cambiar mi hora", "wamid.segundo",
+            ("CONSULTA_DIRECTA",), True, tabla_preferida=None)
+
+    def test_repetir_frase_no_deriva_ni_reenvia(self):
+        conn, _ = self.conexion({
+            "campania_log_id": 0, "primer_mensaje_id": "wamid.primero",
+            "estado": "esperando", "actualizado": datetime.datetime.now()})
+        with patch.object(main, "conectar", return_value=conn), \
+                patch.object(main, "emisor_webhook_actual", return_value=EMISOR), \
+                patch.object(main, "_ultima_campania_del_emisor", return_value=None), \
+                patch.object(main, "_registrar_derivacion_consulta") as derivar, \
+                patch.object(main.threading, "Timer") as timer:
+            resultado = main._gestionar_consulta_campania(
+                TELEFONO, "tengo una consulta", "wamid.repetido", None)
+        self.assertEqual(resultado, "esperando")
+        derivar.assert_not_called()
+        timer.assert_not_called()
+
     def test_segunda_respuesta_usa_su_texto_y_su_base(self):
         conn, _ = self.conexion({
             "campania_log_id": 77, "primer_mensaje_id": "wamid.primero",

@@ -2795,6 +2795,11 @@ _AVISO_CONSULTA_LARGA = (
 )
 
 
+def _pide_detallar_consulta(texto: str) -> bool:
+    """La frase explícita inicia la aclaración incluso sin campaña registrada."""
+    return bool(re.search(r"\btengo\s+una\s+consulta\b", texto.casefold()))
+
+
 def _ultima_campania_del_emisor(cur, telefono: str, phone_id: str,
                                referencia_meta_id: str | None) -> dict | None:
     """No atribuye una respuesta al reagendamiento ni a otro número emisor."""
@@ -2851,7 +2856,7 @@ def _enviar_aviso_consulta_campania(telefono: str, phone_id: str,
 
 def _gestionar_consulta_campania(telefono: str, texto: str, mensaje_id: str,
                                  referencia_meta_id: str | None) -> str:
-    """Primera respuesta: pedir detalle. Segunda: ofrecer botón al CRM."""
+    """Pide detalle antes de derivar; 0 identifica una consulta sin campaña."""
     emisor = emisor_webhook_actual()
     if not emisor or not mensaje_id or not texto.strip():
         return "sin_campania"
@@ -2859,21 +2864,34 @@ def _gestionar_consulta_campania(telefono: str, texto: str, mensaje_id: str,
     phone_id = emisor["phoneNumberId"]
     with conectar() as conn, conn.cursor() as cur:
         campania = _ultima_campania_del_emisor(cur, tel, phone_id, referencia_meta_id)
-        if not campania:
-            return "sin_campania"
         cur.execute("SELECT campania_log_id, primer_mensaje_id, ultimo_mensaje_id,"
                     " estado, actualizado"
                     " FROM campania_consultas WHERE wa_phone_id=%s AND telefono=%s FOR UPDATE",
                     (phone_id, tel))
         estado = cur.fetchone() or {}
-        misma_campania = estado.get("campania_log_id") == campania["id"]
         vigente = (estado.get("actualizado") and
                    estado["actualizado"] >= datetime.datetime.now() - datetime.timedelta(days=7))
+        if not campania:
+            esperando_directa = (estado.get("campania_log_id") == 0 and vigente
+                                 and estado.get("estado") == "esperando")
+            if not esperando_directa and not _pide_detallar_consulta(texto):
+                return "sin_campania"
+            # Los envíos de prueba no crean lote en `envios`. Su último
+            # contacto desde este emisor permite preferir la base correcta.
+            cur.execute(
+                "SELECT tabla_pacientes FROM log_envios WHERE wa_phone_id=%s"
+                " AND numero_telefono=%s AND tabla_pacientes IS NOT NULL"
+                " ORDER BY id DESC LIMIT 1", (phone_id, tel))
+            campania = {"id": 0, "base_datos": (cur.fetchone() or {}).get("tabla_pacientes")}
+        misma_campania = estado.get("campania_log_id") == campania["id"]
         if misma_campania and estado.get("estado") == "completada":
-            return "ya_gestionada"
+            if campania["id"] != 0 or not _pide_detallar_consulta(texto):
+                return "ya_gestionada"
         if misma_campania and vigente and estado.get("estado") == "esperando":
             if estado.get("primer_mensaje_id") == mensaje_id[:255]:
                 return "esperando"
+            if _pide_detallar_consulta(texto):
+                return "esperando"  # repetir la frase no es el detalle solicitado
             if len(texto.strip()) > 500:
                 if estado.get("ultimo_mensaje_id") == "consulta_larga_avisada":
                     return "texto_largo"
@@ -2908,7 +2926,8 @@ def _gestionar_consulta_campania(telefono: str, texto: str, mensaje_id: str,
     if derivar:
         try:
             resultado = _registrar_derivacion_consulta(
-                tel, texto, mensaje_id, ("CONSULTA_CAMPANIA",), True,
+                tel, texto, mensaje_id,
+                ("CONSULTA_CAMPANIA" if campania["id"] else "CONSULTA_DIRECTA",), True,
                 tabla_preferida=campania.get("base_datos"))
         except Exception:
             with conectar() as conn, conn.cursor() as cur:
