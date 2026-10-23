@@ -487,14 +487,14 @@ body[data-pagina="mensajeria"] .layout { width: 100%; }
 .prog-estado--rechazado, .prog-estado--error { background: var(--danger-bg); color: var(--danger-fg); border: 1px solid var(--danger-bd); }
 .prog-estado--cancelado, .prog-estado--enviando { background: var(--neutral-bg); color: var(--neutral-fg); border: 1px solid var(--neutral-bd); }
 
-/* Filtro por área de la lista (aside fijo en las 3 tabs). */
-.filtro-area {
+/* Filtro por clínica de la lista (aside fijo en las 3 tabs). */
+.filtro-clinica {
   display: flex;
   align-items: center;
   gap: 8px;
   margin: 2px 14px 6px;
 }
-.filtro-area label {
+.filtro-clinica label {
   font-size: .72rem;
   font-weight: 700;
   text-transform: uppercase;
@@ -502,7 +502,7 @@ body[data-pagina="mensajeria"] .layout { width: 100%; }
   color: var(--verde-oscuro);
   white-space: nowrap;
 }
-.filtro-area select { flex: 1; min-width: 0; }
+.filtro-clinica select { flex: 1; min-width: 0; }
 
 .tpl-list {
   list-style: none;

@@ -717,7 +717,7 @@ Cada especialidad vive en **una sola tabla** `pacientes_<slug>` dentro de `snw_b
 - **Pestaña Áreas** (administración, admin/dev): crear (con flujo duplicado: usar existente o crear `Kinesiología 2`), renombrar (la tabla no cambia), asignar/retirar roles por cuenta y **eliminar la tabla completa** (zona de peligro, con confirmación; el historial se conserva).
 - **Usuarios** muestra el rol `supervisor` y las áreas asignadas de cada cuenta; «Envíos realizados» y «Actividad» paginan de a 10.
 - **Pacientes**: **selector único de base de datos** (desarrollo/producción/áreas, siempre con el nombre físico de la tabla), **carga CSV** en la tabla de la área (informe de insertados/duplicados/rechazados) y **paginación** (10 a 100 por página, se recuerda).
-- **Mensajería**: área por plantilla (badge en la lista + campo en el editor), **filtro «Filtrar por área»** (Todas/Globales/cada una) y **selector único de base de datos** en el modal (bases disponibles + una opción por área; si hay una sola disponible, queda esa seleccionada; las plantillas de área fuerzan su base), con conteo, slider y cupo diario. Modales de confirmación al aprobar y de motivo al rechazar.
+- **Mensajería**: área por plantilla (badge en la lista + campo en el editor), **filtro «Filtrar por clínica»** (Todas/cada clínica activa; las plantillas de clínicas inactivas siguen visibles en Todas) y **selector único de base de datos** en el modal (bases disponibles + una opción por área; si hay una sola disponible, queda esa seleccionada; las plantillas de área fuerzan su base), con conteo, slider y cupo diario. Modales de confirmación al aprobar y de motivo al rechazar.
 - **Historial**: filtros **Base** (Todas/Desarrollo/Producción, solo admin/dev) y **Área** (con su tabla; «Mis áreas» para el resto) y «Ver mensajes» con la tabla correcta.
 - **Estadísticas** (admin/dev): selector de área o «Todas» en resumen, gráfico y costos.
 - **Confirmación de supervisor**: el correo de solicitud llega también a los supervisores activos del área (con su nombre en el mensaje); los enlaces por token sirven para cualquiera de los destinatarios.
@@ -1215,7 +1215,7 @@ claro** de la sidebar, o con el botón flotante en la portada y el login (págin
 - **Mensajería y plantillas** (`mensajeria.html`, permiso `mensajeria`): editor de plantillas con vista
   previa estilo WhatsApp (formato `*negrita*`/`_cursiva_`/`~tachado~`), campo de área
   (el usuario normal solo las suyas; sin asignadas se le indica pedir una), filtro
-  «Filtrar por área» (Todas/Globales/cada una), nombre y template
+  «Filtrar por clínica» (Todas/cada clínica activa), nombre y template
   de Meta permanentes, botón **Sincronizar** con Meta (cada cuenta solo recibe su alcance),
   badges de aprobación interna («⏳ Por aprobar»/«Rechazada») con botones de aprobar (con
   confirmación) y rechazar (con motivo) para admin/dev/supervisor, y envío directo a todos los

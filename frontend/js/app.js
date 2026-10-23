@@ -129,7 +129,10 @@ async function cargarCentrosEmisores() {
       cuentasPlantillas = centrosEmisores;
     }
     pintarCentrosEmisores();
-    if (plantillas.length) renderLista(buscadorEl.value);
+    if (plantillas.length) {
+      poblarFiltroClinica();
+      renderLista(buscadorEl.value);
+    }
   } catch (error) {
     for (const id of ["#centroErrorConf", "#progCentroError"]) {
       const aviso = $(id);
@@ -165,8 +168,8 @@ async function terminarCargaPlantillas(inicio) {
   listaEl.setAttribute("aria-busy", "false");
 }
 const buscadorEl = $("#buscador");
-const selFiltroArea = $("#selFiltroArea");
-let filtroArea = localStorage.getItem("snw_filtro_tpl") || "todas";
+const selFiltroClinica = $("#selFiltroClinica");
+let filtroClinica = localStorage.getItem("snw_filtro_tpl_clinica") || "todas";
 const formEl = $("#formPlantilla");
 const inpNombre = $("#inpNombre");
 const inpMensaje = $("#inpMensaje");
@@ -544,24 +547,28 @@ async function cargarAreas() {
     misAreas = [];
   }
   poblarSelectArea();
-  poblarFiltroArea();
   poblarFormProg();
 }
 
-function poblarFiltroArea() {
-  if (!selFiltroArea) return;
-  selFiltroArea.innerHTML =
-    `<option value="todas">Todas</option>` +
-    `<option value="global">Globales (sin área)</option>` +
-    misAreas.map((e) => `<option value="${e.id}">${escaparHtml(e.nombre_visible)}</option>`).join("");
-  const vals = ["todas", "global", ...misAreas.map((e) => String(e.id))];
-  if (!vals.includes(filtroArea)) filtroArea = "todas";
-  selFiltroArea.value = filtroArea;
+function poblarFiltroClinica() {
+  if (!selFiltroClinica) return;
+  const cuentas = cuentasPlantillas.filter((centro) => centro.activa !== false).map((centro) => ({
+    codigo: centro.codigo,
+    nombre: centro.nombre,
+  }));
+  cuentas.sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
+  selFiltroClinica.replaceChildren(new Option("Todas", "todas"));
+  for (const centro of cuentas) {
+    selFiltroClinica.add(new Option(centro.nombre, `centro:${centro.codigo}`));
+  }
+  const valores = ["todas", ...cuentas.map((centro) => `centro:${centro.codigo}`)];
+  if (!valores.includes(filtroClinica)) filtroClinica = "todas";
+  selFiltroClinica.value = filtroClinica;
 }
 
-if (selFiltroArea) selFiltroArea.addEventListener("change", () => {
-  filtroArea = selFiltroArea.value;
-  localStorage.setItem("snw_filtro_tpl", filtroArea);
+if (selFiltroClinica) selFiltroClinica.addEventListener("change", () => {
+  filtroClinica = selFiltroClinica.value;
+  localStorage.setItem("snw_filtro_tpl_clinica", filtroClinica);
   renderLista(buscadorEl.value);
 });
 
@@ -675,6 +682,7 @@ async function cargar() {
         if (!Array.isArray(datos)) throw new Error("formato inválido");
         // Las plantillas de call center se gestionan desde el Historial.
         plantillas = datos.filter((p) => !p.especial && esPlantillaValida(p));
+        poblarFiltroClinica();
         renderLista(buscadorEl.value);
         // Restaura la selección guardada (si la plantilla sigue existiendo).
         try {
@@ -734,6 +742,7 @@ async function revisarPlantillasEnSegundoPlano() {
     }
 
     plantillas = nuevas;
+    poblarFiltroClinica();
     renderLista(buscadorEl.value);
     if (activaId) {
       const actual = plantillas.find((x) => x.id === activaId);
@@ -1046,13 +1055,12 @@ function actualizarLimiteDesdeModo() {
 
 function renderLista(filtro = "") {
   const q = filtro.trim().toLowerCase();
-  const fEsp = filtroArea;
+  const centroSeleccionado = filtroClinica.startsWith("centro:") ? filtroClinica.slice(7) : "";
   const visibles = [...plantillas]
     .sort((a, b) => (b.actualizada || 0) - (a.actualizada || 0))
     .filter(
       (p) =>
-        (fEsp === "todas" ||
-          (fEsp === "global" ? p.area_id == null : String(p.area_id) === fEsp)) &&
+        (filtroClinica === "todas" || p.centro_codigo === centroSeleccionado) &&
         (!q ||
           String(p.nombre || "").toLowerCase().includes(q) ||
           String(p.texto || "").toLowerCase().includes(q) ||
@@ -2093,6 +2101,7 @@ formEl.addEventListener("submit", async (e) => {
       fila = await crearPlantilla(nombre, texto, whatsapp_template_lang, whatsapp_template_categoria, area_id, encabezadoMediaActivo(), encabezadoTextoActivo(), inpPieTexto.value.trim(), ejemplosPreview(), centroPlantilla, botonesDelEditor());
       plantillas.push(fila);
     }
+    poblarFiltroClinica();
     setGuardando(false);
 
     // Mensaje según el estado del template en Meta
@@ -2132,6 +2141,7 @@ $("#btnModalConfirmar").addEventListener("click", async () => {
   try {
     const data = await eliminarPlantilla(activaId);
     plantillas = plantillas.filter((x) => x.id !== activaId);
+    poblarFiltroClinica();
     modalEl.hidden = true;
     if (data && data.meta_advertencia) {
       toast(`Plantilla eliminada, pero en Meta: ${data.meta_advertencia}`, "error");
@@ -3200,6 +3210,7 @@ if (btnRevisarTodos) {
       if (!res.ok) throw new Error(data.detail ?? `Error ${res.status}`);
       // Las plantillas de call center se gestionan desde el Historial.
       plantillas = data.filter((p) => !p.especial && esPlantillaValida(p));
+      poblarFiltroClinica();
       renderLista(buscadorEl.value);
       if (activaId) {
         const actual = plantillas.find((x) => x.id === activaId);
@@ -3338,6 +3349,7 @@ if (btnSincronizarMeta) {
       if (!res.ok) throw new Error(data.detail ?? `Error ${res.status}`);
       // Las plantillas de call center se gestionan desde el Historial.
       plantillas = data.plantillas.filter((p) => !p.especial && esPlantillaValida(p));
+      poblarFiltroClinica();
       if ((activaId && !plantillas.some((p) => p.id === activaId)) ||
           (tplSelId && !plantillas.some((p) => p.id === tplSelId))) resetearCardEnvio();
       renderLista(buscadorEl.value);

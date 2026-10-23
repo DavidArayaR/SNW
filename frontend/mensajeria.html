@@ -7,14 +7,14 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
   <link rel="stylesheet" href="css/tema.css?v=tokens1">
-  <link rel="stylesheet" href="css/styles.css?v=carga-plantillas1">
+  <link rel="stylesheet" href="css/styles.css?v=filtro-clinica1">
   <link rel="stylesheet" href="css/componentes.css?v=paginador-cinco1">
   <link rel="stylesheet" href="css/layout.css?v=navcolor1">
   <link rel="stylesheet" href="css/mensajeria.css?v=cuentas-whatsapp1">
   <link rel="stylesheet" href="css/calendario.css?v=base1">
   <link rel="stylesheet" href="css/calendario-programados.css?v=programados2">
   <link rel="stylesheet" href="css/refinamiento.css?v=merge-frontend1">
-  <link rel="stylesheet" href="css/mensajeria-nuevo.css?v=encabezado-exclusivo1">
+  <link rel="stylesheet" href="css/mensajeria-nuevo.css?v=filtro-clinica1">
   <script src="js/tema.js?v=scrollbar1"></script>
 </head>
 <body data-pagina="mensajeria">
@@ -51,11 +51,10 @@
       <div class="searchbox">
         <input type="search" id="buscador" placeholder="Buscar plantilla o cuenta..." autocomplete="off">
       </div>
-      <div class="filtro-area">
-        <label for="selFiltroArea">Filtrar por área:</label>
-        <select id="selFiltroArea" class="badge badge--select" aria-label="Filtrar por área">
+      <div class="filtro-clinica">
+        <label for="selFiltroClinica">Filtrar por clínica:</label>
+        <select id="selFiltroClinica" class="badge badge--select" aria-label="Filtrar por clínica">
           <option value="todas">Todas</option>
-          <option value="global">Globales</option>
         </select>
       </div>
       <div id="cargandoPlantillas" class="tabla-cargando" role="status" aria-live="polite" hidden>
@@ -603,7 +602,7 @@
   <script src="js/layout.js?v=permisos-acciones1"></script>
   <script src="js/pass-toggle.js"></script>
   <script src="js/plantilla-ia.js?v=sin-confirmacion1"></script>
-  <script src="js/app.js?v=borrador-reagendar1"></script>
+  <script src="js/app.js?v=filtro-clinica3"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>

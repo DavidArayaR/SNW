@@ -23,4 +23,15 @@ assert(descripcionCuenta, "Debe existir la descripción del centro de la plantil
 assert.match(descripcionCuenta, /cuenta\.nombre.*cuenta\.phoneNumber/);
 assert.doesNotMatch(descripcionCuenta, /wabaId|WABA ID/);
 assert.doesNotMatch(html, /La plantilla se registra en la WABA|Selecciona la WABA/);
-console.log("Orden y exclusividad del encabezado: OK");
+assert.match(html, /id="selFiltroClinica"[^>]*aria-label="Filtrar por clínica"/);
+assert.doesNotMatch(html, /Sin clínica|sin_clinica/);
+const filtroClinica = app.split("function poblarFiltroClinica() {")[1]?.split("function poblarSelectArea()")[0];
+assert(filtroClinica, "Debe existir el selector de clínicas de las plantillas");
+assert.match(filtroClinica, /cuentasPlantillas\.filter\(\(centro\) => centro\.activa !== false\)/);
+assert.doesNotMatch(filtroClinica, /plantillas\.map\(\(p\) => p\.centro_codigo\)/);
+assert.doesNotMatch(filtroClinica, /Sin clínica|sin_clinica/);
+const lista = app.split('function renderLista(filtro = "") {')[1]?.split("function ")[0];
+assert(lista, "Debe existir el filtro de la lista de plantillas");
+assert.match(lista, /p\.centro_codigo === centroSeleccionado/);
+assert.doesNotMatch(lista, /p\.area_id/);
+console.log("Editor y filtro por clínica de plantillas: OK");

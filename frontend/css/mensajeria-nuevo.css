@@ -79,7 +79,7 @@ body[data-pagina="mensajeria"] .searchbox {
   padding: 5px 12px;
   border-radius: 8px;
 }
-body[data-pagina="mensajeria"] .filtro-area { margin: 4px 20px 12px; }
+body[data-pagina="mensajeria"] .filtro-clinica { margin: 4px 20px 12px; }
 body[data-pagina="mensajeria"] .tpl-list { padding: 0 0 8px; }
 body[data-pagina="mensajeria"] .tpl-item {
   border: 0;
