@@ -294,6 +294,7 @@ def _limpiar_datos(cur, telefono: str) -> tuple[int, int]:
         if normalizar_telefono(row.get("telefono") or "") == telefono:
             cur.execute("DELETE FROM call_center_derivaciones WHERE id = %s", (row["id"],))
     cur.execute("DELETE FROM crm_derivaciones_pendientes WHERE telefono = %s", (telefono,))
+    cur.execute("DELETE FROM campania_consultas WHERE telefono = %s", (telefono,))
     # La nueva cola de citas también contiene PII del paciente. Borrar toda
     # copia pendiente o enviada; el historial se reduce más abajo.
     cur.execute("DELETE FROM paciente_reagendar"

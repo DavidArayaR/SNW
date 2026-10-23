@@ -26,7 +26,7 @@ from whatsapp_channels import (CENTROS, EMISOR_WEBHOOK, catalogo_centros,
                                credenciales_centro, listar_canales, resolver_phone_id)
 from whatsapp_channel_verification import verificar_canal_meta
 from corpus_respuestas import guardar_mensaje_completo
-from intenciones_call_center import clasificar, patrones_configurados
+from intenciones_call_center import clasificar, normalizar as normalizar_intencion, patrones_configurados
 from plantilla_media import obtener_media, ruta_media
 from plantilla_revision import (botones_para_meta, presentar_plantilla,
                                variables_del_cuerpo, version_opciones)
@@ -220,6 +220,30 @@ al_detectar_interes = None
 # Callback registrado por main.py: persiste una derivación idempotente y
 # prepara el botón hacia el número externo del call center.
 al_detectar_consulta = None
+
+# Callback de campañas normales: pide una consulta concreta y deriva el
+# siguiente mensaje. Las respuestas de reagendamiento usan su propio flujo.
+al_consulta_campania = None
+
+_INTERES_DIRECTO_TEXTOS = frozenset((
+    "me interesa", "si me interesa", "interesado", "interesada",
+    "estoy interesado", "estoy interesada",
+))
+
+
+def es_solo_saludo_o_estado(texto: str) -> bool:
+    """No iniciar derivaciones por saludos o respuestas sociales breves."""
+    normalizado = normalizar_intencion(texto)
+    return bool(re.fullmatch(
+        r"(?:hola|holi|buenas|buenos dias|buenas tardes|buenas noches|"
+        r"como estas|como estan|que tal|estoy bien|estoy mal|"
+        r"estoy mas o menos|me siento bien|me siento mal|bien|mal|"
+        r"bien gracias|mal gracias|todo bien|todo mal|mas o menos|"
+        r"ahi nomas|gracias|muchas gracias|ok|okay|vale|dale|"
+        r"perfecto|si|no|claro|entendido|de acuerdo|listo)"
+        r"(?: (?:gracias|y tu|y ustedes))?",
+        normalizado,
+    ))
 
 # Callback opcional que main.py registra: se llama con el teléfono del paciente
 # cuando el webhook detecta que se dio de baja (por botón o por texto libre),
@@ -1388,6 +1412,18 @@ class WhatsAppService:
                         log_error("al_detectar_consulta: ejecutiva", exc)
                 continue
             if es_boton and extra == ACCIONES_BOTON_TEMPLATE["consulta"]:
+                if callable(al_consulta_campania) and reagendar is None:
+                    try:
+                        estado = al_consulta_campania(
+                            telefono, cuerpo, mensaje.get("id"),
+                            (mensaje.get("context") or {}).get("id"))
+                        if estado != "sin_campania":
+                            acciones.append(f"consulta_campania_{estado}")
+                            continue
+                    except Exception as exc:
+                        log_error("al_consulta_campania: botón", exc)
+                        acciones.append("consulta_campania_error")
+                        continue
                 if callable(al_detectar_consulta):
                     try:
                         resultado = al_detectar_consulta(
@@ -1395,6 +1431,26 @@ class WhatsAppService:
                         acciones.append(f"derivacion_{resultado}")
                     except Exception as exc:
                         log_error("al_detectar_consulta: botón de plantilla", exc)
+                continue
+
+            if (tipo == "text" and reagendar is None and not estaba_opt_out
+                    and normalizar_intencion(cuerpo) not in _INTERES_DIRECTO_TEXTOS
+                    and not fue_baja and not no_interes
+                    and not es_solo_saludo_o_estado(cuerpo)):
+                if callable(al_consulta_campania):
+                    try:
+                        estado = al_consulta_campania(
+                            telefono, cuerpo, mensaje.get("id"),
+                            (mensaje.get("context") or {}).get("id"))
+                        if estado != "sin_campania":
+                            acciones.append(f"consulta_campania_{estado}")
+                            continue
+                    except Exception as exc:
+                        log_error("al_consulta_campania", exc)
+                        acciones.append("consulta_campania_error")
+                        continue
+
+            if tipo == "text" and es_solo_saludo_o_estado(cuerpo):
                 continue
 
             # Las bajas y la supresión siempre tienen prioridad. Una consulta
@@ -1782,6 +1838,7 @@ class WhatsAppService:
                     # automáticas en cada alternancia entre baja y alta.
                     cur.execute("DELETE FROM whatsapp_avisos_unicos"
                                 " WHERE telefono = %s AND tipo = 'reintegro'", (telefono,))
+                cur.execute("DELETE FROM campania_consultas WHERE telefono = %s", (telefono,))
                 conn.commit()
         except Exception as e:
             log_error(f"_registrar_baja({telefono})", e)
@@ -1838,6 +1895,7 @@ class WhatsAppService:
                     cur.execute("DELETE FROM whatsapp_avisos_unicos"
                                 " WHERE telefono = %s AND tipo IN"
                                 " ('baja_prueba', 'eliminacion_simulada')", (telefono,))
+                cur.execute("DELETE FROM campania_consultas WHERE telefono = %s", (telefono,))
                 conn.commit()
         except Exception as e:
             log_error(f"_registrar_retractacion({telefono})", e)
@@ -1909,6 +1967,7 @@ class WhatsAppService:
                      f"Interesado en la oferta del {_hoy_es()}, plantilla '{clave_oferta0 or '—'}'.",
                      esp0["id"] if esp0 else None, p0["tabla"] if esp0 else None),
                 )
+                cur.execute("DELETE FROM campania_consultas WHERE telefono = %s", (telefono,))
                 conn.commit()
         except Exception as e:
             log_error(f"_registrar_interes({telefono})", e)
@@ -1948,6 +2007,7 @@ class WhatsAppService:
                      f"No interesado en la oferta del {_hoy_es()}, plantilla '{clave_oferta0 or '—'}'.",
                      esp0["id"] if esp0 else None, p0["tabla"] if esp0 else None),
                 )
+                cur.execute("DELETE FROM campania_consultas WHERE telefono = %s", (telefono,))
                 conn.commit()
         except Exception as e:
             log_error(f"_registrar_no_interes({telefono})", e)

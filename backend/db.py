@@ -807,6 +807,20 @@ def asegurar_tabla_config() -> None:
                 " ON DELETE CASCADE"
                 ") CHARACTER SET utf8mb4"
             )
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS campania_consultas ("
+                " wa_phone_id VARCHAR(64) NOT NULL,"
+                " telefono VARCHAR(20) NOT NULL,"
+                " campania_log_id BIGINT NOT NULL,"
+                " primer_mensaje_id VARCHAR(255) NOT NULL,"
+                " ultimo_mensaje_id VARCHAR(255) NULL,"
+                " estado ENUM('esperando','completada') NOT NULL DEFAULT 'esperando',"
+                " creado DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                " actualizado DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
+                " PRIMARY KEY (wa_phone_id, telefono),"
+                " KEY idx_campania_consultas_actualizado (actualizado)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+            )
             # Cola local para la futura integración CRM. No se despacha nada
             # fuera de SNW hasta que exista contrato de API y autorización.
             cur.execute(

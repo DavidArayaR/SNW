@@ -640,6 +640,14 @@ tiene template de Meta (va como texto libre, ventana de 24 h). No hay gestión d
   En respuestas de interés prepara exactamente «Hola, estoy interesado/a en la oferta que me
   enviaron.». En consultas prepara el texto de la consulta. Si no hay número CRM válido de esa
   clínica, no se usa el de otra ni se construye un enlace inválido; el interés queda registrado.
+- **Otras respuestas a campañas normales:** un saludo o una respuesta social breve no
+  dispara la derivación. Ante otro texto o el botón de consulta, SNW pide escribirla
+  completa en un solo mensaje de hasta 500 caracteres. Si es más larga, pide resumirla
+  sin recortarla silenciosamente. Con el siguiente texto válido registra la consulta y envía
+  el botón al CRM de la misma clínica; allí el paciente debe enviar el mensaje
+  preparado tal como aparece. El estado se guarda por paciente, número emisor y
+  campaña para evitar avisos repetidos. Los botones de interés, desinterés y baja
+  conservan sus flujos actuales. Reagendamiento permanece separado.
 - **Registro:** cada envío queda en `call_center_log` con el número asignado.
   El panel de Historial muestra la fecha, el nombre y teléfono del paciente,
   su base de datos, el número de call center asignado y el estado. También

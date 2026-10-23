@@ -2430,6 +2430,8 @@ def _cc_datos_envio(pac: dict, ambiente: str, consulta: str = "",
     texto = (config_get("call_center_aviso_consulta") or "").strip() if consulta else ""
     if not texto or "automátic" not in texto.casefold():
         texto = CALL_CENTER_PLANTILLA_FIJA["texto"]
+    if consulta and "tal como" not in texto.casefold():
+        texto += " Tu consulta quedó registrada. Envía el mensaje preparado tal como está para continuar."
     texto = renderizar_mensaje(texto, pac)
     datos = {"texto": texto}
     codigo = (emisor or {}).get("codigo")
@@ -2721,7 +2723,8 @@ def _enviar_derivacion_consulta(derivacion_id: int) -> None:
 
 
 def _registrar_derivacion_consulta(telefono: str, texto: str, mensaje_id: str,
-                                   motivos: tuple[str, ...], forzar_nueva: bool = False) -> str:
+                                   motivos: tuple[str, ...], forzar_nueva: bool = False,
+                                   tabla_preferida: str | None = None) -> str:
     """Deduplica por ID de Meta; solo números reales reutilizan consultas recientes."""
     if not mensaje_id or not motivos:
         return "sin_id"
@@ -2757,7 +2760,7 @@ def _registrar_derivacion_consulta(telefono: str, texto: str, mensaje_id: str,
             pacientes = WhatsAppService()._pacientes_con_tel(cur, tel)
             if not pacientes:
                 return "sin_paciente"
-            tabla_origen = _tabla_ultimo_envio_emisor(tel) if emisor else None
+            tabla_origen = tabla_preferida or (_tabla_ultimo_envio_emisor(tel) if emisor else None)
             pac = next((p for p in pacientes if p["tabla"] == tabla_origen), None) or next((p for p in pacientes if p["tabla"] not in
                         (tabla_pacientes("desarrollo"), tabla_pacientes("produccion"))),
                        pacientes[-1])
@@ -2779,6 +2782,159 @@ def _registrar_derivacion_consulta(telefono: str, texto: str, mensaje_id: str,
         timer.daemon = True
         timer.start()
     return "nueva" if nueva else "reutilizada"
+
+
+_AVISO_CONSULTA_CAMPANIA = (
+    "Para ayudarte, escribe cuál es tu consulta completa en un solo mensaje "
+    "de hasta 500 caracteres. "
+    "Luego te enviaremos un botón para continuarla en el WhatsApp del call center."
+)
+_AVISO_CONSULTA_LARGA = (
+    "Tu consulta supera los 500 caracteres. Resúmela en un solo mensaje "
+    "para poder prepararla y continuar con el call center."
+)
+
+
+def _ultima_campania_del_emisor(cur, telefono: str, phone_id: str,
+                               referencia_meta_id: str | None) -> dict | None:
+    """No atribuye una respuesta al reagendamiento ni a otro número emisor."""
+    sql = (
+        "SELECT l.id, COALESCE(l.tabla_pacientes, e.base_datos) AS base_datos"
+        " FROM log_envios l JOIN envios e ON e.id=l.envio_id"
+        " WHERE l.wa_phone_id=%s AND l.numero_telefono=%s"
+        " AND l.estado_envio='enviado'"
+    )
+    if referencia_meta_id:
+        cur.execute(sql + " AND l.whatsapp_message_id=%s ORDER BY l.id DESC LIMIT 1",
+                    (phone_id, telefono, referencia_meta_id))
+        exacta = cur.fetchone()
+        if exacta:
+            return None if exacta["base_datos"] == "paciente_reagendar" else exacta
+    cur.execute(sql + " AND e.base_datos <> 'paciente_reagendar' ORDER BY l.id DESC LIMIT 1",
+                (phone_id, telefono))
+    ultima_normal = cur.fetchone()
+    if not ultima_normal:
+        return None
+    # Un reagendamiento posterior desplaza a la campaña normal: sin referencia
+    # explícita no se puede adjudicar con seguridad esa respuesta a la campaña.
+    cur.execute(
+        "SELECT l.id FROM log_envios l JOIN envios e ON e.id=l.envio_id"
+        " WHERE l.wa_phone_id=%s AND l.numero_telefono=%s"
+        " AND l.estado_envio='enviado' AND e.base_datos='paciente_reagendar'"
+        " ORDER BY l.id DESC LIMIT 1", (phone_id, telefono))
+    ultima_cita = cur.fetchone()
+    return None if ultima_cita and ultima_cita["id"] > ultima_normal["id"] else ultima_normal
+
+
+def _enviar_aviso_consulta_campania(telefono: str, phone_id: str,
+                                    primer_mensaje_id: str, tabla: str | None) -> None:
+    """Envía una sola pregunta; si falla, permite que el próximo mensaje reintente."""
+    try:
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT estado, primer_mensaje_id FROM campania_consultas"
+                " WHERE wa_phone_id=%s AND telefono=%s", (phone_id, telefono))
+            estado = cur.fetchone() or {}
+        if estado.get("estado") != "esperando" or estado.get("primer_mensaje_id") != primer_mensaje_id:
+            return
+        if _enviar_mensaje_directo(telefono, _AVISO_CONSULTA_CAMPANIA,
+                                  "consulta_aclaracion", tabla_preferida=tabla):
+            return
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute("DELETE FROM campania_consultas WHERE wa_phone_id=%s AND telefono=%s"
+                        " AND primer_mensaje_id=%s AND estado='esperando'",
+                        (phone_id, telefono, primer_mensaje_id))
+            conn.commit()
+    except Exception as exc:
+        log_error("_enviar_aviso_consulta_campania", exc)
+
+
+def _gestionar_consulta_campania(telefono: str, texto: str, mensaje_id: str,
+                                 referencia_meta_id: str | None) -> str:
+    """Primera respuesta: pedir detalle. Segunda: ofrecer botón al CRM."""
+    emisor = emisor_webhook_actual()
+    if not emisor or not mensaje_id or not texto.strip():
+        return "sin_campania"
+    tel = normalizar_telefono(telefono) or telefono
+    phone_id = emisor["phoneNumberId"]
+    with conectar() as conn, conn.cursor() as cur:
+        campania = _ultima_campania_del_emisor(cur, tel, phone_id, referencia_meta_id)
+        if not campania:
+            return "sin_campania"
+        cur.execute("SELECT campania_log_id, primer_mensaje_id, ultimo_mensaje_id,"
+                    " estado, actualizado"
+                    " FROM campania_consultas WHERE wa_phone_id=%s AND telefono=%s FOR UPDATE",
+                    (phone_id, tel))
+        estado = cur.fetchone() or {}
+        misma_campania = estado.get("campania_log_id") == campania["id"]
+        vigente = (estado.get("actualizado") and
+                   estado["actualizado"] >= datetime.datetime.now() - datetime.timedelta(days=7))
+        if misma_campania and estado.get("estado") == "completada":
+            return "ya_gestionada"
+        if misma_campania and vigente and estado.get("estado") == "esperando":
+            if estado.get("primer_mensaje_id") == mensaje_id[:255]:
+                return "esperando"
+            if len(texto.strip()) > 500:
+                if estado.get("ultimo_mensaje_id") == "consulta_larga_avisada":
+                    return "texto_largo"
+                cur.execute("UPDATE campania_consultas SET ultimo_mensaje_id='consulta_larga_avisada'"
+                            " WHERE wa_phone_id=%s AND telefono=%s", (phone_id, tel))
+                conn.commit()
+                contexto = contextvars.copy_context()
+                timer = threading.Timer(
+                    0, contexto.run,
+                    args=(_enviar_mensaje_directo, tel, _AVISO_CONSULTA_LARGA,
+                          "consulta_aclaracion"),
+                    kwargs={"tabla_preferida": campania.get("base_datos")})
+                timer.daemon = True
+                timer.start()
+                return "texto_largo"
+            cur.execute("UPDATE campania_consultas SET estado='completada',"
+                        " ultimo_mensaje_id=%s WHERE wa_phone_id=%s AND telefono=%s",
+                        (mensaje_id[:255], phone_id, tel))
+            conn.commit()
+            derivar = True
+        else:
+            cur.execute(
+                "INSERT INTO campania_consultas"
+                " (wa_phone_id, telefono, campania_log_id, primer_mensaje_id, estado)"
+                " VALUES (%s, %s, %s, %s, 'esperando')"
+                " ON DUPLICATE KEY UPDATE campania_log_id=VALUES(campania_log_id),"
+                " primer_mensaje_id=VALUES(primer_mensaje_id), ultimo_mensaje_id=NULL,"
+                " estado='esperando', actualizado=NOW()",
+                (phone_id, tel, campania["id"], mensaje_id[:255]))
+            conn.commit()
+            derivar = False
+    if derivar:
+        try:
+            resultado = _registrar_derivacion_consulta(
+                tel, texto, mensaje_id, ("CONSULTA_CAMPANIA",), True,
+                tabla_preferida=campania.get("base_datos"))
+        except Exception:
+            with conectar() as conn, conn.cursor() as cur:
+                cur.execute("UPDATE campania_consultas SET estado='esperando'"
+                            " WHERE wa_phone_id=%s AND telefono=%s AND ultimo_mensaje_id=%s",
+                            (phone_id, tel, mensaje_id[:255]))
+                conn.commit()
+            raise
+        if resultado not in ("nueva", "duplicada"):
+            with conectar() as conn, conn.cursor() as cur:
+                cur.execute("UPDATE campania_consultas SET estado='esperando'"
+                            " WHERE wa_phone_id=%s AND telefono=%s AND ultimo_mensaje_id=%s",
+                            (phone_id, tel, mensaje_id[:255]))
+                conn.commit()
+        return resultado
+    contexto = contextvars.copy_context()
+    timer = threading.Timer(
+        0, contexto.run,
+        args=(_enviar_aviso_consulta_campania, tel, phone_id, mensaje_id[:255],
+              campania.get("base_datos")))
+    timer.daemon = True
+    timer.start()
+    return "detalle_solicitado"
+
+
+whatsapp_service.al_consulta_campania = _gestionar_consulta_campania
 
 
 def _contexto_derivacion_crm(cur, emisor: dict, telefono: str, mensaje_id: str,
@@ -3014,7 +3170,8 @@ def _reservar_aviso_insulto(telefono: str) -> bool:
 
 
 def _enviar_mensaje_directo(telefono_evento: str, texto: str, clave_log: str,
-                           plantilla: dict | None = None) -> bool:
+                           plantilla: dict | None = None,
+                           tabla_preferida: str | None = None) -> bool:
     """Manda un mensaje de texto libre (respuesta inmediata, dentro de la
     ventana de 24h) al paciente que coincide con este teléfono. Se usa para
     los avisos automáticos de baja y retractación: no dependen de un template
@@ -3043,6 +3200,8 @@ def _enviar_mensaje_directo(telefono_evento: str, texto: str, clave_log: str,
         objetivos += [("produccion", a["nombre_tabla_base"], a["id"])
                       for a in servicio_areas.listar_tablas_areas()]
         objetivos.append(("desarrollo", tabla_pacientes("desarrollo"), None))
+    if tabla_preferida:
+        objetivos.sort(key=lambda objetivo: objetivo[1] != tabla_preferida)
     for amb, t, area_id in objetivos:
         try:
             with conectar(amb) as conn, conn.cursor() as cur:
