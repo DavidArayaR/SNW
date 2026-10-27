@@ -17,7 +17,9 @@ import re
 import threading
 import time
 import unicodedata
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime
+from typing import Callable
 
 import httpx
 
@@ -350,12 +352,44 @@ class ResultadoEnvioIncierto(Exception):
     """Meta pudo aceptar la solicitud, pero no hay ID fiable para conciliarla."""
 
 
+class EnvioInterrumpido(Exception):
+    """La campaña se detuvo antes de iniciar o reintentar la petición a Meta."""
+
+
 class WhatsAppApiClient:
     """Cliente HTTP para el envío de mensajes vía Graph API."""
 
-    def __init__(self, token: str, phone_number_id: str):
+    def __init__(self, token: str, phone_number_id: str,
+                 cliente_compartido: httpx.Client | None = None,
+                 continuar_envio: Callable[[], bool] | None = None):
         self.token = token
         self.phone_number_id = phone_number_id
+        self.cliente_compartido = cliente_compartido
+        self.continuar_envio = continuar_envio
+
+    def _comprobar_envio(self) -> None:
+        if self.continuar_envio is not None and not self.continuar_envio():
+            raise EnvioInterrumpido()
+
+    async def _esperar(self, segundos: float) -> None:
+        if self.continuar_envio is None:
+            await asyncio.sleep(segundos)
+            return
+        fin = time.monotonic() + segundos
+        while True:
+            self._comprobar_envio()
+            restante = fin - time.monotonic()
+            if restante <= 0:
+                return
+            await asyncio.sleep(min(restante, 0.25))
+
+    @asynccontextmanager
+    async def _sesion_http(self):
+        if self.cliente_compartido is not None:
+            yield self.cliente_compartido
+        else:
+            async with httpx.AsyncClient(timeout=30) as cliente:
+                yield cliente
 
     def _headers(self) -> dict:
         return {
@@ -378,20 +412,29 @@ class WhatsAppApiClient:
         reglas = politica_despacho(self.phone_number_id) if throughput else None
         destinatario = str((json or {}).get("to") or "") if throughput else ""
         reintentos = reglas["max_retries"] if reglas else reintentos_throttle()
-        async with httpx.AsyncClient(timeout=30) as cliente:
+        async with self._sesion_http() as cliente:
             for intento in range(reintentos + 1):
+                if throughput:
+                    self._comprobar_envio()
                 espera = gobernador.pausa_antes_de_enviar()
                 if espera > 0:
-                    await asyncio.sleep(min(espera, TOPE_ESPERA_S))
+                    await self._esperar(min(espera, TOPE_ESPERA_S))
                 if throughput:
                     while True:
+                        self._comprobar_envio()
                         turno = await asyncio.to_thread(
                             reservar_despacho, self.phone_number_id, destinatario)
                         if turno <= 0:
                             break
-                        await asyncio.sleep(min(turno, 1.0))
-                resp = await cliente.request(metodo, url, json=json, params=params,
-                                             headers=self._headers())
+                        await self._esperar(min(turno, 1.0))
+                    self._comprobar_envio()
+                if self.cliente_compartido is not None:
+                    resp = await asyncio.to_thread(
+                        cliente.request, metodo, url, json=json, params=params,
+                        headers=self._headers())
+                else:
+                    resp = await cliente.request(metodo, url, json=json, params=params,
+                                                 headers=self._headers())
                 gobernador.registrar_respuesta(resp.headers)
                 if resp.status_code in (200, 201):
                     if throughput:
@@ -430,7 +473,7 @@ class WhatsAppApiClient:
                         await asyncio.to_thread(bloquear_despacho, self.phone_number_id,
                                                 codigo, demora)
                     if intento < reintentos:
-                        await asyncio.sleep(min(demora, TOPE_ESPERA_S))
+                        await self._esperar(min(demora, TOPE_ESPERA_S))
                         continue
                     return self._procesar_respuesta(resp)
                 if tipo_limite == "global":
@@ -440,7 +483,7 @@ class WhatsAppApiClient:
                     if intento < reintentos:
                         log_error(f"Meta rate limit ({metodo} {url}, código {err.get('code')}): "
                                   f"espera {int(segundos)} s y reintenta ({intento + 1}/{reintentos})")
-                        await asyncio.sleep(min(segundos, TOPE_ESPERA_S))
+                        await self._esperar(min(segundos, TOPE_ESPERA_S))
                         continue
                 return self._procesar_respuesta(resp)   # levanta ErrorWhatsApp
         return self._procesar_respuesta(resp)
@@ -579,6 +622,21 @@ class WhatsAppService:
     # (p. ej. rotar el token) surta efecto sin reconstruir el servicio.
     def __init__(self, phone_number_id: str | None = None):
         self._phone_number_id = phone_number_id
+        self._cliente_lote: httpx.Client | None = None
+        self._continuar_lote: Callable[[], bool] | None = None
+
+    @contextmanager
+    def cliente_compartido_envio(self, continuar: Callable[[], bool] | None = None):
+        """Reutiliza conexiones Graph API durante un lote; cierra al terminar."""
+        with httpx.Client(timeout=30, limits=httpx.Limits(
+                max_connections=8, max_keepalive_connections=8)) as cliente:
+            self._cliente_lote = cliente
+            self._continuar_lote = continuar
+            try:
+                yield
+            finally:
+                self._cliente_lote = None
+                self._continuar_lote = None
 
     @property
     def token(self) -> str:
@@ -655,7 +713,9 @@ class WhatsAppService:
 
     @property
     def cliente(self) -> WhatsAppApiClient:
-        return WhatsAppApiClient(self.token, self.phone_number_id)
+        return WhatsAppApiClient(self.token, self.phone_number_id,
+                                 cliente_compartido=self._cliente_lote,
+                                 continuar_envio=self._continuar_lote)
 
     # ---------- Plantillas (templates) ----------
     COMODINES = {

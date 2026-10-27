@@ -1,7 +1,7 @@
 from db import log_error
 import httpx
 
-from whatsapp_service import WhatsAppService, ResultadoEnvioIncierto
+from whatsapp_service import WhatsAppService, ResultadoEnvioIncierto, EnvioInterrumpido
 from supresion import esta_suprimido
 
 
@@ -49,6 +49,8 @@ class MotorApiOficial:
             ok, message_id, error, _ = asyncio.run(
                 self.servicio.enviar(telefono, mensaje, plantilla=plantilla, variables=variables)
             )
+        except EnvioInterrumpido:
+            raise
         except (httpx.TransportError, ResultadoEnvioIncierto) as e:
             # Una caída de red puede ocurrir DESPUÉS de que Meta aceptó el
             # mensaje. No clasificarla como fallo reintentable ni exponer PII.

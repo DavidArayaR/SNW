@@ -1,6 +1,7 @@
 ﻿import asyncio
 import datetime
 import contextvars
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 import csv as _csv
 import hashlib
 import math
@@ -48,7 +49,7 @@ from db import (
     invite_crear, invite_estado, invite_consumir,
     auditoria_registrar, auditoria_listar,
 )
-from motor_envio import (obtener_canal, ResultadoEnvioIncierto,
+from motor_envio import (obtener_canal, MotorApiOficial, ResultadoEnvioIncierto,
                          FalloInfraestructuraDespacho)
 from whatsapp_channels import (CENTROS, catalogo_centros, claves_centro, credenciales_centro,
                                listar_canales, resolver_centro, resolver_phone_id, emisor_webhook_actual)
@@ -62,7 +63,8 @@ from groq_service import consumir_cuota, generar_borrador, validar_instruccion
 from wa_rate_limit import gobernador as wa_gobernador
 from wa_dispatch_limit import (estados as estados_despacho, politica as politica_despacho,
                                limpiar_pares_vencidos)
-from whatsapp_service import WhatsAppService, es_mensaje_interes, etiquetas_automaticas
+from whatsapp_service import (WhatsAppService, EnvioInterrumpido,
+                              es_mensaje_interes, etiquetas_automaticas)
 from whatsapp_webhook import router as whatsapp_router
 from supresion import (asegurar_tabla_supresion, reintentar_pendientes,
                       esta_suprimido, es_exento, es_numero_prueba,
@@ -5538,6 +5540,18 @@ PENDIENTES: dict = {}
 # La consulta bajo el lock garantiza que dos peticiones simultáneas no pasen
 # el chequeo las dos a la vez.
 JOBS_LOCK = threading.Lock()
+MAX_SOLICITUDES_SIMULTANEAS_POR_NUMERO = 4
+_SEMAFOROS_EMISOR: dict[str, threading.BoundedSemaphore] = {}
+_SEMAFOROS_EMISOR_LOCK = threading.Lock()
+
+
+def _semaforo_emisor(phone_id: str) -> threading.BoundedSemaphore:
+    """Comparte el cupo de solicitudes en vuelo entre campañas del proceso."""
+    with _SEMAFOROS_EMISOR_LOCK:
+        return _SEMAFOROS_EMISOR.setdefault(
+            phone_id, threading.BoundedSemaphore(MAX_SOLICITUDES_SIMULTANEAS_POR_NUMERO))
+
+
 ESTADOS_ENVIO_EN_CURSO = ("en_proceso", "pausado")
 
 
@@ -5994,6 +6008,158 @@ def _paciente_habilitado_antes_de_enviar(paciente_id: int, telefono: str,
         return False
 
 
+def _procesar_job_api_concurrente(job_id: str, canal: MotorApiOficial) -> None:
+    """Despacha una campaña por lotes acotados, sin perder resultados en vuelo.
+
+    Pausa/cancelación detienen nuevas solicitudes. Ante una respuesta incierta
+    se detiene el despacho y se registran las respuestas ya iniciadas; jamás
+    se reintenta automáticamente el destinatario incierto.
+    """
+    job = JOBS[job_id]
+    amb = job["ambiente"]
+    tabla_area = job.get("tabla_area")
+    tabla = tabla_area or tabla_pacientes(amb)
+    emisor = job.get("emisor") or {}
+    plantilla = job.get("plantilla")
+    clave = (plantilla or {}).get("clave")
+    envio_id = job.get("envio_id")
+    area_id = job.get("area_id")
+    destinatarios = job["destinatarios"]
+    detener = threading.Event()
+    cupo_emisor = _semaforo_emisor(emisor["phoneNumberId"])
+
+    def activo() -> bool:
+        while job.get("pausado") and not job.get("cancelado") and not detener.is_set():
+            job["estado"] = "pausado"
+            time.sleep(0.2)
+        if job.get("cancelado") or detener.is_set():
+            return False
+        job["estado"] = "en_proceso"
+        return True
+
+    def fallido(d: dict, motivo: str, *, registrar: bool = False) -> None:
+        with JOBS_LOCK:
+            job["fallidos"] += 1
+            job["errores"].append({"id": d["id"], "detalle": motivo})
+        if registrar:
+            registrar_historial(d["id"], d["nombre"], d["telefono"], clave,
+                                d["mensaje"], "error", motivo, ambiente=amb,
+                                envio_id=envio_id, area_id=area_id,
+                                tabla_pacientes=tabla_area, emisor=emisor)
+
+    def trabajador(d: dict) -> None:
+        if not activo():
+            return
+        while not cupo_emisor.acquire(timeout=0.2):
+            if not activo():
+                return
+        try:
+            # La cohorte se vuelve a comprobar después de obtener el cupo:
+            # una baja recibida mientras esperaba no debe salir a Meta.
+            if not activo():
+                return
+            if esta_suprimido(d["telefono"]):
+                fallido(d, "Número suprimido")
+                return
+            if not _paciente_habilitado_antes_de_enviar(d["id"], d["telefono"], amb, tabla):
+                fallido(d, "Paciente dado de baja o ya no disponible")
+                return
+            bloqueo = _restriccion_envio_desarrollo(amb, tabla_area, d["telefono"])
+            if bloqueo:
+                fallido(d, bloqueo, registrar=True)
+                return
+            if not _emisor_vigente(emisor):
+                detener.set()
+                job["detalle"] = "El número emisor cambió durante el envío. Se detuvo el lote."
+                return
+            if not activo():
+                return
+            try:
+                ok, message_id, error = canal.enviar(
+                    d["telefono"], d["mensaje"], plantilla=plantilla,
+                    variables=d.get("variables"))
+            except EnvioInterrumpido:
+                return
+            except ResultadoEnvioIncierto as exc:
+                log_error(f"procesar_job {job_id}: resultado incierto", exc)
+                job["detalle"] = ("Envío detenido: Meta pudo aceptar un mensaje cuya respuesta "
+                                  "no se recibió. Revisa el historial de Meta antes de reintentar.")
+                detener.set()
+                return
+            except FalloInfraestructuraDespacho as exc:
+                log_error(f"procesar_job {job_id}: infraestructura de despacho", exc)
+                job["detalle"] = ("Envío detenido: no se pudo verificar el canal o su capacidad. "
+                                  "Revisa el servidor antes de volver a iniciar el lote.")
+                detener.set()
+                return
+        finally:
+            cupo_emisor.release()
+
+        # La petición pudo terminar después de una pausa o cancelación: el
+        # resultado conocido se conserva para evitar un reenvío accidental.
+        if esta_suprimido(d["telefono"]):
+            fallido(d, "Número suprimido")
+            return
+        registrar_historial(d["id"], d["nombre"], d["telefono"], clave,
+                            d["mensaje"], "enviado" if ok else "error", error,
+                            ambiente=amb, envio_id=envio_id,
+                            whatsapp_message_id=message_id if ok else None,
+                            area_id=area_id, tabla_pacientes=tabla_area, emisor=emisor)
+        actualizar_estado_paciente(d["id"], "enviado" if ok else "error", amb, tabla=tabla_area)
+        if ok:
+            limpiar_interes_paciente(d["id"], amb, tabla=tabla_area)
+            with JOBS_LOCK:
+                job["enviados"] += 1
+                marcas = job.setdefault("aceptados_ultimos", [])
+                marcas.append(time.monotonic())
+                while marcas and marcas[0] < marcas[-1] - 60:
+                    marcas.pop(0)
+        else:
+            fallido(d, error or "Meta rechazó el mensaje")
+            log_error(f"procesar_job {job_id}: envío rechazado: {error}")
+
+    siguiente = 0
+    futuros = set()
+    with canal.servicio.cliente_compartido_envio(continuar=activo):
+        with ThreadPoolExecutor(max_workers=MAX_SOLICITUDES_SIMULTANEAS_POR_NUMERO) as pool:
+            while True:
+                while siguiente < len(destinatarios) \
+                        and len(futuros) < MAX_SOLICITUDES_SIMULTANEAS_POR_NUMERO \
+                        and not job.get("pausado") and not job.get("cancelado") \
+                        and not detener.is_set():
+                    d = destinatarios[siguiente]
+                    siguiente += 1
+                    futuros.add(pool.submit(trabajador, d))
+                if not futuros:
+                    if siguiente >= len(destinatarios):
+                        break
+                    if job.get("pausado") and not job.get("cancelado") and not detener.is_set():
+                        job["estado"] = "pausado"
+                        time.sleep(0.2)
+                        continue
+                    break
+                terminados, futuros = wait(futuros, timeout=0.2, return_when=FIRST_COMPLETED)
+                for futuro in terminados:
+                    try:
+                        futuro.result()
+                    except Exception as exc:
+                        log_error(f"procesar_job {job_id}: trabajador", exc)
+                        job["detalle"] = "Envío detenido por un error interno. Revisa el registro del servidor."
+                        detener.set()
+                # Los trabajadores ya iniciados se drenan incluso si hay error.
+    job["actual"] = ""
+    if detener.is_set():
+        job["estado"] = "error"
+    elif job.get("cancelado"):
+        job["estado"] = "cancelado"
+        job["detalle"] = job.get("cancelado_motivo") or "Cancelado por el usuario"
+    else:
+        job["estado"] = "completado"
+    actualizar_envio_batch(envio_id, amb, enviados=job["enviados"],
+                          fallidos=job["fallidos"],
+                          estado=job["estado"] if job["estado"] != "completado" else None)
+
+
 def _procesar_job(job_id: str) -> None:
     job = JOBS[job_id]
     amb = job["ambiente"]
@@ -6045,6 +6211,10 @@ def _procesar_job(job_id: str) -> None:
         job["actual"] = ""
         job["detalle"] = bloqueo_base
         actualizar_envio_batch(envio_id, amb, fallidos=total, estado="error")
+        return
+
+    if isinstance(canal, MotorApiOficial):
+        _procesar_job_api_concurrente(job_id, canal)
         return
 
     for i, d in enumerate(job["destinatarios"]):
