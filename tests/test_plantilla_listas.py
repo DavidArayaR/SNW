@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
 import main
 from plantilla_revision import presentar_plantilla, version_opciones
-from whatsapp_service import WhatsAppApiClient, WhatsAppService
+from whatsapp_service import ACCIONES_BOTON_TEMPLATE, WhatsAppApiClient, WhatsAppService
 
 
 BOTONES = [
@@ -72,6 +72,24 @@ class EnvioListaTests(unittest.IsolatedAsyncioTestCase):
         componentes = enviar.call_args.args[0]["template"]["components"]
         self.assertEqual(componentes[0]["parameters"][0]["payload"], "snw_tpl_opciones_7")
 
+    async def test_template_chat_crm_envia_respuesta_rapida_identificable(self):
+        plantilla = {**PLANTILLA, "botones": [
+            {"tipo": "respuesta", "texto": "Ir a call center", "accion": "crm_chat"},
+            BOTONES[1]]}
+        servicio = WhatsAppService()
+        with patch("whatsapp_service.esta_suprimido", return_value=False), \
+             patch.object(servicio, "_validar_canal_antes_envio", new_callable=AsyncMock,
+                          return_value=(True, None)), \
+             patch.object(servicio, "_plantilla_aprobada_en_waba", new_callable=AsyncMock,
+                          return_value=True), \
+             patch.object(WhatsAppApiClient, "enviar", new_callable=AsyncMock,
+                          return_value={"messages": [{"id": "wamid.template"}]}) as enviar:
+            ok, _, _, _ = await servicio.enviar(TEL, "Hola", plantilla)
+        self.assertTrue(ok)
+        componentes = enviar.call_args.args[0]["template"]["components"]
+        self.assertEqual(componentes[0]["parameters"][0]["payload"],
+                         ACCIONES_BOTON_TEMPLATE["crm_chat"])
+
 
 class WebhookListaTests(unittest.TestCase):
     def setUp(self):
@@ -94,6 +112,18 @@ class WebhookListaTests(unittest.TestCase):
             acciones = self._procesar(mensaje)
         self.assertIn("lista_solicitada", acciones)
         mostrar.assert_called_once_with(TEL, 7, "wamid.boton")
+
+    def test_pulsacion_del_chat_crm_deriva_sin_marcar_interes(self):
+        mensaje = {"id": "wamid.chat", "type": "button", "button": {
+            "text": "Ir a call center", "payload": ACCIONES_BOTON_TEMPLATE["crm_chat"]}}
+        with patch("whatsapp_service.al_detectar_consulta", return_value="nueva") as derivar, \
+             patch("whatsapp_service.al_detectar_interes") as interes, \
+             patch("whatsapp_service.al_respuesta_reagendar", None):
+            acciones = self._procesar(mensaje)
+        self.assertIn("derivacion_nueva", acciones)
+        derivar.assert_called_once_with(TEL, "Quiero hablar con el equipo de la clínica",
+                                       "wamid.chat", ("SOLICITA_CONTACTO",))
+        interes.assert_not_called()
 
     def test_seleccion_de_lista_solicita_respuesta(self):
         version = version_opciones(BOTONES[0]["opciones"])

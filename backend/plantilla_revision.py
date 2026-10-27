@@ -17,7 +17,7 @@ MAX_PIE = 60
 BOTONES_FIJOS = ["Me interesa", "No me interesa", "Dar de baja"]
 ACCIONES_FIJAS = {"Me interesa": "interes", "No me interesa": "desinteres",
                   "Dar de baja": "baja"}
-ACCIONES_RESPUESTA = {"ninguna", "interes", "desinteres", "baja", "consulta", "opciones"}
+ACCIONES_RESPUESTA = {"ninguna", "interes", "desinteres", "baja", "consulta", "opciones", "crm_chat"}
 _VARIABLE = re.compile(r"\{([^{}]+)\}")
 
 

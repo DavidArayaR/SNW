@@ -95,6 +95,18 @@ class PresentacionPlantillaTests(unittest.TestCase):
             {"type": "QUICK_REPLY", "text": "Salir"},
         ])
 
+    def test_boton_chat_crm_exige_numero_de_su_clinica(self):
+        botones = [{"tipo": "respuesta", "texto": "Ir a call center", "accion": "crm_chat"},
+                   {"tipo": "respuesta", "texto": "Dar de baja", "accion": "baja"}]
+        vista = presentar_plantilla({"texto": "Hola", "botones": botones})
+        self.assertFalse(vista["errores"])
+        with patch.object(main, "config_get", return_value=""):
+            with self.assertRaises(HTTPException):
+                main._exigir_crm_para_boton("SMPT", vista["botones"])
+        with patch.object(main, "config_get", side_effect=lambda clave: (
+                "+56999999999" if clave == "SMPT_CRM_PHONE_NUMBER" else "")):
+            main._exigir_crm_para_boton("SMPT", vista["botones"])
+
     def test_no_interesa_se_guarda_como_respuesta_de_desinteres(self):
         botones = [{"tipo": "respuesta", "texto": "No me interesa", "accion": "desinteres"},
                    {"tipo": "respuesta", "texto": "Dar de baja", "accion": "baja"}]
