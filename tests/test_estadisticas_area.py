@@ -40,6 +40,44 @@ class CursorFalso:
 
 
 class EstadisticasAreaTests(unittest.TestCase):
+    def test_estadisticas_botones_agrupa_textos_y_muestra_botones_sin_clics(self):
+        cursor = CursorFalso(filas=([{"boton": "Me interesa", "clics": 3,
+                                     "clics_mes": 2, "pacientes": 2},
+                                    {"boton": "Botón antiguo", "clics": 1,
+                                     "clics_mes": 0, "pacientes": 1}],))
+        plantillas = [{"centro_codigo": "SMPT", "area_id": 8, "botones": [
+            {"tipo": "respuesta", "texto": "Me interesa"},
+            {"tipo": "respuesta", "texto": "Consultar"},
+            {"tipo": "url", "texto": "Ver sitio"},
+            {"tipo": "respuesta", "texto": "Opciones", "accion": "opciones",
+             "opciones": [{"texto": "Reservar"}]}]}]
+        with patch.object(main, "conectar", return_value=cursor), \
+             patch.object(main, "catalogo_centros", return_value={"SMPT": "Centro"}), \
+             patch.object(main, "_exigir_area", return_value={
+                 "id": 8, "nombre_tabla_base": "pacientes_area", "nombre_visible": "Área"}), \
+             patch.object(main, "leer_plantillas", return_value=plantillas):
+            datos = main.estadisticas_botones(area_id=8, base="produccion",
+                                              centro="SMPT", sesion={})
+        self.assertEqual(datos["total_clics"], 4)
+        por_boton = {f["boton"]: f for f in datos["filas"]}
+        self.assertEqual(por_boton["Me interesa"]["clics"], 3)
+        self.assertEqual(por_boton["Botón antiguo"]["clics"], 1)
+        self.assertEqual(por_boton["Consultar"]["clics"], 0)
+        self.assertEqual(por_boton["Reservar"]["clics"], 0)
+        self.assertIsNone(por_boton["Ver sitio"]["clics"])
+        self.assertIn("m.tipo IN ('button', 'interactive')", cursor.consultas[0][0])
+        self.assertIn("m.centro_codigo = %s", cursor.consultas[0][0])
+        self.assertIn("le.area_id = %s", cursor.consultas[0][0])
+        self.assertEqual(cursor.consultas[0][1], ("%Y-%m-01", "SMPT", 8, "pacientes_area"))
+
+    def test_estadisticas_botones_desarrollo_no_mezcla_produccion(self):
+        cursor = CursorFalso(filas=([],))
+        with patch.object(main, "conectar", return_value=cursor), \
+             patch.object(main, "leer_plantillas", return_value=[]):
+            main.estadisticas_botones(area_id=None, base="desarrollo", centro="todos", sesion={})
+        self.assertIn("le.tabla_pacientes = 'pacientes_dev'", cursor.consultas[0][0])
+        self.assertEqual(cursor.consultas[0][1], ("%Y-%m-01",))
+
     def test_selector_estadisticas_oculta_clinicas_sin_campanas_enviadas(self):
         cursor = CursorFalso(filas=([{"centro_codigo": "SMPT"}],))
         canales = [{"codigo": "SMPT", "nombre": "Salud Mental Para Todos"},
@@ -301,13 +339,15 @@ class EstadisticasAreaTests(unittest.TestCase):
              patch.object(servicio, "_pacientes_con_tel", return_value=pacientes), \
              patch.object(whatsapp_service.servicio_areas, "area_por_tabla",
                           side_effect=lambda tabla: {"id": 9} if tabla == "pacientes_test" else None):
-            resultado = servicio._registrar_respuesta("test", "hola", "2026-10-07")
+            resultado = servicio._registrar_respuesta("test", "hola", "2026-10-07",
+                                                     mensaje_id="wamid.123")
 
         registros = [params for sql, params in conexion.consultas if sql.startswith("INSERT INTO log_envios")]
         self.assertEqual(resultado, "registrada")
         self.assertEqual(conexion.commits, 1)
         self.assertEqual([(r[0], r[6], r[7]) for r in registros],
                          [(1, None, "pacientes_prod"), (2, 9, "pacientes_test")])
+        self.assertEqual([r[-1] for r in registros], ["wamid.123", "wamid.123"])
         etiquetas = [params for sql, params in conexion.consultas
                      if sql.startswith("INSERT IGNORE INTO respuesta_etiquetas")]
         self.assertEqual([r[0] for r in etiquetas], [1, 2])

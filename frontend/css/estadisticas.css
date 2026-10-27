@@ -18,6 +18,16 @@
 
 .stats__respuestas-hint,
 .stats__costos-hint { margin: 12px 18px 0; }
+.stats__botones-hint { margin: 12px 18px 0; }
+.stats-botones { padding: 12px 18px 18px; }
+.stats-botones__total { margin: 0 0 10px; color: var(--texto); font-weight: 700; }
+.stats-botones__tabla-wrap { overflow-x: auto; border: 1px solid var(--borde); border-radius: 10px; }
+.stats-botones table { width: 100%; min-width: 620px; border-collapse: collapse; }
+.stats-botones th, .stats-botones td { padding: 11px 13px; border-bottom: 1px solid var(--borde); text-align: left; }
+.stats-botones thead { background: var(--brand-tint); color: var(--brand-tint-fg); }
+.stats-botones tbody tr:last-child > * { border-bottom: 0; }
+.stats-botones tbody tr:nth-child(2n) { background: var(--panel-2); }
+.stats-botones tbody td:nth-child(n+3), .stats-botones thead th:nth-child(n+3) { text-align: right; font-variant-numeric: tabular-nums; }
 
 .hero-grid {
   display: flex;

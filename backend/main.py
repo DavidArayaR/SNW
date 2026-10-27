@@ -8850,6 +8850,94 @@ def estadisticas(area_id: int | None = Query(None), base: str = "produccion",
     }
 
 
+def estadisticas_botones(area_id: int | None = Query(None), base: str = "produccion",
+                         centro: str = Query("todos"),
+                         sesion: dict = Depends(solo_admin)):
+    """Cuenta respuestas de botones recibidas por webhook, sin fijar sus textos.
+
+    El log de respuestas vincula cada clic con la base/área. Para filas antiguas
+    sin ID entrante se usa texto, teléfono, emisor y una ventana corta de tiempo.
+    """
+    _, _, _, _, esp = _alcance_estadisticas(sesion, area_id, base)
+    centro = centro if isinstance(centro, str) else "todos"
+    if centro != "todos" and centro not in catalogo_centros(incluir_inactivas=True):
+        raise HTTPException(422, detail="Centro emisor inválido.")
+    filtro_centro = " AND m.centro_codigo = %s" if centro != "todos" else ""
+    filtro_area = " AND (le.area_id = %s OR le.tabla_pacientes = %s)" if esp else ""
+    parametros = ("%Y-%m-01", *((centro,) if filtro_centro else ()),
+                  *((esp["id"], esp["nombre_tabla_base"]) if esp else ()))
+    base_log = ("le.tabla_pacientes = 'pacientes_dev'" if base == "desarrollo"
+                else "COALESCE(le.tabla_pacientes, '') <> 'pacientes_dev'")
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT MIN(TRIM(m.texto)) AS boton, COUNT(*) AS clics,"
+            " SUM(m.recibido >= DATE_FORMAT(CURDATE(), %s)) AS clics_mes,"
+            " COUNT(DISTINCT m.telefono_paciente) AS pacientes"
+            " FROM whatsapp_conversaciones_mensajes m"
+            " WHERE m.tipo IN ('button', 'interactive')"
+            " AND COALESCE(TRIM(m.texto), '') <> ''"
+            f"{filtro_centro}"
+            " AND EXISTS (SELECT 1 FROM log_envios le"
+            " WHERE le.plantilla_clave = 'respuesta'"
+            " AND le.numero_telefono = m.telefono_paciente COLLATE utf8mb4_unicode_ci"
+            " AND (BINARY le.wa_phone_id = BINARY m.wa_phone_id OR le.wa_phone_id IS NULL)"
+            " AND (BINARY le.whatsapp_message_id = BINARY m.mensaje_id"
+            "  OR (le.whatsapp_message_id IS NULL"
+            "   AND BINARY le.mensaje = BINARY m.texto"
+            "   AND le.fecha_hora BETWEEN m.recibido - INTERVAL 2 MINUTE"
+            "                         AND m.recibido + INTERVAL 2 MINUTE))"
+            f" AND {base_log}{filtro_area})"
+            " GROUP BY LOWER(TRIM(m.texto)) ORDER BY clics DESC, boton",
+            parametros,
+        )
+        registros = cur.fetchall() or []
+
+    filas = []
+    por_nombre = {}
+    for r in registros:
+        etiqueta = (r.get("boton") or "").strip()
+        if not etiqueta:
+            continue
+        fila = {"boton": etiqueta, "tipo": "respuesta", "medible": True,
+                "clics": int(r.get("clics") or 0), "clics_mes": int(r.get("clics_mes") or 0),
+                "pacientes": int(r.get("pacientes") or 0)}
+        filas.append(fila)
+        por_nombre[etiqueta.casefold()] = fila
+
+    # Las plantillas actuales también aparecen con cero clics. Una plantilla
+    # ya eliminada solo se puede reconstruir si dejó una respuesta registrada.
+    for plantilla in leer_plantillas():
+        if centro != "todos" and plantilla.get("centro_codigo") != centro:
+            continue
+        if esp and plantilla.get("area_id") != esp["id"]:
+            continue
+        for boton in plantilla.get("botones") or []:
+            candidatos = [boton]
+            if boton.get("accion") == "opciones":
+                candidatos.extend({"tipo": "respuesta", "texto": opcion.get("texto")}
+                                  for opcion in boton.get("opciones") or [])
+            for candidato in candidatos:
+                etiqueta = (candidato.get("texto") or "").strip()
+                if not etiqueta:
+                    continue
+                tipo = candidato.get("tipo") or "respuesta"
+                clave = etiqueta.casefold()
+                if tipo in ("url", "telefono"):
+                    if not any(f["boton"].casefold() == clave and f["tipo"] == tipo
+                               for f in filas):
+                        filas.append({"boton": etiqueta, "tipo": tipo, "medible": False,
+                                     "clics": None, "clics_mes": None, "pacientes": None})
+                elif clave not in por_nombre:
+                    fila = {"boton": etiqueta, "tipo": "respuesta", "medible": True,
+                            "clics": 0, "clics_mes": 0, "pacientes": 0}
+                    filas.append(fila)
+                    por_nombre[clave] = fila
+    filas.sort(key=lambda f: (not f["medible"], -(f["clics"] or 0), f["boton"].casefold()))
+    return {"filas": filas, "total_clics": sum(f["clics"] or 0 for f in filas if f["medible"]),
+            "base": base, "centro": centro,
+            "area": {"id": esp["id"], "nombre_visible": esp["nombre_visible"]} if esp else None}
+
+
 def estadisticas_envios(granularidad: str = Query("mes"), area_id: int | None = Query(None),
                         base: str = "produccion",
                         centro: str = Query("todos"),

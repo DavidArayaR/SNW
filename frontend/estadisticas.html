@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="css/componentes.css?v=historial-carga1">
   <link rel="stylesheet" href="css/layout.css?v=navcolor1">
   <link rel="stylesheet" href="css/admin.css?v=tokens1">
-  <link rel="stylesheet" href="css/estadisticas.css?v=panel-anidado1">
+  <link rel="stylesheet" href="css/estadisticas.css?v=botones1">
   <link rel="stylesheet" href="css/calendario.css?v=base1">
   <link rel="stylesheet" href="css/refinamiento.css?v=merge-frontend1">
   <link rel="stylesheet" href="css/estilo-nuevo.css?v=1">
@@ -181,6 +181,11 @@
 
         <!-- ================= PESTAÑA: RESPUESTAS ================= -->
         <div id="stabRespuestas" class="stats-vista" role="tabpanel" aria-labelledby="statsTabRespuestas" hidden>
+          <section class="panel" id="panelBotonesEstadisticas">
+            <div class="panel__head"><h2>Clics en botones</h2></div>
+            <p class="field__hint stats__botones-hint">Cuenta cada respuesta a un botón u opción recibida por WhatsApp. Los botones de enlace y llamada no informan clics a SNW; las etiquetas iguales se agrupan. Las plantillas eliminadas aparecen si tuvieron respuestas registradas.</p>
+            <div id="estadisticasBotones" class="stats-botones" aria-live="polite"></div>
+          </section>
           <section class="panel">
             <div class="panel__head">
               <h2>Respuestas de <span id="nombreMesResp">este mes</span></h2>
@@ -215,7 +220,7 @@
 
   <script src="js/layout.js?v=permisos-acciones1"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/estadisticas.js?v=clinicas3"></script>
+  <script src="js/estadisticas.js?v=botones1"></script>
   <script>
     if (window.snwCargarEstadisticas) window.snwCargarEstadisticas();
   </script>

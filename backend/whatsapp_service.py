@@ -1291,7 +1291,8 @@ class WhatsAppService:
                 # No reactivar bajas, marcar interés, derivar ni contestar a una
                 # posible autorespuesta. El original permanece en el historial.
                 info = self._registrar_respuesta(telefono, cuerpo, mensaje.get("timestamp"),
-                                                 automatica=clasificacion.automatizacion)
+                                                 automatica=clasificacion.automatizacion,
+                                                 mensaje_id=mensaje.get("id"))
                 acciones.append(f"respuesta_automatica_{info}")
                 continue
             # La ofensa es independiente: no omite una consulta ni una baja.
@@ -1340,7 +1341,8 @@ class WhatsAppService:
                 except Exception as exc:
                     log_error("al_respuesta_reagendar", exc)
             if reagendar == "gestionado":
-                info = self._registrar_respuesta(telefono, cuerpo, mensaje.get("timestamp"))
+                info = self._registrar_respuesta(telefono, cuerpo, mensaje.get("timestamp"),
+                                                 mensaje_id=mensaje.get("id"))
                 acciones.append(f"respuesta_{info}")
                 acciones.append("reagendar_gestionado")
                 continue
@@ -1371,7 +1373,8 @@ class WhatsAppService:
                 hubo_retract = True
                 acciones.append("retractacion")
 
-            info = self._registrar_respuesta(telefono, cuerpo, mensaje.get("timestamp"))
+            info = self._registrar_respuesta(telefono, cuerpo, mensaje.get("timestamp"),
+                                             mensaje_id=mensaje.get("id"))
             acciones.append(f"respuesta_{info}")
 
             if es_boton and re.fullmatch(r"snw_tpl_opciones_\d+", extra or ""):
@@ -1706,7 +1709,7 @@ class WhatsAppService:
         return (fila or {}).get("plantilla_clave") or None
 
     def _registrar_respuesta(self, telefono: str, texto: str, timestamp: str,
-                            automatica: str = "") -> str:
+                            automatica: str = "", mensaje_id: str | None = None) -> str:
         match = _TEL_MATCH.format(col="telefono")
         try:
             with conectar() as conn, conn.cursor() as cur:
@@ -1753,14 +1756,15 @@ class WhatsAppService:
                     cur.execute(
                         "INSERT INTO log_envios (envio_id, paciente_id, nombre_paciente, numero_telefono,"
                         " mensaje, plantilla_clave, estado_envio, respuesta, descripcion_error,"
-                        " area_id, tabla_pacientes, centro_codigo, wa_phone_id, numero_emisor)"
-                        " VALUES (NULL, %s, %s, %s, %s, 'respuesta', 'enviado', %s, %s, %s, %s, %s, %s, %s)",
+                        " area_id, tabla_pacientes, centro_codigo, wa_phone_id, numero_emisor,"
+                        " whatsapp_message_id)"
+                        " VALUES (NULL, %s, %s, %s, %s, 'respuesta', 'enviado', %s, %s, %s, %s, %s, %s, %s, %s)",
                         (p["id"], p["nombre"], p["telefono"], (texto or "")[:2000],
                          "pendiente" if automatica else "respondio",
                          automatica if automatica else None,
                          esp["id"] if esp else None, p["tabla"],
                          (emisor or {}).get("codigo"), (emisor or {}).get("phoneNumberId"),
-                         (emisor or {}).get("phoneNumber")),
+                         (emisor or {}).get("phoneNumber"), mensaje_id),
                     )
                     respuesta_id = cur.lastrowid
                     try:

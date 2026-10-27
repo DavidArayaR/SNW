@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS log_envios (
   fecha_hora DATETIME DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_envio (envio_id),
   INDEX idx_paciente (paciente_id),
+  INDEX idx_log_resp_tel_fecha (numero_telefono, fecha_hora),
   INDEX idx_log_area (area_id)
 );
 

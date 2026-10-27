@@ -1256,6 +1256,16 @@ def asegurar_tabla_config() -> None:
                 )
                 if not (cur.fetchone() or {}).get("n"):
                     cur.execute(f"ALTER TABLE {_ht} ADD INDEX {_hidx} (area_id)")
+            # Búsqueda acotada de respuestas al contar clics en botones por
+            # teléfono y fecha, también para registros previos sin ID de Meta.
+            cur.execute(
+                "SELECT COUNT(*) AS n FROM information_schema.STATISTICS"
+                " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'log_envios'"
+                " AND INDEX_NAME = 'idx_log_resp_tel_fecha'"
+            )
+            if not (cur.fetchone() or {}).get("n"):
+                cur.execute("ALTER TABLE log_envios ADD INDEX idx_log_resp_tel_fecha"
+                            " (numero_telefono, fecha_hora)")
 
             # Migración única: separar creación y aprobación por tipo de envío
             # sin quitar capacidades a las cuentas que ya las tenían. El

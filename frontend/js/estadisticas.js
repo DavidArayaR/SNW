@@ -179,11 +179,51 @@ if (selCentroEst) {
 }
 
 async function recargarTodo() {
+  botonesCargados = false;
   const cargas = [cargar(), cargarEnvios(granEnvios)];
+  if ($("#statsTabRespuestas")?.classList.contains("activo")) cargas.push(cargarBotones());
   if (ES_ADMIN && $("#panelCostos")) {
     cargas.push(cargarTarifas(), cargarCostos(granCostos));
   }
   await Promise.all(cargas);
+}
+
+let botonesCargados = false;
+let paginaEstadisticasLista = false;
+async function cargarBotones() {
+  const el = $("#estadisticasBotones");
+  if (!el) return;
+  const inicioCarga = iniciarCargaEstadisticas();
+  el.textContent = "Cargando clics en botones…";
+  try {
+    const alcance = qsEspEst();
+    const res = await fetch(`api/estadisticas/botones${alcance ? `?${alcance.slice(1)}` : ""}`,
+      { headers: authHeaders(), cache: "no-store" });
+    if (res.status === 401) { window.snwSesionExpirada(); return; }
+    if (!res.ok) throw new Error("No se pudieron cargar los clics en botones.");
+    const datos = await res.json();
+    botonesCargados = true;
+    const filas = datos.filas || [];
+    if (!filas.length) {
+      el.innerHTML = '<p class="mes-vacio">Aún no hay botones configurados ni pulsaciones registradas para este alcance.</p>';
+      return;
+    }
+    el.innerHTML = `<p class="stats-botones__total">${num(datos.total_clics)} clics registrados</p>` +
+      `<div class="stats-botones__tabla-wrap"><table><thead><tr>` +
+      `<th>Botón u opción</th><th>Tipo</th><th>Este mes</th><th>Total</th><th>Pacientes</th>` +
+      `</tr></thead><tbody>` + filas.map((fila) => {
+        const tipo = fila.tipo === "url" ? "Enlace" : fila.tipo === "telefono" ? "Llamada" : "Respuesta";
+        const cantidad = (valor) => fila.medible ? num(valor) : "No medible";
+        return `<tr><th scope="row">${escaparHtml(fila.boton)}</th><td>${tipo}</td>` +
+          `<td>${cantidad(fila.clics_mes)}</td><td><strong>${cantidad(fila.clics)}</strong></td>` +
+          `<td>${cantidad(fila.pacientes)}</td></tr>`;
+      }).join("") + `</tbody></table></div>`;
+  } catch (err) {
+    console.error("[estadisticas.js cargarBotones()]", err);
+    el.textContent = "No se pudieron cargar los clics en botones.";
+  } finally {
+    await terminarCargaEstadisticas(inicioCarga);
+  }
 }
 
 function chip(label, valor, clase, resp) {
@@ -990,6 +1030,9 @@ function activarTabStats(stab, animar = true) {
   $("#stabEnvios").hidden = boton.dataset.stab !== "envios";
   $("#stabRespuestas").hidden = boton.dataset.stab !== "respuestas";
   posicionarIndicadorStatsTabs();
+  if (paginaEstadisticasLista && boton.dataset.stab === "respuestas" && !botonesCargados) {
+    cargarBotones();
+  }
 }
 if (statsTabs) {
   statsTabs.querySelectorAll(".stats-series-tab").forEach((b) => b.addEventListener("click", () => {
@@ -1013,6 +1056,7 @@ window.snwCargarEstadisticas = function () {
     const inicioCarga = iniciarCargaEstadisticas();
     try {
       await Promise.all([cargarAreasEst(), cargarClinicasEst()]);
+      paginaEstadisticasLista = true;
       await recargarTodo();
     } finally {
       await terminarCargaEstadisticas(inicioCarga);
