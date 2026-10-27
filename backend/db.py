@@ -185,6 +185,41 @@ def log_error(contexto: str, exc: BaseException | None = None,
     _guardar_error_archivo(contexto, exc)
 
 
+def registrar_resultado_csv_remoto(estado: str, fase: str, *, http_status: int,
+                                  resumen: dict | None = None, duracion_ms: int = 0) -> None:
+    """Guarda el cierre de una carga remota sin CSV, identificadores ni credenciales."""
+    ahora = datetime.now(_ZONA_LOG)
+    campos = ("received", "inserted", "eligible", "alreadyExists", "alreadySent",
+              "rejected", "parts")
+    conteos = {campo: int((resumen or {}).get(campo) or 0) for campo in campos}
+    linea = (f"[{ahora:%Y-%m-%d %H:%M:%S%z}] [CSV REMOTO] {estado}"
+             f" | HTTP {int(http_status)} | fase={_texto_log_seguro(fase)}"
+             f" | duración_ms={max(0, int(duracion_ms))}")
+    detalle = " | ".join(f"{campo}={valor}" for campo, valor in conteos.items())
+    entrada = f"{linea}\n{detalle}\n"
+    print(entrada, end="", file=sys.stderr, flush=True)
+    try:
+        with _LOG_LOCK:
+            LOGS_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+            while True:
+                nombre = (f"csv-remoto-{ahora:%Y-%m-%d_%H-%M-%S-%f}-"
+                          f"{os.getpid()}-{next(_SECUENCIA_LOG)}.log")
+                try:
+                    descriptor = os.open(LOGS_DIR / nombre, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                    break
+                except FileExistsError:
+                    continue
+            try:
+                contenido = entrada.encode("utf-8")
+                while contenido:
+                    contenido = contenido[os.write(descriptor, contenido):]
+            finally:
+                os.close(descriptor)
+    except OSError as error:
+        print(f"[ERROR] No se pudo guardar el resultado de la carga CSV ({type(error).__name__}).",
+              file=sys.stderr, flush=True)
+
+
 def _migrar_numeros_prueba_a_produccion(cur) -> None:
     """Copia autorizaciones antiguas de desarrollo una sola vez."""
     marcador = "numeros_prueba_prod_sync_v1"

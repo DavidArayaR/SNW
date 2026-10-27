@@ -4,6 +4,7 @@ import sys
 import hashlib
 import asyncio
 import datetime as dt
+import tempfile
 import unittest
 import uuid
 from pathlib import Path
@@ -15,6 +16,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
 import main
+import db
 import paciente_reagendar as reagendar
 from db import conectar
 from whatsapp_service import WhatsAppService
@@ -85,24 +87,66 @@ class ParserCitasTests(unittest.TestCase):
         datos = (encabezado + "\n" + "\n".join(filas) + "\n").encode()
         llamadas = 0
 
-        def simular(bloque, cfg, *, recibido, modo_prueba):
+        def simular(bloque, cfg, *, recibido, modo_prueba, programar_automaticamente):
             nonlocal llamadas
+            self.assertFalse(programar_automaticamente)
             llamadas += 1
             cantidad = reagendar.analizar_csv(bloque, cfg)[2]
             return {"summary": {"received": cantidad, "inserted": cantidad,
                                 "eligible": cantidad, "batchId": llamadas,
-                                "batchStatus": "PROGRAMADO",
-                                "scheduledAtUtc": "2026-10-22T17:30:00Z"},
+                                "batchStatus": "REVISION",
+                                "scheduledAtUtc": None},
                     "errors": [{"row": 2, "code": "dato_invalido"}] if llamadas == 2 else []}
 
-        with patch.object(reagendar, "importar", side_effect=simular):
+        with patch.object(reagendar, "importar", side_effect=simular), \
+                patch.object(reagendar, "activar_lotes_importados") as activar:
             resultado = reagendar.importar_por_partes(datos, CFG)
+        activar.assert_not_called()  # La fecha ficticia ya venció: revisión manual.
         self.assertEqual(llamadas, 2)
         self.assertEqual(resultado["summary"]["received"], 10001)
         self.assertEqual(resultado["summary"]["inserted"], 10001)
         self.assertEqual(resultado["summary"]["batchIds"], [1, 2])
         self.assertEqual(resultado["summary"]["parts"], 2)
         self.assertEqual(resultado["errors"][0]["row"], 10002)
+
+    def test_gracia_de_tres_minutos_tras_terminar_la_carga(self):
+        base = dt.datetime(2026, 10, 27, 17, 30)
+        self.assertEqual(reagendar.programacion_tras_carga(
+            base, dt.datetime(2026, 10, 27, 17, 20, tzinfo=dt.timezone.utc)), base)
+        self.assertEqual(reagendar.programacion_tras_carga(
+            base, dt.datetime(2026, 10, 27, 17, 29, tzinfo=dt.timezone.utc)),
+            dt.datetime(2026, 10, 27, 17, 32))
+        self.assertIsNone(reagendar.programacion_tras_carga(None, dt.datetime.now(dt.timezone.utc)))
+
+    def test_partes_activan_juntas_despues_de_importar_todo(self):
+        encabezado, ejemplo = csv_fila().decode().splitlines()
+        filas = [ejemplo.replace("CITA-001", f"CITA-{i:05d}") for i in range(10001)]
+        datos = (encabezado + "\n" + "\n".join(filas) + "\n").encode()
+        fecha = dt.datetime.now(ZoneInfo("America/Santiago")).date()
+        datos = datos.replace(b"2026-10-22", fecha.isoformat().encode())
+        recibido = dt.datetime.combine(fecha, dt.time(14, 10), ZoneInfo("America/Santiago"))
+        vistos = []
+
+        def importar_parte(*args, **kwargs):
+            self.assertFalse(kwargs["programar_automaticamente"])
+            vistos.append(len(vistos) + 1)
+            return {"summary": {"received": 1, "inserted": 1, "eligible": 1,
+                                "batchId": vistos[-1], "batchStatus": "REVISION",
+                                "scheduledAtUtc": None}, "errors": []}
+
+        inicio = recibido.astimezone(dt.timezone.utc)
+        fin = inicio + dt.timedelta(minutes=25)
+        with patch.object(reagendar, "importar", side_effect=importar_parte), \
+                patch.object(reagendar, "activar_lotes_importados") as activar, \
+                patch.object(reagendar.dt, "datetime", wraps=dt.datetime) as reloj:
+            reloj.now.side_effect = [inicio, fin]
+            resultado = reagendar.importar_por_partes(datos, CFG)
+        self.assertEqual(vistos, [1, 2])
+        activar.assert_called_once_with([1, 2],
+            (fin + dt.timedelta(minutes=3)).replace(tzinfo=None))
+        self.assertEqual(resultado["summary"]["batchStatus"], "PROGRAMADO")
+        self.assertTrue(all(p["summary"]["batchStatus"] == "PROGRAMADO"
+                            for p in resultado["parts"]))
 
     def test_csv_ficticio_tiene_una_fila_sin_datos_de_contacto(self):
         filas, errores, recibidas = reagendar.analizar_csv(PRUEBA_CSV, CFG)
@@ -269,6 +313,47 @@ class ApiCitasTests(unittest.TestCase):
                                   headers={"Authorization": "Bearer token-correcto"}, files=files)
             self.assertEqual(ok.status_code, 200)
             self.assertEqual(ok.json()["summary"]["inserted"], 1)
+
+    def test_cierre_de_csv_remoto_distingue_exito_exclusiones_y_fallo(self):
+        token = "token-registro-csv"
+        cfg = {**CFG, "reagendar_api_token_hash": hashlib.sha256(token.encode()).hexdigest()}
+        ruta = "/api/v1/paciente-reagendar/importar-csv"
+        headers = {"Authorization": f"Bearer {token}"}
+        archivo = {"file": ("citas.csv", csv_fila(), "text/csv")}
+        with patch.object(main, "config_all", return_value=cfg), \
+                patch.object(reagendar, "consumir_cuota", return_value=True), \
+                patch.object(main, "auditoria_registrar"), \
+                patch.object(main, "registrar_resultado_csv_remoto") as registrar, \
+                patch.object(reagendar, "importar") as importar:
+            importar.return_value = {"success": True, "summary": {
+                "received": 1, "inserted": 1, "rejected": 0}}
+            self.assertEqual(self.client.post(ruta, headers=headers, files=archivo).status_code, 200)
+            self.assertEqual(registrar.call_args.args[:2], ("COMPLETADO", "auditoria"))
+            self.assertEqual(registrar.call_args.kwargs["http_status"], 200)
+            importar.return_value = {"success": True, "summary": {
+                "received": 1, "inserted": 0, "rejected": 1}, "errors": []}
+            self.assertEqual(self.client.post(ruta, headers=headers, files=archivo).status_code, 200)
+            self.assertEqual(registrar.call_args.args[0], "COMPLETADO_CON_EXCLUSIONES")
+            importar.side_effect = reagendar.CsvInvalido("CSV inválido")
+            self.assertEqual(self.client.post(ruta, headers=headers, files=archivo).status_code, 422)
+            self.assertEqual(registrar.call_args.args[0], "FALLIDO")
+            self.assertEqual(registrar.call_args.kwargs["http_status"], 422)
+            self.assertEqual(registrar.call_count, 3)
+
+    def test_archivo_resultado_csv_omite_datos_sensibles_y_es_visible_en_logs(self):
+        with tempfile.TemporaryDirectory() as temporal, \
+                patch.object(db, "LOGS_DIR", Path(temporal)), \
+                patch.object(main, "LOGS_DIR", Path(temporal)):
+            db.registrar_resultado_csv_remoto("COMPLETADO", "auditoria", http_status=200,
+                resumen={"received": 5, "inserted": 4, "rejected": 1}, duracion_ms=345)
+            archivos = main.listar_logs_consola({"rol": "desarrollador"})["archivos"]
+            self.assertEqual(len(archivos), 1)
+            nombre = archivos[0]["nombre"]
+            self.assertTrue(nombre.startswith("csv-remoto-"))
+            contenido = (Path(temporal) / nombre).read_text(encoding="utf-8")
+            self.assertIn("received=5", contenido)
+            self.assertIn("HTTP 200", contenido)
+            self.assertNotIn("Bearer", contenido)
 
     def test_api_envia_csv_con_mas_de_diez_mil_filas_al_importador_por_partes(self):
         encabezado, ejemplo = csv_fila().decode().splitlines()
@@ -632,7 +717,135 @@ class EliminarCargaTests(unittest.TestCase):
                 main.app.dependency_overrides.pop(main.solo_admin, None)
 
 
+class EliminarPacienteReagendarTests(unittest.TestCase):
+    def test_borra_paciente_sin_intentos_y_cierra_lote_vacio(self):
+        conexion = MagicMock()
+        cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cur.fetchone.side_effect = [
+            {"id": 11, "lote_id": 5, "estado_envio": "PENDIENTE", "intentos_envio": 0,
+             "whatsapp_opt_out": 0, "envio_id": None, "log_envio_id": None,
+             "whatsapp_message_id": None, "reserva_token": None, "ultimo_intento_en": None},
+            {"id": 5}, {"estado": "PENDIENTE"}, {"n": 0}]
+        with patch.object(reagendar, "conectar", return_value=conexion):
+            resultado = reagendar.eliminar_paciente_sin_envio(11)
+        self.assertEqual(resultado, {"id": 11, "lote_id": 5, "eliminado": True})
+        sentencias = [c.args[0] for c in cur.execute.call_args_list]
+        self.assertIn("FOR UPDATE", sentencias[0])
+        self.assertLess(next(i for i, s in enumerate(sentencias) if "DELETE FROM reagendar_destinatarios" in s),
+                        next(i for i, s in enumerate(sentencias) if "DELETE FROM paciente_reagendar" in s))
+        self.assertIn("estado='COMPLETADO'", sentencias[-1])
+        conexion.__enter__.return_value.commit.assert_called_once()
+
+    def test_rechaza_paciente_ya_procesado(self):
+        for cambio in ({"estado_envio": "ENVIADO"}, {"intentos_envio": 1},
+                       {"whatsapp_opt_out": 1}):
+            with self.subTest(cambio=cambio):
+                conexion = MagicMock()
+                cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+                cur.fetchone.return_value = {"id": 11, "lote_id": 5,
+                    "estado_envio": "PENDIENTE", "intentos_envio": 0,
+                    "whatsapp_opt_out": 0, "envio_id": None, "log_envio_id": None,
+                    "whatsapp_message_id": None, "reserva_token": None,
+                    "ultimo_intento_en": None, **cambio}
+                with patch.object(reagendar, "conectar", return_value=conexion), \
+                        self.assertRaises(ValueError):
+                    reagendar.eliminar_paciente_sin_envio(11)
+                self.assertFalse(any("DELETE" in c.args[0] for c in cur.execute.call_args_list))
+
+    def test_endpoint_requiere_sesion_y_audita(self):
+        ruta = "/api/v1/paciente-reagendar/11"
+        with TestClient(main.app) as client:
+            self.assertIn(client.delete(ruta).status_code, (401, 403))
+            main.app.dependency_overrides[main.solo_admin] = lambda: {"usuario": "admin@test"}
+            try:
+                with patch.object(reagendar, "eliminar_paciente_sin_envio",
+                                  return_value={"id": 11, "lote_id": 5, "eliminado": True}), \
+                     patch.object(main, "auditoria_registrar") as auditar:
+                    respuesta = client.delete(ruta)
+                self.assertEqual(respuesta.status_code, 200)
+                auditar.assert_called_once()
+                with patch.object(reagendar, "eliminar_paciente_sin_envio",
+                                  side_effect=ValueError("Ya hubo intento")):
+                    self.assertEqual(client.delete(ruta).status_code, 409)
+            finally:
+                main.app.dependency_overrides.pop(main.solo_admin, None)
+
+
+class EliminarTodosReagendarTests(unittest.TestCase):
+    def test_borrado_masivo_usa_guardas_y_cierra_lote_sin_pendientes(self):
+        conexion = MagicMock()
+        cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cur.fetchall.return_value = [{"id": 11, "lote_id": 5}, {"id": 12, "lote_id": 5}]
+        cur.fetchone.return_value = {"n": 0}
+        with patch.object(reagendar, "conectar", return_value=conexion):
+            resultado = reagendar.eliminar_todos_sin_envio()
+        self.assertEqual(resultado, {"pacientes_eliminados": 2})
+        sentencias = [c.args[0] for c in cur.execute.call_args_list]
+        self.assertIn("r.intentos_envio=0", sentencias[0])
+        self.assertIn("r.whatsapp_opt_out=0", sentencias[0])
+        self.assertIn("d.estado NOT IN ('PROCESANDO','ENVIADO')", sentencias[0])
+        self.assertLess(next(i for i, s in enumerate(sentencias) if "DELETE FROM reagendar_destinatarios" in s),
+                        next(i for i, s in enumerate(sentencias) if "DELETE FROM paciente_reagendar" in s))
+        self.assertIn("estado='COMPLETADO'", sentencias[-1])
+        conexion.__enter__.return_value.commit.assert_called_once()
+
+    def test_resumen_y_borrado_masivo_exigen_admin_y_auditan(self):
+        with TestClient(main.app) as client:
+            self.assertIn(client.get("/api/v1/paciente-reagendar/borrado/resumen").status_code,
+                          (401, 403))
+            self.assertIn(client.delete("/api/v1/paciente-reagendar/borrado/todos").status_code,
+                          (401, 403))
+            main.app.dependency_overrides[main.solo_admin] = lambda: {"usuario": "admin@test"}
+            try:
+                with patch.object(reagendar, "resumen_borrado_pacientes",
+                                  return_value={"eliminables": 3, "conservados": 2}), \
+                     patch.object(reagendar, "eliminar_todos_sin_envio",
+                                  return_value={"pacientes_eliminados": 3}), \
+                     patch.object(main, "auditoria_registrar") as auditar:
+                    previo = client.get("/api/v1/paciente-reagendar/borrado/resumen")
+                    borrado = client.delete("/api/v1/paciente-reagendar/borrado/todos")
+                self.assertEqual(previo.json(), {"eliminables": 3, "conservados": 2})
+                self.assertEqual(borrado.json()["pacientes_eliminados"], 3)
+                auditar.assert_called_once()
+            finally:
+                main.app.dependency_overrides.pop(main.solo_admin, None)
+
+
 class MariaDbCitasTests(unittest.TestCase):
+    def test_borrado_individual_libera_numero_y_cancela_envio_de_carga_vacia(self):
+        clave = "TEST-" + uuid.uuid4().hex
+        telefono = telefono_prueba(clave)
+        chile = ZoneInfo("America/Santiago")
+        fecha = dt.datetime.now(chile).date() + dt.timedelta(days=1)
+        datos = csv_fila(clave, telefono=telefono).replace(
+            b"2026-10-22", fecha.isoformat().encode())
+        recibido = dt.datetime.combine(fecha, dt.time(14, 0), chile)
+        lote_id = None
+        try:
+            importado = reagendar.importar(datos, CFG, recibido=recibido)
+            lote_id = importado["summary"]["batchId"]
+            with conectar() as conn, conn.cursor() as cur:
+                cur.execute("SELECT id FROM paciente_reagendar WHERE reservo_cita_uuid=%s", (clave,))
+                cita_id = cur.fetchone()["id"]
+            self.assertEqual(importado["summary"]["batchStatus"], "PROGRAMADO")
+            self.assertTrue(reagendar.eliminar_paciente_sin_envio(cita_id)["eliminado"])
+            with conectar() as conn, conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) AS n FROM paciente_reagendar WHERE id=%s", (cita_id,))
+                self.assertEqual(cur.fetchone()["n"], 0)
+                cur.execute("SELECT COUNT(*) AS n FROM reagendar_destinatarios WHERE cita_id=%s", (cita_id,))
+                self.assertEqual(cur.fetchone()["n"], 0)
+                cur.execute("SELECT estado, programado_para, creados FROM reagendar_lotes WHERE id=%s", (lote_id,))
+                lote = cur.fetchone()
+            self.assertEqual((lote["estado"], lote["programado_para"], lote["creados"]),
+                             ("COMPLETADO", None, 0))
+        finally:
+            with conectar() as conn, conn.cursor() as cur:
+                cur.execute("DELETE FROM paciente_reagendar WHERE reservo_cita_uuid=%s", (clave,))
+                cur.execute("DELETE FROM reagendar_destinatarios WHERE telefono=%s", ("+" + telefono,))
+                if lote_id:
+                    cur.execute("DELETE FROM reagendar_lotes WHERE id=%s", (lote_id,))
+                conn.commit()
+
     def test_paciente_repetido_pendiente_y_enviado_no_se_reimporta(self):
         claves = ["TEST-" + uuid.uuid4().hex for _ in range(3)]
         telefono = telefono_prueba(claves[0])

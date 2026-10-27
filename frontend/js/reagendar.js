@@ -8,6 +8,114 @@
   let loteActual = null;
   let loteAplazarId = null;
   let loteEliminarId = null;
+  let pacienteEliminarId = null;
+  const modalEliminarTodos = $("modalEliminarTodosReagendar");
+  const confirmarEliminarTodos = $("confirmarEliminarTodosReagendar");
+  const botonEliminarTodos = $("reagendarEliminarTodos");
+  function cerrarEliminarTodos() {
+    modalEliminarTodos.hidden = true;
+    $("errorEliminarTodosReagendar").textContent = "";
+  }
+  botonEliminarTodos.addEventListener("click", async () => {
+    if (botonEliminarTodos.disabled) return;
+    botonEliminarTodos.disabled = true;
+    try {
+      const res = await fetch("api/v1/paciente-reagendar/borrado/resumen",
+        { headers: auth(), cache: "no-store" });
+      const datos = await res.json().catch(() => ({}));
+      if (res.status === 401) { window.snwSesionExpirada(); return; }
+      if (!res.ok) throw new Error(datos.detail || "No se pudo consultar el total.");
+      if (!datos.eliminables) {
+        mensaje.textContent = "No hay pacientes sin envío que se puedan quitar.";
+        return;
+      }
+      $("textoEliminarTodosReagendar").textContent =
+        `Se quitarán ${datos.eliminables} pacientes que todavía no tienen intentos de envío. ` +
+        `${datos.conservados} registros con envíos, intentos o bajas se conservarán. ` +
+        "Si vuelven a llegar en otro CSV, podrán importarse de nuevo. Esta acción no se puede deshacer.";
+      modalEliminarTodos.hidden = false;
+      confirmarEliminarTodos.focus();
+    } catch (error) {
+      mensaje.textContent = error.message;
+    } finally {
+      botonEliminarTodos.disabled = false;
+    }
+  });
+  $("cancelarEliminarTodosReagendar").addEventListener("click", cerrarEliminarTodos);
+  modalEliminarTodos.addEventListener("click", e => {
+    if (e.target === modalEliminarTodos && !confirmarEliminarTodos.disabled) cerrarEliminarTodos();
+  });
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && !modalEliminarTodos.hidden && !confirmarEliminarTodos.disabled) {
+      cerrarEliminarTodos();
+    }
+  });
+  confirmarEliminarTodos.addEventListener("click", async () => {
+    if (confirmarEliminarTodos.disabled) return;
+    confirmarEliminarTodos.disabled = true;
+    $("errorEliminarTodosReagendar").textContent = "Quitando pacientes…";
+    try {
+      const res = await fetch("api/v1/paciente-reagendar/borrado/todos",
+        { method: "DELETE", headers: auth() });
+      const datos = await res.json().catch(() => ({}));
+      if (res.status === 401) { window.snwSesionExpirada(); return; }
+      if (!res.ok) throw new Error(datos.detail || "No se pudieron quitar los pacientes.");
+      cerrarEliminarTodos();
+      await cargarLotes();
+      await cargar();
+      mensaje.textContent = `${datos.pacientes_eliminados || 0} pacientes retirados antes del envío.`;
+    } catch (error) {
+      $("errorEliminarTodosReagendar").textContent = error.message;
+    } finally {
+      confirmarEliminarTodos.disabled = false;
+    }
+  });
+  const modalEliminarPaciente = $("modalEliminarPacienteReagendar");
+  const confirmarEliminarPaciente = $("confirmarEliminarPacienteReagendar");
+  function cerrarEliminarPaciente() {
+    modalEliminarPaciente.hidden = true;
+    pacienteEliminarId = null;
+    $("errorEliminarPacienteReagendar").textContent = "";
+  }
+  function abrirEliminarPaciente(paciente) {
+    pacienteEliminarId = paciente.id;
+    $("textoEliminarPacienteReagendar").textContent =
+      `Se quitará a ${paciente.paciente_nombre} de esta carga. No recibirá la plantilla de ` +
+      "este reagendamiento. Si vuelve a llegar en otro CSV, podrá importarse de nuevo.";
+    $("errorEliminarPacienteReagendar").textContent = "";
+    modalEliminarPaciente.hidden = false;
+    confirmarEliminarPaciente.focus();
+  }
+  $("cancelarEliminarPacienteReagendar").addEventListener("click", cerrarEliminarPaciente);
+  modalEliminarPaciente.addEventListener("click", e => {
+    if (e.target === modalEliminarPaciente && !confirmarEliminarPaciente.disabled) cerrarEliminarPaciente();
+  });
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && !modalEliminarPaciente.hidden && !confirmarEliminarPaciente.disabled) {
+      cerrarEliminarPaciente();
+    }
+  });
+  confirmarEliminarPaciente.addEventListener("click", async () => {
+    const id = pacienteEliminarId;
+    if (!id || confirmarEliminarPaciente.disabled) return;
+    confirmarEliminarPaciente.disabled = true;
+    $("errorEliminarPacienteReagendar").textContent = "Quitando paciente…";
+    try {
+      const res = await fetch(`api/v1/paciente-reagendar/${id}`,
+        { method: "DELETE", headers: auth() });
+      const datos = await res.json().catch(() => ({}));
+      if (res.status === 401) { window.snwSesionExpirada(); return; }
+      if (!res.ok) throw new Error(datos.detail || "No se pudo quitar al paciente.");
+      cerrarEliminarPaciente();
+      await cargar();
+      await cargarLotes();
+      mensaje.textContent = "Paciente retirado del reagendamiento antes del envío.";
+    } catch (error) {
+      $("errorEliminarPacienteReagendar").textContent = error.message;
+    } finally {
+      confirmarEliminarPaciente.disabled = false;
+    }
+  });
   const modalEliminarCarga = $("modalEliminarCargaReagendar");
   const confirmarEliminarCarga = $("confirmarEliminarCargaReagendar");
   function cerrarEliminarCarga() {
@@ -292,6 +400,10 @@
         headers: { Authorization: "Bearer " + (localStorage.getItem("snw_token") || "") }, cache: "no-store" });
       if (!res.ok) throw new Error("No se pudieron cargar los pacientes.");
       const datos = await res.json();
+      if (pagina > 1 && (datos.total || 0) <= (pagina - 1) * 25) {
+        pagina -= 1;
+        return cargar();
+      }
       tbody.replaceChildren();
       for (const r of datos.items || []) {
         const tr = document.createElement("tr");
@@ -300,6 +412,21 @@
                              r.doctor_nombre, r.modo_prueba ? "Prueba" : "Operativo",
                              r.estado_envio, r.intentos_envio,
                              fecha(r.enviado_en), r.ultima_respuesta, r.ultimo_error_codigo]) celda(tr, valor);
+        const acciones = document.createElement("td");
+        const eliminar = document.createElement("button");
+        eliminar.type = "button";
+        eliminar.className = "btn btn--danger-ghost";
+        eliminar.textContent = "Quitar";
+        eliminar.disabled = ["PROCESANDO", "ENVIADO"].includes(r.estado_envio)
+          || Number(r.intentos_envio) > 0 || Boolean(r.whatsapp_opt_out)
+          || Boolean(r.envio_id || r.log_envio_id || r.whatsapp_message_id)
+          || ["PROCESANDO", "ENVIADO"].includes(r.destinatario_estado);
+        eliminar.title = eliminar.disabled
+          ? "Ya tiene un envío, un intento o una baja que debe conservarse."
+          : "Quitar a este paciente antes de enviar la plantilla";
+        eliminar.addEventListener("click", () => abrirEliminarPaciente(r));
+        acciones.appendChild(eliminar);
+        tr.appendChild(acciones);
         tbody.appendChild(tr);
       }
       paginas = Math.max(1, Math.ceil((datos.total || 0) / 25));

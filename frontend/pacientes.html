@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="css/tema.css?v=tokens1">
   <link rel="stylesheet" href="css/styles.css">
   <link rel="stylesheet" href="css/componentes.css?v=paginador-cinco1">
-  <link rel="stylesheet" href="css/pacientes.css?v=csv-codificacion1">
+  <link rel="stylesheet" href="css/pacientes.css?v=reagendar-borrado3">
   <link rel="stylesheet" href="css/layout.css?v=navcolor1">
   <link rel="stylesheet" href="css/admin.css?v=tokens1">
   <link rel="stylesheet" href="css/refinamiento.css?v=merge-frontend1">
@@ -223,7 +223,7 @@
           <p class="field__hint reagendar__ayuda">Aquí ves a cada paciente una sola vez y, por separado, el historial de CSV recibidos desde Reservo. Un paciente al que ya se envió un reagendamiento no volverá a recibir otro.</p>
           <div class="reagendar__lotes">
             <h3>Archivos recibidos y envíos</h3>
-            <p class="field__hint reagendar__explicacion">Cada fila representa un CSV recibido, aunque todos sus pacientes ya estuvieran registrados. Si hay pacientes nuevos y llega a tiempo, el envío se programa para las 14:30 o 20:30; si llega tarde, queda para revisión.</p>
+            <p class="field__hint reagendar__explicacion">Cada fila representa un CSV recibido, aunque todos sus pacientes ya estuvieran registrados. Si hay pacientes nuevos y llega a tiempo, el envío comienza desde las 14:30 o 20:30, pero nunca antes de 3 minutos después de completar la carga. Durante ese plazo puedes revisar o eliminar la carga. Si llega tarde, queda para revisión.</p>
             <div class="tabla-wrap"><table id="tablaReagendarLotes" aria-busy="false">
               <thead><tr><th>CSV de Reservo</th><th>Recibido en SNW</th><th>Envío previsto</th><th>Situación</th><th>Pacientes nuevos</th><th>Mensajes aceptados</th><th>Acciones</th></tr></thead><tbody></tbody>
             </table></div>
@@ -241,7 +241,10 @@
           </div>
           <div class="reagendar__detalle-head">
             <div><h3>Pacientes de reagendamientos</h3><p id="reagendarSeleccionLote" class="field__hint" role="status">Todos los pacientes, sin duplicados. Se aplican los filtros de abajo.</p></div>
-            <button id="reagendarVerTodas" class="btn btn--ghost" type="button" hidden>Quitar selección de carga</button>
+            <div class="reagendar__detalle-acciones">
+              <button id="reagendarVerTodas" class="btn btn--ghost" type="button" hidden>Quitar selección de carga</button>
+              <button id="reagendarEliminarTodos" class="btn btn--danger-ghost" type="button">Quitar todos sin envío</button>
+            </div>
           </div>
           <div class="reagendar__filtros">
             <div class="field"><label for="reagendarCentro">Clínica</label><select id="reagendarCentro"><option value="">Todas</option></select></div>
@@ -253,7 +256,7 @@
           </div>
           <div class="tabla-wrap reagendar__tabla">
             <table aria-busy="false" id="tablaReagendar">
-              <thead><tr><th>Fecha de búsqueda</th><th>Tramo</th><th>Clínica</th><th>Paciente</th><th>Teléfono</th><th>Doctor</th><th>Tipo</th><th>Estado</th><th>Intentos</th><th>Enviado</th><th>Respuesta</th><th>Motivo</th></tr></thead>
+              <thead><tr><th>Fecha de búsqueda</th><th>Tramo</th><th>Clínica</th><th>Paciente</th><th>Teléfono</th><th>Doctor</th><th>Tipo</th><th>Estado</th><th>Intentos</th><th>Enviado</th><th>Respuesta</th><th>Motivo</th><th>Acción</th></tr></thead>
               <tbody></tbody>
             </table>
           </div>
@@ -318,6 +321,30 @@
     </div>
   </div>
 
+  <div id="modalEliminarPacienteReagendar" class="modal" hidden>
+    <div class="modal__card" role="dialog" aria-modal="true" aria-labelledby="tituloEliminarPacienteReagendar">
+      <h3 id="tituloEliminarPacienteReagendar">Quitar paciente del reagendamiento</h3>
+      <p id="textoEliminarPacienteReagendar" class="modal__texto-confirmacion"></p>
+      <p id="errorEliminarPacienteReagendar" class="field__hint" role="alert"></p>
+      <div class="modal__actions">
+        <button type="button" class="btn btn--ghost" id="cancelarEliminarPacienteReagendar">Cancelar</button>
+        <button type="button" class="btn btn--danger" id="confirmarEliminarPacienteReagendar">Quitar paciente</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalEliminarTodosReagendar" class="modal" hidden>
+    <div class="modal__card" role="dialog" aria-modal="true" aria-labelledby="tituloEliminarTodosReagendar">
+      <h3 id="tituloEliminarTodosReagendar">Quitar pacientes sin envío</h3>
+      <p id="textoEliminarTodosReagendar" class="modal__texto-confirmacion"></p>
+      <p id="errorEliminarTodosReagendar" class="field__hint" role="alert"></p>
+      <div class="modal__actions">
+        <button type="button" class="btn btn--ghost" id="cancelarEliminarTodosReagendar">Cancelar</button>
+        <button type="button" class="btn btn--danger" id="confirmarEliminarTodosReagendar">Quitar pacientes</button>
+      </div>
+    </div>
+  </div>
+
   <div id="modalConfirmarMasivo" class="modal" hidden>
     <div class="modal__card" role="dialog" aria-modal="true">
       <h3 id="masivoTitulo">Confirmar cambio</h3>
@@ -333,7 +360,7 @@
   <script src="js/pass-toggle.js"></script>
   <script src="js/csv-chunks.js?v=csv-codificacion1"></script>
   <script src="js/pacientes.js?v=csv-codificacion1"></script>
-  <script src="js/reagendar.js?v=eliminar-carga1"></script>
+  <script src="js/reagendar.js?v=eliminar-todos3"></script>
   <script src="js/pacientes-tabs.js?v=aplazar-flotante1"></script>
   <script>
     (function () {

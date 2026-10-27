@@ -25,6 +25,7 @@ REQUERIDAS = {"fecha", "ventana", "clinica_nombre", "reservo_cita_uuid",
              "paciente_nombre", "inicio_cita"}
 ZONA_CHILE = ZoneInfo("America/Santiago")
 UTC = dt.timezone.utc
+RETRASO_CARGA = dt.timedelta(minutes=3)
 
 
 def programacion_carga(fecha: dt.date, ventana: str,
@@ -42,6 +43,16 @@ def programacion_carga(fecha: dt.date, ventana: str,
     desde = dt.datetime.combine(fecha, dt.time(*horario[0]), ZONA_CHILE)
     salida = dt.datetime.combine(fecha, dt.time(*horario[1]), ZONA_CHILE)
     return salida.astimezone(UTC).replace(tzinfo=None) if desde <= local < salida else None
+
+
+def programacion_tras_carga(programado: dt.datetime | None,
+                           carga_finalizada_utc: dt.datetime) -> dt.datetime | None:
+    """Respeta la salida habitual y deja tres minutos completos para revisar."""
+    if programado is None:
+        return None
+    if carga_finalizada_utc.tzinfo is not None:
+        carga_finalizada_utc = carga_finalizada_utc.astimezone(UTC).replace(tzinfo=None)
+    return max(programado, carga_finalizada_utc + RETRASO_CARGA)
 
 
 def fecha_local_a_utc(valor: str) -> dt.datetime:
@@ -234,8 +245,11 @@ def importar_por_partes(datos: bytes, cfg: dict, *, modo_prueba: bool = False) -
                                      "alreadySent", "rejected")}
     resumen["omittedReasons"] = {}
     ids_lote, estados, horarios, errores, resultados = [], [], [], [], []
+    ids_elegibles = []
     for indice, (bloque, fila_inicial) in enumerate(partes, 1):
-        resultado = importar(bloque, cfg, recibido=recibido, modo_prueba=modo_prueba)
+        # Los lotes parciales quedan en revisión hasta terminar todo el archivo.
+        resultado = importar(bloque, cfg, recibido=recibido, modo_prueba=modo_prueba,
+                             programar_automaticamente=False)
         parcial = resultado["summary"]
         for clave in ("received", "inserted", "eligible", "alreadyExists",
                       "alreadySent", "rejected"):
@@ -244,6 +258,8 @@ def importar_por_partes(datos: bytes, cfg: dict, *, modo_prueba: bool = False) -
             resumen["omittedReasons"][motivo] = resumen["omittedReasons"].get(motivo, 0) + cantidad
         if parcial.get("batchId") is not None:
             ids_lote.append(parcial["batchId"])
+            if parcial.get("eligible") and not modo_prueba:
+                ids_elegibles.append(parcial["batchId"])
         if parcial.get("batchStatus"):
             estados.append(parcial["batchStatus"])
         if parcial.get("scheduledAtUtc"):
@@ -251,6 +267,20 @@ def importar_por_partes(datos: bytes, cfg: dict, *, modo_prueba: bool = False) -
         errores.extend({**error, "row": error["row"] + fila_inicial - 2}
                        for error in resultado.get("errors", []) if len(errores) < 50)
         resultados.append({"part": indice, "firstRow": fila_inicial, "summary": parcial})
+    if ids_elegibles and fechas_ventanas:
+        fecha, ventana = next(iter(fechas_ventanas))
+        horario_base = programacion_carga(fecha, ventana, recibido)
+        horario_final = programacion_tras_carga(horario_base, dt.datetime.now(UTC))
+        if horario_final is not None:
+            activar_lotes_importados(ids_elegibles, horario_final)
+            horario_texto = horario_final.isoformat() + "Z"
+            for resultado in resultados:
+                parcial = resultado["summary"]
+                if parcial.get("batchId") in ids_elegibles:
+                    parcial["batchStatus"] = "PROGRAMADO"
+                    parcial["scheduledAtUtc"] = horario_texto
+            estados = [r["summary"]["batchStatus"] for r in resultados]
+            horarios = [horario_texto]
     resumen.update({"parts": len(partes), "batchIds": ids_lote,
                     "batchId": ids_lote[0] if len(ids_lote) == 1 else None,
                     "batchStatus": (estados[0] if estados and len(set(estados)) == 1
@@ -262,6 +292,15 @@ def importar_por_partes(datos: bytes, cfg: dict, *, modo_prueba: bool = False) -
             and not modo_prueba else None}
 
 
+def activar_lotes_importados(ids_lote: list[int], programado: dt.datetime) -> None:
+    """Activa juntos los lotes de una carga completa, tras la ventana de revisión."""
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("UPDATE reagendar_lotes SET estado='PROGRAMADO', programado_para=%s"
+                    " WHERE id IN (" + ",".join(["%s"] * len(ids_lote)) + ")"
+                    " AND estado='REVISION'", (programado, *ids_lote))
+        conn.commit()
+
+
 _COLUMNAS = ("fecha", "ventana", "clinica_id", "clinica_nombre", "reservo_cita_uuid",
              "paciente_nombre", "paciente_telefono", "paciente_telefono_normalizado",
              "doctor_nombre", "inicio_cita", "centro_codigo",
@@ -269,7 +308,7 @@ _COLUMNAS = ("fecha", "ventana", "clinica_id", "clinica_nombre", "reservo_cita_u
 
 
 def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None,
-            modo_prueba: bool = False) -> dict:
+            modo_prueba: bool = False, programar_automaticamente: bool = True) -> dict:
     registros, errores, recibidas = analizar_csv(datos, cfg)
     if modo_prueba and recibidas != 1:
         raise CsvInvalido("El modo de prueba requiere un CSV de una sola cita.")
@@ -384,10 +423,10 @@ def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None,
         if modo_prueba:
             estado = None
         else:
-            # Si la validación/inserción cruzó la hora de salida, revisión manual:
-            # jamás disparar inmediatamente una programación ya vencida.
-            vigente = (elegibles > 0 and programado is not None
-                       and programado > dt.datetime.now(UTC).replace(tzinfo=None))
+            # En archivos divididos solo se activa al completar todas las partes.
+            if programar_automaticamente:
+                programado = programacion_tras_carga(programado, dt.datetime.now(UTC))
+            vigente = elegibles > 0 and programado is not None and programar_automaticamente
             estado = "PROGRAMADO" if vigente else "REVISION" if insertados else "COMPLETADO"
             cur.execute(
                 "UPDATE reagendar_lotes SET estado=%s, programado_para=%s,"
@@ -532,6 +571,106 @@ def eliminar_carga_sin_envios(lote_id: int) -> dict:
         cur.execute("DELETE FROM reagendar_lotes WHERE id=%s", (lote_id,))
         conn.commit()
     return {"id": lote_id, "pacientes_eliminados": eliminados}
+
+
+_BORRABLE_REAGENDAR = (
+    "r.estado_envio NOT IN ('PROCESANDO','ENVIADO') AND r.intentos_envio=0"
+    " AND r.whatsapp_opt_out=0 AND r.reserva_token IS NULL"
+    " AND r.ultimo_intento_en IS NULL AND r.envio_id IS NULL"
+    " AND r.log_envio_id IS NULL AND r.whatsapp_message_id IS NULL"
+    " AND (d.estado IS NULL OR d.estado NOT IN ('PROCESANDO','ENVIADO'))"
+)
+_ORIGEN_BORRADO_REAGENDAR = (
+    " paciente_reagendar r LEFT JOIN reagendar_destinatarios d ON d.cita_id=r.id"
+)
+
+
+def resumen_borrado_pacientes() -> dict:
+    """Cuenta los registros eliminables sin mostrar datos de pacientes."""
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) AS n FROM paciente_reagendar")
+        total = int(cur.fetchone()["n"])
+        cur.execute("SELECT COUNT(*) AS n FROM" + _ORIGEN_BORRADO_REAGENDAR
+                    + " WHERE " + _BORRABLE_REAGENDAR)
+        eliminables = int(cur.fetchone()["n"])
+    return {"eliminables": eliminables, "conservados": total - eliminables}
+
+
+def eliminar_todos_sin_envio() -> dict:
+    """Retira en una transacción todos los pacientes aún no contactados."""
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("SELECT r.id, r.lote_id FROM" + _ORIGEN_BORRADO_REAGENDAR
+                    + " WHERE " + _BORRABLE_REAGENDAR + " FOR UPDATE")
+        filas = cur.fetchall()
+        ids = [fila["id"] for fila in filas]
+        por_lote: dict[int, int] = {}
+        for fila in filas:
+            if fila["lote_id"] is not None:
+                por_lote[fila["lote_id"]] = por_lote.get(fila["lote_id"], 0) + 1
+        for inicio in range(0, len(ids), 1000):
+            bloque = ids[inicio:inicio + 1000]
+            marcadores = ",".join(["%s"] * len(bloque))
+            cur.execute("DELETE FROM reagendar_destinatarios WHERE cita_id IN ("
+                        + marcadores + ")", tuple(bloque))
+            cur.execute("DELETE FROM paciente_reagendar WHERE id IN ("
+                        + marcadores + ")", tuple(bloque))
+        for lote_id, cantidad in por_lote.items():
+            cur.execute("UPDATE reagendar_lotes SET creados=GREATEST(0, creados-%s)"
+                        " WHERE id=%s", (cantidad, lote_id))
+            cur.execute(
+                "SELECT COUNT(*) AS n FROM paciente_reagendar"
+                " WHERE lote_id=%s AND estado_envio IN ('PENDIENTE','REINTENTO','PROCESANDO')"
+                " AND ultimo_error_codigo IS NULL AND paciente_telefono_normalizado IS NOT NULL"
+                " AND centro_codigo IS NOT NULL", (lote_id,))
+            if cur.fetchone()["n"] == 0:
+                cur.execute("UPDATE reagendar_lotes SET estado='COMPLETADO',"
+                            " programado_para=NULL WHERE id=%s", (lote_id,))
+        conn.commit()
+    return {"pacientes_eliminados": len(ids)}
+
+
+def eliminar_paciente_sin_envio(cita_id: int) -> dict:
+    """Elimina una cita antes de reclamarla; libera su número para futuras cargas."""
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, lote_id, estado_envio, intentos_envio, whatsapp_opt_out,"
+            " reserva_token, ultimo_intento_en, envio_id, log_envio_id,"
+            " whatsapp_message_id FROM paciente_reagendar"
+            " WHERE id=%s FOR UPDATE", (cita_id,))
+        cita = cur.fetchone()
+        if not cita:
+            raise LookupError("Paciente de reagendamiento no encontrado.")
+        if (cita["estado_envio"] in ("PROCESANDO", "ENVIADO")
+                or cita["intentos_envio"] or cita["whatsapp_opt_out"]
+                or cita["reserva_token"] or cita["ultimo_intento_en"]
+                or cita["envio_id"] or cita["log_envio_id"]
+                or cita["whatsapp_message_id"]):
+            raise ValueError("Este paciente ya tiene envíos, intentos o una baja que deben conservarse.")
+        lote_id = cita["lote_id"]
+        if lote_id is not None:
+            cur.execute("SELECT id FROM reagendar_lotes WHERE id=%s FOR UPDATE", (lote_id,))
+            if not cur.fetchone():
+                raise ValueError("No se encontró la carga del paciente.")
+        cur.execute("SELECT estado FROM reagendar_destinatarios WHERE cita_id=%s FOR UPDATE",
+                    (cita_id,))
+        destinatario = cur.fetchone()
+        if destinatario and destinatario["estado"] in ("PROCESANDO", "ENVIADO"):
+            raise ValueError("El mensaje de este paciente ya está en proceso o fue enviado.")
+        cur.execute("DELETE FROM reagendar_destinatarios WHERE cita_id=%s", (cita_id,))
+        cur.execute("DELETE FROM paciente_reagendar WHERE id=%s", (cita_id,))
+        if lote_id is not None:
+            cur.execute("UPDATE reagendar_lotes SET creados=GREATEST(0, creados-1) WHERE id=%s",
+                        (lote_id,))
+            cur.execute(
+                "SELECT COUNT(*) AS n FROM paciente_reagendar"
+                " WHERE lote_id=%s AND estado_envio IN ('PENDIENTE','REINTENTO','PROCESANDO')"
+                " AND ultimo_error_codigo IS NULL AND paciente_telefono_normalizado IS NOT NULL"
+                " AND centro_codigo IS NOT NULL", (lote_id,))
+            if cur.fetchone()["n"] == 0:
+                cur.execute("UPDATE reagendar_lotes SET estado='COMPLETADO',"
+                            " programado_para=NULL WHERE id=%s", (lote_id,))
+        conn.commit()
+    return {"id": cita_id, "lote_id": lote_id, "eliminado": True}
 
 
 def completar_lote_si_corresponde(lote_id: int) -> None:

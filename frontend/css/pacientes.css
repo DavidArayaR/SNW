@@ -69,6 +69,7 @@
 .reagendar__detalle-head h3 { margin: 0 0 4px; font-size: 1rem; }
 .reagendar__detalle-head .field__hint { margin: 0; }
 .reagendar__detalle-head .btn { flex: 0 0 auto; }
+.reagendar__detalle-acciones { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .reagendar__detalle-head .btn[hidden] { display: none; }
 .reagendar__detalle-head #reagendarVerTodas {
   background: #f3d88e;
@@ -92,6 +93,7 @@
 }
 @media (max-width: 600px) {
   .reagendar__detalle-head { align-items: flex-start; flex-direction: column; }
+  .reagendar__detalle-acciones { justify-content: flex-start; }
 }
 .reagendar__vista, .reagendar__aplazar { margin-top: 16px; padding: 16px; border: 1px solid var(--borde); border-radius: 12px; }
 .reagendar__vista .field__hint { margin: 6px 0 0; }

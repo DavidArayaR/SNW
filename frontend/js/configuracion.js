@@ -845,8 +845,8 @@ function render(secciones) {
   }
   paneles.logs.innerHTML = `
     <section class="panel config-seccion config-logs">
-      <div class="panel__head"><h2><i class="fa-solid fa-file-lines" aria-hidden="true"></i> Errores del servidor</h2></div>
-      <p class="config-logs__ayuda">Selecciona un archivo diario para ver y copiar sus errores registrados.</p>
+        <div class="panel__head"><h2><i class="fa-solid fa-file-lines" aria-hidden="true"></i> Registros del servidor</h2></div>
+        <p class="config-logs__ayuda">Selecciona un registro de errores o de una carga CSV remota para verlo y copiarlo.</p>
       <div class="config-logs__controles">
         <label for="configLogArchivo">Archivo</label>
         <select id="configLogArchivo" disabled><option value="">Cargando registros…</option></select>
@@ -879,9 +879,9 @@ async function cargarLogs() {
     const archivos = datos.archivos || [];
     selector.replaceChildren();
     if (!archivos.length) {
-      selector.add(new Option("Aún no hay archivos de errores", ""));
+        selector.add(new Option("Aún no hay registros", ""));
       logSeleccionado = "";
-      $("#configLogContenido").textContent = "Todavía no se han registrado errores.";
+        $("#configLogContenido").textContent = "Todavía no se han registrado eventos.";
       $("#configLogCopiar").disabled = true;
       $("#configLogEstado").textContent = "";
       return;

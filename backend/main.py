@@ -13,6 +13,7 @@ import random
 import re
 import secrets
 import shutil
+import sys
 import threading
 import time
 import unicodedata
@@ -34,6 +35,7 @@ from pydantic import BaseModel, Field
 
 from db import (
     conectar, entorno_valido, log_error, instalar_registro_errores, accion_de_error, LOGS_DIR,
+    registrar_resultado_csv_remoto,
     nombre_base, columnas_tabla, columna_existe,
     tabla_pacientes, asegurar_tabla_config, config_all, config_get, config_set,
     agregar_numero_prueba_ambos, quitar_numero_prueba_ambos,
@@ -454,12 +456,12 @@ def solo_dev(sesion: dict = Depends(sesion_actual)) -> dict:
 
 
 _NOMBRE_LOG_ERROR = re.compile(
-    r"errores-(\d{4}-\d{2}-\d{2})(?:_(\d{2}-\d{2}-\d{2}-\d{6})-(\d+)(?:-(\d+))?)?\.log\Z")
+    r"(?:errores|csv-remoto)-(\d{4}-\d{2}-\d{2})(?:_(\d{2}-\d{2}-\d{2}-\d{6})-(\d+)(?:-(\d+))?)?\.log\Z")
 _MAX_LOG_VISTA_BYTES = 5 * 1024 * 1024
 
 
 def listar_logs_consola(sesion: dict = Depends(solo_dev)):
-    """Lista archivos por error y formatos anteriores, sin crear la carpeta."""
+    """Lista errores y resultados de CSV remoto, sin crear la carpeta."""
     if not LOGS_DIR.is_dir():
         return {"archivos": []}
     archivos = []
@@ -9583,6 +9585,9 @@ async def importar_citas_reagendar(request: Request, file: UploadFile = File(...
                                   modo_prueba: bool = Form(False)):
     fase = "configuracion"
     datos = b""
+    archivo_leido = False
+    resultado = None
+    inicio = time.monotonic()
     try:
         cfg = config_all(refresh=True)
         esperado = str(cfg.get("reagendar_api_token_hash") or "")
@@ -9606,6 +9611,7 @@ async def importar_citas_reagendar(request: Request, file: UploadFile = File(...
             raise HTTPException(429, detail="Demasiadas importaciones. Inténtalo más tarde.")
         fase = "lectura_csv"
         datos = await file.read(paciente_reagendar.CSV_CARGA_MAX_BYTES + 1)
+        archivo_leido = True
         if len(datos) > paciente_reagendar.CSV_CARGA_MAX_BYTES:
             raise paciente_reagendar.CsvInvalido("El archivo supera los 50 MB.")
         fase = "validacion_o_guardado"
@@ -9651,6 +9657,18 @@ async def importar_citas_reagendar(request: Request, file: UploadFile = File(...
         _log_importacion_csv(request, "FALLO_INTERNO", estado=500, detalle=detalle,
                              exc=exc)
         raise HTTPException(500, detail="No se pudo importar el CSV. Revisa el registro del servidor.") from None
+    finally:
+        if archivo_leido:
+            fallo = sys.exc_info()[1]
+            resumen_log = (resultado or {}).get("summary")
+            estado_log = ("FALLIDO" if fallo else
+                          "COMPLETADO_CON_EXCLUSIONES" if resumen_log and
+                          (resumen_log.get("rejected") or resumen_log.get("omittedReasons"))
+                          else "COMPLETADO")
+            registrar_resultado_csv_remoto(
+                estado_log, fase, http_status=(fallo.status_code if isinstance(fallo, HTTPException)
+                                               else 500 if fallo else 200),
+                resumen=resumen_log, duracion_ms=int((time.monotonic() - inicio) * 1000))
 
 
 @app.get("/api/v1/paciente-reagendar")
@@ -9700,7 +9718,9 @@ def listar_citas_reagendar(centro: str | None = Query(None),
             "SELECT r.id, r.fecha, r.ventana, r.clinica_nombre, r.centro_codigo,"
             " r.paciente_nombre, r.paciente_telefono_normalizado, r.doctor_nombre,"
             " r.inicio_cita, r.lote_id, r.plantilla_clave, r.modo_prueba,"
-            " r.estado_envio, r.intentos_envio, r.ultimo_error_codigo, r.importado_en,"
+            " r.estado_envio, r.intentos_envio, r.whatsapp_opt_out, r.envio_id,"
+            " r.log_envio_id, d.estado AS destinatario_estado,"
+            " r.ultimo_error_codigo, r.importado_en,"
             " r.enviado_en, r.whatsapp_message_id,"
             " (SELECT i.accion FROM reagendar_interacciones i"
             " WHERE i.cita_id=r.id ORDER BY i.creado_en DESC,"
@@ -9709,6 +9729,34 @@ def listar_citas_reagendar(centro: str | None = Query(None),
             " ORDER BY r.id DESC LIMIT %s OFFSET %s", (*args, limite, (pagina - 1) * limite))
         filas = cur.fetchall()
     return {"total": total, "pagina": pagina, "limite": limite, "items": filas}
+
+
+@app.get("/api/v1/paciente-reagendar/borrado/resumen")
+def resumen_borrado_reagendar(sesion: dict = Depends(solo_admin)):
+    return paciente_reagendar.resumen_borrado_pacientes()
+
+
+@app.delete("/api/v1/paciente-reagendar/borrado/todos")
+def eliminar_todos_reagendar(sesion: dict = Depends(solo_admin)):
+    resultado = paciente_reagendar.eliminar_todos_sin_envio()
+    auditoria_registrar(sesion.get("usuario", ""), "reagendar_pacientes_eliminados",
+                       "paciente_reagendar",
+                       f"Pacientes retirados antes del envío: {resultado['pacientes_eliminados']}")
+    return resultado
+
+
+@app.delete("/api/v1/paciente-reagendar/{cita_id}")
+def eliminar_paciente_reagendar(cita_id: int, sesion: dict = Depends(solo_admin)):
+    """Retira una cita individual todavía no contactada por WhatsApp."""
+    try:
+        resultado = paciente_reagendar.eliminar_paciente_sin_envio(cita_id)
+    except LookupError as exc:
+        raise HTTPException(404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, detail=str(exc)) from exc
+    auditoria_registrar(sesion.get("usuario", ""), "reagendar_paciente_eliminado",
+                       str(cita_id), "Paciente retirado antes del envío")
+    return resultado
 
 
 @app.get("/api/v1/paciente-reagendar/lotes")
