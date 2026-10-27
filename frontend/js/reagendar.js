@@ -7,6 +7,60 @@
   let paginaLotes = 1;
   let loteActual = null;
   let loteAplazarId = null;
+  let loteEliminarId = null;
+  const modalEliminarCarga = $("modalEliminarCargaReagendar");
+  const confirmarEliminarCarga = $("confirmarEliminarCargaReagendar");
+  function cerrarEliminarCarga() {
+    modalEliminarCarga.hidden = true;
+    loteEliminarId = null;
+    $("errorEliminarCargaReagendar").textContent = "";
+  }
+  function abrirEliminarCarga(lote) {
+    loteEliminarId = lote.id;
+    $("textoEliminarCargaReagendar").textContent =
+      `Se borrarán los pacientes nuevos de la carga #${lote.id} (${lote.creados || 0} registrados) ` +
+      "y se cancelará su programación. No se borrarán pacientes de otras cargas. " +
+      "Si vuelven a llegar en otro CSV, podrán importarse de nuevo. Esta acción no se puede deshacer.";
+    $("errorEliminarCargaReagendar").textContent = "";
+    modalEliminarCarga.hidden = false;
+    confirmarEliminarCarga.focus();
+  }
+  $("cancelarEliminarCargaReagendar").addEventListener("click", cerrarEliminarCarga);
+  modalEliminarCarga.addEventListener("click", e => {
+    if (e.target === modalEliminarCarga && !confirmarEliminarCarga.disabled) cerrarEliminarCarga();
+  });
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && !modalEliminarCarga.hidden && !confirmarEliminarCarga.disabled) {
+      cerrarEliminarCarga();
+    }
+  });
+  confirmarEliminarCarga.addEventListener("click", async () => {
+    const id = loteEliminarId;
+    if (!id || confirmarEliminarCarga.disabled) return;
+    confirmarEliminarCarga.disabled = true;
+    $("errorEliminarCargaReagendar").textContent = "Eliminando carga…";
+    try {
+      const res = await fetch(`api/v1/paciente-reagendar/lotes/${id}`,
+        { method: "DELETE", headers: auth() });
+      const datos = await res.json().catch(() => ({}));
+      if (res.status === 401) { window.snwSesionExpirada(); return; }
+      if (!res.ok) throw new Error(datos.detail || "No se pudo eliminar la carga.");
+      cerrarEliminarCarga();
+      if (loteActual === id) {
+        loteActual = null;
+        pagina = 1;
+        $("reagendarVistaPrevia").hidden = true;
+      }
+      await cargarLotes();
+      await cargar();
+      $("reagendarLotesMensaje").textContent =
+        `Carga #${id} eliminada: ${datos.pacientes_eliminados || 0} pacientes borrados.`;
+    } catch (error) {
+      $("errorEliminarCargaReagendar").textContent = error.message;
+    } finally {
+      confirmarEliminarCarga.disabled = false;
+    }
+  });
   const formularioAplazar = $("reagendarAplazarForm");
   // Fuera del panel animado para que position:fixed se ancle al viewport.
   document.body.appendChild(formularioAplazar);
@@ -157,6 +211,16 @@
           });
           acciones.appendChild(aplazar);
         }
+        const eliminar = document.createElement("button");
+        eliminar.type = "button";
+        eliminar.className = "btn btn--danger-ghost";
+        eliminar.textContent = "Eliminar carga";
+        eliminar.disabled = lote.estado === "EN_CURSO" || Number(lote.no_eliminables) > 0;
+        eliminar.title = eliminar.disabled
+          ? "No se puede borrar: contiene envíos, intentos o bajas que deben conservarse."
+          : "Borrar los pacientes nuevos de esta carga antes de que se envíen";
+        eliminar.addEventListener("click", () => abrirEliminarCarga(lote));
+        acciones.appendChild(eliminar);
         tr.appendChild(acciones); cuerpo.appendChild(tr);
       }
       actualizarSeleccionLote();

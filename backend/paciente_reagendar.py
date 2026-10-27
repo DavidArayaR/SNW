@@ -495,6 +495,45 @@ def aplazar_lote(lote_id: int, nueva_fecha_utc: dt.datetime,
     return {"id": lote_id, "estado": "APLAZADO", "programado_para": nueva.isoformat() + "Z"}
 
 
+def eliminar_carga_sin_envios(lote_id: int) -> dict:
+    """Retira una carga remota antes de cualquier intento de envío.
+
+    Bloquea sus citas antes de revisar el estado para serializarse con el
+    despachador. Elimina también las reservas de teléfonos que creó la carga;
+    una importación futura podrá volver a evaluarlos.
+    """
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, estado_envio, intentos_envio, whatsapp_opt_out, envio_id, log_envio_id,"
+            " whatsapp_message_id FROM paciente_reagendar"
+            " WHERE lote_id=%s FOR UPDATE", (lote_id,))
+        citas = cur.fetchall()
+        cur.execute("SELECT id, estado FROM reagendar_lotes WHERE id=%s FOR UPDATE", (lote_id,))
+        lote = cur.fetchone()
+        if not lote:
+            raise LookupError("Carga no encontrada.")
+        if lote["estado"] == "EN_CURSO" or any(
+                c["estado_envio"] in ("PROCESANDO", "ENVIADO")
+                or c["intentos_envio"] or c["whatsapp_opt_out"]
+                or c["envio_id"] or c["log_envio_id"]
+                or c["whatsapp_message_id"] for c in citas):
+            raise ValueError("Esta carga tiene envíos, intentos o bajas que deben conservarse.")
+        cur.execute(
+            "SELECT COUNT(*) AS n FROM reagendar_destinatarios d"
+            " JOIN paciente_reagendar r ON r.id=d.cita_id"
+            " WHERE r.lote_id=%s AND d.estado IN ('PROCESANDO','ENVIADO')", (lote_id,))
+        if (cur.fetchone() or {}).get("n"):
+            raise ValueError("Esta carga tiene destinatarios en envío o ya enviados.")
+        cur.execute(
+            "DELETE d FROM reagendar_destinatarios d"
+            " JOIN paciente_reagendar r ON r.id=d.cita_id WHERE r.lote_id=%s", (lote_id,))
+        cur.execute("DELETE FROM paciente_reagendar WHERE lote_id=%s", (lote_id,))
+        eliminados = cur.rowcount
+        cur.execute("DELETE FROM reagendar_lotes WHERE id=%s", (lote_id,))
+        conn.commit()
+    return {"id": lote_id, "pacientes_eliminados": eliminados}
+
+
 def completar_lote_si_corresponde(lote_id: int) -> None:
     with conectar() as conn, conn.cursor() as cur:
         cur.execute("SELECT estado FROM reagendar_lotes WHERE id=%s FOR UPDATE", (lote_id,))

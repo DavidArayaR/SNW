@@ -306,6 +306,18 @@
     </div>
   </div>
 
+  <div id="modalEliminarCargaReagendar" class="modal" hidden>
+    <div class="modal__card" role="dialog" aria-modal="true" aria-labelledby="tituloEliminarCargaReagendar">
+      <h3 id="tituloEliminarCargaReagendar">Eliminar carga remota</h3>
+      <p id="textoEliminarCargaReagendar" class="modal__texto-confirmacion"></p>
+      <p id="errorEliminarCargaReagendar" class="field__hint" role="alert"></p>
+      <div class="modal__actions">
+        <button type="button" class="btn btn--ghost" id="cancelarEliminarCargaReagendar">Cancelar</button>
+        <button type="button" class="btn btn--danger" id="confirmarEliminarCargaReagendar">Eliminar carga</button>
+      </div>
+    </div>
+  </div>
+
   <div id="modalConfirmarMasivo" class="modal" hidden>
     <div class="modal__card" role="dialog" aria-modal="true">
       <h3 id="masivoTitulo">Confirmar cambio</h3>
@@ -321,7 +333,7 @@
   <script src="js/pass-toggle.js"></script>
   <script src="js/csv-chunks.js?v=csv-codificacion1"></script>
   <script src="js/pacientes.js?v=csv-codificacion1"></script>
-  <script src="js/reagendar.js?v=pacientes-reagendar2"></script>
+  <script src="js/reagendar.js?v=eliminar-carga1"></script>
   <script src="js/pacientes-tabs.js?v=aplazar-flotante1"></script>
   <script>
     (function () {

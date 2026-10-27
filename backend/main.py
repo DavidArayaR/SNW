@@ -9725,10 +9725,29 @@ def listar_lotes_reagendar(limite: int = Query(50, ge=1, le=200),
             " SUM(CASE WHEN r.estado_envio IN ('PENDIENTE','REINTENTO','PROCESANDO')"
             " THEN 1 ELSE 0 END) AS pendientes,"
             " SUM(CASE WHEN r.ultimo_error_codigo IS NOT NULL THEN 1 ELSE 0 END) AS con_error"
+            ", SUM(CASE WHEN r.estado_envio IN ('PROCESANDO','ENVIADO')"
+            " OR r.intentos_envio > 0 OR r.whatsapp_opt_out = 1 OR r.envio_id IS NOT NULL"
+            " OR r.log_envio_id IS NOT NULL OR r.whatsapp_message_id IS NOT NULL"
+            " THEN 1 ELSE 0 END) AS no_eliminables"
             " FROM reagendar_lotes l LEFT JOIN paciente_reagendar r ON r.lote_id=l.id"
             " GROUP BY l.id ORDER BY l.id DESC LIMIT %s OFFSET %s",
             (limite, (pagina - 1) * limite))
         return cur.fetchall()
+
+
+@app.delete("/api/v1/paciente-reagendar/lotes/{lote_id}")
+def eliminar_lote_reagendar(lote_id: int, sesion: dict = Depends(solo_admin)):
+    """Borra los pacientes de una carga CSV que todavía no empezó a enviarse."""
+    try:
+        resultado = paciente_reagendar.eliminar_carga_sin_envios(lote_id)
+    except LookupError as exc:
+        raise HTTPException(404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, detail=str(exc)) from exc
+    auditoria_registrar(sesion.get("usuario", ""), "reagendar_carga_eliminada",
+                       str(lote_id),
+                       f"Carga remota eliminada; pacientes: {resultado['pacientes_eliminados']}")
+    return resultado
 
 
 @app.get("/api/v1/paciente-reagendar/lotes/{lote_id}/vista-previa")

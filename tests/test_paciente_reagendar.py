@@ -570,6 +570,68 @@ class ApiCitasTests(unittest.TestCase):
         fallo.assert_called_once_with(cita, "RESULTADO_INCIERTO")
 
 
+class EliminarCargaTests(unittest.TestCase):
+    def test_elimina_carga_sin_intentos_y_libera_reservas(self):
+        conexion = MagicMock()
+        cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cur.fetchall.return_value = [
+            {"id": 11, "estado_envio": "PENDIENTE", "intentos_envio": 0,
+             "whatsapp_opt_out": 0, "envio_id": None, "log_envio_id": None,
+             "whatsapp_message_id": None}]
+        cur.fetchone.side_effect = [{"id": 5, "estado": "PROGRAMADO"}, {"n": 0}]
+        cur.rowcount = 1
+        with patch.object(reagendar, "conectar", return_value=conexion):
+            resultado = reagendar.eliminar_carga_sin_envios(5)
+        self.assertEqual(resultado, {"id": 5, "pacientes_eliminados": 1})
+        sentencias = [c.args[0] for c in cur.execute.call_args_list]
+        self.assertIn("FOR UPDATE", sentencias[0])
+        self.assertLess(next(i for i, s in enumerate(sentencias) if "DELETE d FROM" in s),
+                        next(i for i, s in enumerate(sentencias) if "DELETE FROM paciente_reagendar" in s))
+        self.assertIn("DELETE FROM reagendar_lotes", sentencias[-1])
+        conexion.__enter__.return_value.commit.assert_called_once()
+
+    def test_rechaza_carga_enviada_o_con_baja(self):
+        for cambio in ({"estado_envio": "ENVIADO"}, {"whatsapp_opt_out": 1},
+                       {"intentos_envio": 1}):
+            with self.subTest(cambio=cambio):
+                conexion = MagicMock()
+                cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+                cur.fetchall.return_value = [{"estado_envio": "PENDIENTE",
+                    "intentos_envio": 0, "whatsapp_opt_out": 0,
+                    "envio_id": None, "log_envio_id": None,
+                    "whatsapp_message_id": None, **cambio}]
+                cur.fetchone.return_value = {"id": 5, "estado": "COMPLETADO"}
+                with patch.object(reagendar, "conectar", return_value=conexion), \
+                     self.assertRaises(ValueError):
+                    reagendar.eliminar_carga_sin_envios(5)
+                self.assertFalse(any("DELETE" in c.args[0] for c in cur.execute.call_args_list))
+                conexion.__enter__.return_value.commit.assert_not_called()
+
+    def test_ruta_exige_autenticacion_y_audita_el_borrado(self):
+        ruta = "/api/v1/paciente-reagendar/lotes/5"
+        with TestClient(main.app) as client:
+            self.assertIn(client.delete(ruta).status_code, (401, 403))
+            main.app.dependency_overrides[main.solo_admin] = lambda: {"usuario": "admin@test"}
+            try:
+                with patch.object(reagendar, "eliminar_carga_sin_envios",
+                                  return_value={"id": 5, "pacientes_eliminados": 1}), \
+                     patch.object(main, "auditoria_registrar") as auditar:
+                    respuesta = client.delete(ruta)
+                self.assertEqual(respuesta.status_code, 200)
+                self.assertEqual(respuesta.json()["pacientes_eliminados"], 1)
+                auditar.assert_called_once()
+                with patch.object(reagendar, "eliminar_carga_sin_envios",
+                                  side_effect=ValueError("Ya enviada")), \
+                     patch.object(main, "auditoria_registrar") as auditar:
+                    self.assertEqual(client.delete(ruta).status_code, 409)
+                    auditar.assert_not_called()
+                with patch.object(reagendar, "eliminar_carga_sin_envios",
+                                  side_effect=LookupError("No existe")):
+                    self.assertEqual(client.delete(ruta).status_code, 404)
+            finally:
+                main.app.dependency_overrides.pop(main.solo_admin, None)
+
+
 class MariaDbCitasTests(unittest.TestCase):
     def test_paciente_repetido_pendiente_y_enviado_no_se_reimporta(self):
         claves = ["TEST-" + uuid.uuid4().hex for _ in range(3)]
