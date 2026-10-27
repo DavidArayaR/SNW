@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="css/tema.css?v=tokens1">
   <link rel="stylesheet" href="css/styles.css">
   <link rel="stylesheet" href="css/componentes.css?v=paginador-cinco1">
-  <link rel="stylesheet" href="css/pacientes.css?v=quitar-carga-amarillo1">
+  <link rel="stylesheet" href="css/pacientes.css?v=mapeo-columnas2">
   <link rel="stylesheet" href="css/layout.css?v=navcolor1">
   <link rel="stylesheet" href="css/admin.css?v=tokens1">
   <link rel="stylesheet" href="css/refinamiento.css?v=merge-frontend1">
@@ -120,6 +120,8 @@
                   <th>ID</th>
                   <th>Nombre</th>
                   <th>Tel&eacute;fono</th>
+                  <th>Tratamiento última atención</th>
+                  <th>Fecha última atención</th>
                   <th>Estado</th>
                   <th>Error</th>
                   <th>Respuesta</th>
@@ -150,11 +152,12 @@
           </div>
 
           <p class="field__hint gestion-base__intro">
-            Acciones sobre la base elegida arriba. Puedes subir un CSV de columnas
-            <strong>nombre, apellido, telefono</strong> (UTF-8, máx. 5 MB): los teléfonos se
-            normalizan a <strong>+569XXXXXXXX</strong>. Opcionalmente
+            Acciones sobre la base elegida arriba. Al elegir un CSV UTF-8 podrás asignar
+            sus columnas a <strong>nombre, apellido y teléfono</strong>; los teléfonos se
+            normalizan a <strong>+569XXXXXXXX</strong>. También puedes asignar
             <strong>respuesta</strong> (Se dio de baja / Respondió / Sin respuesta) y
-            <strong>estado</strong> (pendiente / enviado): si el paciente ya estaba
+            <strong>estado</strong> (pendiente / enviado), <strong>tratamiento de la última atención</strong>
+            y <strong>fecha de la última atención</strong>. Si el paciente ya estaba
             cargado se actualiza, y se aplica lo mismo al mismo número en
             <strong>todas las demás bases</strong>.
           </p>
@@ -177,6 +180,21 @@
             </div>
             <input type="file" id="csvArchivo" accept=".csv" hidden>
           </div>
+
+          <section id="csvMapeo" class="csv-mapeo" aria-labelledby="csvMapeoTitulo" hidden>
+            <h3 id="csvMapeoTitulo">Asignar columnas del CSV</h3>
+            <p class="field__hint">Elige qué columna del archivo corresponde a cada dato. Nombre, apellido y teléfono son obligatorios; los demás son opcionales. La fecha acepta AAAA-MM-DD o DD/MM/AAAA.</p>
+            <div class="csv-mapeo__grid">
+              <div class="field"><label for="csvMapNombre">Nombre *</label><select id="csvMapNombre" data-csv-campo="nombre"></select></div>
+              <div class="field"><label for="csvMapApellido">Apellido *</label><select id="csvMapApellido" data-csv-campo="apellido"></select></div>
+              <div class="field"><label for="csvMapTelefono">Teléfono *</label><select id="csvMapTelefono" data-csv-campo="telefono"></select></div>
+              <div class="field"><label for="csvMapRespuesta">Respuesta</label><select id="csvMapRespuesta" data-csv-campo="respuesta"></select></div>
+              <div class="field"><label for="csvMapEstado">Estado</label><select id="csvMapEstado" data-csv-campo="estado"></select></div>
+              <div class="field"><label for="csvMapTratamiento">Tratamiento última atención</label><select id="csvMapTratamiento" data-csv-campo="tratamiento_ultima_atencion"></select></div>
+              <div class="field"><label for="csvMapFechaAtencion">Fecha última atención</label><select id="csvMapFechaAtencion" data-csv-campo="fecha_ultima_atencion"></select></div>
+            </div>
+            <p id="csvMapError" class="csv-mapeo__error" role="status"></p>
+          </section>
 
           <div class="gestion-acciones">
             <button id="btnSubirCsv" class="btn btn--primary" type="button" disabled>
@@ -299,8 +317,8 @@
 
   <script src="js/layout.js?v=permisos-acciones1"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/csv-chunks.js?v=filas2000-1"></script>
-  <script src="js/pacientes.js?v=permisos-acciones1"></script>
+  <script src="js/csv-chunks.js?v=mapeo-columnas2"></script>
+  <script src="js/pacientes.js?v=mapeo-columnas2"></script>
   <script src="js/reagendar.js?v=pacientes-reagendar2"></script>
   <script src="js/pacientes-tabs.js?v=aplazar-flotante1"></script>
   <script>

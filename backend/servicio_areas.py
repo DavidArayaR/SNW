@@ -15,6 +15,7 @@ Reglas de esta fase:
 """
 
 import csv as _csv
+import datetime as _dt
 import io as _io
 import re
 import unicodedata
@@ -47,6 +48,8 @@ _ESQUEMA_PACIENTES = (
     "  interes_plantilla_clave VARCHAR(50) DEFAULT NULL,"
     "  interes_fecha DATETIME NULL,"
     "  ultimo_reintegro DATETIME NULL,"
+    "  tratamiento_ultima_atencion TEXT NULL,"
+    "  fecha_ultima_atencion DATE NULL,"
     "  fecha_actualizacion DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
     "  INDEX idx_telefono (telefono)"
     ") CHARACTER SET utf8mb4"
@@ -128,6 +131,22 @@ def asegurar_tablas_areas(cur) -> None:
         "  INDEX idx_uer_rol (rol_id)"
         ") CHARACTER SET utf8mb4"
     )
+    # Amplía tanto las bases generales como las áreas ya creadas. Las áreas
+    # nuevas reciben estas columnas directamente desde _ESQUEMA_PACIENTES.
+    cur.execute("SELECT nombre_tabla_base FROM areas")
+    tablas = ["pacientes_dev", "pacientes_prod"] + [
+        fila["nombre_tabla_base"] for fila in cur.fetchall()
+    ]
+    for tabla in dict.fromkeys(tablas):
+        if not tabla_valida(tabla) or not _tabla_fisica_existe(cur, tabla):
+            continue
+        cur.execute("SELECT COLUMN_NAME FROM information_schema.COLUMNS"
+                    " WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=%s", (tabla,))
+        columnas = {fila["COLUMN_NAME"] for fila in cur.fetchall()}
+        if "tratamiento_ultima_atencion" not in columnas:
+            cur.execute(f"ALTER TABLE {tabla} ADD COLUMN tratamiento_ultima_atencion TEXT NULL")
+        if "fecha_ultima_atencion" not in columnas:
+            cur.execute(f"ALTER TABLE {tabla} ADD COLUMN fecha_ultima_atencion DATE NULL")
 
 
 def slug_base(nombre_visible: str) -> str:
@@ -733,13 +752,26 @@ def _limpiar_celda_csv(valor: str | None) -> str:
     return (valor or "").strip(" ;\t")
 
 
+def _fecha_ultima_atencion_csv(valor: str) -> _dt.date | None:
+    """Acepta fechas ISO y día/mes/año; nunca interpreta una fecha ambigua como mes/día."""
+    if not valor:
+        return None
+    for formato in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+        try:
+            return _dt.datetime.strptime(valor, formato).date()
+        except ValueError:
+            pass
+    raise ValueError("fecha_ultima_atencion_invalida")
+
+
 def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int,
-                           fila_inicial: int = 2) -> dict:
+                           fila_inicial: int = 2,
+                           mapeo: dict[str, str] | None = None) -> dict:
     """Valida un CSV y lo carga en la tabla de la especialidad.
 
     Columnas obligatorias: `nombre`, `apellido`, `telefono` (UTF-8).
-    Opcionales: `respuesta` (Se dio de baja / Respondió / Sin respuesta) y
-    `estado` (pendiente / enviado). Teléfonos normalizados con
+    Opcionales: `respuesta`, `estado`, `tratamiento_ultima_atencion` y
+    `fecha_ultima_atencion` (AAAA-MM-DD o DD/MM/AAAA). Teléfonos normalizados con
     `telefono.py` (`+569XXXXXXXX`).
 
     Los pacientes que ya estaban en la base se actualizan con la respuesta y el
@@ -762,18 +794,40 @@ def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int,
     lector = _csv.DictReader(_io.StringIO(texto))
     if not lector.fieldnames:
         raise ValueError("csv_vacio")
-    cols = {_limpiar_celda_csv(c).lower(): c for c in lector.fieldnames}
-    faltan = [c for c in ("nombre", "apellido", "telefono") if c not in cols]
+    encabezados = lector.fieldnames
+    if any(not c or not str(c).strip() for c in encabezados) or len(set(encabezados)) != len(encabezados):
+        raise ValueError("mapeo_columna")
+    cols = {_limpiar_celda_csv(c).lower(): c for c in encabezados}
+    if mapeo is not None:
+        destinos = {"nombre", "apellido", "telefono", "respuesta", "estado",
+                    "tratamiento_ultima_atencion", "fecha_ultima_atencion"}
+        if (not isinstance(mapeo, dict) or not mapeo or
+                any(k not in destinos or not isinstance(v, str) or not v
+                    for k, v in mapeo.items())):
+            raise ValueError("mapeo_invalido")
+        if any(v not in encabezados for v in mapeo.values()):
+            raise ValueError("mapeo_columna")
+        if len(set(mapeo.values())) != len(mapeo):
+            raise ValueError("mapeo_duplicado")
+        elegidas = mapeo
+    else:
+        elegidas = {c: cols[c] for c in ("nombre", "apellido", "telefono") if c in cols}
+        for destino, opciones in (("respuesta", ("respuesta", "respuesta_paciente", "estado_respuesta")),
+                                  ("estado", ("estado", "estado_paciente", "estado_envio")),
+                                  ("tratamiento_ultima_atencion", ("tratamiento_ultima_atencion",)),
+                                  ("fecha_ultima_atencion", ("fecha_ultima_atencion",))):
+            elegidas[destino] = next((cols[c] for c in opciones if c in cols), None)
+    faltan = [c for c in ("nombre", "apellido", "telefono") if not elegidas.get(c)]
     if faltan:
         raise ValueError("columnas:" + ",".join(faltan))
-    col_respuesta = next((cols[c] for c in ("respuesta", "respuesta_paciente", "estado_respuesta")
-                          if c in cols), None)
-    col_estado = next((cols[c] for c in ("estado", "estado_paciente", "estado_envio")
-                       if c in cols), None)
+    col_respuesta = elegidas.get("respuesta")
+    col_estado = elegidas.get("estado")
+    col_tratamiento = elegidas.get("tratamiento_ultima_atencion")
+    col_fecha_atencion = elegidas.get("fecha_ultima_atencion")
     filas_csv = list(enumerate(lector, start=fila_inicial))
     telefonos_objetivo = {
         telefono for _, fila in filas_csv
-        if (telefono := normalizar_telefono(_limpiar_celda_csv(fila.get(cols["telefono"]))))
+        if (telefono := normalizar_telefono(_limpiar_celda_csv(fila.get(elegidas["telefono"]))))
     }
 
     from supresion import huella_telefono
@@ -797,9 +851,9 @@ def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int,
         vistos_archivo: set[str] = set()
         accesos_pendientes: list[tuple[str, int, int]] = []
         for nro, fila in filas_csv:
-            nombre = normalizar_texto(_limpiar_celda_csv(fila.get(cols["nombre"])))
-            apellido = normalizar_texto(_limpiar_celda_csv(fila.get(cols["apellido"])))
-            telefono_crudo = _limpiar_celda_csv(fila.get(cols["telefono"]))
+            nombre = normalizar_texto(_limpiar_celda_csv(fila.get(elegidas["nombre"])))
+            apellido = normalizar_texto(_limpiar_celda_csv(fila.get(elegidas["apellido"])))
+            telefono_crudo = _limpiar_celda_csv(fila.get(elegidas["telefono"]))
             if not nombre and not apellido and not telefono_crudo:
                 continue
             procesados += 1
@@ -844,6 +898,18 @@ def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int,
                                         f"enviado"})
                         continue
 
+            tratamiento = (fila.get(col_tratamiento) or "").strip() if col_tratamiento else ""
+            if len(tratamiento) > 500:
+                errores.append({"fila": nro, "motivo": "Tratamiento supera 500 caracteres"})
+                continue
+            fecha_texto = _limpiar_celda_csv(fila.get(col_fecha_atencion)) if col_fecha_atencion else ""
+            try:
+                fecha_atencion = _fecha_ultima_atencion_csv(fecha_texto)
+            except ValueError:
+                errores.append({"fila": nro, "motivo":
+                                "Fecha de última atención inválida. Use AAAA-MM-DD o DD/MM/AAAA"})
+                continue
+
             # Un número repetido dentro del archivo se procesa una sola vez.
             if telefono in vistos_archivo:
                 duplicados += 1
@@ -870,16 +936,32 @@ def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int,
                 respuesta_aplicar = "baja"
 
             if ids_objetivo:
-                if aplicar_en_tabla(cur, tabla, ids_objetivo, respuesta_aplicar, estado,
-                                    candado=candado_aplicar):
+                cambios_atencion = []
+                valores_atencion = []
+                if tratamiento:
+                    cambios_atencion.append("tratamiento_ultima_atencion=%s")
+                    valores_atencion.append(tratamiento)
+                if fecha_atencion:
+                    cambios_atencion.append("fecha_ultima_atencion=%s")
+                    valores_atencion.append(fecha_atencion)
+                if cambios_atencion:
+                    marcadores = ",".join("%s" for _ in ids_objetivo)
+                    cur.execute(f"UPDATE {tabla} SET {', '.join(cambios_atencion)}"
+                                f" WHERE id IN ({marcadores})",
+                                (*valores_atencion, *ids_objetivo))
+                cambio_estado = aplicar_en_tabla(cur, tabla, ids_objetivo,
+                                                 respuesta_aplicar, estado,
+                                                 candado=candado_aplicar)
+                if cambios_atencion or cambio_estado:
                     actualizados += len(ids_objetivo)
                 duplicados += 1
             else:
                 cur.execute(
                     f"INSERT INTO {tabla} (nombre, apellido, telefono, estado,"
-                    " whatsapp_opt_out, interesado, opt_out_explicito)"
-                    " VALUES (%s, %s, %s, 'pendiente', 0, 0, 0)",
-                    (nombre[:150], apellido[:150], telefono),
+                    " whatsapp_opt_out, interesado, opt_out_explicito,"
+                    " tratamiento_ultima_atencion, fecha_ultima_atencion)"
+                    " VALUES (%s, %s, %s, 'pendiente', 0, 0, 0, %s, %s)",
+                    (nombre[:150], apellido[:150], telefono, tratamiento or None, fecha_atencion),
                 )
                 pid = cur.lastrowid
                 ids_objetivo = [pid]

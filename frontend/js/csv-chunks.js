@@ -33,6 +33,86 @@
     }
   }
 
+  function separarEncabezadoCsv(registro) {
+    const columnas = [];
+    let valor = "";
+    let entreComillas = false;
+    for (let i = 0; i < registro.length; i++) {
+      const caracter = registro[i];
+      if (caracter === '"') {
+        if (entreComillas && registro[i + 1] === '"') {
+          valor += '"';
+          i++;
+        } else if (entreComillas || !valor) {
+          entreComillas = !entreComillas;
+        } else {
+          throw new Error("El encabezado del CSV tiene comillas mal ubicadas.");
+        }
+      } else if (caracter === "," && !entreComillas) {
+        columnas.push(valor);
+        valor = "";
+      } else {
+        valor += caracter;
+      }
+    }
+    if (entreComillas) throw new Error("El encabezado del CSV tiene comillas sin cerrar.");
+    columnas.push(valor);
+    if (columnas.some((c) => !c.trim()) || new Set(columnas).size !== columnas.length) {
+      throw new Error("El CSV tiene columnas vacías o encabezados repetidos.");
+    }
+    return columnas;
+  }
+
+  async function leerEncabezadosCsv(archivo) {
+    const registros = registrosCsv(archivo);
+    try {
+      const primero = await registros.next();
+      if (primero.done) throw new Error("El archivo CSV está vacío.");
+      return separarEncabezadoCsv(primero.value);
+    } finally {
+      await registros.return();
+    }
+  }
+
+  function sugerirMapeoCsv(encabezados) {
+    const normalizar = (valor) => valor.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    const aliases = {
+      nombre: ["nombre", "nombres", "primer nombre"],
+      apellido: ["apellido", "apellidos", "primer apellido"],
+      telefono: ["telefono", "numero de telefono", "numero telefono", "celular", "movil", "whatsapp"],
+      respuesta: ["respuesta", "respuesta paciente", "estado respuesta"],
+      estado: ["estado", "estado paciente", "estado envio"],
+      tratamiento_ultima_atencion: ["tratamiento ultima atencion", "ultimo tratamiento", "tratamiento"],
+      fecha_ultima_atencion: ["fecha ultima atencion", "ultima atencion", "fecha atencion"],
+    };
+    const resultado = {};
+    const usados = new Set();
+    for (const [campo, opciones] of Object.entries(aliases)) {
+      const encontrado = encabezados.find((columna) =>
+        !usados.has(columna) && opciones.includes(normalizar(columna)));
+      if (encontrado) {
+        resultado[campo] = encontrado;
+        usados.add(encontrado);
+      }
+    }
+    return resultado;
+  }
+
+  function validarMapeoCsv(mapeo, encabezados) {
+    for (const campo of ["nombre", "apellido", "telefono"]) {
+      if (!mapeo[campo]) return `Selecciona la columna para ${campo}.`;
+    }
+    const usadas = Object.values(mapeo).filter(Boolean);
+    if (usadas.some((columna) => !encabezados.includes(columna))) {
+      return "Una columna asignada no existe en el archivo.";
+    }
+    if (new Set(usadas).size !== usadas.length) {
+      return "Cada columna del archivo debe asignarse a un solo campo.";
+    }
+    return "";
+  }
+
   async function* fragmentarCsv(archivo, maxBytes = TAMANO_BLOQUE_CSV,
                                 maxFilas = MAX_FILAS_BLOQUE_CSV) {
     if (!Number.isInteger(maxFilas) || maxFilas < 1) {
@@ -72,7 +152,8 @@
     if (cantidad || filaSiguiente === 2) yield { contenido, filaInicial, cantidad };
   }
 
-  const api = { fragmentarCsv, TAMANO_BLOQUE_CSV, MAX_FILAS_BLOQUE_CSV };
+  const api = { fragmentarCsv, leerEncabezadosCsv, sugerirMapeoCsv, validarMapeoCsv,
+    TAMANO_BLOQUE_CSV, MAX_FILAS_BLOQUE_CSV };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   if (raiz) raiz.snwCsvChunks = api;
 })(typeof window !== "undefined" ? window : null);

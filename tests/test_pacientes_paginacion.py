@@ -1,5 +1,6 @@
 import sys
 import unittest
+from datetime import date
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -9,6 +10,14 @@ import main
 
 
 class PacientesPaginacionTests(unittest.TestCase):
+    def test_ultima_atencion_se_oculta_sin_permiso_de_datos(self):
+        fila = {"nombre": "Ana", "apellido": "Sol", "telefono": "+56993921740",
+                "tratamiento_ultima_atencion": "Tratamiento privado",
+                "fecha_ultima_atencion": date(2026, 10, 3)}
+        main._ocultar_datos_paciente(fila)
+        self.assertIsNone(fila["tratamiento_ultima_atencion"])
+        self.assertIsNone(fila["fecha_ultima_atencion"])
+
     def test_ruta_paginada_esta_registrada(self):
         self.assertIn("get", main.app.openapi()["paths"]["/api/pacientes/pagina"])
 

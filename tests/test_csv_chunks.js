@@ -1,6 +1,36 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { fragmentarCsv, MAX_FILAS_BLOQUE_CSV } = require("../frontend/js/csv-chunks.js");
+const { fragmentarCsv, leerEncabezadosCsv, sugerirMapeoCsv, validarMapeoCsv,
+  MAX_FILAS_BLOQUE_CSV } = require("../frontend/js/csv-chunks.js");
+
+test("lee encabezados entre comillas y propone columnas sin cargar todo el archivo", async () => {
+  const encabezados = await leerEncabezadosCsv(new Blob([
+    '"Nombres","Apellidos","Número de teléfono","Respuesta externa"\nAna,Sol,93921740,Respondio\n',
+  ]));
+  assert.deepEqual(encabezados,
+    ["Nombres", "Apellidos", "Número de teléfono", "Respuesta externa"]);
+  assert.deepEqual(sugerirMapeoCsv(encabezados), {
+    nombre: "Nombres", apellido: "Apellidos", telefono: "Número de teléfono",
+  });
+  assert.equal(validarMapeoCsv({ nombre: "Nombres", apellido: "Apellidos",
+    telefono: "Número de teléfono" }, encabezados), "");
+  assert.match(validarMapeoCsv({ nombre: "Nombres", apellido: "Nombres",
+    telefono: "Número de teléfono" }, encabezados), /un solo campo/);
+});
+
+test("rechaza encabezados vacíos o repetidos", async () => {
+  await assert.rejects(leerEncabezadosCsv(new Blob(["A,A,C\n1,2,3\n"])), /repetidos/);
+  await assert.rejects(leerEncabezadosCsv(new Blob(["A,,C\n1,2,3\n"])), /vacías/);
+});
+
+test("sugiere columnas de última atención", () => {
+  const encabezados = ["Nombre", "Apellido", "Teléfono", "Tratamiento última atención",
+    "Fecha última atención"];
+  const mapeo = sugerirMapeoCsv(encabezados);
+  assert.equal(mapeo.tratamiento_ultima_atencion, "Tratamiento última atención");
+  assert.equal(mapeo.fecha_ultima_atencion, "Fecha última atención");
+  assert.equal(validarMapeoCsv(mapeo, encabezados), "");
+});
 
 async function bloques(texto, maxBytes) {
   const resultado = [];

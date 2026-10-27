@@ -131,6 +131,8 @@
 #lblArchivoGestion { cursor: pointer; margin: 0; }
 
 #tablaPacientesWrap { position: relative; }
+#tablaPacientes .campo-tratamiento { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#tablaPacientes .campo-fecha-atencion { white-space: nowrap; }
 #tablaPacientesWrap.is-loading { min-height: 180px; }
 
 #cardPacientePrueba { padding-bottom: 20px; }
@@ -159,6 +161,20 @@
 .gestion-campo { margin: 18px 18px 0; max-width: 640px; }
 .gestion-archivo { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .gestion-archivo .field__hint { margin: 0; }
+.csv-mapeo {
+  margin: 18px 18px 0;
+  padding: 16px;
+  border: 1px solid var(--borde);
+  border-radius: 14px;
+  background: var(--panel-2);
+}
+.csv-mapeo h3 { margin: 0; font-size: 1rem; }
+.csv-mapeo > .field__hint { margin: 6px 0 14px; }
+.csv-mapeo__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.csv-mapeo__grid .field { min-width: 0; margin: 0; }
+.csv-mapeo__grid select { width: 100%; }
+.csv-mapeo__error { min-height: 1.2em; margin: 10px 0 0; color: var(--rojo); font-size: .86rem; }
+.csv-mapeo__error:empty { display: none; }
 .gestion-acciones {
   display: flex;
   flex-wrap: wrap;

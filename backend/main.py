@@ -558,6 +558,8 @@ def _ocultar_datos_paciente(fila: dict) -> None:
     fila["telefono"] = _telefono_paciente_oculto(fila.get("telefono"))
     fila["ultimo_mensaje_recibido"] = None
     fila["ultimo_error"] = None
+    fila["tratamiento_ultima_atencion"] = None
+    fila["fecha_ultima_atencion"] = None
 
 
 def _rechazados_visibles(rechazados: list[dict], tabla: str, sesion: dict) -> list[dict]:
@@ -1134,6 +1136,9 @@ _ERRORES_ESPECIALIDAD = {
     "sin_sufijo_libre": (409, "No se encontró un sufijo numérico libre para la tabla."),
     "codificacion": (422, "El archivo debe estar en UTF-8."),
     "csv_vacio": (422, "El archivo CSV está vacío."),
+    "mapeo_invalido": (422, "La asignación de columnas del CSV no es válida."),
+    "mapeo_columna": (422, "El CSV tiene encabezados vacíos, repetidos o una columna asignada no existe."),
+    "mapeo_duplicado": (422, "Cada columna del CSV solo puede asignarse a un campo."),
 }
 
 
@@ -1294,6 +1299,7 @@ def vaciar_tabla_area(area_id: int, sesion: dict = Depends(sesion_actual)):
 
 
 async def importar_pacientes_csv(area_id: int, archivo: UploadFile = File(...),
+                                 mapeo_csv: str | None = Form(None),
                                  fila_inicial: int = Query(2, ge=2),
                                  sesion: dict = Depends(sesion_actual)):
     """Carga pacientes vía CSV en la tabla de la area.
@@ -1316,9 +1322,22 @@ async def importar_pacientes_csv(area_id: int, archivo: UploadFile = File(...),
     datos = await archivo.read(CSV_MAX_BYTES + 1)
     if len(datos) > CSV_MAX_BYTES:
         raise HTTPException(413, detail="El archivo supera los 5 MB.")
+    mapeo = None
+    if isinstance(mapeo_csv, str):
+        if len(mapeo_csv) > 4096:
+            raise _error_area("mapeo_invalido")
+        try:
+            mapeo = json.loads(mapeo_csv)
+        except ValueError:
+            raise _error_area("mapeo_invalido") from None
+        if not isinstance(mapeo, dict):
+            raise _error_area("mapeo_invalido")
     try:
+        opciones = {"fila_inicial": fila_inicial}
+        if mapeo is not None:
+            opciones["mapeo"] = mapeo
         informe = await asyncio.to_thread(servicio_areas.importar_pacientes_csv,
-                                          area_id, datos, uid, fila_inicial=fila_inicial)
+                                          area_id, datos, uid, **opciones)
     except ValueError as e:
         raise _error_area(str(e))
     auditoria_registrar(sesion.get("usuario", ""), "area_csv",
@@ -1540,6 +1559,8 @@ def expr_select_pacientes(ambiente: str, tabla: str | None = None) -> str:
     cols = columnas_tabla(t, ambiente)
     log_tiene_tabla = "tabla_pacientes" in columnas_tabla("log_envios", ambiente)
     exprs = ["p.id", "p.nombre", "p.apellido", "p.telefono"]
+    for campo in ("tratamiento_ultima_atencion", "fecha_ultima_atencion"):
+        exprs.append(f"p.{campo}" if campo in cols else f"NULL AS {campo}")
     if "estado" in cols:
         exprs.append("COALESCE(NULLIF(p.estado, ''), 'pendiente') AS estado")
     else:
@@ -1671,6 +1692,9 @@ def _presentar_filas_pacientes(filas: list[dict], t: str, ambiente: str,
             _ocultar_datos_paciente(f)
         fecha = f.pop("fecha_actualizacion", None)
         f["actualizado"] = fecha.strftime("%d-%m-%Y %H:%M") if fecha else "—"
+        ultima_atencion = f.get("fecha_ultima_atencion")
+        if ultima_atencion and hasattr(ultima_atencion, "strftime"):
+            f["fecha_ultima_atencion"] = ultima_atencion.strftime("%d-%m-%Y")
         fr = f.get("ultima_respuesta_fecha")
         f["ultima_respuesta_fecha"] = fr.strftime("%d-%m-%Y %H:%M") if fr else None
     return filas

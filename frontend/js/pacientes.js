@@ -237,7 +237,8 @@ function aplicarModoBase() {
   const lblCsv = $("#lblArchivoGestion");
   // Sin áreas no hay nada que gestionar; con tabla general tampoco.
   const puedeOperar = esArea && puedeCargarArea;
-  if (btnSubir) btnSubir.disabled = !puedeOperar;
+  if (btnSubir) btnSubir.disabled = !puedeOperar || !inpCsv?.files?.length ||
+    !!$("#csvMapeo")?.hidden || !!$("#csvMapError")?.textContent;
   if (btnVaciar) {
     btnVaciar.hidden = !window.snwPuede?.("pacientes_vaciar");
     btnVaciar.disabled = !esArea;
@@ -250,7 +251,7 @@ function aplicarModoBase() {
   const msg = $("#csvMsg");
   if (msg) {
     msg.textContent = esArea
-      ? `Destino: ${area.nombre_visible} (${area.nombre_tabla_base}) · columnas: nombre, apellido, telefono (UTF-8). La carga se divide en partes de hasta 2.000 filas o 2 MB.`
+      ? `Destino: ${area.nombre_visible} (${area.nombre_tabla_base}) · asigna las columnas tras elegir el CSV UTF-8. La carga se divide en partes de hasta 2.000 filas o 2 MB.`
       : "Destino: —";
   }
 
@@ -431,6 +432,8 @@ function render() {
       `<td class="campo-id">${p.id}</td>` +
       `<td class="campo-nombre">${escaparHtml(nombreCompleto)}</td>` +
       `<td class="campo-tel">${escaparHtml(p.telefono)}</td>` +
+      `<td class="campo-tratamiento" title="${escaparHtml(p.tratamiento_ultima_atencion || "")}">${escaparHtml(p.tratamiento_ultima_atencion || "—")}</td>` +
+      `<td class="campo-fecha-atencion">${escaparHtml(p.fecha_ultima_atencion || "—")}</td>` +
       `<td class="campo-estado">` +
         `<span class="estado-badge estado-${escaparHtml(p.estado)}"${editable ? ` data-editable data-id="${p.id}" title="Click para cambiar estado"` : ` title="${PUEDE_GESTIONAR_PAC ? "Solo se edita en números de prueba" : "Sin permiso para editar"}"`}>${escaparHtml(p.estado)}</span>` +
         `<select class="estado-select" data-id="${p.id}" hidden>` +
@@ -1211,16 +1214,60 @@ const csvInput = $("#csvArchivo");
 const btnSubirCsv = $("#btnSubirCsv");
 const nombreArchivo = $("#nombreArchivoGestion");
 const csvResultado = $("#csvResultado");
+const csvMapeo = $("#csvMapeo");
+const csvMapError = $("#csvMapError");
+const csvSelectores = [...document.querySelectorAll("[data-csv-campo]")];
 let archivoElegido = null;
+let csvEncabezados = [];
+
+function mapeoCsvSeleccionado() {
+  return Object.fromEntries(csvSelectores.filter((select) => select.value)
+    .map((select) => [select.dataset.csvCampo, select.value]));
+}
+
+function actualizarMapeoCsv() {
+  if (!csvMapeo || csvMapeo.hidden || !csvEncabezados.length) return;
+  csvMapError.textContent = window.snwCsvChunks.validarMapeoCsv(
+    mapeoCsvSeleccionado(), csvEncabezados);
+  aplicarModoBase();
+}
+
+for (const select of csvSelectores) select.addEventListener("change", actualizarMapeoCsv);
 
 if (csvInput) {
-  csvInput.addEventListener("change", () => {
+  csvInput.addEventListener("change", async () => {
     const f = csvInput.files && csvInput.files[0];
     archivoElegido = f || null;
+    csvEncabezados = [];
+    csvMapeo.hidden = !f;
+    csvMapError.textContent = f ? "Leyendo columnas del archivo…" : "";
+    if (csvResultado) csvResultado.textContent = "";
     if (nombreArchivo) {
       nombreArchivo.textContent = f
         ? `${f.name} (${(f.size / 1024).toFixed(1)} KB)`
         : "No se ha seleccionado ningún archivo";
+    }
+    aplicarModoBase();
+    if (!f) return;
+    try {
+      const encabezados = await window.snwCsvChunks.leerEncabezadosCsv(f);
+      if (archivoElegido !== f) return;
+      csvEncabezados = encabezados;
+      const sugeridos = window.snwCsvChunks.sugerirMapeoCsv(encabezados);
+      for (const select of csvSelectores) {
+        select.replaceChildren(new Option(
+          ["nombre", "apellido", "telefono"].includes(select.dataset.csvCampo)
+            ? "— Seleccione columna —" : "— No importar —", ""));
+        for (const encabezado of encabezados) {
+          select.add(new Option(encabezado, encabezado));
+        }
+        select.value = sugeridos[select.dataset.csvCampo] || "";
+      }
+      actualizarMapeoCsv();
+    } catch (err) {
+      if (archivoElegido !== f) return;
+      csvMapError.textContent = err.message || "No se pudieron leer las columnas del CSV.";
+      aplicarModoBase();
     }
   });
 }
@@ -1243,6 +1290,9 @@ if (btnSubirCsv) btnSubirCsv.addEventListener("click", async () => {
   const esp = espPacId();
   if (esp == null) return toast("Elige un área como base de datos.", "error");
   if (!archivoElegido) return toast("Elige un archivo CSV.", "error");
+  const mapeo = mapeoCsvSeleccionado();
+  const errorMapeo = window.snwCsvChunks.validarMapeoCsv(mapeo, csvEncabezados);
+  if (csvMapeo.hidden || errorMapeo) return toast(errorMapeo || "Revisa las columnas del CSV.", "error");
   const archivo = archivoElegido;
   const informeTotal = { bases: [], errores: [] };
   let bloquesCompletados = 0;
@@ -1257,6 +1307,7 @@ if (btnSubirCsv) btnSubirCsv.addEventListener("click", async () => {
         `Subiendo parte ${bloquesCompletados + 1}… ${informeTotal.procesados || 0} filas procesadas.`;
       const datos = new FormData();
       datos.append("archivo", new Blob([bloque.contenido], { type: "text/csv;charset=utf-8" }), archivo.name);
+      datos.append("mapeo_csv", JSON.stringify(mapeo));
       const res = await fetch(`api/areas/${esp}/pacientes/csv?fila_inicial=${bloque.filaInicial}`, {
         method: "POST", headers: authHeaders(), body: datos,
       });
@@ -1300,6 +1351,9 @@ if (btnSubirCsv) btnSubirCsv.addEventListener("click", async () => {
     toast("Base de datos cargada.", "ok");
     csvInput.value = "";
     archivoElegido = null;
+    csvEncabezados = [];
+    csvMapeo.hidden = true;
+    csvMapError.textContent = "";
     if (nombreArchivo) nombreArchivo.textContent = "No se ha seleccionado ningún archivo";
     cargarTrasCambio();
   } catch (err) {
