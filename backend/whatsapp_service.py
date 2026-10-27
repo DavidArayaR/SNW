@@ -275,7 +275,6 @@ BOTON_ID_BAJA_INSULTO = "snw_dar_de_baja"
 ACCIONES_BOTON_TEMPLATE = {
     "interes": "snw_tpl_interes", "desinteres": "snw_tpl_desinteres",
     "baja": "snw_tpl_baja", "consulta": "snw_tpl_consulta",
-    "crm_chat": "snw_tpl_crm_chat",
 }
 BOTONES_RESPUESTA = [
     {"type": "QUICK_REPLY", "text": BOTON_TEXTO_INTERES},
@@ -1414,16 +1413,6 @@ class WhatsAppService:
                         acciones.append(f"derivacion_{resultado}")
                     except Exception as exc:
                         log_error("al_detectar_consulta: ejecutiva", exc)
-                continue
-            if es_boton and extra == ACCIONES_BOTON_TEMPLATE["crm_chat"]:
-                if callable(al_detectar_consulta):
-                    try:
-                        resultado = al_detectar_consulta(
-                            telefono, "Quiero hablar con el equipo de la clínica",
-                            mensaje.get("id"), ("SOLICITA_CONTACTO",))
-                        acciones.append(f"derivacion_{resultado}")
-                    except Exception as exc:
-                        log_error("al_detectar_consulta: chat CRM", exc)
                 continue
             if es_boton and extra == ACCIONES_BOTON_TEMPLATE["consulta"]:
                 if callable(al_consulta_campania) and reagendar is None:

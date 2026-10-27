@@ -187,7 +187,6 @@ function botonesDelEditor() {
     if (tipo === "baja") return { tipo: "respuesta", texto: "Dar de baja", accion: "baja" };
     if (tipo === "interes") return { tipo: "respuesta", texto: "Me interesa", accion: "interes" };
     if (tipo === "nointeres") return { tipo: "respuesta", texto: "No me interesa", accion: "desinteres" };
-    if (tipo === "chatcrm") return { tipo: "respuesta", texto: "Ir a call center", accion: "crm_chat" };
     const boton = { tipo, texto: fila.querySelector(".tpl-boton__texto").value.trim() };
     if (tipo === "respuesta") {
       boton.accion = fila.querySelector(".tpl-boton__accion").value;
@@ -232,7 +231,6 @@ function agregarFilaBoton(datos = {}) {
     <button type="button" class="btn btn--ghost tpl-boton__quitar" aria-label="Quitar botón" title="Quitar botón"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
     <label class="tpl-boton__campo"><span>Tipo de botón</span><select class="tpl-boton__tipo">
       <option value="respuesta">Respuesta rápida</option><option value="url">Abrir enlace</option>
-      <option value="chatcrm">Chat del call center (CRM)</option>
       <option value="interes">Me interesa</option>
       <option value="nointeres">No interesa</option>
       <option value="baja">Baja</option></select></label>
@@ -241,7 +239,7 @@ function agregarFilaBoton(datos = {}) {
     <label class="tpl-boton__campo tpl-boton__accion-campo"><span>Qué ocurre al pulsarlo</span>
       <select class="tpl-boton__accion">
         <option value="ninguna">Solo responder</option><option value="interes">Interés</option>
-        <option value="desinteres">Desinterés</option><option value="consulta">Registrar consulta</option>
+        <option value="desinteres">Desinterés</option><option value="consulta">Hablar con callcenter</option>
         <option value="opciones">Ver opciones (lista)</option>
         <option value="baja">Baja</option></select></label>
     <label class="tpl-boton__campo tpl-boton__destino-campo"><span class="tpl-boton__destino-label">Destino</span>
@@ -257,7 +255,8 @@ function agregarFilaBoton(datos = {}) {
   const destino = fila.querySelector(".tpl-boton__destino");
   const crearLista = fila.querySelector(".tpl-boton__crear-lista");
   const panelOpciones = fila.querySelector(".tpl-boton__opciones");
-  // Las llamadas históricas siguen editables, pero las nuevas usan el chat CRM.
+  // Las llamadas existentes siguen siendo editables, pero ya no pueden
+  // elegirse como tipo para botones nuevos.
   if (datos.tipo === "telefono") {
     const opcionExistente = new Option("Llamar (existente)", "telefono");
     opcionExistente.disabled = true;
@@ -265,24 +264,20 @@ function agregarFilaBoton(datos = {}) {
   }
   tipo.value = datos.accion === "baja" || datos.tipo === "baja" ? "baja" :
     (datos.tipo === "interes" || (datos.tipo === "respuesta" && datos.accion === "interes" && datos.texto === "Me interesa")
-      ? "interes" : (datos.tipo === "chatcrm" ||
-        (datos.tipo === "respuesta" && datos.accion === "crm_chat")
-        ? "chatcrm" : (datos.tipo === "nointeres" ||
+      ? "interes" : (datos.tipo === "nointeres" ||
         (datos.tipo === "respuesta" && datos.accion === "desinteres" && datos.texto === "No me interesa")
-        ? "nointeres" : (["respuesta", "url", "telefono"].includes(datos.tipo) ? datos.tipo : "respuesta"))));
+        ? "nointeres" : (["respuesta", "url", "telefono"].includes(datos.tipo) ? datos.tipo : "respuesta")));
   texto.value = datos.texto || "";
   accion.value = datos.accion || ({ "Me interesa": "interes", "No me interesa": "desinteres",
     "Dar de baja": "baja" }[datos.texto] || "ninguna");
   destino.value = datos.url || datos.telefono || "";
   for (const opcion of datos.opciones || []) agregarOpcionLista(panelOpciones, opcion);
   const sincronizarTipo = () => {
-    if (["baja", "interes", "nointeres", "chatcrm"].includes(tipo.value)) {
-      texto.value = { baja: "Dar de baja", interes: "Me interesa", nointeres: "No me interesa",
-        chatcrm: "Ir a call center" }[tipo.value];
-      accion.value = { baja: "baja", interes: "interes", nointeres: "desinteres",
-        chatcrm: "crm_chat" }[tipo.value];
+    if (["baja", "interes", "nointeres"].includes(tipo.value)) {
+      texto.value = { baja: "Dar de baja", interes: "Me interesa", nointeres: "No me interesa" }[tipo.value];
+      accion.value = { baja: "baja", interes: "interes", nointeres: "desinteres" }[tipo.value];
     }
-    texto.readOnly = ["baja", "interes", "nointeres", "chatcrm"].includes(tipo.value);
+    texto.readOnly = ["baja", "interes", "nointeres"].includes(tipo.value);
     fila.querySelector(".tpl-boton__accion-campo").hidden = tipo.value !== "respuesta";
     fila.querySelector(".tpl-boton__destino-campo").hidden = !["url", "telefono"].includes(tipo.value);
     crearLista.hidden = tipo.value !== "respuesta" || ["baja", "opciones"].includes(accion.value);
@@ -297,7 +292,6 @@ function agregarFilaBoton(datos = {}) {
       respuesta: "Escribe el texto y elige qué hará el sistema al recibir la respuesta.",
       url: "El paciente abrirá el enlace indicado.",
       telefono: "El paciente podrá llamar al número indicado.",
-      chatcrm: "Al pulsarlo, SNW enviará un botón que abre el chat del número CRM de esta clínica.",
       interes: "Se mostrará «Me interesa» y la respuesta se marcará como interés.",
       nointeres: "Se mostrará «No me interesa» y la respuesta se marcará como desinterés.",
       baja: "Se mostrará «Dar de baja» y se solicitará la baja del paciente.",
@@ -308,7 +302,7 @@ function agregarFilaBoton(datos = {}) {
     if (tipo.dataset.tipoAnterior === "telefono" && tipo.value !== "telefono") {
       tipo.querySelector('option[value="telefono"]')?.remove();
     }
-    if (["baja", "interes", "nointeres", "chatcrm"].includes(tipo.dataset.tipoAnterior) && tipo.value !== tipo.dataset.tipoAnterior) {
+    if (["baja", "interes", "nointeres"].includes(tipo.dataset.tipoAnterior) && tipo.value !== tipo.dataset.tipoAnterior) {
       texto.value = "";
       accion.value = "ninguna";
     }
@@ -1172,8 +1166,7 @@ function mostrarPreviewServidor(data) {
     nodo.className = "bubble__boton";
     const icono = document.createElement("i");
     icono.className = `fa-solid ${boton.tipo === "url" ? "fa-arrow-up-right-from-square" :
-      boton.tipo === "telefono" ? "fa-phone" : boton.accion === "crm_chat" ? "fa-comments" :
-      boton.accion === "opciones" ? "fa-list" : "fa-reply"}`;
+      boton.tipo === "telefono" ? "fa-phone" : boton.accion === "opciones" ? "fa-list" : "fa-reply"}`;
     nodo.append(icono, document.createTextNode(` ${boton.texto}`));
     previewBotones.appendChild(nodo);
     if (boton.accion === "opciones" && boton.opciones?.length) {

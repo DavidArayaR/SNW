@@ -4105,15 +4105,6 @@ def _exigir_revision_valida(plantilla: dict, ejemplos: dict | None = None) -> di
     return vista
 
 
-def _exigir_crm_para_boton(centro: str | None, botones: list[dict]) -> None:
-    """El botón de chat necesita el número CRM de la clínica de la plantilla."""
-    if not any(b.get("accion") == "crm_chat" for b in botones):
-        return
-    numero = str(config_get(f"{centro}_CRM_PHONE_NUMBER") or "").strip() if centro else ""
-    if not re.fullmatch(r"\+?[1-9]\d{7,14}", numero):
-        raise HTTPException(400, detail="Configura un número CRM válido para esta clínica antes de guardar el botón de chat.")
-
-
 def previsualizar_plantilla(body: PlantillaPreviaIn,
                            sesion: dict = Depends(exigir("mensajeria"))):
     actual = None
@@ -4290,7 +4281,6 @@ def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(exigir("plantillas
     vista = _exigir_revision_valida({"texto": body.texto, "encabezado_media_id": media_id,
                                      "encabezado_texto": encabezado_texto,
                                      "pie_texto": pie_texto, "botones": body.botones}, body.ejemplos)
-    _exigir_crm_para_boton(body.centro, vista["botones"])
 
     plantillas = leer_plantillas()
     clave = slug(body.clave or body.nombre)
@@ -4421,7 +4411,6 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
             if "botones" in body.model_fields_set:
                 revision_borrador["botones"] = body.botones
             vista = _exigir_revision_valida(revision_borrador, body.ejemplos)
-            _exigir_crm_para_boton(p.get("centro_codigo"), vista["botones"])
             if _aprobacion_plantilla(p) != "aprobada":
                 # Pendiente/rechazada: aún no existe en Meta. Si la edita su
                 # creador y estaba rechazada, vuelve a pendiente (pide revisión
