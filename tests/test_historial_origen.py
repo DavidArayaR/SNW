@@ -12,6 +12,14 @@ import main
 
 
 class HistorialOrigenTests(unittest.TestCase):
+    def test_ritmo_real_cuenta_solo_aceptaciones_recientes_de_envios_activos(self):
+        ahora = 100.0
+        job = {"estado": "en_proceso", "aceptados_ultimos": [98.0, 99.1, 99.8, 100.0]}
+        self.assertEqual(main._aceptados_job_ultimo_segundo(job, ahora), 3)
+        job["estado"] = "pausado"
+        self.assertEqual(main._aceptados_job_ultimo_segundo(job, ahora), 0)
+        self.assertEqual(main._aceptados_job_ultimo_segundo(None, ahora), 0)
+
     def test_tabla_dice_tipo_y_muestra_registro_call_center(self):
         raiz = Path(__file__).resolve().parents[1] / "frontend"
         pagina = (raiz / "historial.html").read_text(encoding="utf-8")

@@ -399,6 +399,15 @@ body[data-pagina="mensajeria"] .layout { width: 100%; }
   font-weight: 700;
 }
 .prog-item__meta { font-size: .82rem; color: var(--texto-suave); margin-top: 4px; }
+#panelEnProgreso .prog-item__ritmo {
+  margin-top: 9px;
+  font-size: .82rem;
+  color: var(--texto-suave);
+}
+#panelEnProgreso .prog-item__ritmo strong {
+  color: var(--verde);
+  font-size: 1rem;
+}
 /* Fecha programada, junto al nombre de la plantilla: es el dato clave de la
    fila, por eso va como etiqueta destacada y no como texto suelto. */
 .prog-item__fecha {

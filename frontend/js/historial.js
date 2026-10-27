@@ -62,6 +62,10 @@ function progEnProgresoHtml(it) {
       (it.area ? ` · ${escaparHtml(it.area)}` : (it.base ? ` · ${escaparHtml(it.base)}` : "")) +
       (it.centro ? ` · ${escaparHtml(it.centro)} (${escaparHtml(it.numero_emisor || "—")})` : "") +
     `</div>` + barra +
+    (it.job_id && ["en_proceso", "pausado"].includes(it.estado)
+      ? `<div class="prog-item__ritmo">Ritmo real: <strong>${it.aceptados_ultimo_segundo || 0} mensajes/s</strong>` +
+        `<span> (aceptados por Meta en los últimos 1 s)</span></div>`
+      : "") +
     ((controlaPausa || cancelaJob || cancelaProg)
       ? `<div class="prog-item__acciones">` +
         (controlaPausa
@@ -112,7 +116,7 @@ async function cambiarPausaEnProgreso(btn) {
 }
 
 function firmaItemProgreso(it) {
-  return `${it.origen}:${it.id ?? it.job_id}:${it.estado}:${it.enviados || 0}:${it.fallidos || 0}:${it.total || 0}`;
+  return `${it.origen}:${it.id ?? it.job_id}:${it.estado}:${it.enviados || 0}:${it.fallidos || 0}:${it.total || 0}:${it.aceptados_ultimo_segundo || 0}`;
 }
 
 function asegurarContenedorProgreso(lista) {
@@ -133,18 +137,20 @@ function mostrarVacioProgreso(lista) {
   }
 }
 
-// Cadencia del sondeo de «Envíos en progreso»: cada 3 s mientras hay algo vivo
-// (para ver el avance al instante) y un latido lento cuando la lista está
-// vacía, que es lo único que detecta un envío iniciado en otro equipo.
-const INTERVALO_PROGRESO_VIVO = 3000;
+// Sondeo por segundo solo durante un envío activo. Los pendientes y pausados
+// mantienen la cadencia anterior; la lista vacía usa un latido lento.
+const INTERVALO_PROGRESO_VIVO = 1000;
+const INTERVALO_PROGRESO_PENDIENTE = 3000;
 const INTERVALO_PROGRESO_LATIDO = 60000;
 let timerProgreso = null;
-let hayProgresoVivo = false;
+let modoSondeoProgreso = "vacio";
 let cargandoEnProgreso = false;
 
 function programarProgreso() {
   if (timerProgreso) clearInterval(timerProgreso);
-  const ms = hayProgresoVivo ? INTERVALO_PROGRESO_VIVO : INTERVALO_PROGRESO_LATIDO;
+  const ms = modoSondeoProgreso === "enviando" ? INTERVALO_PROGRESO_VIVO
+    : modoSondeoProgreso === "pendiente" ? INTERVALO_PROGRESO_PENDIENTE
+      : INTERVALO_PROGRESO_LATIDO;
   timerProgreso = setInterval(() => {
     if (!document.hidden) cargarEnProgreso();
   }, ms);
@@ -178,9 +184,10 @@ async function cargarEnProgreso(mostrarFeedback = false) {
   firmaProgreso = firma;
   const centroActivo = $("#selCentroHist")?.value || "todos";
   if (centroActivo !== "todos") items = items.filter((it) => it.centro_codigo === centroActivo);
-  // La cadencia sigue a la lista: rápida con envíos vivos, lenta si no hay nada.
-  if (hayProgresoVivo !== !!items.length) {
-    hayProgresoVivo = !!items.length;
+  const nuevoModo = items.some((it) => it.job_id && it.estado === "en_proceso")
+    ? "enviando" : items.length ? "pendiente" : "vacio";
+  if (modoSondeoProgreso !== nuevoModo) {
+    modoSondeoProgreso = nuevoModo;
     programarProgreso();
   }
   if (!items.length) {

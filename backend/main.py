@@ -6810,6 +6810,13 @@ def estado_job(job_id: str, sesion: dict = Depends(exigir("mensajeria"))):
     return respuesta
 
 
+def _aceptados_job_ultimo_segundo(job: dict | None, ahora: float) -> int:
+    """Mensajes aceptados por Meta en los últimos 1 s de un envío activo."""
+    if not job or job.get("estado") != "en_proceso":
+        return 0
+    return sum(ahora - 1 < t <= ahora for t in job.get("aceptados_ultimos") or ())
+
+
 def envios_en_progreso(sesion: dict = Depends(exigir("mensajeria"))):
     """Tab «Envíos en progreso»: jobs manuales activos + programados
     pendientes de ejecutar o ejecutándose, cada uno con su origen
@@ -6818,6 +6825,7 @@ def envios_en_progreso(sesion: dict = Depends(exigir("mensajeria"))):
     ver_todo = _es_privilegiado(sesion) or sesion.get("rol") == "supervisor"
     yo = (sesion.get("usuario") or "").strip().lower()
     mias = set(sesion.get("area_ids") or [])
+    ahora_mono = time.monotonic()
 
     def _area_nombre(area_id):
         if area_id is None:
@@ -6864,6 +6872,7 @@ def envios_en_progreso(sesion: dict = Depends(exigir("mensajeria"))):
             "puede_pausar": bool(vivo and _puede_controlar_job(sesion, vivo)),
             "plantilla": f.get("plantilla_nombre") or "", "estado": estado,
             "total": total, "enviados": enviados, "fallidos": fallidos,
+            "aceptados_ultimo_segundo": _aceptados_job_ultimo_segundo(vivo, ahora_mono),
             "quien_envio": f.get("creador_nombre") or f.get("creador") or "",
             "quien_aprobo": f.get("decidido_por") or "",
             "base": f.get("tabla") or "", "area": _area_nombre(f.get("area_id")),
@@ -6894,6 +6903,7 @@ def envios_en_progreso(sesion: dict = Depends(exigir("mensajeria"))):
             "estado": job.get("estado"),
             "total": job.get("total", 0), "enviados": job.get("enviados", 0),
             "fallidos": job.get("fallidos", 0),
+            "aceptados_ultimo_segundo": _aceptados_job_ultimo_segundo(job, ahora_mono),
             "quien_envio": job.get("nombre_enviador") or job.get("usuario") or "",
             "quien_aprobo": "",
             "base": job.get("base", job.get("ambiente")) or "",
