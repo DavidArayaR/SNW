@@ -32,6 +32,20 @@ test("sugiere columnas de última atención", () => {
   assert.equal(validarMapeoCsv(mapeo, encabezados), "");
 });
 
+test("lee CSV Windows-1252 con punto y coma y nombre completo", async () => {
+  const csv = Buffer.from("nombre_paciente;telefono_paciente;fecha_ultima_atencion;tratamiento_ultima_atencion\nJosé Pérez;93921740;03-10-2026 14:30;Control\n", "latin1");
+  const archivo = new Blob([csv]);
+  const encabezados = await leerEncabezadosCsv(archivo);
+  assert.equal(encabezados.length, 4);
+  const mapeo = sugerirMapeoCsv(encabezados);
+  assert.equal(mapeo.nombre, "nombre_paciente");
+  assert.equal(mapeo.telefono, "telefono_paciente");
+  assert.equal(validarMapeoCsv(mapeo, encabezados), "");
+  const partes = await bloques(archivo);
+  assert.equal(partes.length, 1);
+  assert.match(partes[0].contenido, /José Pérez/);
+});
+
 async function bloques(texto, maxBytes) {
   const resultado = [];
   for await (const bloque of fragmentarCsv(new Blob([texto]), maxBytes)) resultado.push(bloque);

@@ -1134,7 +1134,7 @@ _ERRORES_ESPECIALIDAD = {
     "tabla_larga": (409, "El nombre genera una tabla demasiado larga."),
     "tabla_invalida": (500, "La tabla registrada de la area no es válida."),
     "sin_sufijo_libre": (409, "No se encontró un sufijo numérico libre para la tabla."),
-    "codificacion": (422, "El archivo debe estar en UTF-8."),
+    "codificacion": (422, "El archivo debe estar en UTF-8 o Windows-1252."),
     "csv_vacio": (422, "El archivo CSV está vacío."),
     "mapeo_invalido": (422, "La asignación de columnas del CSV no es válida."),
     "mapeo_columna": (422, "El CSV tiene encabezados vacíos, repetidos o una columna asignada no existe."),

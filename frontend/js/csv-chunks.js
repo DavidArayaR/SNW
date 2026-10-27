@@ -5,9 +5,31 @@
   const TAMANO_BLOQUE_CSV = 2 * 1024 * 1024;
   const MAX_FILAS_BLOQUE_CSV = 2000;
 
-  async function* registrosCsv(archivo) {
+  async function detectarCodificacionCsv(archivo) {
     const lector = archivo.stream().getReader();
     const decodificador = new TextDecoder("utf-8", { fatal: true });
+    try {
+      while (true) {
+        const { value, done } = await lector.read();
+        if (done) {
+          decodificador.decode();
+          return "utf-8";
+        }
+        decodificador.decode(value, { stream: true });
+      }
+    } catch (err) {
+      if (!(err instanceof TypeError)) throw err;
+      await lector.cancel();
+      return "windows-1252";
+    } finally {
+      lector.releaseLock();
+    }
+  }
+
+  async function* registrosCsv(archivo) {
+    const codificacion = await detectarCodificacionCsv(archivo);
+    const lector = archivo.stream().getReader();
+    const decodificador = new TextDecoder(codificacion, { fatal: true });
     let registro = "";
     let entreComillas = false;
     try {
@@ -33,7 +55,7 @@
     }
   }
 
-  function separarEncabezadoCsv(registro) {
+  function separarEncabezadoCsv(registro, separador = ",") {
     const columnas = [];
     let valor = "";
     let entreComillas = false;
@@ -48,7 +70,7 @@
         } else {
           throw new Error("El encabezado del CSV tiene comillas mal ubicadas.");
         }
-      } else if (caracter === "," && !entreComillas) {
+      } else if (caracter === separador && !entreComillas) {
         columnas.push(valor);
         valor = "";
       } else {
@@ -68,7 +90,21 @@
     try {
       const primero = await registros.next();
       if (primero.done) throw new Error("El archivo CSV está vacío.");
-      return separarEncabezadoCsv(primero.value);
+      let comas = null;
+      let puntoComas = null;
+      let errorComas = null;
+      try {
+        comas = separarEncabezadoCsv(primero.value, ",");
+        if (comas.length < 2) comas = null;
+      } catch (err) { errorComas = err; }
+      try {
+        puntoComas = separarEncabezadoCsv(primero.value, ";");
+        if (puntoComas.length < 2) puntoComas = null;
+      } catch (_) { /* probar , */ }
+      if (!comas && !puntoComas) {
+        throw errorComas || new Error("El encabezado del CSV debe contener al menos dos columnas.");
+      }
+      return puntoComas && (!comas || puntoComas.length > comas.length) ? puntoComas : comas;
     } finally {
       await registros.return();
     }
@@ -78,9 +114,9 @@
     const normalizar = (valor) => valor.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
       .toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
     const aliases = {
-      nombre: ["nombre", "nombres", "primer nombre"],
+      nombre: ["nombre", "nombres", "primer nombre", "nombre paciente"],
       apellido: ["apellido", "apellidos", "primer apellido"],
-      telefono: ["telefono", "numero de telefono", "numero telefono", "celular", "movil", "whatsapp"],
+      telefono: ["telefono", "numero de telefono", "numero telefono", "celular", "movil", "whatsapp", "telefono paciente"],
       respuesta: ["respuesta", "respuesta paciente", "estado respuesta"],
       estado: ["estado", "estado paciente", "estado envio"],
       tratamiento_ultima_atencion: ["tratamiento ultima atencion", "ultimo tratamiento", "tratamiento"],
@@ -100,7 +136,7 @@
   }
 
   function validarMapeoCsv(mapeo, encabezados) {
-    for (const campo of ["nombre", "apellido", "telefono"]) {
+    for (const campo of ["nombre", "telefono"]) {
       if (!mapeo[campo]) return `Selecciona la columna para ${campo}.`;
     }
     const usadas = Object.values(mapeo).filter(Boolean);

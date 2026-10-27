@@ -1256,7 +1256,7 @@ if (csvInput) {
       const sugeridos = window.snwCsvChunks.sugerirMapeoCsv(encabezados);
       for (const select of csvSelectores) {
         select.replaceChildren(new Option(
-          ["nombre", "apellido", "telefono"].includes(select.dataset.csvCampo)
+          ["nombre", "telefono"].includes(select.dataset.csvCampo)
             ? "— Seleccione columna —" : "— No importar —", ""));
         for (const encabezado of encabezados) {
           select.add(new Option(encabezado, encabezado));

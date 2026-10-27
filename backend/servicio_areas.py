@@ -756,7 +756,8 @@ def _fecha_ultima_atencion_csv(valor: str) -> _dt.date | None:
     """Acepta fechas ISO y día/mes/año; nunca interpreta una fecha ambigua como mes/día."""
     if not valor:
         return None
-    for formato in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+    for formato in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y",
+                    "%d-%m-%Y %H:%M", "%d/%m/%Y %H:%M"):
         try:
             return _dt.datetime.strptime(valor, formato).date()
         except ValueError:
@@ -769,7 +770,9 @@ def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int,
                            mapeo: dict[str, str] | None = None) -> dict:
     """Valida un CSV y lo carga en la tabla de la especialidad.
 
-    Columnas obligatorias: `nombre`, `apellido`, `telefono` (UTF-8).
+    Columnas obligatorias: `nombre`, `telefono`. `apellido` es opcional si
+    `nombre` contiene el nombre completo. Se acepta UTF-8 o Windows-1252,
+    con comas o punto y coma como separador.
     Opcionales: `respuesta`, `estado`, `tratamiento_ultima_atencion` y
     `fecha_ultima_atencion` (AAAA-MM-DD o DD/MM/AAAA). Teléfonos normalizados con
     `telefono.py` (`+569XXXXXXXX`).
@@ -789,9 +792,26 @@ def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int,
         raise ValueError("usuario_invalido")
     try:
         texto = (datos or b"").decode("utf-8-sig")
-    except (UnicodeDecodeError, ValueError):
-        raise ValueError("codificacion")
-    lector = _csv.DictReader(_io.StringIO(texto))
+    except UnicodeDecodeError:
+        try:
+            texto = (datos or b"").decode("cp1252")
+        except (UnicodeDecodeError, ValueError):
+            raise ValueError("codificacion")
+    encabezado = texto.splitlines()[0] if texto else ""
+    def cantidad_columnas(separador: str) -> int:
+        try:
+            columnas = next(_csv.reader([encabezado], delimiter=separador, strict=True))
+        except (_csv.Error, StopIteration):
+            return 0
+        return (len(columnas) if len(columnas) >= 2 and all(c.strip() for c in columnas)
+                and len(set(columnas)) == len(columnas) else 0)
+
+    n_comas = cantidad_columnas(",")
+    n_punto_comas = cantidad_columnas(";")
+    if not n_comas and not n_punto_comas:
+        raise ValueError("mapeo_columna")
+    delimitador = ";" if n_punto_comas > n_comas else ","
+    lector = _csv.DictReader(_io.StringIO(texto), delimiter=delimitador)
     if not lector.fieldnames:
         raise ValueError("csv_vacio")
     encabezados = lector.fieldnames
@@ -812,12 +832,14 @@ def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int,
         elegidas = mapeo
     else:
         elegidas = {c: cols[c] for c in ("nombre", "apellido", "telefono") if c in cols}
+        elegidas.setdefault("nombre", cols.get("nombre_paciente"))
+        elegidas.setdefault("telefono", cols.get("telefono_paciente"))
         for destino, opciones in (("respuesta", ("respuesta", "respuesta_paciente", "estado_respuesta")),
                                   ("estado", ("estado", "estado_paciente", "estado_envio")),
                                   ("tratamiento_ultima_atencion", ("tratamiento_ultima_atencion",)),
                                   ("fecha_ultima_atencion", ("fecha_ultima_atencion",))):
             elegidas[destino] = next((cols[c] for c in opciones if c in cols), None)
-    faltan = [c for c in ("nombre", "apellido", "telefono") if not elegidas.get(c)]
+    faltan = [c for c in ("nombre", "telefono") if not elegidas.get(c)]
     if faltan:
         raise ValueError("columnas:" + ",".join(faltan))
     col_respuesta = elegidas.get("respuesta")
@@ -852,7 +874,7 @@ def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int,
         accesos_pendientes: list[tuple[str, int, int]] = []
         for nro, fila in filas_csv:
             nombre = normalizar_texto(_limpiar_celda_csv(fila.get(elegidas["nombre"])))
-            apellido = normalizar_texto(_limpiar_celda_csv(fila.get(elegidas["apellido"])))
+            apellido = normalizar_texto(_limpiar_celda_csv(fila.get(elegidas["apellido"]))) if elegidas.get("apellido") else ""
             telefono_crudo = _limpiar_celda_csv(fila.get(elegidas["telefono"]))
             if not nombre and not apellido and not telefono_crudo:
                 continue

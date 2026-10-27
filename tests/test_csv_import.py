@@ -12,6 +12,28 @@ from datetime import date
 
 
 class CsvImportTests(unittest.TestCase):
+    def test_csv_windows_1252_y_punto_coma_con_nombre_completo(self):
+        conexion = MagicMock()
+        cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cur.fetchall.return_value = []
+        cur.fetchone.return_value = None
+        cur.lastrowid = 7
+        csv = ("nombre_paciente;telefono_paciente;fecha_ultima_atencion;tratamiento_ultima_atencion\n"
+               "José Pérez;93921740;03-10-2026 14:30;Control\n").encode("cp1252")
+        with patch("servicio_areas.obtener_area", return_value={"nombre_tabla_base": "pacientes_test"}), \
+                patch("servicio_areas.conectar", return_value=conexion), \
+                patch("servicio_areas.indice_pacientes_por_telefono", return_value={}), \
+                patch("supresion.huella_telefono", return_value="huella-test"), \
+                patch("servicio_areas.aplicar_en_tabla"), \
+                patch("servicio_areas.propagar_a_todas_las_bases",
+                      return_value={"bases": [], "omitidos": 0}):
+            informe = servicio_areas.importar_pacientes_csv(1, csv, 2)
+        self.assertEqual(informe["insertados"], 1)
+        insercion = next(c for c in cur.execute.call_args_list
+                         if c.args[0].startswith("INSERT INTO pacientes_test"))
+        self.assertEqual(insercion.args[1], ("José Pérez", "", "+56993921740",
+                                            "Control", date(2026, 10, 3)))
+
     def test_fecha_ultima_atencion_acepta_formatos_no_ambiguos(self):
         self.assertEqual(servicio_areas._fecha_ultima_atencion_csv("2026-10-03"), date(2026, 10, 3))
         self.assertEqual(servicio_areas._fecha_ultima_atencion_csv("03/10/2026"), date(2026, 10, 3))

@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="css/tema.css?v=tokens1">
   <link rel="stylesheet" href="css/styles.css">
   <link rel="stylesheet" href="css/componentes.css?v=paginador-cinco1">
-  <link rel="stylesheet" href="css/pacientes.css?v=mapeo-columnas2">
+  <link rel="stylesheet" href="css/pacientes.css?v=csv-codificacion1">
   <link rel="stylesheet" href="css/layout.css?v=navcolor1">
   <link rel="stylesheet" href="css/admin.css?v=tokens1">
   <link rel="stylesheet" href="css/refinamiento.css?v=merge-frontend1">
@@ -152,8 +152,10 @@
           </div>
 
           <p class="field__hint gestion-base__intro">
-            Acciones sobre la base elegida arriba. Al elegir un CSV UTF-8 podrás asignar
-            sus columnas a <strong>nombre, apellido y teléfono</strong>; los teléfonos se
+            Acciones sobre la base elegida arriba. Al elegir un CSV UTF-8 o Windows-1252,
+            separado por comas o punto y coma, podrás asignar sus columnas a
+            <strong>nombre y teléfono</strong> (obligatorios) y <strong>apellido</strong>
+            (opcional si el nombre viene completo); los teléfonos se
             normalizan a <strong>+569XXXXXXXX</strong>. También puedes asignar
             <strong>respuesta</strong> (Se dio de baja / Respondió / Sin respuesta) y
             <strong>estado</strong> (pendiente / enviado), <strong>tratamiento de la última atención</strong>
@@ -183,10 +185,10 @@
 
           <section id="csvMapeo" class="csv-mapeo" aria-labelledby="csvMapeoTitulo" hidden>
             <h3 id="csvMapeoTitulo">Asignar columnas del CSV</h3>
-            <p class="field__hint">Elige qué columna del archivo corresponde a cada dato. Nombre, apellido y teléfono son obligatorios; los demás son opcionales. La fecha acepta AAAA-MM-DD o DD/MM/AAAA.</p>
+            <p class="field__hint">Elige qué columna corresponde a cada dato. Nombre y teléfono son obligatorios; apellido puede quedar vacío si el nombre viene completo. La fecha admite AAAA-MM-DD, DD/MM/AAAA o DD-MM-AAAA con hora.</p>
             <div class="csv-mapeo__grid">
               <div class="field"><label for="csvMapNombre">Nombre *</label><select id="csvMapNombre" data-csv-campo="nombre"></select></div>
-              <div class="field"><label for="csvMapApellido">Apellido *</label><select id="csvMapApellido" data-csv-campo="apellido"></select></div>
+              <div class="field"><label for="csvMapApellido">Apellido</label><select id="csvMapApellido" data-csv-campo="apellido"></select></div>
               <div class="field"><label for="csvMapTelefono">Teléfono *</label><select id="csvMapTelefono" data-csv-campo="telefono"></select></div>
               <div class="field"><label for="csvMapRespuesta">Respuesta</label><select id="csvMapRespuesta" data-csv-campo="respuesta"></select></div>
               <div class="field"><label for="csvMapEstado">Estado</label><select id="csvMapEstado" data-csv-campo="estado"></select></div>
@@ -317,8 +319,8 @@
 
   <script src="js/layout.js?v=permisos-acciones1"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/csv-chunks.js?v=mapeo-columnas2"></script>
-  <script src="js/pacientes.js?v=mapeo-columnas2"></script>
+  <script src="js/csv-chunks.js?v=csv-codificacion1"></script>
+  <script src="js/pacientes.js?v=csv-codificacion1"></script>
   <script src="js/reagendar.js?v=pacientes-reagendar2"></script>
   <script src="js/pacientes-tabs.js?v=aplazar-flotante1"></script>
   <script>
