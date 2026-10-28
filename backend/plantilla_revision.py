@@ -3,6 +3,7 @@
 import hashlib
 import json
 import re
+import unicodedata
 from urllib.parse import urlparse
 
 from fastapi import HTTPException
@@ -14,11 +15,25 @@ EJEMPLOS = {"nombre": "David", "apellido": "Araya"}
 MAX_CUERPO = 1024
 MAX_ENCABEZADO = 60
 MAX_PIE = 60
+ERROR_TITULO_META = ("El título del mensaje no puede contener nuevas líneas, "
+                     "caracteres con formato, emojis ni asteriscos.")
 BOTONES_FIJOS = ["Me interesa", "No me interesa", "Dar de baja"]
 ACCIONES_FIJAS = {"Me interesa": "interes", "No me interesa": "desinteres",
                   "Dar de baja": "baja"}
 ACCIONES_RESPUESTA = {"ninguna", "interes", "desinteres", "baja", "consulta", "opciones"}
 _VARIABLE = re.compile(r"\{([^{}]+)\}")
+
+
+def _titulo_meta_invalido(texto: str) -> bool:
+    """Detecta caracteres que Meta rechaza en encabezados de texto."""
+    return any(
+        caracter in "*_~`" or
+        unicodedata.category(caracter) in ("Cc", "Cf", "Zl", "Zp") or
+        0x1F000 <= ord(caracter) <= 0x1FAFF or
+        0x2600 <= ord(caracter) <= 0x27BF or
+        caracter in "\ufe0f\u20e3"
+        for caracter in texto
+    )
 
 
 def variables_del_cuerpo(texto: str) -> list[str]:
@@ -195,7 +210,8 @@ def presentar_plantilla(plantilla: dict, ejemplos: dict | None = None) -> dict:
                         for b in botones_normalizados)):
         errores.append("Debes incluir al menos un botón de respuesta rápida con la acción Baja.")
     media_id = plantilla.get("encabezado_media_id")
-    encabezado_texto = (plantilla.get("encabezado_texto") or "").strip()
+    encabezado_crudo = plantilla.get("encabezado_texto") or ""
+    encabezado_texto = encabezado_crudo.strip()
     pie_texto = (plantilla.get("pie_texto") or "").strip()
     encabezado = None
     formato_esperado = (plantilla.get("whatsapp_header_format") or "").upper()
@@ -205,12 +221,16 @@ def presentar_plantilla(plantilla: dict, ejemplos: dict | None = None) -> dict:
         errores.append("El formato de encabezado de Meta no es compatible con esta vista previa.")
     if len(encabezado_texto) > MAX_ENCABEZADO:
         errores.append(f"El encabezado supera el máximo de {MAX_ENCABEZADO} caracteres.")
+    if _titulo_meta_invalido(encabezado_crudo):
+        errores.append(ERROR_TITULO_META)
     if len(pie_texto) > MAX_PIE:
         errores.append(f"El pie supera el máximo de {MAX_PIE} caracteres.")
     if media_id and encabezado_texto:
         errores.append("Elige un encabezado de texto o multimedia, no ambos.")
-    if any(c in encabezado_texto + pie_texto for c in "{}\r\n"):
-        errores.append("El encabezado y el pie no admiten variables ni saltos de línea.")
+    if any(c in encabezado_texto for c in "{}"):
+        errores.append("El encabezado no admite variables.")
+    if any(c in pie_texto for c in "{}\r\n"):
+        errores.append("El pie no admite variables ni saltos de línea.")
     if encabezado_texto and not media_id:
         encabezado = {"tipo": "texto", "texto": encabezado_texto}
     if media_id:

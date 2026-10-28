@@ -15,7 +15,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
 import main
 import plantilla_media
-from plantilla_revision import botones_para_meta, componentes_para_vista, presentar_plantilla, variables_del_cuerpo
+from plantilla_revision import (ERROR_TITULO_META, botones_para_meta, componentes_para_vista,
+                               presentar_plantilla, variables_del_cuerpo)
 from routes import plantillas as rutas_plantillas
 from whatsapp_service import WhatsAppApiClient, WhatsAppService
 
@@ -140,6 +141,29 @@ class PresentacionPlantillaTests(unittest.TestCase):
                                       "pie_texto": "{nombre}"})["errores"]
         self.assertTrue(any("60 caracteres" in error for error in errores))
         self.assertTrue(any("variables" in error for error in errores))
+
+    def test_titulo_incompatible_con_meta_se_detecta_en_previsualizacion(self):
+        for titulo in ("Oferta\nNueva", "Oferta\n", "*Oferta*", "_Oferta_", "Oferta 😊"):
+            with self.subTest(titulo=titulo):
+                vista = presentar_plantilla({"texto": "Hola", "encabezado_texto": titulo})
+                self.assertIn(ERROR_TITULO_META, vista["errores"])
+
+    def test_titulo_incompatible_se_rechaza_antes_de_crear_plantilla(self):
+        body = main.PlantillaIn(nombre="Oferta", texto="Hola", centro="SMPT",
+                               whatsapp_template_categoria="MARKETING",
+                               encabezado_texto="Oferta 😊")
+        with patch.object(main, "catalogo_centros", return_value={"SMPT": {}}), \
+             patch.object(main, "_validar_plantilla_area", return_value=None), \
+             patch.object(main, "leer_plantillas") as leer, \
+             patch.object(main, "_registrar_template_meta") as registrar, \
+             patch.object(main, "escribir_plantillas") as escribir:
+            with self.assertRaises(HTTPException) as error:
+                main.crear_plantilla(body, sesion=SESION)
+        self.assertEqual(error.exception.status_code, 400)
+        self.assertIn(ERROR_TITULO_META, error.exception.detail)
+        leer.assert_not_called()
+        registrar.assert_not_called()
+        escribir.assert_not_called()
 
 
 class ComponentesMetaEditablesTests(unittest.TestCase):
