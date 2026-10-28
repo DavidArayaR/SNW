@@ -52,7 +52,8 @@ from db import (
 from motor_envio import (obtener_canal, MotorApiOficial, ResultadoEnvioIncierto,
                          FalloInfraestructuraDespacho)
 from whatsapp_channels import (CENTROS, catalogo_centros, claves_centro, credenciales_centro,
-                               listar_canales, resolver_centro, resolver_phone_id, emisor_webhook_actual)
+                               app_id_centro, listar_canales, resolver_centro, resolver_phone_id,
+                               emisor_webhook_actual)
 from whatsapp_channel_verification import verificar_canal_meta
 import whatsapp_service
 from plantilla_media import (MAX_MEDIA_BYTES, descargar_media_meta, guardar_media,
@@ -4087,11 +4088,12 @@ def _es_creador_plantilla(p: dict, sesion: dict) -> bool:
 
 
 def _validar_media_plantilla(media_id: str | None, sesion: dict,
-                            plantilla_actual: dict | None = None) -> str | None:
+                            plantilla_actual: dict | None = None,
+                            centro_codigo: str | None = None) -> str | None:
     if not media_id:
         return None
-    if not (config_get("wa_app_id") or "").strip():
-        raise HTTPException(400, detail="Configura el App ID de Meta antes de guardar una plantilla con encabezado.")
+    if not app_id_centro(centro_codigo or (plantilla_actual or {}).get("centro_codigo")):
+        raise HTTPException(400, detail="Configura el App ID de Meta de esta clínica antes de guardar una plantilla con encabezado.")
     metadata = obtener_media(media_id)
     if (metadata["creador"] != (sesion.get("usuario") or "").lower()
             and not _es_privilegiado(sesion)
@@ -4277,7 +4279,7 @@ def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(exigir("plantillas
     if body.centro and body.centro not in catalogo_centros():
         raise HTTPException(422, detail="Selecciona una clínica activa para esta plantilla.")
     esp_id = _validar_plantilla_area(sesion, body.area_id)
-    media_id = _validar_media_plantilla(body.encabezado_media_id, sesion)
+    media_id = _validar_media_plantilla(body.encabezado_media_id, sesion, centro_codigo=body.centro)
     encabezado_texto = body.encabezado_texto or ""
     pie_texto = (body.pie_texto or "").strip()
     vista = _exigir_revision_valida({"texto": body.texto, "encabezado_media_id": media_id,
@@ -4324,6 +4326,9 @@ def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(exigir("plantillas
     }
     if preaprobada:
         nueva = _registrar_template_meta(nueva)
+        if media_id and not nueva.get("encabezado_meta_registrado"):
+            raise HTTPException(502, detail=nueva.get("whatsapp_template_error") or
+                                "No se pudo subir el encabezado a Meta. Revisa el App ID de la clínica.")
     else:
         nueva["whatsapp_template"] = None
         nueva["whatsapp_template_id"] = None
@@ -4808,7 +4813,12 @@ def obtener_configuracion(ambiente: str | None = Query(None),
                           sesion: dict = Depends(sesion_actual)):
     try:
         valores = leer_config(ambiente)
-        valores["app_id_meta_configurada"] = bool((config_get("wa_app_id") or "").strip())
+        cfg_apps = config_all()
+        valores["app_id_meta_configurada"] = bool(app_id_centro(None, cfg_apps))
+        valores["app_id_meta_por_clinica"] = {
+            codigo: bool(app_id_centro(codigo, cfg_apps))
+            for codigo in catalogo_centros(cfg_apps)
+        }
         if valores.get("entorno") == "desarrollo" and not _es_privilegiado(sesion):
             valores.pop("numeros_autorizados", None)
         return valores
@@ -5023,6 +5033,8 @@ def _seccion_centro(codigo: str, nombre: str, *, activa: bool = True) -> dict:
              "ayuda": "Identificador numérico de este número en Meta."},
             {"clave": f"{codigo}_WSP_WABA_ID", "etiqueta": "WABA ID (obligatorio para enviar)", "tipo": "text",
              "ayuda": "Debe pertenecer al Phone Number ID de esta clínica. Las plantillas se aprueban por WABA."},
+            {"clave": f"{codigo}_WSP_APP_ID", "etiqueta": "App ID de Meta para esta clínica", "tipo": "text",
+             "ayuda": "Para subir imágenes o GIF de plantillas. Debe ser la app que emitió el access token de esta clínica. Vacío: usa el App ID global."},
             {"clave": f"{codigo}_WSP_ACCESS_TOKEN", "etiqueta": "Access token de esta clínica", "tipo": "password",
              "ayuda": "Token con acceso a la WABA y al número de esta clínica. No se comparte con otras clínicas."},
             {"tipo": "derivado", "etiqueta": "URL del webhook de esta clínica",
@@ -5316,6 +5328,8 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
             raise HTTPException(422, detail="La credencial del webhook es demasiado extensa.")
         if clave.endswith("_WSP_WABA_ID") and v and not re.fullmatch(r"[1-9]\d{4,30}", v):
             raise HTTPException(422, detail="El WABA ID debe ser numérico.")
+        if clave.endswith("_WSP_APP_ID") and v and not re.fullmatch(r"[1-9]\d{4,30}", v):
+            raise HTTPException(422, detail="El App ID de Meta debe ser numérico.")
         if clave.endswith("_CRM_PHONE_NUMBER") and v and not re.fullmatch(r"\+?[1-9]\d{7,14}", v):
             raise HTTPException(422, detail="El número CRM debe tener código de país y entre 8 y 15 dígitos.")
         cambios[clave] = v

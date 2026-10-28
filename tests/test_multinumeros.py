@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
-from whatsapp_channels import (CENTROS, EMISOR_WEBHOOK, catalogo_centros,
+from whatsapp_channels import (CENTROS, EMISOR_WEBHOOK, app_id_centro, catalogo_centros,
                                credenciales_centro, listar_canales, resolver_phone_id)
 from whatsapp_service import WhatsAppService
 from whatsapp_channel_verification import verificar_canal_meta
@@ -31,6 +31,18 @@ def configuracion():
 
 
 class MultiNumerosTests(unittest.TestCase):
+    def test_app_id_de_clinica_para_encabezado_con_respaldo_global(self):
+        cfg = configuracion()
+        cfg["wa_app_id"] = "1392977325249373"
+        cfg["MS_WSP_APP_ID"] = "987654321012345"
+        self.assertEqual(app_id_centro("SMPT", cfg), "1392977325249373")
+        self.assertEqual(app_id_centro("MS", cfg), "987654321012345")
+        with patch("db.config_all", return_value=cfg):
+            self.assertEqual(WhatsAppService(phone_number_id=cfg["SMPT_WSP_PHONE_NUMBER_ID"]).app_id,
+                             "1392977325249373")
+            self.assertEqual(WhatsAppService(phone_number_id=cfg["MS_WSP_PHONE_NUMBER_ID"]).app_id,
+                             "987654321012345")
+
     def test_cinco_clinicas_tienen_waba_y_token_propios(self):
         cfg = configuracion()
         canales = listar_canales(cfg)

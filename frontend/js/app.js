@@ -17,6 +17,14 @@ let urlPreviewMedia = null;
 let versionPreviewMedia = 0;
 let versionEditor = 0;
 let appIdMetaConfigurada = null;
+let appIdsMetaPorClinica = null;
+
+function actualizarAppIdMetaClinica() {
+  const codigo = inpCentroPlantilla?.value || plantillas.find((p) => p.id === activaId)?.centro_codigo;
+  if (codigo && appIdsMetaPorClinica) appIdMetaConfigurada = !!appIdsMetaPorClinica[codigo];
+  if (encabezadoMediaId) establecerEncabezado(encabezadoMediaId);
+  actualizarEstadoBotonGuardar();
+}
 
 // Áreas visibles para la cuenta (Fase 3): todas si es
 // privilegiada, solo las asignadas si no. Las plantillas pueden asociarse a
@@ -1416,6 +1424,7 @@ function refrescarEditor() {
 if (inpArea) inpArea.addEventListener("change", refrescarEditor);
 inpCentroPlantilla?.addEventListener("change", () => {
   pintarCuentaPlantillaEditor();
+  actualizarAppIdMetaClinica();
   refrescarEditor();
 });
 
@@ -2415,8 +2424,8 @@ fetch("api/configuracion", { headers: authHeaders(), cache: "no-store" })
   .then((cfg) => {
     if (cfg && typeof cfg.app_id_meta_configurada === "boolean") {
       appIdMetaConfigurada = cfg.app_id_meta_configurada;
-      if (encabezadoMediaId) establecerEncabezado(encabezadoMediaId);
-      actualizarEstadoBotonGuardar();
+      appIdsMetaPorClinica = cfg.app_id_meta_por_clinica || null;
+      actualizarAppIdMetaClinica();
     }
     if (cfg && cfg.entorno) {
       entornoGlobal = cfg.entorno;

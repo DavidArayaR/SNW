@@ -165,6 +165,25 @@ class PresentacionPlantillaTests(unittest.TestCase):
         registrar.assert_not_called()
         escribir.assert_not_called()
 
+    def test_error_de_subida_a_meta_no_guarda_plantilla_con_media(self):
+        body = main.PlantillaIn(nombre="Oferta", texto="Hola", centro="SMPT",
+                               whatsapp_template_categoria="MARKETING",
+                               encabezado_media_id="media-1")
+        with patch.object(main, "catalogo_centros", return_value={"SMPT": "Clínica"}), \
+             patch.object(main, "_validar_plantilla_area", return_value=None), \
+             patch.object(main, "_validar_media_plantilla", return_value="media-1"), \
+             patch.object(main, "_exigir_revision_valida", return_value={"botones": []}), \
+             patch.object(main, "leer_plantillas", return_value=[]), \
+             patch.object(main, "_validar_nombre_reusable"), \
+             patch.object(main, "_registrar_template_meta", side_effect=lambda p: {
+                 **p, "encabezado_meta_registrado": False,
+                 "whatsapp_template_error": "No se pudo subir el encabezado a Meta."}), \
+             patch.object(main, "escribir_plantillas") as escribir:
+            with self.assertRaises(HTTPException) as error:
+                main.crear_plantilla(body, sesion=SESION)
+        self.assertEqual(error.exception.status_code, 502)
+        escribir.assert_not_called()
+
 
 class ComponentesMetaEditablesTests(unittest.TestCase):
     def test_creacion_envia_encabezado_y_pie_a_meta(self):

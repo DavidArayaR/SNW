@@ -25,7 +25,7 @@ import httpx
 
 from db import conectar, config_all, config_get, log_error, tabla_pacientes
 from whatsapp_channels import (CENTROS, EMISOR_WEBHOOK, catalogo_centros,
-                               credenciales_centro, listar_canales, resolver_phone_id)
+                               app_id_centro, credenciales_centro, listar_canales, resolver_phone_id)
 from whatsapp_channel_verification import verificar_canal_meta
 from corpus_respuestas import guardar_mensaje_completo
 from intenciones_call_center import clasificar, normalizar as normalizar_intencion, patrones_configurados
@@ -659,7 +659,8 @@ class WhatsAppService:
 
     @property
     def app_id(self) -> str:
-        return (config_get("wa_app_id") or "").strip()
+        canal = resolver_phone_id(self.phone_number_id) if self.phone_number_id else None
+        return app_id_centro(canal["codigo"] if canal else None)
 
     async def _id_media_envio(self, media_id: str) -> tuple[str, str]:
         metadata = obtener_media(media_id)
@@ -759,6 +760,12 @@ class WhatsAppService:
 
         try:
             encabezado = self._componente_encabezado_meta(media_id)
+        except ErrorWhatsApp as exc:
+            log_error(f"subir_muestra_template({nombre!r})", exc)
+            return {"ok": False, "template_id": None, "status": None,
+                    "error": ("No se pudo subir el encabezado a Meta. Comprueba que el App ID "
+                              "de esta clínica pertenezca a la app que emitió su access token "
+                              "y que el token tenga acceso a ella. Detalle de Meta: " + exc.message)}
         except Exception as exc:
             return {"ok": False, "template_id": None, "status": None, "error": str(exc)}
         if not encabezado and encabezado_texto:
@@ -828,6 +835,12 @@ class WhatsAppService:
 
         try:
             encabezado = self._componente_encabezado_meta(media_id)
+        except ErrorWhatsApp as exc:
+            log_error(f"subir_muestra_template({template_id!r})", exc)
+            return {"ok": False, "template_id": template_id, "status": None,
+                    "error": ("No se pudo subir el encabezado a Meta. Comprueba que el App ID "
+                              "de esta clínica pertenezca a la app que emitió su access token "
+                              "y que el token tenga acceso a ella. Detalle de Meta: " + exc.message)}
         except Exception as exc:
             return {"ok": False, "template_id": template_id, "status": None, "error": str(exc)}
         if not encabezado and encabezado_texto:
