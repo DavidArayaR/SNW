@@ -330,7 +330,6 @@ CONFIG_DEFAULTS = {
     "correo_destino": "",
     # WhatsApp Business Cloud API (Meta)
     "wa_token": "",
-    "wa_phone_id": "",
     "wa_clinicas_adicionales": "[]",
     # Integración de citas atendidas: la credencial se genera por API y solo
     # su huella se conserva aquí. El despacho permanece apagado por defecto.
@@ -339,7 +338,6 @@ CONFIG_DEFAULTS = {
     "reagendar_envio_activo": "false",
     "reagendar_plantillas_json": "{}",
     "reagendar_clinicas_ids": "{}",
-    "wa_app_id": "",
     "wa_verify_token": "",
     "wa_app_secret": "",
     "wa_template_nombre": "",
@@ -397,6 +395,7 @@ for _centro in CENTROS:
     CONFIG_DEFAULTS[f"{_centro}_WSP_RATE_LIMIT_MODE"] = "estandar"
     CONFIG_DEFAULTS[f"{_centro}_WSP_RATE_LIMIT_VERIFIED"] = "false"
     CONFIG_DEFAULTS[f"{_centro}_WSP_WABA_ID"] = ""
+    CONFIG_DEFAULTS[f"{_centro}_WSP_APP_ID"] = ""
     CONFIG_DEFAULTS[f"{_centro}_CRM_PHONE_NUMBER"] = ""
 
 _CLAVES_CENTRO_ANTIGUAS = {
@@ -429,6 +428,25 @@ def _migrar_claves_centro(cur) -> None:
             cur.execute("UPDATE configuracion SET valor = %s WHERE clave = %s", (valor, nueva))
         cur.execute("DELETE FROM configuracion WHERE clave = %s", (vieja,))
 
+
+def _migrar_ids_globales_smpt(cur) -> None:
+    """Conserva los IDs heredados en SMPT y retira las claves globales."""
+    for vieja, nueva in (("wa_phone_id", "SMPT_WSP_PHONE_NUMBER_ID"),
+                         ("wa_app_id", "SMPT_WSP_APP_ID")):
+        cur.execute("SELECT valor FROM configuracion WHERE clave = %s FOR UPDATE", (vieja,))
+        fila = cur.fetchone()
+        if fila is None:
+            continue
+        valor = (fila.get("valor") or "").strip()
+        cur.execute("SELECT valor FROM configuracion WHERE clave = %s FOR UPDATE", (nueva,))
+        actual = ((cur.fetchone() or {}).get("valor") or "").strip()
+        if valor and actual and valor != actual:
+            log_error(f"Migración de {vieja}: conflicto con {nueva}; conservadas ambas claves")
+            continue
+        if valor and not actual:
+            cur.execute("UPDATE configuracion SET valor = %s WHERE clave = %s", (valor, nueva))
+        cur.execute("DELETE FROM configuracion WHERE clave = %s", (vieja,))
+
 _config_cache: dict | None = None
 _config_cache_cargado: float = 0.0
 
@@ -454,6 +472,7 @@ def asegurar_tabla_config() -> None:
             # la fila heredada para que no reaparezca en configuraciones.
             cur.execute("DELETE FROM configuracion WHERE clave = 'wa_business_account_id'")
             _migrar_claves_centro(cur)
+            _migrar_ids_globales_smpt(cur)
             cur.execute(
                 "CREATE TABLE IF NOT EXISTS reagendar_lotes ("
                 " id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,"

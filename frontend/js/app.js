@@ -21,7 +21,7 @@ let appIdsMetaPorClinica = null;
 
 function actualizarAppIdMetaClinica() {
   const codigo = inpCentroPlantilla?.value || plantillas.find((p) => p.id === activaId)?.centro_codigo;
-  if (codigo && appIdsMetaPorClinica) appIdMetaConfigurada = !!appIdsMetaPorClinica[codigo];
+  if (appIdsMetaPorClinica) appIdMetaConfigurada = !!(codigo && appIdsMetaPorClinica[codigo]);
   if (encabezadoMediaId) establecerEncabezado(encabezadoMediaId);
   actualizarEstadoBotonGuardar();
 }
@@ -2465,9 +2465,8 @@ function setBloqueoEnvioConf(bloquear) {
 fetch("api/configuracion", { headers: authHeaders(), cache: "no-store" })
   .then((r) => (r.ok ? r.json() : null))
   .then((cfg) => {
-    if (cfg && typeof cfg.app_id_meta_configurada === "boolean") {
-      appIdMetaConfigurada = cfg.app_id_meta_configurada;
-      appIdsMetaPorClinica = cfg.app_id_meta_por_clinica || null;
+    if (cfg && cfg.app_id_meta_por_clinica) {
+      appIdsMetaPorClinica = cfg.app_id_meta_por_clinica;
       actualizarAppIdMetaClinica();
     }
     if (cfg && cfg.entorno) {

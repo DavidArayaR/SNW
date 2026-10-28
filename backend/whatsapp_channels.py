@@ -72,11 +72,10 @@ def credenciales_centro(phone_id: str, config: dict | None = None) -> dict:
 
 
 def app_id_centro(codigo: str | None, config: dict | None = None) -> str:
-    """App ID de la clínica para uploads de plantillas; global como respaldo."""
+    """App ID propio de la clínica para subir encabezados de plantillas."""
     from db import config_all
     valores = config if config is not None else config_all()
-    propio = valores.get(f"{codigo}_WSP_APP_ID") if codigo else None
-    return str(propio or valores.get("wa_app_id") or "").strip()
+    return str(valores.get(f"{codigo}_WSP_APP_ID") or "").strip() if codigo else ""
 
 
 def listar_canales(config: dict | None = None, *, incluir_inactivas: bool = False) -> list[dict]:

@@ -204,8 +204,9 @@ Cada clínica debe tener su propio WABA ID; no existe un WABA global de respaldo
 Las plantillas históricas sin clínica se vinculan solo cuando su ID de Meta coincide con uno
 devuelto por la WABA de la clínica elegida al sincronizar. En Configuración → Clínicas, «Verificar en Meta» comprueba que el token
 pueda consultar el WABA y que el Phone Number ID corresponda al número emisor. Los envíos
-oficiales repiten esa validación antes de llamar a `/messages`. El antiguo `wa_phone_id` se conserva
-solo por compatibilidad histórica; no se utiliza como alternativa automática en envíos nuevos.
+oficiales repiten esa validación antes de llamar a `/messages`. Al iniciar, los antiguos IDs globales
+`wa_phone_id` y `wa_app_id` se trasladan a las claves de SMPT si no hay conflicto; después se retiran.
+Ningún envío ni plantilla usa esos IDs como respaldo global.
 La migración de claves antiguas `PHONE_NUMER` se ejecuta al iniciar: copia valores no conflictivos;
 ante dos valores distintos conserva ambas claves e informa el conflicto en el registro del servidor.
 
@@ -354,11 +355,11 @@ configura desde la página y queda legible en la base de datos para quien tenga 
 | App / envío | `entorno` (`desarrollo`/`produccion`), `metodo_envio` (`simulado`/`api_oficial`), `numeros_prueba_dev`, `numeros_prueba_prod`, `intervalo_ms`, `sesion_expira_horas` (horas de inactividad antes de cerrar una sesión sola; 0 = no expiran; por defecto 5), `url_base` |
 | Call center | `<CODIGO>_CRM_PHONE_NUMBER` configura el número de WhatsApp de atención propio de cada clínica. Las claves antiguas `call_center_url`, `call_center_numeros` y `call_center_boton_mensaje*` se conservan por compatibilidad, pero el botón actual no las utiliza. |
 | Correo | `smtp_host`, `smtp_port`, `smtp_user`, `smtp_pass`, `smtp_tls`, `correo_emisor`, `correo_destino` |
-| WhatsApp / Meta | `<CODIGO>_WSP_ACCESS_TOKEN` y `<CODIGO>_WSP_WABA_ID` identifican las credenciales propias de cada clínica; `<CODIGO>_WSP_VERIFY_TOKEN` verifica su webhook. No hay respaldo global para envíos ni para la verificación de URLs por clínica. `wa_token` queda como clave legada sin uso para envíos; `wa_verify_token` y `wa_webhook_path` conservan la URL global. `wa_app_id`, `wa_graph_version`, `wa_moneda`, `plantillas_revision_minutos` y `plantillas_badge_aprobada_minutos` siguen en uso. |
+| WhatsApp / Meta | Cada clínica configura `<CODIGO>_WSP_PHONE_NUMBER_ID`, `<CODIGO>_WSP_WABA_ID` y `<CODIGO>_WSP_ACCESS_TOKEN`; `<CODIGO>_WSP_APP_ID` habilita encabezados multimedia y `<CODIGO>_WSP_VERIFY_TOKEN` verifica su webhook. `wa_token` queda como clave legada sin uso para envíos; `wa_verify_token` y `wa_webhook_path` conservan la URL global. `wa_graph_version`, `wa_moneda`, `plantillas_revision_minutos` y `plantillas_badge_aprobada_minutos` siguen en uso. |
 | Groq | `groq_api_key` (solo desarrollador; guardada en `configuracion`), `groq_limite_hora` (borradores por cuenta y hora, por defecto 12) |
 | Límites de envío Meta | `wa_rate_limit_activo` (frenado proactivo on/off), `wa_rate_limit_umbral_pct` (% de cuota a partir del cual se espera, 80), `wa_rate_limit_pausa_max_s` (espera entre mensajes al 100 % de cuota, 30), `wa_rate_limit_espera_defecto_s` (espera tras un 429 sin dato, 60), `wa_rate_limit_reintentos` (reintentos de una llamada tras un 429, 3), `wa_throughput_mps` (ritmo máximo de salida hacia Meta, msg/s; 0 = sin límite; 10), `wa_messaging_limit_24h` (usuarios únicos que se pueden contactar en 24 h antes de bloquear el envío masivo; 0 = ilimitado; 2000) |
 
-Las plantillas admiten opcionalmente un encabezado JPG, PNG o GIF de hasta **3,5 MB**. El GIF se conserva animado en la vista previa y se convierte a MP4 para Meta; el video convertido también debe caber en 3,5 MB. Instala las dependencias actualizadas con `pip install -r requirements.txt` y configura `wa_app_id` (App ID de Meta) junto al token y la WABA para poder subir la muestra que Meta exige al revisar una plantilla con encabezado. Los archivos quedan en `data/plantillas_media/` (ignorado por Git): inclúyelos en las copias de seguridad junto a las plantillas. Si quitas o cambias el encabezado de una plantilla aprobada, Meta debe volver a revisarla.
+Las plantillas admiten opcionalmente un encabezado JPG, PNG o GIF de hasta **3,5 MB**. El GIF se conserva animado en la vista previa y se convierte a MP4 para Meta; el video convertido también debe caber en 3,5 MB. Instala las dependencias actualizadas con `pip install -r requirements.txt` y configura el App ID propio de la clínica (`<CODIGO>_WSP_APP_ID`) junto a su token y WABA para subir la muestra que Meta exige al revisar una plantilla con encabezado. Los archivos quedan en `data/plantillas_media/` (ignorado por Git): inclúyelos en las copias de seguridad junto a las plantillas. Si quitas o cambias el encabezado de una plantilla aprobada, Meta debe volver a revisarla.
 
 En Mensajería → Plantillas, “Generar mensaje con IA” acepta instrucciones genéricas de hasta
 400 caracteres y devuelve un borrador para revisar. Se puede aceptar, editar o descartar;
@@ -1016,9 +1017,8 @@ volver a procesarlo.
    `Phone Number ID` y `WABA ID`. Para SMPT, configura también
    `SMPT_CRM_PHONE_NUMBER` si usarás el botón de derivación. Repite para MS, PS, CP y VS.
    Cada WABA debe dar acceso al token propio de su clínica y tener sus plantillas aprobadas.
-5. En **Configuración → WhatsApp**, guarda el `App ID` de Meta for Developers →
-   `wa_app_id` (para plantillas con encabezado). En **Configuración → Clínicas**,
-   guarda un Access Token distinto para cada centro, con acceso a su WABA.
+5. En **Configuración → Clínicas**, guarda el App ID de Meta de cada centro
+   (si usará plantillas con encabezado) y un Access Token propio con acceso a su WABA.
 6. Define un **Verify Token distinto por clínica**. Copia la URL específica de
    cada ficha y asígnala a su WABA en Meta; suscríbela al menos a `messages`.
    Si cada clínica usa una app distinta, configura también su App Secret propio.

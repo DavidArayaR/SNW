@@ -31,17 +31,53 @@ def configuracion():
 
 
 class MultiNumerosTests(unittest.TestCase):
-    def test_app_id_de_clinica_para_encabezado_con_respaldo_global(self):
+    def test_app_id_de_clinica_sin_respaldo_global(self):
         cfg = configuracion()
         cfg["wa_app_id"] = "1392977325249373"
+        cfg["SMPT_WSP_APP_ID"] = "1392977325249373"
         cfg["MS_WSP_APP_ID"] = "987654321012345"
         self.assertEqual(app_id_centro("SMPT", cfg), "1392977325249373")
         self.assertEqual(app_id_centro("MS", cfg), "987654321012345")
+        self.assertEqual(app_id_centro("PS", cfg), "")
+        self.assertEqual(app_id_centro(None, cfg), "")
         with patch("db.config_all", return_value=cfg):
             self.assertEqual(WhatsAppService(phone_number_id=cfg["SMPT_WSP_PHONE_NUMBER_ID"]).app_id,
                              "1392977325249373")
             self.assertEqual(WhatsAppService(phone_number_id=cfg["MS_WSP_PHONE_NUMBER_ID"]).app_id,
                              "987654321012345")
+
+    def test_migracion_ids_globales_a_smpt_no_pisa_valores(self):
+        from db import _migrar_ids_globales_smpt
+
+        class Cursor:
+            def __init__(self, valores):
+                self.valores = valores
+                self.clave = None
+
+            def execute(self, sql, params):
+                self.clave = params[-1]
+                if sql.startswith("UPDATE"):
+                    self.valores[self.clave] = params[0]
+                elif sql.startswith("DELETE"):
+                    self.valores.pop(self.clave, None)
+
+            def fetchone(self):
+                return {"valor": self.valores[self.clave]} if self.clave in self.valores else None
+
+        cur = Cursor({"wa_phone_id": "123", "SMPT_WSP_PHONE_NUMBER_ID": "",
+                      "wa_app_id": "456", "SMPT_WSP_APP_ID": "456"})
+        _migrar_ids_globales_smpt(cur)
+        self.assertEqual(cur.valores["SMPT_WSP_PHONE_NUMBER_ID"], "123")
+        self.assertEqual(cur.valores["SMPT_WSP_APP_ID"], "456")
+        self.assertNotIn("wa_phone_id", cur.valores)
+        self.assertNotIn("wa_app_id", cur.valores)
+
+        cur = Cursor({"wa_phone_id": "otro", "SMPT_WSP_PHONE_NUMBER_ID": "123"})
+        with patch("db.log_error") as registrar:
+            _migrar_ids_globales_smpt(cur)
+        self.assertEqual(cur.valores["SMPT_WSP_PHONE_NUMBER_ID"], "123")
+        self.assertEqual(cur.valores["wa_phone_id"], "otro")
+        registrar.assert_called_once()
 
     def test_cinco_clinicas_tienen_waba_y_token_propios(self):
         cfg = configuracion()

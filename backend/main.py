@@ -4853,7 +4853,6 @@ def obtener_configuracion(ambiente: str | None = Query(None),
     try:
         valores = leer_config(ambiente)
         cfg_apps = config_all()
-        valores["app_id_meta_configurada"] = bool(app_id_centro(None, cfg_apps))
         valores["app_id_meta_por_clinica"] = {
             codigo: bool(app_id_centro(codigo, cfg_apps))
             for codigo in catalogo_centros(cfg_apps)
@@ -4902,8 +4901,6 @@ def actualizar_configuracion(body: ConfigIn, sesion: dict = Depends(solo_dev)):
         "correo_emisor": body.correo_emisor,
         "correo_destino": body.correo_destino,
         "wa_token": body.wa_token,
-        "wa_phone_id": body.wa_phone_id,
-        "wa_app_id": body.wa_app_id,
         "wa_verify_token": body.wa_verify_token,
         "wa_app_secret": body.wa_app_secret,
         "wa_template_nombre": body.wa_template_nombre,
@@ -4981,8 +4978,6 @@ _CONFIG_SECCIONES = [
     {
         "id": "whatsapp", "titulo": "WhatsApp · Meta Cloud API", "icono": "fa-whatsapp", "marca": True,
         "campos": [
-            {"clave": "wa_app_id", "etiqueta": "App ID de Meta", "tipo": "text",
-             "ayuda": "Necesario para registrar plantillas con imagen o GIF de encabezado."},
             {"clave": "wa_verify_token", "etiqueta": "Verify token del webhook global (compatibilidad)", "tipo": "password"},
             {"clave": "wa_app_secret", "etiqueta": "App Secret global de Meta", "tipo": "password",
              "ayuda": "Respaldo de firma para webhooks de clínicas sin App Secret propio y para la URL antigua."},
@@ -4993,7 +4988,7 @@ _CONFIG_SECCIONES = [
              "ayuda": "URL base del servidor + ruta del webhook. Cópiala y pégala en el panel de "
                       "Webhooks de Meta; si cambia (nueva URL de servidor), hay que actualizarla allí.",
              "enlace": {
-                 "url": "https://developers.facebook.com/apps/1392977325249373/webhooks/?business_id=799315784581199&view=whatsapp_business_account",
+                 "url": "https://developers.facebook.com/apps/",
                  "texto": "Abrir Webhooks en Meta",
              }},
             {"clave": "wa_template_nombre", "etiqueta": "Template por defecto", "tipo": "text"},
@@ -5073,7 +5068,7 @@ def _seccion_centro(codigo: str, nombre: str, *, activa: bool = True) -> dict:
             {"clave": f"{codigo}_WSP_WABA_ID", "etiqueta": "WABA ID (obligatorio para enviar)", "tipo": "text",
              "ayuda": "Debe pertenecer al Phone Number ID de esta clínica. Las plantillas se aprueban por WABA."},
             {"clave": f"{codigo}_WSP_APP_ID", "etiqueta": "App ID de Meta para esta clínica", "tipo": "text",
-             "ayuda": "Para subir imágenes o GIF de plantillas. Debe ser la app que emitió el access token de esta clínica. Vacío: usa el App ID global."},
+             "ayuda": "Necesario para subir imágenes o GIF de plantillas. Debe corresponder a la app que emitió el access token de esta clínica."},
             {"clave": f"{codigo}_WSP_ACCESS_TOKEN", "etiqueta": "Access token de esta clínica", "tipo": "password",
              "ayuda": "Token con acceso a la WABA y al número de esta clínica. No se comparte con otras clínicas."},
             {"tipo": "derivado", "etiqueta": "URL del webhook de esta clínica",

@@ -131,8 +131,7 @@ def solicitar_eliminacion(telefono: str) -> str:
         raise ValueError("Teléfono inválido para eliminación")
     huella = huella_telefono(tel)
     from whatsapp_channels import emisor_webhook_actual
-    phone_id_origen = ((emisor_webhook_actual() or {}).get("phoneNumberId")
-                       or (config_get("wa_phone_id") or "").strip())
+    phone_id_origen = (emisor_webhook_actual() or {}).get("phoneNumberId")
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO supresion_telefonos (huella, telefono_pendiente, wa_phone_id)"
