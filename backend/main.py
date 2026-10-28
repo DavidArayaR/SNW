@@ -4852,7 +4852,7 @@ def obtener_configuracion(ambiente: str | None = Query(None),
                           sesion: dict = Depends(sesion_actual)):
     try:
         valores = leer_config(ambiente)
-        cfg_apps = config_all()
+        cfg_apps = config_all(refresh=True)
         valores["app_id_meta_por_clinica"] = {
             codigo: bool(app_id_centro(codigo, cfg_apps))
             for codigo in catalogo_centros(cfg_apps)

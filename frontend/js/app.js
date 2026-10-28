@@ -22,7 +22,11 @@ let appIdsMetaPorClinica = null;
 function actualizarAppIdMetaClinica() {
   const codigo = inpCentroPlantilla?.value || plantillas.find((p) => p.id === activaId)?.centro_codigo;
   if (appIdsMetaPorClinica) appIdMetaConfigurada = !!(codigo && appIdsMetaPorClinica[codigo]);
-  if (encabezadoMediaId) establecerEncabezado(encabezadoMediaId);
+  if (encabezadoMediaId) {
+    estadoEncabezado.textContent = appIdMetaConfigurada === false
+      ? "Configura el App ID de Meta antes de guardar esta plantilla."
+      : "Encabezado listo. Puedes quitarlo o reemplazarlo.";
+  }
   actualizarEstadoBotonGuardar();
 }
 
@@ -123,6 +127,7 @@ function pintarCentrosEmisores() {
     selector.value = opciones.some((c) => c.codigo === elegido) ? elegido : "";
   }
   pintarCuentaPlantillaEditor();
+  actualizarAppIdMetaClinica();
   actualizarPasosManual();
   actualizarPasosProg();
   actualizarEstadoBotonPrueba();
@@ -1782,6 +1787,7 @@ function abrir(id) {
     inpArea.value = espVal;
   }
   if (inpCentroPlantilla) inpCentroPlantilla.value = p.centro_codigo || "";
+  actualizarAppIdMetaClinica();
   pintarCuentaPlantillaEditor();
   if (hayTemplateMeta) {
     inpTemplateLang.value = p.whatsapp_template_lang || "es";
@@ -1839,6 +1845,7 @@ function modoNueva() {
   establecerEncabezado(null);
   if (inpArea) inpArea.value = "";
   if (inpCentroPlantilla) inpCentroPlantilla.value = "";
+  actualizarAppIdMetaClinica();
   pintarCuentaPlantillaEditor();
   if (hayTemplateMeta) {
     inpTemplateLang.value = "es";
