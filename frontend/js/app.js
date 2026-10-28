@@ -483,6 +483,8 @@ const esPlantillaAprobada = (p) => !p || p.whatsapp_template_status === "APPROVE
 const esPlantillaRechazada = (p) => !!p && p.whatsapp_template_status === "REJECTED";
 const esPlantillaPausada = (p) => !!p && p.whatsapp_template_status === "PAUSED";
 const esPlantillaDeshabilitada = (p) => !!p && p.whatsapp_template_status === "DISABLED";
+const esRegistroMetaFallido = (p) => !!p && !p.especial && aprobacionPlantilla(p) === "aprobada" &&
+  !p.whatsapp_template_id && !p.whatsapp_template_status && !!p.whatsapp_template_error;
 // Aprobación interna previa a Meta: el usuario normal crea en "pendiente" y
 // solo se registra en Meta cuando un admin/dev/supervisor la aprueba. Las
 // antiguas (sin campo) cuentan como "aprobada".
@@ -834,7 +836,9 @@ function crearItemPlantilla(p) {
     (p.id === tplSelId ? " tpl-item--activa" : "") +
     (aprobada ? "" : " tpl-item--pendiente");
   let estadoTag = "";
-  if (esPlantillaRechazada(p)) {
+  if (esRegistroMetaFallido(p)) {
+    estadoTag = ` <span class="tpl-item__estado tpl-item__estado--rechazada">Error al registrar</span>`;
+  } else if (esPlantillaRechazada(p)) {
     // Las pendientes de revisión no llevan badge: ya están agrupadas bajo
     // «Plantillas pendientes de aprobación por Meta», el badge era redundante.
     estadoTag = ` <span class="tpl-item__estado tpl-item__estado--rechazada">` +
@@ -1095,6 +1099,7 @@ function renderLista(filtro = "") {
   // por eso van en su propio grupo. La aprobación interna ocurre antes de
   // enviar la plantilla a Meta, por lo que ambas esperas deben distinguirse.
   const estaRechazada = (p) => esPlantillaRechazada(p) || aprobacionPlantilla(p) === "rechazada";
+  const fallidasMeta = visibles.filter(esRegistroMetaFallido);
   const aprobadas = visibles.filter((p) => esPlantillaAprobada(p) && !estaRechazada(p));
   const pausadas = visibles.filter((p) => esPlantillaPausada(p) && !estaRechazada(p));
   const deshabilitadas = visibles.filter((p) => esPlantillaDeshabilitada(p) && !estaRechazada(p));
@@ -1103,7 +1108,7 @@ function renderLista(filtro = "") {
     (p) => aprobacionPlantilla(p) === "pendiente" && !estaRechazada(p)
   );
   const pendientesMeta = visibles.filter(
-    (p) => aprobacionPlantilla(p) !== "pendiente" && !estaRechazada(p) &&
+    (p) => aprobacionPlantilla(p) !== "pendiente" && !estaRechazada(p) && !esRegistroMetaFallido(p) &&
       !esPlantillaAprobada(p) && !esPlantillaPausada(p) && !esPlantillaDeshabilitada(p)
   );
 
@@ -1120,6 +1125,7 @@ function renderLista(filtro = "") {
   agregarGrupo("Plantillas pausadas por Meta", pausadas, "danger", "fa-circle-pause");
   agregarGrupo("Plantillas deshabilitadas por Meta", deshabilitadas, "danger", "fa-ban");
   agregarGrupo("Plantillas rechazadas", rechazadas, "danger", "fa-circle-xmark");
+  agregarGrupo("Error al registrar en Meta", fallidasMeta, "danger", "fa-triangle-exclamation");
   agregarGrupo("Plantillas pendientes de aprobación", pendientesInternas, "warn", "fa-clock");
   agregarGrupo("Plantillas pendientes de aprobación por Meta", pendientesMeta, "info", "fa-clock");
 }
@@ -1470,8 +1476,9 @@ function renderEstadoMeta(p) {
   if (!tieneTemplate) return;
 
   const status = p.whatsapp_template_status || "DESCONOCIDO";
-  badgeEstadoMeta.textContent = etiquetaEstadoMeta(status);
-  badgeEstadoMeta.className = "estado-badge estado-" + (ETIQUETAS_ESTADO_META[status] ? status : "DESCONOCIDO");
+  badgeEstadoMeta.textContent = esRegistroMetaFallido(p) ? "Error al registrar" : etiquetaEstadoMeta(status);
+  badgeEstadoMeta.className = "estado-badge estado-" + (esRegistroMetaFallido(p) ? "REJECTED" :
+    (ETIQUETAS_ESTADO_META[status] ? status : "DESCONOCIDO"));
   if (badgeAprobadaReciente) badgeAprobadaReciente.hidden = !esRecienAprobada(p);
 
   const motivo = status === "PAUSED"
@@ -1565,7 +1572,8 @@ function actualizarBotonesSegunEstado(p) {
   // sigue disponible aunque Guardar esté bloqueado por el enfriamiento.
   // Además solo el creador edita/elimina las suyas (admin/dev, cualquiera).
   const puedeGuardar = PUEDE_EDITAR_PLANTILLAS && puedeEditarEsta(p) && editable && !enEnfriamiento && !esPlantillaProtegida(p);
-  const puedeEliminar = PUEDE_ELIMINAR_PLANTILLAS && puedeEditarEsta(p) && editable && !esPlantillaProtegida(p);
+  const puedeEliminar = PUEDE_ELIMINAR_PLANTILLAS && puedeEditarEsta(p) &&
+    (editable || esRegistroMetaFallido(p)) && !esPlantillaProtegida(p);
   const puedeRevisar = p && ap === "pendiente" && puedeAprobarPlantillas();
   document.querySelectorAll(".wildcards").forEach((el) => { el.hidden = !puedeGuardar; });
   const puedeGuardarArea = p && PUEDE_EDITAR_PLANTILLAS && puedeEditarEsta(p) &&
@@ -1574,6 +1582,9 @@ function actualizarBotonesSegunEstado(p) {
   const btnAprobar = $("#btnAprobar");
   const btnRechazar = $("#btnRechazar");
   if (btnAprobar) btnAprobar.hidden = !puedeRevisar;
+  const btnReintentarMeta = $("#btnReintentarMeta");
+  if (btnReintentarMeta) btnReintentarMeta.hidden = !(p && esRegistroMetaFallido(p) &&
+    PUEDE_EDITAR_PLANTILLAS && puedeEditarEsta(p));
   if (btnRechazar) btnRechazar.hidden = !(p && ap === "pendiente" && puedeAprobarPlantillas());
   // Cancelar no guarda nada, solo deselecciona: debe poder usarse para salir
   // de una plantilla aunque Guardar esté bloqueado (en enfriamiento, pendiente
@@ -1608,6 +1619,10 @@ function actualizarBotonesSegunEstado(p) {
         "Esta plantilla fue rechazada en la revisión interna" +
         (p.rechazo_motivo ? `: «${p.rechazo_motivo}».` : ".") +
         " Corrígela y guárdala para pedir revisión de nuevo.";
+      avisoPendiente.hidden = false;
+    } else if (p && esRegistroMetaFallido(p)) {
+      pararCuentaRegresiva();
+      avisoPendiente.textContent = "Esta plantilla no llegó a Meta. Corrige el App ID o el token de la clínica y reintenta el registro; también puedes eliminar esta copia local.";
       avisoPendiente.hidden = false;
     } else if (p && !editable) {
       pararCuentaRegresiva();
@@ -2146,6 +2161,34 @@ btnEliminar.addEventListener("click", () => {
   if (!p) return;
   $("#modalNombre").textContent = p.nombre;
   modalEl.hidden = false;
+});
+
+$("#btnReintentarMeta")?.addEventListener("click", async () => {
+  const id = activaId;
+  const p = plantillas.find((item) => item.id === id);
+  if (!p || !esRegistroMetaFallido(p)) return;
+  const boton = $("#btnReintentarMeta");
+  boton.disabled = true;
+  try {
+    const res = await fetch(`${API_URL}/${id}/reintentar-meta`, {
+      method: "POST", headers: authHeaders(),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || `Error ${res.status}`);
+    const indice = plantillas.findIndex((item) => item.id === id);
+    if (indice >= 0) plantillas[indice] = data;
+    renderLista(buscadorEl.value);
+    abrir(id);
+    toast("Meta recibió la plantilla. Ahora espera su revisión.", "ok");
+  } catch (err) {
+    const actual = plantillas.find((item) => item.id === id);
+    if (actual) actual.whatsapp_template_error = err.message;
+    renderLista(buscadorEl.value);
+    renderEstadoMeta(actual);
+    toast(`No se pudo registrar en Meta: ${err.message}`, "error");
+  } finally {
+    boton.disabled = false;
+  }
 });
 
 $("#btnModalCancelar").addEventListener("click", () => (modalEl.hidden = true));

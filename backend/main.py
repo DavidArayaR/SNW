@@ -4078,6 +4078,37 @@ def _aprobacion_plantilla(p: dict) -> str:
     return p.get("aprobacion_estado") or "aprobada"
 
 
+def _registro_meta_fallido(p: dict) -> bool:
+    """Registro local sin template de Meta tras un fallo de integración."""
+    return (not p.get("especial") and _aprobacion_plantilla(p) == "aprobada"
+            and not p.get("whatsapp_template_id")
+            and not p.get("whatsapp_template_status")
+            and bool(p.get("whatsapp_template_error")))
+
+
+def reintentar_registro_plantilla(plantilla_id: int,
+                                 sesion: dict = Depends(exigir("plantillas_editar"))):
+    plantillas = leer_plantillas()
+    p = next((item for item in plantillas if item["id"] == plantilla_id), None)
+    if p is None:
+        raise HTTPException(404, detail="Plantilla no encontrada.")
+    if not _registro_meta_fallido(p) or _es_plantilla_protegida(p):
+        raise HTTPException(409, detail="Esta plantilla no tiene un registro fallido que reintentar.")
+    if not (_es_privilegiado(sesion) or _es_creador_plantilla(p, sesion)):
+        raise HTTPException(403, detail="Solo puedes gestionar las plantillas que creaste.")
+    _exigir_plantilla_en_alcance(sesion, p)
+    _validar_categoria_template(p.get("whatsapp_template_categoria"))
+    _validar_media_plantilla(p.get("encabezado_media_id"), sesion, p)
+    _exigir_revision_valida(p)
+    _registrar_template_meta(p)
+    escribir_plantillas(plantillas)
+    if p.get("whatsapp_template_error") and not p.get("whatsapp_template_status"):
+        raise HTTPException(502, detail=p["whatsapp_template_error"])
+    auditoria_registrar(sesion.get("usuario", ""), "plantilla_registro_meta_reintentado",
+                        p.get("clave", ""), f"Reintentó registrar «{p.get('nombre', '')}» en Meta")
+    return p
+
+
 def _puede_aprobar_plantillas(sesion: dict) -> bool:
     return _es_privilegiado(sesion) or sesion.get("rol") == "supervisor"
 
@@ -4558,6 +4589,14 @@ def eliminar_plantilla(plantilla_id: int, sesion: dict = Depends(exigir("plantil
         escribir_plantillas([p for p in plantillas if p["id"] != plantilla_id])
         auditoria_registrar(sesion.get("usuario", ""), "plantilla_eliminada", objetivo.get("clave", ""),
                             f"Eliminó la plantilla pendiente «{objetivo.get('nombre', '')}»")
+        return {"ok": True, "meta_borrado": False, "meta_advertencia": None}
+    if _registro_meta_fallido(objetivo):
+        # El fallo ocurrió antes de obtener un template en Meta: borrar solo
+        # la copia local, sin cuarentena del nombre ni solicitud DELETE remota.
+        escribir_plantillas([p for p in plantillas if p["id"] != plantilla_id])
+        auditoria_registrar(sesion.get("usuario", ""), "plantilla_eliminada",
+                            objetivo.get("clave", ""),
+                            f"Eliminó el registro local fallido «{objetivo.get('nombre', '')}»")
         return {"ok": True, "meta_borrado": False, "meta_advertencia": None}
     if objetivo.get("whatsapp_template_status") not in ESTADOS_TEMPLATE_EDITABLES:
         raise HTTPException(

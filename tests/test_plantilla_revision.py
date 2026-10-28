@@ -186,6 +186,44 @@ class PresentacionPlantillaTests(unittest.TestCase):
 
 
 class ComponentesMetaEditablesTests(unittest.TestCase):
+    def test_plantilla_sin_registro_meta_se_puede_eliminar_sin_cuarentena(self):
+        fallida = {**PLANTILLA, "whatsapp_template_id": None,
+                   "whatsapp_template_status": None,
+                   "whatsapp_template_error": "Fallo al subir encabezado",
+                   "encabezado_media_id": "media-1", "encabezado_meta_registrado": False}
+        self.assertTrue(main._registro_meta_fallido(fallida))
+        with patch.object(main, "leer_plantillas", return_value=[fallida]), \
+             patch.object(main, "escribir_plantillas") as escribir, \
+             patch.object(main, "_registrar_eliminada") as cuarentena, \
+             patch.object(main, "_servicio_plantilla") as servicio, \
+             patch.object(main, "auditoria_registrar"):
+            resultado = main.eliminar_plantilla(fallida["id"], sesion=SESION)
+        self.assertEqual(resultado, {"ok": True, "meta_borrado": False, "meta_advertencia": None})
+        escribir.assert_called_once_with([])
+        cuarentena.assert_not_called()
+        servicio.assert_not_called()
+
+    def test_reintento_registra_plantilla_local_fallida(self):
+        fallida = {**PLANTILLA, "whatsapp_template_id": None,
+                   "whatsapp_template_status": None,
+                   "whatsapp_template_error": "Fallo al subir encabezado",
+                   "encabezado_media_id": "media-1", "encabezado_meta_registrado": False,
+                   "whatsapp_template_categoria": "MARKETING"}
+        def registrar(p):
+            p.update(whatsapp_template_id="meta-7", whatsapp_template_status="PENDING",
+                     whatsapp_template_error=None, encabezado_meta_registrado=True)
+            return p
+        with patch.object(main, "leer_plantillas", return_value=[fallida]), \
+             patch.object(main, "_validar_media_plantilla", return_value="media-1"), \
+             patch.object(main, "_exigir_revision_valida", return_value={"errores": []}), \
+             patch.object(main, "_registrar_template_meta", side_effect=registrar) as subir, \
+             patch.object(main, "escribir_plantillas") as escribir, \
+             patch.object(main, "auditoria_registrar"):
+            resultado = main.reintentar_registro_plantilla(fallida["id"], sesion=SESION)
+        self.assertEqual(resultado["whatsapp_template_status"], "PENDING")
+        subir.assert_called_once()
+        escribir.assert_called_once()
+
     def test_creacion_envia_encabezado_y_pie_a_meta(self):
         with patch("whatsapp_service.credenciales_centro", return_value={
                  "token": "token-test", "waba_id": "waba-test"}), \
