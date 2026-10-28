@@ -436,6 +436,9 @@ tbody tr:last-child td { border-bottom: none; }
 }
 .historial__cc-uso span { color: var(--texto-suave); font-size: .78rem; line-height: 1.4; }
 .historial__cc-uso strong { font-size: 1.25rem; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.historial__cc-destino { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 2px 7px; min-width: 0; }
+.historial__cc-destino .historial__cc-clinica { color: var(--texto); font-family: inherit; font-size: .82rem; font-weight: 650; line-height: 1.3; }
+.historial__cc-destino .campo-tel { color: var(--texto-suave); font-size: .78rem; }
 .historial__cc-uso--total {
   border-color: var(--ok-bd);
   background: var(--ok-bg);

@@ -889,6 +889,13 @@ function numeroCCVisible(numero) {
   return valor ? (valor.startsWith("+") ? valor : `+${valor}`) : "—";
 }
 
+function numeroCCConClinica(numero, clinica) {
+  const nombre = String(clinica ?? "").trim();
+  return `<span class="historial__cc-destino">` +
+    (nombre ? `<span class="historial__cc-clinica">${escaparHtml(nombre)}</span>` : "") +
+    `<span class="campo-tel">${escaparHtml(numeroCCVisible(numero))}</span></span>`;
+}
+
 const vistasAvisoCC = new Map();
 
 function abrirAvisoCC(id) {
@@ -899,7 +906,9 @@ function abrirAvisoCC(id) {
     ? "Vista del aviso registrado al enviarlo." : "Aviso preparado; el envío registró un error.";
   $("#avisoCCTexto").textContent = vista.texto || "—";
   $("#avisoCCBoton").textContent = vista.boton_texto || "Ir al call center";
-  $("#avisoCCDestino").textContent = `El botón abre el chat con ${numeroCCVisible(fila.numero_call_center)}.`;
+  $("#avisoCCDestino").textContent = `El botón abre el chat con ${
+    fila.clinica_nombre ? `${fila.clinica_nombre} (${numeroCCVisible(fila.numero_call_center)})` :
+      numeroCCVisible(fila.numero_call_center)}.`;
   $("#avisoCCPreparado").textContent = vista.mensaje_preparado
     ? `Mensaje preparado al pulsar: ${vista.mensaje_preparado}`
     : "El botón no tenía un texto preparado.";
@@ -925,11 +934,12 @@ async function cargarLogCC(mostrarFeedback = false) {
     if (!r.ok) throw new Error();
     const data = await r.json();
     const contadores = Object.entries(data.contadores || {});
+    const clinicasPorNumero = data.clinicas_por_numero || {};
     const totalUsos = contadores.reduce((total, [, usos]) => total + (Number(usos) || 0), 0);
     cont.innerHTML = contadores.length
       ? `<div class="historial__cc-uso historial__cc-uso--total"><span>Total de usos</span><strong>${totalUsos.toLocaleString("es-CL")}</strong></div>` +
         contadores.map(([numero, usos]) =>
-          `<div class="historial__cc-uso"><span>${escaparHtml(numeroCCVisible(numero))}</span>` +
+          `<div class="historial__cc-uso">${numeroCCConClinica(numero, clinicasPorNumero[String(numero).replace(/\D/g, "")])}` +
           `<strong>${(Number(usos) || 0).toLocaleString("es-CL")} uso${Number(usos) === 1 ? "" : "s"}</strong></div>`
         ).join("")
       : `<p class="historial__cc-sin-usos">Todavía no hay usos registrados.</p>`;
@@ -946,7 +956,7 @@ async function cargarLogCC(mostrarFeedback = false) {
           `<td><div class="historial__cc-motivos">${(d.motivos || []).map((motivo) =>
             `<span class="historial__cc-motivo">${escaparHtml(etiquetasMotivoCC[motivo] || motivo)}</span>`
           ).join("") || "—"}</div></td>` +
-          `<td class="campo-tel">${escaparHtml(numeroCCVisible(d.numero_call_center))}</td>` +
+          `<td>${numeroCCConClinica(d.numero_call_center, d.clinica_nombre)}</td>` +
           `<td>${badgeEstadoCC(d.estado)}` +
           (d.puede_reintentar ? ` <button type="button" class="btn btn--ghost historial__cc-reintentar" data-reintentar-derivacion="${Number(d.id)}">Reintentar</button>` : "") +
           `</td>` +
@@ -961,7 +971,7 @@ async function cargarLogCC(mostrarFeedback = false) {
             `<td class="campo-nombre">${escaparHtml(f.nombre_paciente ?? "—")}</td>` +
             `<td class="campo-tel">${escaparHtml(f.numero_paciente ?? "—")}</td>` +
             `<td>${escaparHtml(f.base_datos ?? "—")}</td>` +
-            `<td class="campo-tel">${escaparHtml(numeroCCVisible(f.numero_call_center))}</td>` +
+            `<td>${numeroCCConClinica(f.numero_call_center, f.clinica_nombre)}</td>` +
             `<td><span class="historial__cc-estado-badge historial__cc-estado-badge--${enviado ? "notificado" : "error"}">${estado}</span>` +
             (f.vista_mensaje ? ` <button type="button" class="btn btn--ghost btn--sm historial__cc-ver-aviso" data-ver-aviso-cc="${Number(f.id)}">Ver mensaje</button>` : "") +
             (f.descripcion_error ? `<div class="hist-msg">${escaparHtml(f.descripcion_error)}</div>` : "") +

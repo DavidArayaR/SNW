@@ -4654,6 +4654,18 @@ def obtener_call_center_log(sesion: dict = Depends(exigir("call_center_registro"
     contadores = {}
     derivaciones = []
     try:
+        configuracion = config_all()
+        nombres_clinicas = catalogo_centros(configuracion, incluir_inactivas=True)
+        clinicas_por_numero = {}
+        for canal in listar_canales(configuracion, incluir_inactivas=True):
+            numero = re.sub(r"\D", "", canal.get("crmPhoneNumber") or "")
+            if numero:
+                clinicas_por_numero.setdefault(numero, set()).add(canal["nombre"])
+
+        def clinica_del_numero(numero):
+            nombres = clinicas_por_numero.get(re.sub(r"\D", "", numero or ""), set())
+            return next(iter(nombres)) if len(nombres) == 1 else None
+
         filtro_area, args = "", ()
         if not _es_privilegiado(sesion):
             permitidas = {e["nombre_tabla_base"]
@@ -4687,6 +4699,7 @@ def obtener_call_center_log(sesion: dict = Depends(exigir("call_center_registro"
             for r in filas:
                 r["fecha"] = r.pop("fecha_hora").strftime("%d-%m-%Y %H:%M")
                 r["automatico"] = bool(r["automatico"])
+                r["clinica_nombre"] = clinica_del_numero(r.get("numero_call_center"))
                 vista = r.pop("vista_mensaje", None)
                 try:
                     r["vista_mensaje"] = json.loads(vista) if puede_ver_datos and vista else None
@@ -4699,7 +4712,7 @@ def obtener_call_center_log(sesion: dict = Depends(exigir("call_center_registro"
                 entradas.append(r)
             cur.execute(
                 "SELECT id, paciente_id, telefono, mensaje_original, motivos, estado,"
-                " numero_call_center, base_datos, creado"
+                " numero_call_center, centro_codigo, base_datos, creado"
                 " FROM call_center_derivaciones"
                 + (f" WHERE {filtro_area}" if filtro_area else "")
                 + " ORDER BY id DESC LIMIT 100", args or None)
@@ -4708,6 +4721,8 @@ def obtener_call_center_log(sesion: dict = Depends(exigir("call_center_registro"
                 derivaciones.append({
                     "id": d["id"], "motivos": d["motivos"].split(","),
                     "estado": d["estado"], "numero_call_center": d.get("numero_call_center"),
+                    "clinica_nombre": nombres_clinicas.get(d.get("centro_codigo"))
+                    or clinica_del_numero(d.get("numero_call_center")),
                     "base_datos": d.get("base_datos"),
                     "fecha": d["creado"].strftime("%d-%m-%Y %H:%M"),
                     "telefono": d["telefono"] if puede_ver_datos else _telefono_paciente_oculto(d["telefono"]),
@@ -4719,6 +4734,9 @@ def obtener_call_center_log(sesion: dict = Depends(exigir("call_center_registro"
         log_error("obtener_call_center_log", e)
         raise HTTPException(503, detail="No se pudo cargar el historial de call center.")
     return {"entradas": entradas, "contadores": contadores,
+            "clinicas_por_numero": {numero: next(iter(nombres))
+                                    for numero, nombres in clinicas_por_numero.items()
+                                    if len(nombres) == 1},
             "derivaciones": derivaciones}
 
 

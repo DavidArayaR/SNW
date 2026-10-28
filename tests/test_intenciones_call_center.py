@@ -329,6 +329,34 @@ class IntencionesCallCenterTests(unittest.TestCase):
         self.assertEqual(consultar(["pacientes_ver_datos"])["vista_mensaje"]["texto"], "Aviso privado")
         self.assertIsNone(consultar([])["vista_mensaje"])
 
+    def test_historial_identifica_clinica_del_numero_y_del_codigo_guardado(self):
+        import main
+        conn = MagicMock()
+        cur = conn.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cur.fetchall.side_effect = [[{
+            "id": 7, "paciente_id": 2, "nombre_paciente": "Paciente Apellido",
+            "numero_paciente": "+56912345678", "numero_call_center": "56999999999",
+            "plantilla_clave": "call_center", "automatico": 1, "estado": "enviado",
+            "descripcion_error": None, "base_datos": "pacientes_prod",
+            "vista_mensaje": None, "fecha_hora": datetime(2026, 10, 16, 12, 0),
+        }], [{"n": "56999999999", "c": 1}], [{
+            "id": 8, "paciente_id": 2, "telefono": "+56912345678",
+            "mensaje_original": "Quiero consultar", "motivos": "CONSULTA_AMBIGUA",
+            "estado": "notificado", "numero_call_center": "56911111111",
+            "centro_codigo": "SMPT", "base_datos": "pacientes_prod",
+            "creado": datetime(2026, 10, 16, 12, 1),
+        }]]
+        with patch.object(main, "conectar", return_value=conn), \
+             patch.object(main, "_es_privilegiado", return_value=True), \
+             patch.object(main, "config_all", return_value={
+                 "SMPT_CRM_PHONE_NUMBER": "+56999999999"}):
+            respuesta = main.obtener_call_center_log({
+                "rol": "usuario", "usuario": "operador", "permisos": []})
+        nombre = "Salud Mental Para Todos"
+        self.assertEqual(respuesta["entradas"][0]["clinica_nombre"], nombre)
+        self.assertEqual(respuesta["clinicas_por_numero"]["56999999999"], nombre)
+        self.assertEqual(respuesta["derivaciones"][0]["clinica_nombre"], nombre)
+
     def test_despacho_guarda_la_vista_del_boton_realmente_preparado(self):
         import main
         canal = MagicMock()
