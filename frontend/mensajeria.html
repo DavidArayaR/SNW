@@ -109,7 +109,7 @@
           <div id="grupoEncabezadoTexto" class="encabezado__contenido">
             <label for="inpEncabezadoTexto">Texto del encabezado</label>
             <input type="text" id="inpEncabezadoTexto" maxlength="60" placeholder="Ej.: Una noticia para ti" autocomplete="off">
-            <p class="field__hint">Máximo 60 caracteres.</p>
+            <p class="field__hint">Máximo 60 caracteres; sin saltos de línea, formato, emojis ni asteriscos.</p>
           </div>
           <div id="grupoEncabezadoMedia" class="encabezado__contenido" hidden>
             <label for="inpEncabezadoMedia">Imagen o GIF del encabezado</label>
@@ -279,10 +279,11 @@
             <div class="prog-paso" id="pasoManualCentro">
               <span class="prog-paso__num">3</span>
               <div class="field">
-                <label for="selCentroConf">Centro / Número de WhatsApp emisor</label>
-                <select id="selCentroConf" required aria-describedby="centroErrorConf">
-                  <option value="">— Seleccione centro emisor —</option>
+                <label for="selCentroConf">Centro / Número de WhatsApp de la plantilla</label>
+                <select id="selCentroConf" disabled aria-describedby="centroErrorConf">
+                  <option value="">— Selecciona una plantilla —</option>
                 </select>
+                <p class="field__hint">El envío saldrá desde el número asociado a esta plantilla.</p>
                 <p id="centroErrorConf" class="limite-error" role="alert" hidden></p>
               </div>
             </div>
@@ -380,10 +381,11 @@
           <div class="prog-paso" id="pasoProgCentro">
             <span class="prog-paso__num">3</span>
             <div class="field">
-              <label for="selProgCentro">Centro / Número de WhatsApp emisor</label>
-              <select id="selProgCentro" required aria-describedby="progCentroError">
-                <option value="">— Seleccione centro emisor —</option>
+              <label for="selProgCentro">Centro / Número de WhatsApp de la plantilla</label>
+              <select id="selProgCentro" disabled aria-describedby="progCentroError">
+                <option value="">— Selecciona una plantilla —</option>
               </select>
+              <p class="field__hint">El envío saldrá desde el número asociado a esta plantilla.</p>
               <p id="progCentroError" class="limite-error" role="alert" hidden></p>
             </div>
           </div>

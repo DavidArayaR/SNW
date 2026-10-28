@@ -435,6 +435,61 @@ class MultiNumerosTests(unittest.TestCase):
             with self.assertRaises(main.HTTPException):
                 main._exigir_centro_envio("PS")
 
+    def test_envio_manual_rechaza_emisor_distinto_al_de_la_plantilla(self):
+        plantilla = {"id": 7, "centro_codigo": "SMPT", "clave": "promocion"}
+        with patch.object(main, "tiene_permiso", return_value=True), \
+             patch.object(main, "_exigir_centro_envio", return_value={"codigo": "MS"}), \
+             patch.object(main, "_exigir_base_desarrollo"), \
+             patch.object(main, "_envio_en_curso", return_value=None), \
+             patch.object(main, "config_get", return_value="produccion"), \
+             patch.object(main, "leer_config", return_value={}), \
+             patch.object(main, "_numeros_prueba_editables", return_value=set()), \
+             patch.object(main, "leer_plantillas", return_value=[plantilla]), \
+             patch.object(main, "conectar") as conectar:
+            with self.assertRaises(main.HTTPException) as error:
+                main.iniciar_envio(main.EnvioIn(
+                    plantilla_id=7, ambiente="produccion", centro="MS"),
+                    main.BackgroundTasks(), {"rol": "administrador"})
+        self.assertEqual(error.exception.status_code, 422)
+        conectar.assert_not_called()
+
+    def test_prevision_rechaza_emisor_distinto_sin_consultar_pacientes(self):
+        plantilla = {"id": 7, "centro_codigo": "SMPT"}
+        with patch.object(main, "_exigir_base_desarrollo"), \
+             patch.object(main, "leer_plantillas", return_value=[plantilla]), \
+             patch.object(main, "_contar_elegibles_tabla") as contar:
+            with self.assertRaises(main.HTTPException) as error:
+                main.contar_destinatarios(main.DestinosIn(
+                    plantilla_id=7, ambiente="produccion", centro="MS"),
+                    {"rol": "administrador"})
+        self.assertEqual(error.exception.status_code, 422)
+        contar.assert_not_called()
+
+    def test_programado_rechaza_emisor_distinto_al_de_la_plantilla(self):
+        plantilla = {"id": 7, "centro_codigo": "SMPT"}
+        fecha = (datetime.datetime.now() + datetime.timedelta(days=2)).strftime("%Y-%m-%dT%H:%M")
+        with patch.object(main, "tiene_permiso", return_value=True), \
+             patch.object(main, "_exigir_centro_envio", return_value={
+                 "codigo": "MS", "phoneNumberId": "1234500002"}), \
+             patch.object(main, "_exigir_base_desarrollo"), \
+             patch.object(main, "config_get", return_value="produccion"), \
+             patch.object(main, "_contar_elegibles_tabla", return_value=(10, 10)), \
+             patch.object(main, "_contar_reservados_prog", return_value=0), \
+             patch.object(main, "leer_plantillas", return_value=[plantilla]), \
+             patch.object(main, "_validar_plantilla_programable", return_value=plantilla), \
+             patch.object(main, "conectar") as conectar:
+            with self.assertRaises(main.HTTPException) as error:
+                main.crear_programado(main.ProgCrearIn(
+                    plantilla_id=7, ambiente="produccion", centro="MS",
+                    programado_para=fecha, limite=1), {"rol": "administrador"})
+        self.assertEqual(error.exception.status_code, 422)
+        conectar.assert_not_called()
+
+    def test_plantilla_sin_clinica_no_se_envia(self):
+        with self.assertRaises(main.HTTPException) as error:
+            main._exigir_emisor_de_plantilla({"id": 7}, "SMPT")
+        self.assertEqual(error.exception.status_code, 409)
+
     def test_historial_filtra_ambas_fuentes_por_centro(self):
         sesion = {"rol": "administrador", "area_ids": []}
         with patch.object(main, "_es_privilegiado", return_value=True):

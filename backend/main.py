@@ -4278,7 +4278,7 @@ def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(exigir("plantillas
         raise HTTPException(422, detail="Selecciona una clínica activa para esta plantilla.")
     esp_id = _validar_plantilla_area(sesion, body.area_id)
     media_id = _validar_media_plantilla(body.encabezado_media_id, sesion)
-    encabezado_texto = (body.encabezado_texto or "").strip()
+    encabezado_texto = body.encabezado_texto or ""
     pie_texto = (body.pie_texto or "").strip()
     vista = _exigir_revision_valida({"texto": body.texto, "encabezado_media_id": media_id,
                                      "encabezado_texto": encabezado_texto,
@@ -4303,7 +4303,7 @@ def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(exigir("plantillas
         "texto": body.texto,
         "area_id": esp_id,
         "encabezado_media_id": media_id,
-        "encabezado_texto": encabezado_texto or None,
+        "encabezado_texto": encabezado_texto.strip() or None,
         "pie_texto": pie_texto or None,
         "botones": vista["botones"],
         # El nombre del template de Meta se deriva SIEMPRE del nombre de la
@@ -4372,8 +4372,9 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
             _exigir_plantilla_en_alcance(sesion, p)
             if body.centro and body.centro != p.get("centro_codigo"):
                 raise HTTPException(409, detail="No se puede cambiar la WABA de una plantilla existente. Sincronízala desde la otra clínica.")
-            encabezado_texto = ((body.encabezado_texto if "encabezado_texto" in body.model_fields_set
-                                 else p.get("encabezado_texto")) or "").strip()
+            encabezado_crudo = ((body.encabezado_texto if "encabezado_texto" in body.model_fields_set
+                                 else p.get("encabezado_texto")) or "")
+            encabezado_texto = encabezado_crudo.strip()
             pie_texto = ((body.pie_texto if "pie_texto" in body.model_fields_set
                           else p.get("pie_texto")) or "").strip()
             # El área solo organiza la copia local. Cambiarla durante el
@@ -4406,7 +4407,7 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
                                else p.get("encabezado_media_id"))
             media_id = _validar_media_plantilla(media_solicitada, sesion, p)
             revision_borrador = {**p, "texto": body.texto, "encabezado_media_id": media_id,
-                                "encabezado_texto": encabezado_texto, "pie_texto": pie_texto}
+                                "encabezado_texto": encabezado_crudo, "pie_texto": pie_texto}
             if (media_id != p.get("encabezado_media_id") or
                     encabezado_texto != (p.get("encabezado_texto") or "")):
                 revision_borrador["whatsapp_header_format"] = None
@@ -6001,6 +6002,19 @@ def _exigir_centro_envio(codigo: str | None) -> dict:
     return canal
 
 
+def _exigir_emisor_de_plantilla(plantilla: dict, centro_codigo: str | None) -> None:
+    """Una plantilla aprobada en una clínica solo sale desde su emisor."""
+    asignado = plantilla.get("centro_codigo")
+    if not asignado:
+        raise HTTPException(409, detail=(
+            "La plantilla no tiene una clínica asociada. Sincronízala desde su clínica "
+            "antes de enviar mensajes."))
+    if centro_codigo != asignado:
+        raise HTTPException(422, detail=(
+            "El centro emisor debe ser el de la plantilla. Selecciona una plantilla "
+            "de este centro o usa su número asociado."))
+
+
 def _emisor_vigente(emisor: dict | None) -> bool:
     if not emisor:
         return False
@@ -6428,6 +6442,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
     plantilla = next((p for p in leer_plantillas() if p["id"] == body.plantilla_id), None)
     if plantilla is None:
         raise HTTPException(404, detail="Plantilla no encontrada")
+    _exigir_emisor_de_plantilla(plantilla, emisor["codigo"])
     if plantilla.get("especial"):
         raise HTTPException(
             400,
@@ -6919,6 +6934,13 @@ def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensaj
     except ValueError:
         raise HTTPException(400, detail=f"Entorno inválido: '{body.ambiente}'")
     _exigir_base_desarrollo(sesion, amb, body.area_id)
+    plantilla_preview = None
+    if body.plantilla_id is not None:
+        plantilla_preview = next((p for p in leer_plantillas()
+                                  if p["id"] == body.plantilla_id), None)
+        if plantilla_preview is None:
+            raise HTTPException(404, detail="Plantilla no encontrada")
+        _exigir_emisor_de_plantilla(plantilla_preview, body.centro)
 
     esp = None
     if body.area_id is not None:
@@ -6939,10 +6961,8 @@ def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensaj
     # La estimación se muestra a administradores, desarrolladores y supervisores;
     # un usuario normal no la recibe aunque pueda consultar destinatarios.
     puede_ver_costo = _es_privilegiado(sesion) or sesion.get("rol") == "supervisor"
-    if body.plantilla_id is not None and puede_ver_costo:
-        plantilla = next((p for p in leer_plantillas() if p["id"] == body.plantilla_id), None)
-        if plantilla is not None:
-            costo = _costo_estimado_por_clave(plantilla.get("clave", ""), elegibles)
+    if plantilla_preview is not None and puede_ver_costo:
+        costo = _costo_estimado_por_clave(plantilla_preview.get("clave", ""), elegibles)
 
     aplica_limite_meta = (
         amb == "produccion" and config_get("metodo_envio", "").strip() == "api_oficial"
@@ -7520,6 +7540,7 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
     plantilla = _validar_plantilla_programable(
         next((p for p in leer_plantillas() if p["id"] == body.plantilla_id), None),
         esp["id"] if esp else None)
+    _exigir_emisor_de_plantilla(plantilla, emisor["codigo"])
     # La muestra de Meta (hello_world) solo se puede probar en desarrollo.
     if _es_plantilla_protegida(plantilla) and (esp is not None or amb != "desarrollo"):
         raise HTTPException(

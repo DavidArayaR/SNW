@@ -702,6 +702,13 @@ button:disabled:hover { outline: none; }
   cursor: not-allowed;
   border-style: dashed;
 }
+.field select[data-fijo="true"]:disabled {
+  appearance: none;
+  background: var(--surface-2);
+  color: var(--texto);
+  cursor: default;
+  border-style: solid;
+}
 
 .field__foot {
   display: flex;

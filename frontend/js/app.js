@@ -47,6 +47,28 @@ let cuentasPlantillas = [];
 function centroElegido(id) {
   return centrosEmisores.find((c) => c.codigo === $(id)?.value && c.configured) || null;
 }
+function fijarEmisorDePlantilla(id, plantilla) {
+  const selector = $(id);
+  if (!selector) return;
+  const codigo = plantilla?.centro_codigo || "";
+  const centro = centrosEmisores.find((c) => c.codigo === codigo);
+  const cuenta = cuentaDePlantilla(codigo);
+  const error = $(id === "#selCentroConf" ? "#centroErrorConf" : "#progCentroError");
+  selector.replaceChildren(new Option(
+    !plantilla ? "— Selecciona una plantilla —" :
+      !codigo ? "— Plantilla sin clínica asociada —" :
+        centro ? `${centro.nombre} — ${centro.phoneNumber || "número pendiente"}` :
+          `${cuenta?.nombre || codigo} — centro no disponible`,
+    centro?.configured ? codigo : ""));
+  selector.disabled = true;
+  selector.dataset.fijo = centro?.configured ? "true" : "false";
+  if (error) {
+    error.hidden = !plantilla || !!centro?.configured;
+    error.textContent = error.hidden ? "" : !codigo
+      ? "Esta plantilla no tiene una clínica asociada. Sincronízala desde su clínica antes de enviarla."
+      : "El número emisor de esta plantilla no está disponible. Revisa Configuración → Clínicas.";
+  }
+}
 function centroDePlantillaActiva() {
   const codigo = plantillas.find((p) => p.id === activaId)?.centro_codigo;
   return centrosEmisores.find((c) => c.codigo === codigo && c.configured) || null;
@@ -74,26 +96,8 @@ function pintarCuentaPlantillaEditor() {
   aviso.classList.toggle("tpl-cuenta-editor--pendiente", !codigo || !cuentaDePlantilla(codigo)?.wabaId);
 }
 function pintarCentrosEmisores() {
-  for (const id of ["#selCentroConf", "#selProgCentro"]) {
-    const selector = $(id);
-    if (!selector) continue;
-    const anterior = selector.value;
-    selector.replaceChildren(new Option("— Seleccione centro emisor —", ""));
-    for (const centro of centrosEmisores) {
-      const estado = centro.configured
-        ? centro.phoneNumber
-        : `Pendiente: ${centro.problemas.join(", ")}`;
-      const opcion = new Option(`${centro.nombre} — ${estado}`, centro.codigo);
-      opcion.disabled = !centro.configured;
-      selector.add(opcion);
-    }
-    selector.value = centrosEmisores.some((c) => c.codigo === anterior && c.configured) ? anterior : "";
-    const error = $(id === "#selCentroConf" ? "#centroErrorConf" : "#progCentroError");
-    if (error) {
-      error.hidden = centrosEmisores.some((c) => c.configured);
-      error.textContent = error.hidden ? "" : "No hay centros emisores configurados. Revisa Configuración.";
-    }
-  }
+  fijarEmisorDePlantilla("#selCentroConf", plantillas.find((p) => p.id === confPlantillaId));
+  fijarEmisorDePlantilla("#selProgCentro", plantillas.find((p) => p.id === tplSelId));
   for (const id of ["#inpCentroPlantilla", "#selCentroSync"]) {
     const selector = $(id);
     if (!selector) continue;
@@ -114,6 +118,8 @@ function pintarCentrosEmisores() {
   actualizarPasosManual();
   actualizarPasosProg();
   actualizarEstadoBotonPrueba();
+  if (confPlantillaId && baseSeleccionadaConf()) actualizarResumenConf();
+  if (tplSelId && $("#selProgBase")?.value) cargarCupoProg(true);
 }
 async function cargarCentrosEmisores() {
   try {
@@ -141,8 +147,6 @@ async function cargarCentrosEmisores() {
   }
 }
 const cargaInicialCentrosEmisores = cargarCentrosEmisores();
-$("#selCentroConf")?.addEventListener("change", () => { actualizarPasosManual(); actualizarResumenConf(); });
-$("#selProgCentro")?.addEventListener("change", () => { actualizarPasosProg(); cargarCupoProg(true); });
 
 const listaEl = $("#listaPlantillas");
 const cargandoPlantillasEl = $("#cargandoPlantillas");
@@ -918,6 +922,7 @@ function actualizarProgPlantilla() {
   const el = document.getElementById("progPlantillaNombre");
   const p = (plantillas || []).find((x) => x.id === tplSelId);
   if (el) el.textContent = p ? p.nombre : "—";
+  fijarEmisorDePlantilla("#selProgCentro", p);
   const sinPlantilla = document.getElementById("progSinPlantilla");
   const formulario = document.getElementById("progForm");
   if (sinPlantilla) sinPlantilla.hidden = !!p;
@@ -990,7 +995,7 @@ function actualizarPasosProg() {
     if (el) el.classList.toggle("prog-paso--listo", !!listo);
   }
   if (selA) selA.disabled = !paso1;
-  $("#selProgCentro").disabled = !paso2 || progCreando;
+  $("#selProgCentro").disabled = true;
   if (inpF) inpF.disabled = !pasoCentro;
   const btnDia = document.getElementById("btnProgDia");
   const btnHora = document.getElementById("btnProgHora");
@@ -1290,7 +1295,7 @@ function encabezadoMediaActivo() {
 }
 
 function encabezadoTextoActivo() {
-  return checkEncabezadoMultimedia.checked ? "" : inpEncabezadoTexto.value.trim();
+  return checkEncabezadoMultimedia.checked ? "" : inpEncabezadoTexto.value;
 }
 
 function actualizarTipoEncabezado() {
@@ -2081,7 +2086,8 @@ formEl.addEventListener("submit", async (e) => {
   if (!soloCambioArea()) {
     const vistaPrevia = await consultarPreview(++previewSolicitud);
     if (!vistaPrevia || vistaPrevia.errores?.length) {
-      return toast("Corrige los errores de la vista previa antes de guardar.", "error");
+      const errorTitulo = vistaPrevia?.errores?.find((error) => error.startsWith("El título del mensaje"));
+      return toast(errorTitulo || vistaPrevia?.errores?.[0] || "No se pudo validar la plantilla. Inténtalo de nuevo.", "error");
     }
   }
 
@@ -2491,6 +2497,7 @@ function abrirModalConf(id = tplSelId) {
   $("#selLimiteModoConf").value = "";
   $("#limiteNumConf").value = "";
   $("#confNombre").textContent = p?.nombre ?? "";
+  fijarEmisorDePlantilla("#selCentroConf", p);
 
   aplicarRestriccionAmbiente();
   // Si la plantilla es de un área, el select ofrece solo esa base;
@@ -2534,7 +2541,7 @@ function resetearCardEnvio() {
   disponiblesMetaManualConf = null;
   tarifaCostoManualConf = null;
   $("#selLimiteModoConf").value = "";
-  $("#selCentroConf").value = "";
+  fijarEmisorDePlantilla("#selCentroConf", null);
   $("#limiteNumConf").value = "";
   modoVacia();
   guardarSelTpl();
@@ -2655,7 +2662,7 @@ function actualizarPasosManual() {
   }
   const selBase = $("#selBaseConf");
   if (selBase) selBase.disabled = !listo1 || envioEnCursoConf;
-  $("#selCentroConf").disabled = !listo2 || envioEnCursoConf;
+  $("#selCentroConf").disabled = true;
   $("#selLimiteModoConf").disabled = !puedeElegirLimite || envioEnCursoConf;
   $("#limiteRangeConf").disabled = !puedeElegirLimite || modo !== "porcentaje" || envioEnCursoConf;
   $("#limiteNumConf").disabled = !puedeElegirLimite || modo !== "cantidad" || envioEnCursoConf;
