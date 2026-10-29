@@ -5898,12 +5898,21 @@ def renderizar_mensaje(texto: str, paciente: dict) -> str:
     return texto
 
 
-def actualizar_estado_paciente(paciente_id: int, estado: str, ambiente: str, tabla: str | None = None) -> None:
+def actualizar_estado_paciente(paciente_id: int, estado: str, ambiente: str, tabla: str | None = None,
+                               whatsapp_message_id: str | None = None) -> None:
     t = tabla or tabla_pacientes(ambiente)
     if not columna_existe(t, "estado", ambiente):
         return
     with conectar(ambiente) as conn, conn.cursor() as cur:
-        cur.execute(f"UPDATE {t} SET estado = %s WHERE id = %s", (estado, paciente_id))
+        if estado == "enviado" and whatsapp_message_id:
+            cur.execute(
+                f"UPDATE {t} SET estado = %s WHERE id = %s"
+                " AND NOT EXISTS (SELECT 1 FROM log_envios"
+                " WHERE whatsapp_message_id = %s AND estado_whatsapp = 'failed')",
+                (estado, paciente_id, whatsapp_message_id),
+            )
+        else:
+            cur.execute(f"UPDATE {t} SET estado = %s WHERE id = %s", (estado, paciente_id))
         conn.commit()
 
 
@@ -6197,7 +6206,8 @@ def _procesar_job_api_concurrente(job_id: str, canal: MotorApiOficial) -> None:
                             ambiente=amb, envio_id=envio_id,
                             whatsapp_message_id=message_id if ok else None,
                             area_id=area_id, tabla_pacientes=tabla_area, emisor=emisor)
-        actualizar_estado_paciente(d["id"], "enviado" if ok else "error", amb, tabla=tabla_area)
+        actualizar_estado_paciente(d["id"], "enviado" if ok else "error", amb,
+                                  tabla=tabla_area, whatsapp_message_id=message_id if ok else None)
         if ok:
             limpiar_interes_paciente(d["id"], amb, tabla=tabla_area)
             with JOBS_LOCK:
@@ -8793,6 +8803,7 @@ def detalle_historial(envio_id: str, ambiente: str = Query("produccion"),
                                       tiene_interes=tiene_int and columna_existe(t, "no_interesado", ambiente),
                                       mostrar_no_interesado=True)
     int_expr = "COALESCE(pac.interesado, 0)" if tiene_int else "0"
+    estado_paciente_expr = "pac.estado" if columna_existe(t, "estado", ambiente) else "NULL"
     if "tabla_pacientes" in columnas_tabla("log_envios", ambiente):
         cond_r, args_r = (("AND r.tabla_pacientes = %s", (tabla_env,)) if tabla_env
                           else ("AND r.tabla_pacientes IS NULL", ()))
@@ -8800,7 +8811,8 @@ def detalle_historial(envio_id: str, ambiente: str = Query("produccion"),
         cond_r, args_r = "", ()
     sql = (
         "SELECT le.id, le.paciente_id, le.nombre_paciente, le.numero_telefono, le.estado_envio,"
-        " le.descripcion_error, le.fecha_hora,"
+        " le.estado_whatsapp, le.mensaje AS mensaje_enviado, le.descripcion_error, le.fecha_hora,"
+        f" {estado_paciente_expr} AS estado_paciente,"
         "  (SELECT r.mensaje FROM log_envios r"
         "     WHERE r.paciente_id = le.paciente_id AND r.plantilla_clave = 'respuesta'"
         f"       {cond_r}"
@@ -8818,6 +8830,12 @@ def detalle_historial(envio_id: str, ambiente: str = Query("produccion"),
     puede_ver_datos = tiene_permiso(sesion, "pacientes_ver_datos")
     for f in filas:
         f["fecha"] = f.pop("fecha_hora").strftime("%d-%m-%Y %H:%M")
+        codigo = re.search(r"(?<!\d)(1\d{5})(?!\d)", f.get("descripcion_error") or "")
+        f["codigo_error"] = codigo.group(1) if codigo else None
+        f["puede_marcar_pendiente"] = bool(
+            _es_privilegiado(sesion) and f.get("paciente_id")
+            and f.get("estado_paciente") in ("enviado", "error")
+            and (f.get("estado_whatsapp") == "failed" or f.get("estado_envio") == "error"))
         f["interesado"] = bool(f.get("interesado"))
         msg = (f.get("mensaje_respuesta") or "").strip()
         f["mensaje_respuesta"] = msg
@@ -8827,9 +8845,79 @@ def detalle_historial(envio_id: str, ambiente: str = Query("produccion"),
             f["nombre_paciente"] = _iniciales_paciente(f.get("nombre_paciente"))
             f["numero_telefono"] = _telefono_paciente_oculto(f.get("numero_telefono"))
             f["mensaje_respuesta"] = None
+            f["mensaje_enviado"] = None
             f["descripcion_error"] = None
             f["respuesta_interes"] = False
     return filas
+
+
+class FallidosPendientesIn(BaseModel):
+    registros: list[int]
+
+
+def marcar_fallidos_pendientes(envio_id: int, body: FallidosPendientesIn,
+                              sesion: dict = Depends(exigir("historial"))):
+    """Rehabilita manualmente fallos confirmados; nunca reenvía mensajes."""
+    if not _es_privilegiado(sesion):
+        raise HTTPException(403, detail="Solo administradores y desarrolladores pueden hacer este cambio.")
+    ids = list(dict.fromkeys(body.registros))
+    if not ids or len(ids) > 500 or any(i <= 0 for i in ids):
+        raise HTTPException(422, detail="Selecciona entre 1 y 500 mensajes con error.")
+    marcadores = ", ".join("%s" for _ in ids)
+    actualizados = omitidos = 0
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("SELECT id, base_datos, tabla_pacientes FROM envios WHERE id = %s", (envio_id,))
+        envio = cur.fetchone()
+        if not envio:
+            raise HTTPException(404, detail="Envío no encontrado.")
+        tabla = envio.get("tabla_pacientes") or envio.get("base_datos")
+        if not servicio_areas.tabla_valida(tabla) or not servicio_areas.tabla_fisica_existe(tabla):
+            raise HTTPException(409, detail="La base de pacientes de este envío no está disponible.")
+        if not columna_existe(tabla, "estado") or not columna_existe(tabla, "whatsapp_opt_out"):
+            raise HTTPException(409, detail="Esta base no permite cambiar el estado de los pacientes.")
+        cur.execute(
+            "SELECT id, paciente_id, numero_telefono, estado_envio, estado_whatsapp, tabla_pacientes"
+            f" FROM log_envios WHERE envio_id = %s AND id IN ({marcadores}) ORDER BY id FOR UPDATE",
+            (envio_id, *ids),
+        )
+        registros = cur.fetchall() or []
+        if len(registros) != len(ids):
+            raise HTTPException(422, detail="La selección contiene mensajes de otro envío.")
+        for r in registros:
+            if (r.get("tabla_pacientes") not in (None, tabla) or not r.get("paciente_id")
+                    or not (r.get("estado_whatsapp") == "failed"
+                    or r.get("estado_envio") == "error")):
+                omitidos += 1
+                continue
+            # Solo el último intento de campaña puede volver a habilitar al
+            # paciente; una entrega posterior no debe quedar sobrescrita.
+            cur.execute(
+                "SELECT MAX(l.id) AS ultimo FROM log_envios l"
+                " LEFT JOIN envios e ON e.id = l.envio_id"
+                " WHERE l.paciente_id = %s"
+                " AND COALESCE(l.tabla_pacientes, e.tabla_pacientes, e.base_datos) = %s"
+                " AND l.plantilla_clave NOT IN ('respuesta','ajuste_manual')",
+                (r["paciente_id"], tabla),
+            )
+            if (cur.fetchone() or {}).get("ultimo") != r["id"]:
+                omitidos += 1
+                continue
+            cur.execute(f"SELECT telefono, estado, whatsapp_opt_out FROM {tabla} WHERE id = %s FOR UPDATE",
+                        (r["paciente_id"],))
+            paciente = cur.fetchone()
+            if not paciente or paciente.get("whatsapp_opt_out") or paciente.get("estado") == "pendiente" \
+                    or normalizar_telefono(paciente.get("telefono") or "") != normalizar_telefono(r.get("numero_telefono") or "") \
+                    or esta_suprimido(paciente["telefono"]):
+                omitidos += 1
+                continue
+            cur.execute(f"UPDATE {tabla} SET estado = 'pendiente' WHERE id = %s",
+                        (r["paciente_id"],))
+            actualizados += 1
+        conn.commit()
+    if actualizados:
+        auditoria_registrar(sesion.get("usuario", ""), "fallidos_marcados_pendientes",
+                            f"envios:{envio_id}", f"{actualizados} pacientes; {omitidos} omitidos")
+    return {"ok": True, "actualizados": actualizados, "omitidos": omitidos}
 
 
 def actualizar_respuesta(registro_id: int, body: EstadoPacienteIn,

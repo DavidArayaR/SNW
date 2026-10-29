@@ -2105,31 +2105,82 @@ class WhatsAppService:
                 with conectar(ambiente) as conn, conn.cursor() as cur:
                     cur.execute(
                         "UPDATE log_envios SET estado_whatsapp = CASE"
-                        " WHEN estado_whatsapp IN ('delivered','read') AND %s = 'sent'"
+                        " WHEN estado_whatsapp IN ('delivered','read') AND %s IN ('sent','failed')"
+                        " THEN estado_whatsapp"
+                        " WHEN estado_whatsapp = 'failed' AND %s = 'sent'"
                         " THEN estado_whatsapp"
                         " WHEN estado_whatsapp = 'read' AND %s = 'delivered'"
                         " THEN estado_whatsapp ELSE %s END,"
                         " entregado_en = COALESCE(entregado_en, %s)"
                         " WHERE whatsapp_message_id = %s" + filtro_emisor,
-                        (estado, estado, estado, entrega, message_id, *args_emisor),
+                        (estado, estado, estado, estado, entrega, message_id, *args_emisor),
                     )
                     if estado == "sent":
                         cur.execute(
                             "UPDATE log_envios SET estado_envio = 'enviado'"
-                            " WHERE whatsapp_message_id = %s" + filtro_emisor,
+                            " WHERE whatsapp_message_id = %s AND estado_whatsapp = 'sent'" + filtro_emisor,
                             (message_id, *args_emisor),
                         )
                     if estado == "failed":
                         cur.execute(
                             "UPDATE log_envios SET estado_envio = 'error',"
                             " descripcion_error = COALESCE(%s, descripcion_error)"
-                            " WHERE whatsapp_message_id = %s" + filtro_emisor,
+                            " WHERE whatsapp_message_id = %s AND estado_whatsapp = 'failed'" + filtro_emisor,
                             (detalle_error[:255] if detalle_error else None, message_id, *args_emisor)
                         )
+                        self._actualizar_paciente_por_entrega(cur, message_id, "failed", filtro_emisor, args_emisor)
+                    elif estado in ("delivered", "read"):
+                        cur.execute(
+                            "UPDATE log_envios SET estado_envio = 'enviado', descripcion_error = NULL"
+                            " WHERE whatsapp_message_id = %s AND estado_whatsapp IN ('delivered','read')"
+                            + filtro_emisor,
+                            (message_id, *args_emisor),
+                        )
+                        self._actualizar_paciente_por_entrega(cur, message_id, estado, filtro_emisor, args_emisor)
                     conn.commit()
             except Exception as e:
                 log_error(f"_actualizar_estado({ambiente}, msg={message_id}, estado={estado})", e)
                 continue
+
+    @staticmethod
+    def _actualizar_paciente_por_entrega(cur, message_id: str, estado: str,
+                                        filtro_emisor: str, args_emisor: tuple) -> None:
+        """Solo modifica al paciente del último intento, sin revivir bajas ni cambios manuales."""
+        cur.execute(
+            "SELECT le.id, le.paciente_id, le.numero_telefono, le.tabla_pacientes,"
+            " COALESCE(le.tabla_pacientes, e.tabla_pacientes, e.base_datos) AS tabla,"
+            " le.estado_whatsapp FROM log_envios le"
+            " LEFT JOIN envios e ON e.id = le.envio_id"
+            " WHERE le.whatsapp_message_id = %s" + filtro_emisor,
+            (message_id, *args_emisor),
+        )
+        for registro in cur.fetchall() or []:
+            tabla = registro.get("tabla")
+            paciente_id = registro.get("paciente_id")
+            if not paciente_id or not servicio_areas.tabla_valida(tabla) \
+                    or not servicio_areas.tabla_fisica_existe(tabla):
+                continue
+            if registro.get("estado_whatsapp") != estado:
+                continue
+            cur.execute(
+                "SELECT MAX(l.id) AS ultimo FROM log_envios l"
+                " LEFT JOIN envios e ON e.id = l.envio_id"
+                " WHERE l.paciente_id = %s"
+                " AND COALESCE(l.tabla_pacientes, e.tabla_pacientes, e.base_datos) = %s"
+                " AND l.plantilla_clave NOT IN ('respuesta','ajuste_manual')",
+                (paciente_id, tabla),
+            )
+            if (cur.fetchone() or {}).get("ultimo") != registro["id"]:
+                continue
+            cur.execute(f"SELECT telefono, estado, whatsapp_opt_out FROM {tabla} WHERE id = %s FOR UPDATE",
+                        (paciente_id,))
+            paciente = cur.fetchone()
+            if not paciente or paciente.get("whatsapp_opt_out") \
+                    or _normalizar_telefono(paciente.get("telefono") or "") != _normalizar_telefono(registro.get("numero_telefono") or ""):
+                continue
+            esperado, nuevo = ("enviado", "error") if estado == "failed" else ("error", "enviado")
+            if paciente.get("estado") == esperado:
+                cur.execute(f"UPDATE {tabla} SET estado = %s WHERE id = %s", (nuevo, paciente_id))
 
     @staticmethod
     def _es_baja(texto: str) -> bool:

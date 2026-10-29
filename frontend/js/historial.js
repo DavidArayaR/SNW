@@ -267,6 +267,9 @@ let ambienteDetalle = "produccion";
 let areaDetalle = null; // area del envío abierto (para sus mensajes)
 let detalleActual = null;
 let cargaDetalleSecuencia = 0;
+let filasDetalle = [];
+let filtroEntregaDetalle = "todos";
+const seleccionFallidos = new Set();
 let pacienteMsgActual = null; // { id, ambiente, interesado }
 
 let basesHist = [];
@@ -642,13 +645,41 @@ function abrirDetalle(envio, detalle) {
     ? `Pacientes del envío · ${plantilla} · ${centro}${envio?.numero_emisor ? ` (${envio.numero_emisor})` : ""}`
     : `Pacientes del envío · ${centro}`;
 
+  filasDetalle = detalle;
+  seleccionFallidos.clear();
+  $("#totalDetalleMensajes").textContent = detalle.length;
+  $("#totalDetalleFallidos").textContent = detalle.filter(noEntregado).length;
+  pintarDetalle();
+  $("#modalDetalle").hidden = false;
+}
+
+function noEntregado(d) {
+  return d.estado_whatsapp === "failed" || ["error", "numero_invalido"].includes(d.estado_envio);
+}
+
+function estadoEntrega(d) {
+  if (d.estado_whatsapp === "failed") return ["fallido", "No entregado"];
+  if (d.estado_envio === "numero_invalido") return ["fallido", "Número inválido"];
+  if (d.estado_envio === "error") return ["fallido", "Error de envío"];
+  if (d.estado_whatsapp === "read") return ["confirmado", "Leído"];
+  if (d.estado_whatsapp === "delivered") return ["confirmado", "Entregado"];
+  return ["pendiente", "Sin confirmación de entrega"];
+}
+
+function pintarDetalle() {
+  const envio = detalleActual?.envio;
   const body = $("#detalleBody");
   body.innerHTML = "";
+  document.querySelectorAll("[data-filtro-entrega]").forEach((boton) => {
+    const activo = boton.dataset.filtroEntrega === filtroEntregaDetalle;
+    boton.classList.toggle("activo", activo);
+    boton.setAttribute("aria-pressed", String(activo));
+  });
 
   // Columna extra "Detalle" con el botón «Ver mensajes».
   const thMsgs = $("#thDetalleMensajes");
   if (thMsgs) thMsgs.hidden = false;
-  const cols = 4;
+  const cols = 5;
 
   if ((envio?.estado || "") === "rechazado") {
     const c = (envio.comentario ?? "").trim();
@@ -657,15 +688,16 @@ function abrirDetalle(envio, detalle) {
       `Envío rechazado por el supervisor. No se envió ningún mensaje.` +
       (c ? `<br><span>Comentario: «${escaparHtml(c)}»</span>` : "") +
       `</td></tr>`;
-    $("#modalDetalle").hidden = false;
     return;
   }
 
-  if (!detalle.length) {
-    body.innerHTML = `<tr><td colspan="${cols}" style="text-align:center;color:#66757f;">Sin detalle individual registrado.</td></tr>`;
+  const visibles = filtroEntregaDetalle === "no_entregados" ? filasDetalle.filter(noEntregado) : filasDetalle;
+  $("#accionesFallidos").hidden = !filasDetalle.some((d) => d.puede_marcar_pendiente);
+  if (!visibles.length) {
+    body.innerHTML = `<tr><td colspan="${cols}" class="hist-entrega-vacio">${filtroEntregaDetalle === "no_entregados" ? "No hay mensajes no entregados en este envío." : "Sin detalle individual registrado."}</td></tr>`;
   } else {
     const pesoRespuesta = { respondio: 0, no_interesado: 1, baja: 2, pendiente: 3 };
-    const orden = [...detalle].sort(
+    const orden = [...visibles].sort(
       (x, y) => (pesoRespuesta[x.respuesta] ?? 4) - (pesoRespuesta[y.respuesta] ?? 4) || (x.id - y.id)
     );
     for (const d of orden) {
@@ -680,17 +712,38 @@ function abrirDetalle(envio, detalle) {
       const celdaMsgs = d.paciente_id && d.datos_completos
         ? `<td class="hist-col-msgs"><button type="button" class="btn btn--sm btn--ghost" data-mensajes="${d.paciente_id}">Ver mensajes</button></td>`
         : `<td class="hist-col-msgs">—</td>`;
+      const [claseEntrega, textoEntrega] = estadoEntrega(d);
+      const motivo = d.codigo_error === "131042"
+        ? "Error 131042: falta configurar la moneda de la cuenta de WhatsApp Business."
+        : (d.descripcion_error || (d.codigo_error ? `Error ${d.codigo_error}` : ""));
+      const motivoHtml = noEntregado(d) && motivo
+        ? `<div class="hist-entrega-motivo">${escaparHtml(motivo)}</div>` : "";
+      const mensajeHtml = d.datos_completos && d.mensaje_enviado && noEntregado(d)
+        ? `<details class="hist-entrega-mensaje"><summary>Ver mensaje enviado</summary><div>${escaparHtml(d.mensaje_enviado)}</div></details>` : "";
+      const seleccionHtml = d.puede_marcar_pendiente
+        ? `<label class="hist-entrega-seleccion"><input type="checkbox" data-registro-fallido="${Number(d.id)}" ${seleccionFallidos.has(Number(d.id)) ? "checked" : ""}> Seleccionar</label>` : "";
+      const telefono = d.datos_completos ? telefonoEnmascarado(d.numero_telefono) : (d.numero_telefono || "—");
       const tr = document.createElement("tr");
       tr.innerHTML =
-        `<td class="campo-nombre">${escaparHtml(inicialesPaciente(d.nombre_paciente))}${marcaInteres}</td>` +
+        `<td class="campo-nombre">${escaparHtml(inicialesPaciente(d.nombre_paciente))}${marcaInteres}<small class="hist-entrega-telefono">${escaparHtml(telefono)}</small></td>` +
         `<td><span class="respuesta-badge respuesta-${escaparHtml(r)}">${escaparHtml(respuestaLabel(r))}</span>${msgHtml}</td>` +
+        `<td><span class="hist-entrega-estado hist-entrega-estado--${claseEntrega}">${textoEntrega}</span>${motivoHtml}${mensajeHtml}${seleccionHtml}</td>` +
         `<td class="campo-fecha">${escaparHtml(d.fecha ?? "—")}</td>` +
         celdaMsgs;
       body.appendChild(tr);
     }
   }
+  actualizarSeleccionFallidos();
+}
 
-  $("#modalDetalle").hidden = false;
+function actualizarSeleccionFallidos() {
+  const total = seleccionFallidos.size;
+  const boton = $("#btnMarcarFallidosPendientes");
+  boton.disabled = total === 0;
+  boton.textContent = total ? `Marcar ${total} como pendiente${total === 1 ? "" : "s"}` : "Marcar como pendientes";
+  const elegibles = (filtroEntregaDetalle === "no_entregados" ? filasDetalle.filter(noEntregado) : filasDetalle)
+    .filter((d) => d.puede_marcar_pendiente);
+  $("#seleccionarFallidos").checked = elegibles.length > 0 && elegibles.every((d) => seleccionFallidos.has(Number(d.id)));
 }
 
 function respuestaLabel(r) {
@@ -700,12 +753,77 @@ function respuestaLabel(r) {
 function cerrarDetalle() {
   $("#modalDetalle").hidden = true;
   detalleActual = null;
+  filasDetalle = [];
+  filtroEntregaDetalle = "todos";
+  seleccionFallidos.clear();
+  $("#modalMarcarFallidos").hidden = true;
   ++cargaDetalleSecuencia;
   $("#btnActualizarDetalle").disabled = false;
   $("#btnActualizarDetalle i").classList.remove("fa-spin");
   $("#tablaDetallePacientes").classList.remove("detalle-actualizando");
   $("#tablaDetallePacientes").removeAttribute("aria-busy");
 }
+
+document.querySelectorAll("[data-filtro-entrega]").forEach((boton) => {
+  boton.addEventListener("click", () => {
+    filtroEntregaDetalle = boton.dataset.filtroEntrega;
+    seleccionFallidos.clear();
+    pintarDetalle();
+  });
+});
+
+$("#detalleBody").addEventListener("change", (e) => {
+  const entrada = e.target.closest("[data-registro-fallido]");
+  if (!entrada) return;
+  const id = Number(entrada.dataset.registroFallido);
+  if (entrada.checked) seleccionFallidos.add(id);
+  else seleccionFallidos.delete(id);
+  actualizarSeleccionFallidos();
+});
+
+$("#seleccionarFallidos").addEventListener("change", (e) => {
+  const visibles = filtroEntregaDetalle === "no_entregados" ? filasDetalle.filter(noEntregado) : filasDetalle;
+  visibles.filter((d) => d.puede_marcar_pendiente).forEach((d) => {
+    if (e.target.checked) seleccionFallidos.add(Number(d.id));
+    else seleccionFallidos.delete(Number(d.id));
+  });
+  pintarDetalle();
+});
+
+$("#btnMarcarFallidosPendientes").addEventListener("click", () => {
+  if (!seleccionFallidos.size) return;
+  $("#textoMarcarFallidos").textContent = `Se marcarán ${seleccionFallidos.size} paciente${seleccionFallidos.size === 1 ? "" : "s"} con error como pendiente${seleccionFallidos.size === 1 ? "" : "s"}.`;
+  $("#modalMarcarFallidos").hidden = false;
+});
+$("#btnCancelarMarcarFallidos").addEventListener("click", () => { $("#modalMarcarFallidos").hidden = true; });
+$("#modalMarcarFallidos").addEventListener("click", (e) => {
+  if (e.target === $("#modalMarcarFallidos")) $("#modalMarcarFallidos").hidden = true;
+});
+$("#btnConfirmarMarcarFallidos").addEventListener("click", async () => {
+  const objetivo = detalleActual;
+  if (!objetivo || !seleccionFallidos.size) return;
+  const boton = $("#btnConfirmarMarcarFallidos");
+  boton.disabled = true;
+  try {
+    const r = await fetch(`api/notificaciones/historial/${encodeURIComponent(objetivo.envioId)}/marcar-pendientes`, {
+      method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ registros: [...seleccionFallidos] }),
+    });
+    if (r.status === 401) { window.snwSesionExpirada(); return; }
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || "No se pudieron cambiar los estados.");
+    $("#modalMarcarFallidos").hidden = true;
+    seleccionFallidos.clear();
+    toast(data.actualizados
+      ? `${data.actualizados} paciente${data.actualizados === 1 ? "" : "s"} marcado${data.actualizados === 1 ? "" : "s"} como pendiente${data.actualizados === 1 ? "" : "s"}.${data.omitidos ? ` ${data.omitidos} no cambiaron porque ya no cumplen las condiciones.` : ""}`
+      : "Ningún paciente cambió: revisa si ya está pendiente, se dio de baja o recibió otro mensaje.", data.actualizados ? "ok" : "error");
+    await cargarDetalle();
+  } catch (err) {
+    toast(err.message || "No se pudieron cambiar los estados.", "error");
+  } finally {
+    boton.disabled = false;
+  }
+});
 
 $("#btnActualizarDetalle").addEventListener("click", cargarDetalle);
 $("#btnCerrarDetalle").addEventListener("click", cerrarDetalle);

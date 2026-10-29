@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
   <link rel="stylesheet" href="css/tema.css?v=tokens1">
   <link rel="stylesheet" href="css/styles.css?v=ritmo-historial1">
-  <link rel="stylesheet" href="css/componentes.css?v=estado-lotes1">
+  <link rel="stylesheet" href="css/componentes.css?v=fallidos-pendientes1">
   <link rel="stylesheet" href="css/layout.css?v=navcolor1">
   <link rel="stylesheet" href="css/refinamiento.css?v=merge-frontend1">
   <link rel="stylesheet" href="css/estilo-nuevo.css?v=1">
@@ -178,12 +178,21 @@
   <div id="modalDetalle" class="modal" hidden>
     <div class="modal__card modal__card--detalle" role="dialog" aria-modal="true">
       <h3 id="detalleTitulo">Pacientes del env&iacute;o</h3>
+      <div class="hist-entrega-filtros" role="group" aria-label="Filtrar mensajes por entrega">
+        <button type="button" class="hist-entrega-filtro activo" data-filtro-entrega="todos" aria-pressed="true">Todos <span id="totalDetalleMensajes">0</span></button>
+        <button type="button" class="hist-entrega-filtro" data-filtro-entrega="no_entregados" aria-pressed="false">No entregados <span id="totalDetalleFallidos">0</span></button>
+      </div>
+      <div id="accionesFallidos" class="hist-entrega-acciones" hidden>
+        <label><input type="checkbox" id="seleccionarFallidos"> Seleccionar los errores visibles</label>
+        <button type="button" class="btn btn--sm btn--ghost" id="btnMarcarFallidosPendientes" disabled>Marcar como pendientes</button>
+      </div>
       <div class="tabla-wrap" id="tablaDetallePacientes">
         <table>
           <thead>
             <tr>
               <th>Paciente</th>
               <th>Respuesta</th>
+              <th>Entrega</th>
               <th>Fecha</th>
               <th id="thDetalleMensajes">Detalle</th>
             </tr>
@@ -194,6 +203,18 @@
       <div class="modal__actions">
         <button type="button" class="btn btn--ghost" id="btnActualizarDetalle"><i class="fa-solid fa-rotate" aria-hidden="true"></i> Actualizar pacientes</button>
         <button type="button" class="btn btn--primary" id="btnCerrarDetalle">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalMarcarFallidos" class="modal" hidden>
+    <div class="modal__card modal__card--cancelar" role="dialog" aria-modal="true" aria-labelledby="tituloMarcarFallidos">
+      <h3 id="tituloMarcarFallidos">Marcar pacientes como pendientes</h3>
+      <p id="textoMarcarFallidos"></p>
+      <p class="modal__nota-secundaria">Esta acción no reenvía mensajes. Los pacientes quedarán disponibles para un nuevo envío, siempre que no se hayan dado de baja.</p>
+      <div class="modal__actions modal__actions--centradas">
+        <button type="button" class="btn btn--ghost" id="btnCancelarMarcarFallidos">Volver</button>
+        <button type="button" class="btn btn--primary" id="btnConfirmarMarcarFallidos">Sí, marcar pendientes</button>
       </div>
     </div>
   </div>
@@ -247,7 +268,7 @@
 
   <script src="js/layout.js?v=permisos-acciones1"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/historial.js?v=estado-lotes1"></script>
+  <script src="js/historial.js?v=fallidos-pendientes1"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>

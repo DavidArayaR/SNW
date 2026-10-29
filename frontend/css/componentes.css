@@ -235,6 +235,32 @@
   flex-direction: column;
   overflow: hidden;
 }
+#modalDetalle .modal__card--detalle { max-width: min(920px, 96vw); }
+.hist-entrega-filtros { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 14px; }
+.hist-entrega-filtro {
+  border: 1px solid var(--borde); border-radius: 999px;
+  padding: 7px 12px; background: var(--surface-2); color: var(--texto);
+  font: inherit; font-size: .84rem; font-weight: 650; cursor: pointer;
+  transition: border-color .18s ease, color .18s ease, background .18s ease;
+}
+.hist-entrega-filtro:hover { border-color: var(--brand-tint-fg); color: var(--brand-tint-fg); }
+.hist-entrega-filtro.activo { background: var(--brand-tint); border-color: var(--brand-tint-bd); color: var(--brand-tint-fg); }
+.hist-entrega-filtro span { margin-left: 4px; font-variant-numeric: tabular-nums; }
+.hist-entrega-acciones { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 12px; padding: 9px 11px; border: 1px solid var(--borde); border-radius: 10px; background: var(--surface-2); }
+.hist-entrega-acciones[hidden] { display: none; }
+.hist-entrega-acciones label, .hist-entrega-seleccion { display: inline-flex; align-items: center; gap: 6px; color: var(--texto); font-size: .8rem; cursor: pointer; }
+.hist-entrega-acciones input, .hist-entrega-seleccion input { accent-color: var(--btn-primary-bg); cursor: pointer; }
+.hist-entrega-seleccion { margin-top: 7px; }
+.hist-entrega-estado { display: inline-block; border-radius: 999px; padding: 3px 9px; font-size: .77rem; font-weight: 700; white-space: nowrap; }
+.hist-entrega-estado--fallido { background: var(--danger-bg); color: var(--danger-fg); border: 1px solid var(--danger-bd); }
+.hist-entrega-estado--confirmado { background: var(--ok-bg); color: var(--ok-fg); border: 1px solid var(--ok-bd); }
+.hist-entrega-estado--pendiente { background: var(--neutral-bg); color: var(--neutral-fg); border: 1px solid var(--neutral-bd); }
+.hist-entrega-motivo { margin-top: 6px; max-width: 280px; color: var(--danger-fg); font-size: .78rem; line-height: 1.4; overflow-wrap: anywhere; }
+.hist-entrega-mensaje { margin-top: 7px; max-width: 280px; font-size: .78rem; }
+.hist-entrega-mensaje summary { cursor: pointer; color: var(--brand-tint-fg); font-weight: 650; }
+.hist-entrega-mensaje div { margin-top: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.hist-entrega-telefono { display: block; margin-top: 3px; color: var(--texto-suave); font-size: .75rem; white-space: nowrap; }
+.hist-entrega-vacio { text-align: center; color: var(--texto-suave); padding: 20px 10px; }
 .modal__card--detalle .tabla-wrap {
   overflow: auto;
   flex: 1;
