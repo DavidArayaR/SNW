@@ -1,17 +1,19 @@
 import hashlib
 import hmac
+import asyncio
 import json
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
+from starlette.requests import ClientDisconnect
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
 from main import app
-from whatsapp_webhook import firma_meta_valida
+from whatsapp_webhook import _recibir_evento, firma_meta_valida
 
 
 class FirmaWebhookTests(unittest.TestCase):
@@ -26,6 +28,14 @@ class FirmaWebhookTests(unittest.TestCase):
         self.assertTrue(firma_meta_valida(self.cuerpo, self.firma, self.secreto))
         self.assertFalse(firma_meta_valida(self.cuerpo + b" ", self.firma, self.secreto))
         self.assertFalse(firma_meta_valida(self.cuerpo, "sha256=incorrecta", self.secreto))
+
+    def test_cliente_desconectado_no_procesa_evento_incompleto(self):
+        request = AsyncMock()
+        request.body.side_effect = ClientDisconnect()
+        with patch("whatsapp_webhook.handler.procesar") as procesar:
+            respuesta = asyncio.run(_recibir_evento(request, secreto=self.secreto))
+        self.assertEqual(respuesta.status_code, 204)
+        procesar.assert_not_called()
 
     def test_sin_secreto_no_se_procesa(self):
         with patch.dict("os.environ", {"WA_APP_SECRET": self.secreto}), \

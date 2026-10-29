@@ -11,7 +11,8 @@ import hmac
 import re
 
 from fastapi import APIRouter, Query, Request
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
+from starlette.requests import ClientDisconnect
 
 from db import config_all, config_get, log_error
 from whatsapp_channels import catalogo_centros, listar_canales
@@ -132,7 +133,12 @@ async def _recibir_evento(request: Request, *, secreto: str | None = None,
         log_error("webhook: falta wa_app_secret en configuración; evento no procesado")
         return JSONResponse({"detail": "Webhook no configurado"}, status_code=503)
 
-    cuerpo = await request.body()
+    try:
+        cuerpo = await request.body()
+    except ClientDisconnect:
+        # El emisor cortó la conexión antes de entregar el cuerpo completo.
+        # No verificar una firma parcial ni procesar un evento incompleto.
+        return Response(status_code=204)
     if not firma_meta_valida(
         cuerpo, request.headers.get("X-Hub-Signature-256", ""), secreto
     ):
