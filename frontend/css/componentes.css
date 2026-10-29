@@ -626,7 +626,10 @@ tbody tr:last-child td { border-bottom: none; }
   letter-spacing: .02em;
 }
 .estado-envio--completado { background: var(--ok-bg); color: var(--ok-fg); border: 1px solid var(--ok-bd); }
+.estado-envio--en_proceso, .estado-envio--pendiente { background: var(--info-bg); color: var(--info-fg); border: 1px solid var(--info-bd); }
 .estado-envio--en_progreso { background: var(--info-bg); color: var(--info-fg); border: 1px solid var(--info-bd); }
+.estado-envio--error { background: var(--danger-bg); color: var(--danger-fg); border: 1px solid var(--danger-bd); }
+.estado-envio--sin_confirmar { background: var(--warn-bg); color: var(--warn-fg); border: 1px solid var(--warn-bd); }
 .estado-envio--cancelado { background: var(--neutral-bg); color: var(--neutral-fg); border: 1px solid var(--neutral-bd); }
 .estado-envio--rechazado { background: var(--danger-bg); color: var(--danger-fg); border: 1px solid var(--danger-bd); }
 

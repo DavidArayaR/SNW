@@ -48,10 +48,46 @@ class DetencionSeguraTests(unittest.TestCase):
         self.assertEqual(trabajo["fallidos"], 0)
         paciente.assert_not_called()
         historial.assert_not_called()
-        batch.assert_called_once_with(123, "desarrollo", estado="error")
+        batch.assert_called_once_with(123, "desarrollo", enviados=0, fallidos=0,
+                                      invalidos=None, estado="error")
 
     def test_no_avanza_tras_resultado_incierto(self):
         self._verificar_detencion(ResultadoEnvioIncierto("sin respuesta"))
 
     def test_no_avanza_si_limitador_no_puede_reservar(self):
         self._verificar_detencion(FalloInfraestructuraDespacho("base caída"))
+
+    def test_error_despues_de_un_envio_conserva_el_conteo(self):
+        canal = MagicMock()
+        canal.nombre = "simulado"
+        canal.disponible.return_value = True
+        canal.enviar.side_effect = [(True, "wamid-prueba", None),
+                                   FalloInfraestructuraDespacho("base caída")]
+        trabajo = {
+            "ambiente": "desarrollo", "tabla_area": None, "area_id": None,
+            "emisor": {"codigo": "SMPT", "phoneNumberId": "id-prueba",
+                       "phoneNumber": "+56900000001"},
+            "plantilla": {"clave": "prueba"}, "envio_id": 123,
+            "destinatarios": [
+                {"id": 1, "nombre": "Uno", "telefono": "56900000001", "mensaje": "prueba"},
+                {"id": 2, "nombre": "Dos", "telefono": "56900000002", "mensaje": "prueba"},
+            ],
+            "enviados": 0, "fallidos": 0, "invalidos": 1, "errores": [],
+            "estado": "en_proceso", "actual": "", "detalle": "", "pausado": False,
+        }
+        with patch.dict(main.JOBS, {"test_parcial": trabajo}), \
+             patch.object(main, "leer_config", return_value={}), \
+             patch.object(main, "_emisor_vigente", return_value=True), \
+             patch.object(main, "obtener_canal", return_value=canal), \
+             patch.object(main, "_restriccion_envio_desarrollo", return_value=None), \
+             patch.object(main, "esta_suprimido", return_value=False), \
+             patch.object(main, "_paciente_habilitado_antes_de_enviar", return_value=True), \
+             patch.object(main, "actualizar_envio_batch") as batch, \
+             patch.object(main, "actualizar_estado_paciente"), \
+             patch.object(main, "limpiar_interes_paciente"), \
+             patch.object(main, "registrar_historial"), \
+             patch.object(main, "log_error"):
+            main._procesar_job("test_parcial")
+        self.assertEqual(trabajo["estado"], "error")
+        batch.assert_called_once_with(123, "desarrollo", enviados=1, fallidos=0,
+                                      invalidos=1, estado="error")

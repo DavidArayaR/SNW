@@ -447,6 +447,39 @@ def _migrar_ids_globales_smpt(cur) -> None:
             cur.execute("UPDATE configuracion SET valor = %s WHERE clave = %s", (valor, nueva))
         cur.execute("DELETE FROM configuracion WHERE clave = %s", (vieja,))
 
+
+def _reconciliar_lotes_sin_conteos(cur) -> None:
+    """Recupera lotes antiguos con resultados registrados y resumen en cero."""
+    cur.execute(
+        "SELECT id, total_pacientes FROM envios WHERE estado = 'completado'"
+        " AND total_pacientes > 0 AND enviados = 0 AND fallidos = 0 AND invalidos = 0"
+        " AND fecha_hora < DATE_SUB(NOW(), INTERVAL 30 MINUTE)"
+        " ORDER BY id DESC LIMIT 500"
+    )
+    candidatos = cur.fetchall() or []
+    for lote in candidatos:
+        cur.execute(
+            "SELECT COALESCE(SUM(estado_envio = 'enviado'), 0) AS enviados,"
+            " COALESCE(SUM(estado_envio = 'error'), 0) AS fallidos,"
+            " COALESCE(SUM(estado_envio = 'numero_invalido'), 0) AS invalidos"
+            " FROM log_envios WHERE envio_id = %s", (lote["id"],)
+        )
+        conteos = cur.fetchone() or {}
+        enviados = int(conteos.get("enviados") or 0)
+        fallidos = int(conteos.get("fallidos") or 0)
+        invalidos = int(conteos.get("invalidos") or 0)
+        registrados = enviados + fallidos + invalidos
+        if not (enviados or fallidos):
+            continue  # Inválidos previos a una aprobación no prueban que el envío comenzara.
+        estado = ("error" if registrados < int(lote["total_pacientes"])
+                  or (enviados == 0 and fallidos > 0) else "completado")
+        cur.execute(
+            "UPDATE envios SET enviados = %s, fallidos = %s, invalidos = %s, estado = %s"
+            " WHERE id = %s AND estado = 'completado'"
+            " AND enviados = 0 AND fallidos = 0 AND invalidos = 0",
+            (enviados, fallidos, invalidos, estado, lote["id"]),
+        )
+
 _config_cache: dict | None = None
 _config_cache_cargado: float = 0.0
 
@@ -1226,10 +1259,12 @@ def asegurar_tabla_config() -> None:
             e = cur.fetchone() or {}
             if e.get("tabla"):
                 if any(valor not in (e.get("estado_tipo") or "")
-                       for valor in ("'completado'", "'cancelado'", "'rechazado'", "'error'")):
+                       for valor in ("'pendiente'", "'en_proceso'", "'completado'",
+                                     "'cancelado'", "'rechazado'", "'error'")):
                     cur.execute(
                         "ALTER TABLE envios MODIFY COLUMN estado"
-                        " ENUM('completado','cancelado','rechazado','error') NOT NULL DEFAULT 'completado'"
+                        " ENUM('pendiente','en_proceso','completado','cancelado','rechazado','error')"
+                        " NOT NULL DEFAULT 'en_proceso'"
                     )
                 if not e.get("tiene_com"):
                     cur.execute("ALTER TABLE envios ADD COLUMN comentario VARCHAR(255) NULL")
@@ -1243,6 +1278,10 @@ def asegurar_tabla_config() -> None:
                 if not e.get("tiene_prog"):
                     cur.execute("ALTER TABLE envios ADD COLUMN programado_id INT NULL")
                     cur.execute("ALTER TABLE envios ADD INDEX idx_envios_programado (programado_id)")
+                cur.execute("SELECT COUNT(*) AS n FROM information_schema.TABLES"
+                            " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'log_envios'")
+                if (cur.fetchone() or {}).get("n"):
+                    _reconciliar_lotes_sin_conteos(cur)
 
             # (uno o varios, separados por coma). Se traspasa una vez.
             cur.execute("SELECT clave, valor FROM configuracion WHERE clave IN ('call_center_numero', 'call_center_numeros')")

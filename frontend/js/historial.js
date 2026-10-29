@@ -552,11 +552,13 @@ function render() {
     const enviados = r.enviados ?? 0;
     const fallidos = r.fallidos ?? 0;
     const invalidos = r.invalidos ?? 0;
-    const estado = r.estado || "completado";
+    const estado = r.estado || "desconocido";
     const estadoLabel =
       { cancelado: "Cancelado", rechazado: "Rechazado", pendiente: "Pendiente",
         aprobado: "Aprobado", enviando: "Enviando", enviado: "Enviado",
-        en_progreso: "En progreso" }[estado] || "Completado";
+        en_proceso: "En progreso", en_progreso: "En progreso",
+        completado: "Completado", error: "Error",
+        sin_confirmar: "Sin confirmar" }[estado] || "Sin estado";
     const comentario = (r.comentario ?? "").trim();
     const notaRechazo = estado === "rechazado"
       ? `<div class="hist-rechazo">Rechazado por el supervisor${comentario ? `: «${escaparHtml(comentario)}»` : " (sin comentario)"}</div>`

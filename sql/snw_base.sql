@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS envios (
   enviados INT DEFAULT 0,
   fallidos INT DEFAULT 0,
   invalidos INT DEFAULT 0,
-  estado ENUM('completado','cancelado','rechazado','error') NOT NULL DEFAULT 'completado',
+  estado ENUM('pendiente','en_proceso','completado','cancelado','rechazado','error') NOT NULL DEFAULT 'en_proceso',
   comentario VARCHAR(255) DEFAULT NULL,
   area_id INT DEFAULT NULL,
   tabla_pacientes VARCHAR(64) DEFAULT NULL,

@@ -26,6 +26,7 @@ import smtplib
 import ssl
 
 import httpx
+import pymysql
 from fastapi import (BackgroundTasks, Depends, FastAPI, File, Form, HTTPException,
                      Query, Request, UploadFile, status)
 from fastapi.responses import HTMLResponse, PlainTextResponse, FileResponse, Response
@@ -5966,7 +5967,7 @@ def registrar_historial(paciente_id, nombre, telefono, clave_plantilla, mensaje,
 
 def crear_envio_batch(base_datos, plantilla_clave, plantilla_nombre, total, ambiente, usuario: str = "",
                       area_id=None, tabla_pacientes=None, programado_id=None,
-                      emisor: dict | None = None) -> int | None:
+                      emisor: dict | None = None, estado: str = "en_proceso") -> int | None:
     try:
         with conectar(ambiente) as conn, conn.cursor() as cur:
             cols = columnas_tabla("envios", ambiente)
@@ -5987,8 +5988,9 @@ def crear_envio_batch(base_datos, plantilla_clave, plantilla_nombre, total, ambi
             cur.execute(
                 "INSERT INTO envios (base_datos, plantilla_clave, plantilla_nombre, total_pacientes, estado, usuario"
                 f"{extra_col})"
-                " VALUES (%s, %s, %s, %s, 'completado', %s" + (f", {placeholders})" if extra_val else ")"),
-                (base_datos, plantilla_clave, plantilla_nombre, total, (usuario or "").strip().lower() or None,
+                " VALUES (%s, %s, %s, %s, %s, %s" + (f", {placeholders})" if extra_val else ")"),
+                (base_datos, plantilla_clave, plantilla_nombre, total, estado,
+                 (usuario or "").strip().lower() or None,
                  *extra_val),
             )
             conn.commit()
@@ -5998,26 +6000,32 @@ def crear_envio_batch(base_datos, plantilla_clave, plantilla_nombre, total, ambi
         return None
 
 
-def actualizar_envio_batch(envio_id, ambiente, enviados=0, fallidos=0, invalidos=0, estado=None) -> None:
+def actualizar_envio_batch(envio_id, ambiente, enviados=None, fallidos=None,
+                          invalidos=None, estado=None) -> None:
     if envio_id is None:
         return
-    try:
-        with conectar(ambiente) as conn, conn.cursor() as cur:
-            if estado:
-                cur.execute(
-                    "UPDATE envios SET enviados = enviados + %s, fallidos = fallidos + %s,"
-                    " invalidos = invalidos + %s, estado = %s WHERE id = %s",
-                    (enviados, fallidos, invalidos, estado, envio_id),
-                )
-            else:
-                cur.execute(
-                    "UPDATE envios SET enviados = enviados + %s, fallidos = fallidos + %s,"
-                    " invalidos = invalidos + %s WHERE id = %s",
-                    (enviados, fallidos, invalidos, envio_id),
-                )
-            conn.commit()
-    except Exception as e:
-        log_error("envío: no se pudo actualizar batch", e)
+    cambios = [(clave, valor) for clave, valor in (
+        ("enviados", enviados), ("fallidos", fallidos),
+        ("invalidos", invalidos), ("estado", estado)) if valor is not None]
+    if not cambios:
+        return
+    sql = "UPDATE envios SET " + ", ".join(f"{clave} = %s" for clave, _ in cambios) + " WHERE id = %s"
+    args = (*(valor for _, valor in cambios), envio_id)
+    for intento in range(3):
+        try:
+            with conectar(ambiente) as conn, conn.cursor() as cur:
+                cur.execute(sql, args)
+                conn.commit()
+            return
+        except pymysql.err.OperationalError as e:
+            if e.args[0] == 1213 and intento < 2:
+                time.sleep(0.05 * (intento + 1))
+                continue
+            log_error("envío: no se pudo actualizar batch", e)
+            return
+        except Exception as e:
+            log_error("envío: no se pudo actualizar batch", e)
+            return
 
 
 def procesar_job(job_id: str) -> None:
@@ -6032,6 +6040,10 @@ def procesar_job(job_id: str) -> None:
             if job is not None:
                 job["estado"] = "error"
                 job["detalle"] = f"Error interno del envío: {e}"
+                actualizar_envio_batch(job.get("envio_id"), job.get("ambiente"),
+                                      enviados=job.get("enviados", 0),
+                                      fallidos=job.get("fallidos", 0),
+                                      invalidos=job.get("invalidos"), estado="error")
 
 
 def _exigir_centro_envio(codigo: str | None) -> dict:
@@ -6234,10 +6246,10 @@ def _procesar_job_api_concurrente(job_id: str, canal: MotorApiOficial) -> None:
         job["estado"] = "cancelado"
         job["detalle"] = job.get("cancelado_motivo") or "Cancelado por el usuario"
     else:
-        job["estado"] = "completado"
+        job["estado"] = "error" if job["fallidos"] and not job["enviados"] else "completado"
     actualizar_envio_batch(envio_id, amb, enviados=job["enviados"],
-                          fallidos=job["fallidos"],
-                          estado=job["estado"] if job["estado"] != "completado" else None)
+                          fallidos=job["fallidos"], invalidos=job.get("invalidos"),
+                          estado=job["estado"])
 
 
 def _procesar_job(job_id: str) -> None:
@@ -6266,7 +6278,7 @@ def _procesar_job(job_id: str) -> None:
                                 f"Canal no disponible: {canal.nombre if canal else 'desconocido'}",
                                 ambiente=amb, envio_id=envio_id,
                                 area_id=esp_id, tabla_pacientes=t_esp, emisor=emisor)
-        actualizar_envio_batch(envio_id, amb, fallidos=len(job["destinatarios"]))
+        actualizar_envio_batch(envio_id, amb, fallidos=len(job["destinatarios"]), estado="error")
         job["estado"] = "error"
         job["detalle"] = f"Canal de envío no disponible ({cfg.get('metodo_envio')})"
         return
@@ -6368,7 +6380,6 @@ def _procesar_job(job_id: str) -> None:
         if not _emisor_vigente(emisor):
             job["estado"] = "error"
             job["detalle"] = "El número emisor cambió durante el envío. Se detuvo el lote."
-            actualizar_envio_batch(envio_id, amb, estado="error")
             break
         try:
             resultado = canal.enviar(d["telefono"], d["mensaje"], plantilla=plantilla_datos, variables=d.get("variables"))
@@ -6386,7 +6397,6 @@ def _procesar_job(job_id: str) -> None:
             job["actual"] = ""
             job["detalle"] = ("Envío detenido: Meta pudo aceptar un mensaje cuya respuesta "
                               "no se recibió. Revisa el historial de Meta antes de reintentar.")
-            actualizar_envio_batch(envio_id, amb, estado="error")
             break
         except FalloInfraestructuraDespacho as e:
             log_error(f"procesar_job {job_id}: infraestructura de despacho", e)
@@ -6394,7 +6404,6 @@ def _procesar_job(job_id: str) -> None:
             job["actual"] = ""
             job["detalle"] = ("Envío detenido: no se pudo verificar el canal o su capacidad. "
                               "Revisa el servidor antes de volver a iniciar el lote.")
-            actualizar_envio_batch(envio_id, amb, estado="error")
             break
         except Exception as e:
             log_error(f"procesar_job {job_id}: fallo enviando", e)
@@ -6432,8 +6441,10 @@ def _procesar_job(job_id: str) -> None:
 
     job["actual"] = ""
     if job.get("estado") not in ("cancelado", "error"):
-        job["estado"] = "completado"
-        actualizar_envio_batch(envio_id, amb, enviados=job["enviados"], fallidos=job["fallidos"])
+        job["estado"] = "error" if job["fallidos"] and not job["enviados"] else "completado"
+    actualizar_envio_batch(envio_id, amb, enviados=job["enviados"],
+                          fallidos=job["fallidos"], invalidos=job.get("invalidos"),
+                          estado=job["estado"])
 
 
 def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
@@ -6658,7 +6669,8 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
                                          usuario=sesion.get("usuario", ""),
                                          area_id=(esp["id"] if esp else None),
                                          tabla_pacientes=t_esp,
-                                         programado_id=sesion.get("programado_id"), emisor=emisor)
+                                         programado_id=sesion.get("programado_id"), emisor=emisor,
+                                         estado="error")
             if envio_id:
                 actualizar_envio_batch(envio_id, amb, invalidos=len(rechazados))
                 for r in rechazados:
@@ -6679,7 +6691,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
                                      len(destinatarios) + len(rechazados), amb,
                                      usuario=sesion.get("usuario", ""),
                                      area_id=(esp["id"] if esp else None),
-                                     tabla_pacientes=t_esp, emisor=emisor)
+                                     tabla_pacientes=t_esp, emisor=emisor, estado="pendiente")
         PENDIENTES[token] = {
             "emisor": emisor,
             "ambiente": amb,
@@ -6761,6 +6773,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
             "estado": "en_proceso",
             "total": len(destinatarios),
             "enviados": 0,
+            "invalidos": len(rechazados),
             "aceptados_ultimos": [],
             "fallidos": 0,
             "actual": "",
@@ -6911,6 +6924,7 @@ def confirmar_envio(token: str, background_tasks: BackgroundTasks):
             "estado": "en_proceso",
             "total": len(pend["destinatarios"]),
             "enviados": 0,
+            "invalidos": len(pend.get("rechazados") or []),
             "aceptados_ultimos": [],
             "fallidos": 0,
             "actual": "",
@@ -6927,6 +6941,7 @@ def confirmar_envio(token: str, background_tasks: BackgroundTasks):
             "usuario": pend.get("usuario", ""),
             "nombre_enviador": pend.get("nombre_enviador", "Usuario"),
         }
+    actualizar_envio_batch(pend.get("envio_id"), pend["ambiente"], estado="en_proceso")
     background_tasks.add_task(procesar_job, job_id)
     return HTMLResponse(f"""
 <html><head><meta charset='utf-8'><title>Envío confirmado</title></head>
@@ -8494,9 +8509,10 @@ def _presentar_historial(filas: list[dict], sesion: dict, limite: int | None = N
     if limite is not None:
         filas = filas[:limite]
     with JOBS_LOCK:
-        vivos = {j.get("envio_id"): (jid, j.get("estado"))
-                 for jid, j in JOBS.items()
-                 if j.get("estado") in ESTADOS_ENVIO_EN_CURSO and j.get("envio_id")}
+        trabajos = {j.get("envio_id"): (jid, dict(j))
+                    for jid, j in JOBS.items() if j.get("envio_id")}
+    pendientes = {p.get("envio_id") for p in PENDIENTES.values()
+                  if p.get("estado") == "pendiente" and p.get("envio_id")}
     for f in filas:
         f["centro"] = catalogo_centros(incluir_inactivas=True).get(f.get("centro_codigo"), "Emisor histórico no identificado")
         orden = f.pop("_orden", None)
@@ -8524,16 +8540,27 @@ def _presentar_historial(filas: list[dict], sesion: dict, limite: int | None = N
         else:
             f["fecha"] = orden.strftime("%d-%m-%Y %H:%M") if orden else "—"
             f.pop("fecha_hora", None)
-            jid, _jest = vivos.get(f["id"], (None, None))
-            if jid:
+            jid, job = trabajos.get(f["id"], (None, None))
+            if job and job.get("estado") in ESTADOS_ENVIO_EN_CURSO:
                 # Lote con job activo: se muestra En progreso (no Completado).
                 f["estado"] = "en_progreso"
+                for cuenta in ("enviados", "fallidos", "invalidos"):
+                    f[cuenta] = job.get(cuenta, f.get(cuenta, 0))
                 f["job_id"] = jid
-                job = JOBS.get(jid)
                 f["puede_cancelar"] = bool(job and _puede_controlar_job(sesion, job))
             else:
                 f["job_id"] = ""
                 f["puede_cancelar"] = False
+                if job and job.get("estado") in ("error", "cancelado", "completado"):
+                    f["estado"] = job["estado"]
+                    for cuenta in ("enviados", "fallidos", "invalidos"):
+                        f[cuenta] = job.get(cuenta, f.get(cuenta, 0))
+                elif f.get("estado") == "completado" and f.get("total_pacientes", 0) > 0 \
+                        and sum(int(f.get(c) or 0) for c in ("enviados", "fallidos", "invalidos")) \
+                        < int(f["total_pacientes"]):
+                    # Lote antiguo sin actualización final: no presentar un
+                    # resultado exitoso que la base no puede demostrar.
+                    f["estado"] = "pendiente" if f["id"] in pendientes else "sin_confirmar"
     return filas
 
 
