@@ -1225,10 +1225,11 @@ def asegurar_tabla_config() -> None:
             )
             e = cur.fetchone() or {}
             if e.get("tabla"):
-                if "'rechazado'" not in (e.get("estado_tipo") or ""):
+                if any(valor not in (e.get("estado_tipo") or "")
+                       for valor in ("'completado'", "'cancelado'", "'rechazado'", "'error'")):
                     cur.execute(
                         "ALTER TABLE envios MODIFY COLUMN estado"
-                        " ENUM('completado','cancelado','rechazado') NOT NULL DEFAULT 'completado'"
+                        " ENUM('completado','cancelado','rechazado','error') NOT NULL DEFAULT 'completado'"
                     )
                 if not e.get("tiene_com"):
                     cur.execute("ALTER TABLE envios ADD COLUMN comentario VARCHAR(255) NULL")

@@ -7,6 +7,8 @@ import uuid
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pymysql
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
 from db import conectar
@@ -28,6 +30,26 @@ def configuracion():
 
 
 class PoliticaDespachoTests(unittest.TestCase):
+    def test_deadlock_de_reserva_se_reintenta_antes_de_enviar(self):
+        deadlock = pymysql.err.OperationalError(1213, "Deadlock")
+        with patch.object(dispatch, "politica", return_value={"mps": 10}), \
+                patch.object(dispatch, "huella_pareja", return_value="huella"), \
+                patch.object(dispatch, "_reservar_una_vez", side_effect=[deadlock, 0]) as intento, \
+                patch.object(dispatch.time, "sleep") as espera:
+            self.assertEqual(reservar("emisor", "destinatario"), 0)
+        self.assertEqual(intento.call_count, 2)
+        espera.assert_called_once()
+
+    def test_deadlock_persistente_detiene_la_reserva(self):
+        deadlock = pymysql.err.OperationalError(1213, "Deadlock")
+        with patch.object(dispatch, "politica", return_value={"mps": 10}), \
+                patch.object(dispatch, "huella_pareja", return_value="huella"), \
+                patch.object(dispatch, "_reservar_una_vez", side_effect=deadlock) as intento, \
+                patch.object(dispatch.time, "sleep"):
+            with self.assertRaises(pymysql.err.OperationalError):
+                reservar("emisor", "destinatario")
+        self.assertEqual(intento.call_count, 3)
+
     def test_config_actual_lee_token_clinica_sin_requerir_default(self):
         conexion = MagicMock()
         conexion.__enter__.return_value = conexion

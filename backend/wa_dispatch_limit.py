@@ -6,10 +6,13 @@ abierta durante la llamada HTTP. Si la base falla, el envío real falla cerrado.
 
 import hashlib
 import math
+import random
 import re
 import threading
 import time
 from datetime import datetime
+
+import pymysql
 
 from db import CONFIG_DEFAULTS, conectar
 from whatsapp_channels import CENTROS, resolver_phone_id
@@ -108,6 +111,17 @@ def reservar(phone_id: str, destinatario: str, *, cfg: dict | None = None) -> fl
         raise ValueError("Falta destinatario para limitar el envío")
     reglas = politica(phone_id, cfg)
     huella = huella_pareja(phone_id, destinatario)
+    for intento in range(3):
+        try:
+            return _reservar_una_vez(phone_id, huella, reglas)
+        except pymysql.err.OperationalError as exc:
+            if exc.args[0] != 1213 or intento == 2:
+                raise
+            # El deadlock revierte la transacción; todavía no se llamó a Meta.
+            time.sleep(random.uniform(0.02, 0.08) * (intento + 1))
+
+
+def _reservar_una_vez(phone_id: str, huella: str, reglas: dict) -> float:
     with conectar() as conn, conn.cursor() as cur:
         cur.execute("INSERT IGNORE INTO wa_despacho_canales (phone_id) VALUES (%s)", (phone_id,))
         cur.execute("SELECT UTC_TIMESTAMP(6) AS ahora")
