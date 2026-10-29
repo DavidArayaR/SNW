@@ -9,6 +9,7 @@ import supresion
 import whatsapp_service
 import servicio_areas
 import main
+import paciente_reagendar
 from motor_envio import MotorSimulado
 
 
@@ -20,6 +21,10 @@ class SupresionTests(unittest.TestCase):
         p = patch.object(whatsapp_service.WhatsAppService, "_guardar_corpus_respuesta")
         p.start()
         self.addCleanup(p.stop)
+        # Los tests de supresión no dependen de la base de reagendamientos.
+        p_reagendar = patch.object(paciente_reagendar, "marcar_opt_out_reagendar")
+        p_reagendar.start()
+        self.addCleanup(p_reagendar.stop)
 
     def _valor(self, texto):
         return {"contacts": [{"wa_id": TEL.lstrip("+")}],
@@ -313,7 +318,7 @@ class SupresionTests(unittest.TestCase):
             self.assertTrue(supresion._bloquear_en_meta(TEL, "id-ficticio"))
         self.assertIn("/id-ficticio/block_users", api.post.call_args.args[0])
         self.assertEqual(api.post.call_args.kwargs["json"]["block_users"],
-                         [{"user": TEL.lstrip("+")}])
+                         [{"user": TEL}])
 
     def test_limpieza_conserva_fila_de_costo_sin_datos_completos(self):
         cur = MagicMock()
@@ -429,17 +434,18 @@ class SupresionTests(unittest.TestCase):
         self.assertTrue(any("DELETE FROM programado_destinatarios WHERE" in c.args[0]
                             for c in cur.execute.call_args_list))
 
-    def test_meta_sin_confirmar_mantiene_pendiente_y_no_borra(self):
+    def test_meta_sin_confirmar_borra_localmente_y_no_reintenta(self):
         conexion = MagicMock()
         cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
         cur.rowcount = 1
         cur.fetchone.return_value = {"telefono_pendiente": TEL, "wa_phone_id": "id-test"}
         with patch("supresion.conectar", return_value=conexion), \
-                patch("supresion._bloquear_en_meta", return_value=False), \
-                patch("supresion._limpiar_datos") as limpiar:
-            self.assertFalse(supresion.procesar_pendiente("x" * 64))
-        limpiar.assert_not_called()
-        self.assertTrue(any("SET estado = 'pendiente'" in c.args[0]
+                patch("supresion._bloquear_en_meta", return_value=False) as bloquear, \
+                patch("supresion._limpiar_datos", return_value=(2, 3)) as limpiar:
+            self.assertTrue(supresion.procesar_pendiente("x" * 64))
+        bloquear.assert_called_once_with(TEL, "id-test")
+        limpiar.assert_called_once_with(cur, TEL)
+        self.assertTrue(any("telefono_pendiente = NULL" in c.args[0]
                             for c in cur.execute.call_args_list))
 
     def test_meta_confirmado_borra_y_descarta_numero_pendiente(self):
@@ -450,6 +456,33 @@ class SupresionTests(unittest.TestCase):
         with patch("supresion.conectar", return_value=conexion), \
                 patch("supresion._bloquear_en_meta", return_value=True), \
                 patch("supresion._limpiar_datos", return_value=(2, 3)) as limpiar:
+            self.assertTrue(supresion.procesar_pendiente("x" * 64))
+        limpiar.assert_called_once_with(cur, TEL)
+        self.assertTrue(any("telefono_pendiente = NULL" in c.args[0]
+                            for c in cur.execute.call_args_list))
+
+    def test_sin_emisor_de_origen_tambien_borra_localmente(self):
+        conexion = MagicMock()
+        cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cur.rowcount = 1
+        cur.fetchone.return_value = {"telefono_pendiente": TEL, "wa_phone_id": None}
+        with patch("supresion.conectar", return_value=conexion), \
+                patch("supresion._bloquear_en_meta") as bloquear, \
+                patch("supresion._limpiar_datos", return_value=(1, 1)) as limpiar, \
+                patch("supresion.log_error"):
+            self.assertTrue(supresion.procesar_pendiente("x" * 64))
+        bloquear.assert_not_called()
+        limpiar.assert_called_once_with(cur, TEL)
+
+    def test_excepcion_de_meta_no_impide_la_eliminacion_local(self):
+        conexion = MagicMock()
+        cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cur.rowcount = 1
+        cur.fetchone.return_value = {"telefono_pendiente": TEL, "wa_phone_id": "id-test"}
+        with patch("supresion.conectar", return_value=conexion), \
+                patch("supresion._bloquear_en_meta", side_effect=RuntimeError("Meta")), \
+                patch("supresion._limpiar_datos", return_value=(1, 1)) as limpiar, \
+                patch("supresion.log_error"):
             self.assertTrue(supresion.procesar_pendiente("x" * 64))
         limpiar.assert_called_once_with(cur, TEL)
         self.assertTrue(any("telefono_pendiente = NULL" in c.args[0]

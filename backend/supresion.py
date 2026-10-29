@@ -173,19 +173,19 @@ def oferta_eliminacion_enviada(telefono: str) -> bool:
 
 def _bloquear_en_meta(telefono: str, phone_id: str) -> bool:
     from whatsapp_channels import credenciales_centro
-    token = credenciales_centro(phone_id)["token"]
-    version = (config_get("wa_graph_version") or "v26.0").strip()
-    if not token or not phone_id:
-        log_error("supresión: faltan credenciales de Meta; se mantiene pendiente")
-        return False
     try:
+        token = credenciales_centro(phone_id)["token"]
+        version = (config_get("wa_graph_version") or "v26.0").strip()
+        if not token or not phone_id:
+            log_error("supresión: faltan credenciales de Meta; se completa la eliminación local")
+            return False
         url = f"https://graph.facebook.com/{version}/{phone_id}/block_users"
         headers = {"Authorization": f"Bearer {token}"}
         with httpx.Client(timeout=20) as cliente:
             respuesta = cliente.post(
                 url, headers=headers,
                 json={"messaging_product": "whatsapp",
-                      "block_users": [{"user": telefono.lstrip("+")}]},
+                      "block_users": [{"user": telefono}]},
             )
             if respuesta.status_code == 200:
                 data = respuesta.json()
@@ -382,13 +382,20 @@ def procesar_pendiente(huella: str) -> bool:
         fila = cur.fetchone()
     try:
         telefono = (fila or {}).get("telefono_pendiente")
-        from whatsapp_channels import listar_canales
-        canales = [c for c in listar_canales() if c["configured"]]
-        ids = list(dict.fromkeys(c["phoneNumberId"] for c in canales))
-        if not ids and fila.get("wa_phone_id"):
-            ids = [fila["wa_phone_id"]]  # compatibilidad con instalaciones antiguas
-        if not telefono or not ids or not all(_bloquear_en_meta(telefono, pid) for pid in ids):
+        if not telefono:
             return False
+        # Meta solo permite bloquear desde el número al que el paciente escribió.
+        # El veto local por huella ya cubre a todas las clínicas de SNW.
+        phone_id_origen = (fila or {}).get("wa_phone_id")
+        if phone_id_origen:
+            try:
+                _bloquear_en_meta(telefono, phone_id_origen)
+            except Exception as exc:
+                # Nunca hacer depender el derecho a eliminación de Meta.
+                log_error("supresión: fallo al intentar el bloqueo en Meta", exc)
+        else:
+            log_error("supresión: falta el emisor de origen para bloquear en Meta; "
+                      "se completa la eliminación local")
         # Se conserva la huella y una constancia sin PII; se elimina el número crudo.
         with conectar() as conn, conn.cursor() as cur:
             bases, pacientes = _limpiar_datos(cur, telefono)
@@ -401,7 +408,7 @@ def procesar_pendiente(huella: str) -> bool:
             conn.commit()
         return True
     finally:
-        # Si Meta o la limpieza fallan, conservar el teléfono solo para retry.
+        # Solo un fallo de la limpieza local deja el teléfono pendiente para retry.
         with conectar() as conn, conn.cursor() as cur:
             cur.execute("UPDATE supresion_telefonos SET estado = 'pendiente',"
                         " completado = NULL WHERE huella = %s AND estado = 'procesando'",
