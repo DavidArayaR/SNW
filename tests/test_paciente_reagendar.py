@@ -221,6 +221,13 @@ class ParserCitasTests(unittest.TestCase):
                       "Sí quiero consultar precios", "Hola"):
             self.assertFalse(reagendar.es_aceptacion_reagendar(texto), texto)
 
+    def test_variables_de_plantilla_se_obtienen_del_csv(self):
+        filas, errores, _ = reagendar.analizar_csv(csv_fila(), CFG)
+        self.assertEqual(errores, [])
+        self.assertEqual(reagendar.variables_plantilla_reagendar(filas[0]), {
+            "nombre": "Persona", "apellido": "Prueba",
+            "nombre_paciente": "Persona Prueba", "nombre_doc": "Doctor Prueba"})
+
     def test_aceptacion_guarda_mensaje_preparado_antes_de_responder(self):
         conexion = MagicMock()
         cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value

@@ -11,7 +11,8 @@ from fastapi import HTTPException
 from plantilla_media import MAX_MEDIA_BYTES, obtener_media, ruta_media
 
 
-EJEMPLOS = {"nombre": "David", "apellido": "Araya"}
+EJEMPLOS = {"nombre": "David", "apellido": "Araya",
+            "nombre_paciente": "David Araya", "nombre_doc": "Dra. Elena Soto"}
 MAX_CUERPO = 1024
 MAX_ENCABEZADO = 60
 MAX_PIE = 60
@@ -106,7 +107,8 @@ def presentar_plantilla(plantilla: dict, ejemplos: dict | None = None) -> dict:
         errores.append("Hay llaves incompletas o variables con formato inválido.")
     for variable in variables:
         if variable not in EJEMPLOS:
-            errores.append(f"La variable {{{variable}}} no está admitida. Usa {{nombre}} o {{apellido}}.")
+            errores.append("La variable {" + variable + "} no está admitida. Usa "
+                           "{nombre}, {apellido}, {nombre_paciente} o {nombre_doc}.")
         elif not valores.get(variable):
             errores.append(f"Falta un ejemplo para {{{variable}}}.")
     if not texto.strip():

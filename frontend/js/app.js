@@ -447,6 +447,8 @@ const previewHora = $("#previewHora");
 const previewBotones = $("#previewBotones");
 const inpEjemploNombre = $("#inpEjemploNombre");
 const inpEjemploApellido = $("#inpEjemploApellido");
+const inpEjemploNombrePaciente = $("#inpEjemploNombrePaciente");
+const inpEjemploNombreDoc = $("#inpEjemploNombreDoc");
 const previewValidaciones = $("#previewValidaciones");
 const selNumeroPrueba = $("#selNumeroPrueba");
 const btnRecargarNumerosPrueba = $("#btnRecargarNumerosPrueba");
@@ -1163,7 +1165,8 @@ function actualizarPreview() {
 }
 
 function ejemplosPreview() {
-  return { nombre: inpEjemploNombre.value.trim(), apellido: inpEjemploApellido.value.trim() };
+  return { nombre: inpEjemploNombre.value.trim(), apellido: inpEjemploApellido.value.trim(),
+    nombre_paciente: inpEjemploNombrePaciente.value.trim(), nombre_doc: inpEjemploNombreDoc.value.trim() };
 }
 
 function actualizarEstadoBotonPrueba() {
@@ -1269,6 +1272,8 @@ async function cargarDestinatariosPrueba() {
 
 inpEjemploNombre.addEventListener("input", actualizarPreview);
 inpEjemploApellido.addEventListener("input", actualizarPreview);
+inpEjemploNombrePaciente.addEventListener("input", actualizarPreview);
+inpEjemploNombreDoc.addEventListener("input", actualizarPreview);
 selNumeroPrueba.addEventListener("change", actualizarEstadoBotonPrueba);
 btnRecargarNumerosPrueba.addEventListener("click", cargarDestinatariosPrueba);
 btnEnviarPrueba.addEventListener("click", async () => {
@@ -1419,7 +1424,7 @@ function actualizarContador() {
 function validarComodines() {
   const desconocidos = [...inpMensaje.value.matchAll(/\{([^{}]+)\}/g)]
     .map((m) => m[1].trim())
-    .filter((t) => !["nombre", "apellido"].includes(t));
+    .filter((t) => !["nombre", "apellido", "nombre_paciente", "nombre_doc"].includes(t));
 
   if (desconocidos.length) {
     const unicos = [...new Set(desconocidos)].map((t) => `{${t}}`).join(", ");
@@ -1704,6 +1709,8 @@ function actualizarBloqueoCampos() {
     // Una plantilla aprobada puede estar en solo lectura y aun así probarse.
     inpEjemploNombre.disabled = false;
     inpEjemploApellido.disabled = false;
+    inpEjemploNombrePaciente.disabled = false;
+    inpEjemploNombreDoc.disabled = false;
     selNumeroPrueba.disabled = false;
     btnQuitarEncabezado.disabled = true;
     btnAbrirIA.hidden = true;
@@ -1727,6 +1734,8 @@ function actualizarBloqueoCampos() {
   inpInstruccionIA.disabled = false;
   inpEjemploNombre.disabled = false;
   inpEjemploApellido.disabled = false;
+  inpEjemploNombrePaciente.disabled = false;
+  inpEjemploNombreDoc.disabled = false;
   selNumeroPrueba.disabled = false;
   checkEncabezadoMultimedia.disabled = subiendoEncabezado;
   inpEncabezadoTexto.disabled = checkEncabezadoMultimedia.checked;
@@ -1783,6 +1792,8 @@ function abrir(id) {
   establecerBotones(p.botones || (esPlantillaProtegida(p) ? [] : null));
   inpEjemploNombre.value = "David";
   inpEjemploApellido.value = "Araya";
+  inpEjemploNombrePaciente.value = "David Araya";
+  inpEjemploNombreDoc.value = "Dra. Elena Soto";
   establecerEncabezado(p.encabezado_media_id);
   if (inpArea) {
     const espVal = p.area_id != null ? String(p.area_id) : "";
@@ -1848,6 +1859,8 @@ function modoNueva() {
   establecerBotones(null);
   inpEjemploNombre.value = "David";
   inpEjemploApellido.value = "Araya";
+  inpEjemploNombrePaciente.value = "David Araya";
+  inpEjemploNombreDoc.value = "Dra. Elena Soto";
   establecerEncabezado(null);
   if (inpArea) inpArea.value = "";
   if (inpCentroPlantilla) inpCentroPlantilla.value = "";

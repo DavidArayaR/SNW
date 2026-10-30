@@ -723,10 +723,12 @@ class WhatsAppService:
     COMODINES = {
         "nombre": "David",
         "apellido": "Araya",
+        "nombre_paciente": "David Araya",
+        "nombre_doc": "Dra. Elena Soto",
     }
 
     def convertir_texto_meta(self, texto: str) -> tuple[str, list[str]]:
-        """Convierte los comodines {nombre}/{apellido} del sistema
+        """Convierte los comodines admitidos del sistema
         a placeholders secuenciales de Meta ({{1}}, {{2}}, ...) y devuelve el
         texto convertido junto con los valores de ejemplo en ese orden."""
         orden: list[str] = []
@@ -1103,10 +1105,10 @@ class WhatsAppService:
         return payload, "template"
 
     def extraer_orden_comodines(self, texto: str) -> list[str]:
-        """Devuelve el orden de aparición de los comodines {nombre}/{apellido}
+        """Devuelve el orden de aparición de los comodines admitidos
         en el texto, para construir los parámetros del template en el orden correcto."""
         return [clave for clave in variables_del_cuerpo(texto)
-                if clave in ("nombre", "apellido")]
+                if clave in self.COMODINES]
 
     async def enviar(self, telefono: str, mensaje: str, plantilla: dict | None = None,
                      variables: dict | None = None, es_prueba: bool = False) -> tuple:

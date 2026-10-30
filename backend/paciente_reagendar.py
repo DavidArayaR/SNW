@@ -115,6 +115,15 @@ def mensaje_preparado_reagendar(cita: dict) -> str:
             f"{cita['doctor_nombre']}, clínica: {cita['clinica_nombre']}")
 
 
+def variables_plantilla_reagendar(cita: dict) -> dict[str, str]:
+    """Datos reales del CSV para la plantilla de esta cita."""
+    nombre_completo = str(cita.get("paciente_nombre") or "").strip()
+    nombre, _, apellido = nombre_completo.partition(" ")
+    return {"nombre": nombre, "apellido": apellido,
+            "nombre_paciente": nombre_completo,
+            "nombre_doc": str(cita.get("doctor_nombre") or "").strip()}
+
+
 def resolver_clinica(nombre: str, clinica_id: int | None, cfg: dict) -> str | None:
     catalogo = catalogo_centros(cfg)
     nombre_normalizado = _normalizar_nombre(nombre)

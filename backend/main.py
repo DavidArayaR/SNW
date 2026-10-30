@@ -59,7 +59,7 @@ from whatsapp_channel_verification import verificar_canal_meta
 import whatsapp_service
 from plantilla_media import (MAX_MEDIA_BYTES, descargar_media_meta, guardar_media,
                             guardar_media_importada, obtener_media, ruta_media)
-from plantilla_revision import (MAX_CUERPO, presentar_plantilla,
+from plantilla_revision import (MAX_CUERPO, presentar_plantilla, variables_del_cuerpo,
                                componentes_para_vista, version_opciones)
 from groq_service import consumir_cuota, generar_borrador, validar_instruccion
 from wa_rate_limit import gobernador as wa_gobernador
@@ -3726,7 +3726,7 @@ _programar_revision_plantillas(demora_seg=20)
 def _texto_desde_componentes(components: list) -> str:
     """Extrae el texto del componente BODY de un template de Meta y traduce
     sus placeholders {{1}}, {{2}}... a los comodines internos ({nombre},
-    {apellido}...), para que una plantilla importada por «Sincronizar» se
+    {apellido}, {nombre_paciente}, {nombre_doc}), para que una plantilla importada por «Sincronizar» se
     pueda usar igual que una creada acá.
 
     Si el template trae valores de ejemplo (`example.body_text`, los que esta
@@ -3750,7 +3750,7 @@ def _texto_desde_componentes(components: list) -> str:
     ejemplo_a_comodin = {
         str(valor).strip().lower(): clave for clave, valor in WhatsAppService.COMODINES.items()
     }
-    orden_por_defecto = list(WhatsAppService.COMODINES.keys())  # ["nombre", "apellido"]
+    orden_por_defecto = list(WhatsAppService.COMODINES.keys())
 
     def reemplazo(m: re.Match) -> str:
         n = int(m.group(1))
@@ -6508,6 +6508,10 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
     plantilla = next((p for p in leer_plantillas() if p["id"] == body.plantilla_id), None)
     if plantilla is None:
         raise HTTPException(404, detail="Plantilla no encontrada")
+    if {"nombre_paciente", "nombre_doc"}.intersection(
+            variables_del_cuerpo(plantilla.get("texto") or "")):
+        raise HTTPException(400, detail="Esta plantilla usa datos del CSV de reagendamiento; "
+                            "asígnala en Configuración → Citas atendidas.")
     _exigir_emisor_de_plantilla(plantilla, emisor["codigo"])
     if plantilla.get("especial"):
         raise HTTPException(
@@ -7405,6 +7409,10 @@ def _validar_plantilla_programable(plantilla: dict | None, area_id: int | None) 
     con revisión interna aprobada; si es de un area, solo sirve en esa area."""
     if plantilla is None:
         raise HTTPException(404, detail="Plantilla no encontrada")
+    if {"nombre_paciente", "nombre_doc"}.intersection(
+            variables_del_cuerpo(plantilla.get("texto") or "")):
+        raise HTTPException(400, detail="Esta plantilla usa datos del CSV de reagendamiento; "
+                            "asígnala en Configuración → Citas atendidas.")
     if plantilla.get("especial"):
         raise HTTPException(400, detail="El mensaje de call center no se puede programar: se manda solo.")
     if plantilla.get("whatsapp_template_status") != "APPROVED":
@@ -8284,8 +8292,8 @@ async def _procesar_cita_reagendar(cita: dict, plantillas_por_centro: dict) -> N
                                       for p in servicio._pacientes_con_tel(cur, telefono))):
                 paciente_reagendar.marcar_fallo(cita, "PACIENTE_DE_BAJA")
                 return
-        nombre, _, apellido = cita["paciente_nombre"].partition(" ")
-        vista = presentar_plantilla(plantilla, {"nombre": nombre, "apellido": apellido})
+        vista = presentar_plantilla(
+            plantilla, paciente_reagendar.variables_plantilla_reagendar(cita))
         if vista["errores"]:
             paciente_reagendar.marcar_fallo(cita, "PLANTILLA_INVALIDA")
             return
@@ -10209,8 +10217,8 @@ def vista_previa_lote_reagendar(lote_id: int, sesion: dict = Depends(solo_admin)
                  and _aprobacion_plantilla(plantilla) == "aprobada") else "No disponible"
         vista = None
         if plantilla:
-            nombre, _, apellido = cita["paciente_nombre"].partition(" ")
-            vista = presentar_plantilla(plantilla, {"nombre": nombre, "apellido": apellido})
+            vista = presentar_plantilla(
+                plantilla, paciente_reagendar.variables_plantilla_reagendar(cita))
         items.append({"centro": codigo, "clinica": cita["clinica_nombre"],
                       "emisor": canal.get("phoneNumber") if canal else None,
                       "plantilla": plantilla.get("nombre") if plantilla else None,

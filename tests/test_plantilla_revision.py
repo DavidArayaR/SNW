@@ -40,6 +40,34 @@ class PresentacionPlantillaTests(unittest.TestCase):
                          ["apellido", "nombre"])
         self.assertEqual(len(vista["botones"]), 3)
 
+    def test_variables_de_reagendamiento_usan_nombre_completo_y_medico(self):
+        texto = "Hola {nombre_paciente}, ¿cómo fue tu atención con {nombre_doc}?"
+        ejemplos = {"nombre_paciente": "Ana Pérez", "nombre_doc": "Dra. Elena Soto"}
+        vista = presentar_plantilla({"texto": texto}, ejemplos)
+        self.assertEqual(vista["errores"], [])
+        self.assertEqual(vista["cuerpo"],
+                         "Hola Ana Pérez, ¿cómo fue tu atención con Dra. Elena Soto?")
+        self.assertEqual(vista["variables"], ["nombre_paciente", "nombre_doc"])
+        servicio = WhatsAppService(phone_number_id="12345")
+        convertido, muestras = servicio.convertir_texto_meta(texto)
+        self.assertEqual(convertido, "Hola {{1}}, ¿cómo fue tu atención con {{2}}?")
+        self.assertEqual(muestras, ["David Araya", "Dra. Elena Soto"])
+        self.assertEqual(servicio.extraer_orden_comodines(texto),
+                         ["nombre_paciente", "nombre_doc"])
+        self.assertEqual(main._texto_desde_componentes([{
+            "type": "BODY", "text": convertido,
+            "example": {"body_text": [muestras]}}]), texto)
+        self.assertTrue(any("Falta un ejemplo" in error for error in
+                            presentar_plantilla({"texto": texto},
+                                                {"nombre_paciente": "Ana Pérez"})["errores"]))
+
+    def test_variable_del_csv_no_permite_programar_envio_comun(self):
+        plantilla = {**PLANTILLA, "texto": "Hola {nombre_paciente}, habla {nombre_doc}"}
+        with self.assertRaises(HTTPException) as error:
+            main._validar_plantilla_programable(plantilla, None)
+        self.assertEqual(error.exception.status_code, 400)
+        self.assertIn("CSV de reagendamiento", error.exception.detail)
+
     def test_variable_sin_ejemplo_y_desconocida(self):
         vista = presentar_plantilla({"texto": "Hola {nombre} {edad}"}, {"nombre": ""})
         self.assertTrue(any("Falta un ejemplo" in e for e in vista["errores"]))
