@@ -9,6 +9,67 @@
   let loteAplazarId = null;
   let loteEliminarId = null;
   let pacienteEliminarId = null;
+  const modalEliminarPruebas = $("modalEliminarPruebasReagendar");
+  const confirmarEliminarPruebas = $("confirmarEliminarPruebasReagendar");
+  const botonEliminarPruebas = $("reagendarEliminarPruebas");
+  function cerrarEliminarPruebas() {
+    modalEliminarPruebas.hidden = true;
+    $("errorEliminarPruebasReagendar").textContent = "";
+  }
+  botonEliminarPruebas.addEventListener("click", async () => {
+    if (botonEliminarPruebas.disabled) return;
+    botonEliminarPruebas.disabled = true;
+    try {
+      const res = await fetch("api/v1/paciente-reagendar/pruebas/borrado/resumen",
+        { headers: auth(), cache: "no-store" });
+      const datos = await res.json().catch(() => ({}));
+      if (res.status === 401) { window.snwSesionExpirada(); return; }
+      if (!res.ok) throw new Error(datos.detail || "No se pudieron revisar los números de prueba.");
+      if (!datos.eliminables) {
+        mensaje.textContent = "Aún no hay números de prueba finalizados para quitar. Espera la respuesta o 24 horas desde el envío.";
+        return;
+      }
+      $("textoEliminarPruebasReagendar").textContent =
+        `Se quitarán ${datos.eliminables} registros de números de prueba de reagendamientos. ` +
+        "El historial de mensajes se conservará y los números seguirán autorizados en Configuración. " +
+        "Podrán volver a importarse en otro CSV. Esta acción no se puede deshacer.";
+      modalEliminarPruebas.hidden = false;
+      confirmarEliminarPruebas.focus();
+    } catch (error) {
+      mensaje.textContent = error.message;
+    } finally {
+      botonEliminarPruebas.disabled = false;
+    }
+  });
+  $("cancelarEliminarPruebasReagendar").addEventListener("click", cerrarEliminarPruebas);
+  modalEliminarPruebas.addEventListener("click", e => {
+    if (e.target === modalEliminarPruebas && !confirmarEliminarPruebas.disabled) cerrarEliminarPruebas();
+  });
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && !modalEliminarPruebas.hidden && !confirmarEliminarPruebas.disabled) {
+      cerrarEliminarPruebas();
+    }
+  });
+  confirmarEliminarPruebas.addEventListener("click", async () => {
+    if (confirmarEliminarPruebas.disabled) return;
+    confirmarEliminarPruebas.disabled = true;
+    $("errorEliminarPruebasReagendar").textContent = "Quitando registros de prueba…";
+    try {
+      const res = await fetch("api/v1/paciente-reagendar/pruebas/borrado",
+        { method: "DELETE", headers: auth() });
+      const datos = await res.json().catch(() => ({}));
+      if (res.status === 401) { window.snwSesionExpirada(); return; }
+      if (!res.ok) throw new Error(datos.detail || "No se pudieron quitar los registros de prueba.");
+      cerrarEliminarPruebas();
+      await cargarLotes();
+      await cargar();
+      mensaje.textContent = `${datos.pacientes_eliminados || 0} registros de prueba retirados de reagendamientos.`;
+    } catch (error) {
+      $("errorEliminarPruebasReagendar").textContent = error.message;
+    } finally {
+      confirmarEliminarPruebas.disabled = false;
+    }
+  });
   const modalEliminarTodos = $("modalEliminarTodosReagendar");
   const confirmarEliminarTodos = $("confirmarEliminarTodosReagendar");
   const botonEliminarTodos = $("reagendarEliminarTodos");

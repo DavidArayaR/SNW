@@ -10239,6 +10239,21 @@ def eliminar_todos_reagendar(sesion: dict = Depends(solo_admin)):
     return resultado
 
 
+@app.get("/api/v1/paciente-reagendar/pruebas/borrado/resumen")
+def resumen_borrado_pruebas_reagendar(sesion: dict = Depends(solo_admin)):
+    return paciente_reagendar.resumen_borrado_pruebas_finalizadas()
+
+
+@app.delete("/api/v1/paciente-reagendar/pruebas/borrado")
+def eliminar_pruebas_reagendar(sesion: dict = Depends(solo_admin)):
+    resultado = paciente_reagendar.eliminar_pruebas_finalizadas()
+    if resultado["pacientes_eliminados"]:
+        auditoria_registrar(sesion.get("usuario", ""), "reagendar_pruebas_eliminadas",
+                           "paciente_reagendar",
+                           f"Registros de prueba retirados manualmente: {resultado['pacientes_eliminados']}")
+    return resultado
+
+
 @app.delete("/api/v1/paciente-reagendar/{cita_id}")
 def eliminar_paciente_reagendar(cita_id: int, sesion: dict = Depends(solo_admin)):
     """Retira una cita individual todavía no contactada por WhatsApp."""

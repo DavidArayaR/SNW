@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 
 import pymysql
 
-from db import conectar
+from db import conectar, config_all
 from telefono import normalizar_telefono
 from whatsapp_channels import catalogo_centros
 
@@ -712,6 +712,56 @@ def eliminar_todos_sin_envio() -> dict:
             if cur.fetchone()["n"] == 0:
                 cur.execute("UPDATE reagendar_lotes SET estado='COMPLETADO',"
                             " programado_para=NULL WHERE id=%s", (lote_id,))
+        conn.commit()
+    return {"pacientes_eliminados": len(ids)}
+
+
+def _telefonos_prueba_configurados() -> tuple[str, ...]:
+    cfg = config_all(refresh=True)
+    numeros = {normalizar_telefono(valor.strip())
+               for clave in ("numeros_prueba_dev", "numeros_prueba_prod")
+               for valor in (cfg.get(clave) or "").split(",") if valor.strip()}
+    return tuple(sorted(numero for numero in numeros if numero))
+
+
+def _condicion_pruebas_finalizadas(numeros: tuple[str, ...]) -> tuple[str, tuple]:
+    if not numeros:
+        return "1=0", ()
+    marcadores = ",".join(["%s"] * len(numeros))
+    condicion = (
+        f"r.paciente_telefono_normalizado IN ({marcadores})"
+        " AND r.estado_envio='ENVIADO' AND r.whatsapp_message_id IS NOT NULL"
+        " AND (r.enviado_en <= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 24 HOUR)"
+        " OR (EXISTS (SELECT 1 FROM reagendar_flujo f WHERE f.cita_id=r.id"
+        " AND f.estado IN ('CONTACTO_OFRECIDO','FINALIZADO'))"
+        " AND NOT EXISTS (SELECT 1 FROM reagendar_interacciones i"
+        " WHERE i.cita_id=r.id AND i.respuesta_estado NOT IN ('ENVIADO','OMITIDO'))))"
+    )
+    return condicion, numeros
+
+
+def resumen_borrado_pruebas_finalizadas() -> dict:
+    """Cuenta citas de números de prueba que ya no necesitan contexto de respuesta."""
+    condicion, args = _condicion_pruebas_finalizadas(_telefonos_prueba_configurados())
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) AS n FROM paciente_reagendar r WHERE " + condicion, args)
+        return {"eliminables": int(cur.fetchone()["n"])}
+
+
+def eliminar_pruebas_finalizadas() -> dict:
+    """Retira solo citas de prueba finalizadas; conserva el historial de envíos."""
+    condicion, args = _condicion_pruebas_finalizadas(_telefonos_prueba_configurados())
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("SELECT r.id FROM paciente_reagendar r WHERE " + condicion
+                    + " ORDER BY r.id FOR UPDATE", args)
+        ids = [fila["id"] for fila in cur.fetchall()]
+        for inicio in range(0, len(ids), 1000):
+            bloque = ids[inicio:inicio + 1000]
+            marcadores = ",".join(["%s"] * len(bloque))
+            cur.execute("DELETE FROM reagendar_destinatarios WHERE cita_id IN ("
+                        + marcadores + ")", tuple(bloque))
+            cur.execute("DELETE FROM paciente_reagendar WHERE id IN ("
+                        + marcadores + ")", tuple(bloque))
         conn.commit()
     return {"pacientes_eliminados": len(ids)}
 
