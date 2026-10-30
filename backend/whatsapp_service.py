@@ -1365,7 +1365,8 @@ class WhatsAppService:
                 # posible autorespuesta. El original permanece en el historial.
                 info = self._registrar_respuesta(telefono, cuerpo, mensaje.get("timestamp"),
                                                  automatica=clasificacion.automatizacion,
-                                                 mensaje_id=mensaje.get("id"))
+                                                 mensaje_id=mensaje.get("id"),
+                                                 referencia_meta_id=(mensaje.get("context") or {}).get("id"))
                 acciones.append(f"respuesta_automatica_{info}")
                 continue
             # La ofensa es independiente: no omite una consulta ni una baja.
@@ -1415,7 +1416,8 @@ class WhatsAppService:
                     log_error("al_respuesta_reagendar", exc)
             if reagendar == "gestionado":
                 info = self._registrar_respuesta(telefono, cuerpo, mensaje.get("timestamp"),
-                                                 mensaje_id=mensaje.get("id"))
+                                                 mensaje_id=mensaje.get("id"),
+                                                 referencia_meta_id=(mensaje.get("context") or {}).get("id"))
                 acciones.append(f"respuesta_{info}")
                 acciones.append("reagendar_gestionado")
                 continue
@@ -1447,7 +1449,8 @@ class WhatsAppService:
                 acciones.append("retractacion")
 
             info = self._registrar_respuesta(telefono, cuerpo, mensaje.get("timestamp"),
-                                             mensaje_id=mensaje.get("id"))
+                                             mensaje_id=mensaje.get("id"),
+                                             referencia_meta_id=(mensaje.get("context") or {}).get("id"))
             acciones.append(f"respuesta_{info}")
 
             if es_boton and re.fullmatch(r"snw_tpl_opciones_\d+", extra or ""):
@@ -1782,32 +1785,56 @@ class WhatsAppService:
         return (fila or {}).get("plantilla_clave") or None
 
     def _registrar_respuesta(self, telefono: str, texto: str, timestamp: str,
-                            automatica: str = "", mensaje_id: str | None = None) -> str:
+                            automatica: str = "", mensaje_id: str | None = None,
+                            referencia_meta_id: str | None = None) -> str:
         match = _TEL_MATCH.format(col="telefono")
         try:
             with conectar() as conn, conn.cursor() as cur:
                 pacientes = self._pacientes_con_tel(cur, telefono)
                 if not pacientes:
+                    if referencia_meta_id:
+                        emisor_actual = EMISOR_WEBHOOK.get() or {}
+                        log_error("webhook: respuesta contextual sin paciente en bases"
+                                  f" (centro={emisor_actual.get('codigo') or 'desconocido'})")
                     return "sin_cliente"
                 emisor = EMISOR_WEBHOOK.get()
                 if emisor:
-                    cur.execute(
-                        "SELECT COALESCE(le.tabla_pacientes, e.base_datos) AS tabla_pacientes,"
-                        " le.paciente_id FROM log_envios le"
-                        " LEFT JOIN envios e ON e.id = le.envio_id"
-                        " WHERE le.wa_phone_id = %s AND le.numero_telefono = %s"
-                        " AND le.plantilla_clave NOT IN ('respuesta','call_center',"
-                        " 'baja_aviso','retractacion_aviso','ajuste_manual')"
-                        " ORDER BY le.id DESC LIMIT 1",
-                        (emisor["phoneNumberId"], telefono),
-                    )
-                    origen = cur.fetchone() or {}
+                    # El contexto del botón señala el mensaje de campaña exacto.
+                    # La comparación normalizada también cubre teléfonos antiguos
+                    # guardados sin '+' o con espacios.
+                    def buscar_origen(condicion: str, parametros: tuple) -> dict:
+                        cur.execute(
+                            "SELECT COALESCE(le.tabla_pacientes, e.tabla_pacientes,"
+                            " e.base_datos) AS tabla_pacientes, le.paciente_id"
+                            " FROM log_envios le LEFT JOIN envios e ON e.id = le.envio_id"
+                            " WHERE le.wa_phone_id = %s AND "
+                            + _TEL_MATCH.format(col="le.numero_telefono")
+                            + " AND le.paciente_id IS NOT NULL AND " + condicion
+                            + " ORDER BY le.id DESC LIMIT 1",
+                            (emisor["phoneNumberId"], telefono, *parametros),
+                        )
+                        return cur.fetchone() or {}
+
+                    origen = (buscar_origen("BINARY le.whatsapp_message_id = BINARY %s",
+                                            (referencia_meta_id,)) if referencia_meta_id else {})
+                    if not origen:
+                        origen = buscar_origen(
+                            "le.envio_id IS NOT NULL AND le.estado_envio = 'enviado'",
+                            (),
+                        )
                     if origen:
                         pacientes = [p for p in pacientes if p["tabla"] == origen.get("tabla_pacientes")
                                      and p["id"] == origen.get("paciente_id")]
+                        if not pacientes:
+                            log_error("webhook: respuesta sin paciente vinculado al envío"
+                                      f" (centro={emisor.get('codigo') or 'desconocido'})")
+                            return "sin_base_inequivoca"
                     elif len(pacientes) > 1:
                         # Conversación directa sin campaña: se conservó arriba,
                         # pero no se atribuye arbitrariamente a una base.
+                        if referencia_meta_id:
+                            log_error("webhook: respuesta contextual con varias bases posibles"
+                                      f" (centro={emisor.get('codigo') or 'desconocido'})")
                         return "sin_base_inequivoca"
                 for p in pacientes:
                     if not automatica:
