@@ -3113,8 +3113,10 @@ def _enviar_respuesta_reagendar(evento: dict) -> None:
             if not re.fullmatch(r"[1-9]\d{7,14}", numero):
                 raise ValueError("Número CRM de la clínica no disponible")
             url = f"https://wa.me/{numero}?text={urllib.parse.quote(preparado, safe='')}"
-            texto = ("Pulsa «Ir a call center» para abrir WhatsApp con el equipo de tu clínica. "
-                     "El mensaje ya estará preparado; debes enviarlo allí para que puedan atenderte.")
+            motivo = "reagendamiento" if accion == "REAGENDAR" else "consulta"
+            texto = (f"Si quieres continuar con tu {motivo}, toca «Ir a call center». "
+                     "Se abrirá un nuevo chat con un mensaje preparado para que puedas "
+                     "enviarlo al equipo. 💚")
             extra = {"cta": {"texto": "Ir a call center", "url": url}}
         ok, respuesta_id, _error, _ = asyncio.run(
             WhatsAppService(phone_number_id=canal["phoneNumberId"]).enviar(
