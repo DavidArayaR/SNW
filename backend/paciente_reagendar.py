@@ -94,6 +94,27 @@ def _normalizar_nombre(valor: str) -> str:
     return " ".join(re.sub(r"[^a-z0-9 ]", " ", texto).split())
 
 
+def es_aceptacion_reagendar(texto: str) -> bool:
+    """Aceptaciones breves de una cita, no coincidencias dentro de consultas largas."""
+    normalizado = _normalizar_nombre(texto or "")
+    return normalizado in {
+        "reagendar", "quiero reagendar", "si quiero reagendar",
+        "me gustaria reagendar", "si me gustaria reagendar",
+        "deseo reagendar", "si deseo reagendar", "acepto reagendar",
+        "quiero agendar", "si quiero agendar", "me gustaria agendar",
+        "me interesa reagendar", "claro quiero reagendar",
+        "si me gustaria agendar", "si quiero", "si por favor", "claro que si",
+    }
+
+
+def mensaje_preparado_reagendar(cita: dict) -> str:
+    if not cita.get("doctor_nombre"):
+        raise ValueError("Falta el médico para preparar el reagendamiento")
+    return ("Sí me gustaría agendar, mi nombre es "
+            f"{cita['paciente_nombre']}, con el médico: "
+            f"{cita['doctor_nombre']}, clínica: {cita['clinica_nombre']}")
+
+
 def resolver_clinica(nombre: str, clinica_id: int | None, cfg: dict) -> str | None:
     catalogo = catalogo_centros(cfg)
     nombre_normalizado = _normalizar_nombre(nombre)
@@ -776,6 +797,20 @@ def registrar_respuesta_reagendar(telefono: str, phone_id: str, mensaje_id: str,
             if not cita:
                 return None
         if not cita:
+            # Un texto nuevo sin contexto solo se atribuye al reagendamiento
+            # si fue el último mensaje saliente de este número y clínica.
+            if not referencia_id and es_aceptacion_reagendar(texto):
+                cur.execute(
+                    "SELECT r.* FROM log_envios le"
+                    " LEFT JOIN paciente_reagendar r ON r.log_envio_id=le.id"
+                    " WHERE le.numero_telefono=%s AND le.wa_phone_id=%s"
+                    " AND le.estado_envio='enviado'"
+                    " AND le.plantilla_clave NOT IN ('respuesta','ajuste_manual')"
+                    " AND le.fecha_hora >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
+                    " ORDER BY le.id DESC LIMIT 1", (telefono, phone_id))
+                ultima = cur.fetchone()
+                cita = ultima if ultima and ultima.get("id") is not None else None
+        if not cita and not es_aceptacion_reagendar(texto):
             cur.execute(
                 "SELECT r.* FROM reagendar_flujo f JOIN paciente_reagendar r ON r.id=f.cita_id"
                 " WHERE r.paciente_telefono_normalizado=%s AND r.whatsapp_phone_number_id=%s"
@@ -804,23 +839,24 @@ def registrar_respuesta_reagendar(telefono: str, phone_id: str, mensaje_id: str,
             return {"accion": "DUPLICADO"}
         cur.execute("SELECT estado FROM reagendar_flujo WHERE cita_id=%s FOR UPDATE", (cita["id"],))
         flujo = cur.fetchone() or {}
-        normalizado = _normalizar_nombre(texto)
         if declina:
             accion, estado = declina, "FINALIZADO"
-        elif flujo.get("estado") == "ESPERANDO_CONSULTA":
-            accion, estado = "CONSULTA", "CONTACTO_OFRECIDO"
-        elif normalizado == "reagendar":
-            accion, estado = "REAGENDAR", "CONTACTO_OFRECIDO"
-        elif ("?" in texto or "¿" in texto) and len(texto.strip()) >= 15:
-            accion, estado = "CONSULTA", "CONTACTO_OFRECIDO"
         elif flujo.get("estado") in ("CONTACTO_OFRECIDO", "FINALIZADO"):
             return None
+        elif es_aceptacion_reagendar(texto):
+            accion, estado = "REAGENDAR", "CONTACTO_OFRECIDO"
+        elif flujo.get("estado") == "ESPERANDO_CONSULTA":
+            accion, estado = "CONSULTA", "CONTACTO_OFRECIDO"
+        elif ("?" in texto or "¿" in texto) and len(texto.strip()) >= 15:
+            accion, estado = "CONSULTA", "CONTACTO_OFRECIDO"
         else:
             accion, estado = "SOLICITAR_CONSULTA", "ESPERANDO_CONSULTA"
+        preparado = mensaje_preparado_reagendar(cita) if accion == "REAGENDAR" else None
         cur.execute(
             "INSERT IGNORE INTO reagendar_interacciones"
-            " (mensaje_id, cita_id, accion, texto) VALUES (%s, %s, %s, %s)",
-            (mensaje_id[:255], cita["id"], accion, texto[:2000]))
+            " (mensaje_id, cita_id, accion, texto, mensaje_preparado)"
+            " VALUES (%s, %s, %s, %s, %s)",
+            (mensaje_id[:255], cita["id"], accion, texto[:2000], preparado))
         if cur.rowcount != 1:
             return {"accion": "DUPLICADO"}
         cur.execute(
@@ -833,7 +869,8 @@ def registrar_respuesta_reagendar(telefono: str, phone_id: str, mensaje_id: str,
             cur.execute("UPDATE paciente_reagendar SET whatsapp_opt_out=1"
                         " WHERE paciente_telefono_normalizado=%s", (telefono,))
         conn.commit()
-    return {"accion": accion, "cita": cita, "texto": texto, "mensaje_id": mensaje_id}
+    return {"accion": accion, "cita": cita, "texto": texto, "mensaje_id": mensaje_id,
+            "mensaje_preparado": preparado}
 
 
 def marcar_opt_out_reagendar(telefono: str, valor: bool) -> None:

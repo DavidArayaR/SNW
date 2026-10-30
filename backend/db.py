@@ -665,7 +665,7 @@ def asegurar_tabla_config() -> None:
                 "CREATE TABLE IF NOT EXISTS reagendar_interacciones ("
                 " mensaje_id VARCHAR(255) COLLATE utf8mb4_bin NOT NULL PRIMARY KEY,"
                 " cita_id BIGINT UNSIGNED NOT NULL, accion VARCHAR(30) NOT NULL,"
-                " texto TEXT NULL, respuesta_id VARCHAR(255) NULL,"
+                " texto TEXT NULL, mensaje_preparado TEXT NULL, respuesta_id VARCHAR(255) NULL,"
                 " respuesta_estado VARCHAR(20) NOT NULL DEFAULT 'PENDIENTE',"
                 " creado_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
                 " KEY idx_reagendar_interaccion_cita (cita_id),"
@@ -673,6 +673,12 @@ def asegurar_tabla_config() -> None:
                 " REFERENCES paciente_reagendar(id) ON DELETE CASCADE"
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
             )
+            cur.execute("SELECT COLUMN_NAME FROM information_schema.COLUMNS"
+                        " WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='reagendar_interacciones'"
+                        " AND COLUMN_NAME='mensaje_preparado'")
+            if not cur.fetchone():
+                cur.execute("ALTER TABLE reagendar_interacciones"
+                            " ADD COLUMN mensaje_preparado TEXT NULL")
             cur.execute(
                 "CREATE TABLE IF NOT EXISTS reagendar_import_quota ("
                 " actor_hash CHAR(64) NOT NULL, ventana BIGINT NOT NULL,"

@@ -105,6 +105,14 @@ class PresentacionPlantillaTests(unittest.TestCase):
         self.assertEqual(botones_para_meta(vista["botones"])[0],
                          {"type": "QUICK_REPLY", "text": "No me interesa"})
 
+    def test_boton_reagendar_es_respuesta_rapida_valida(self):
+        botones = [{"tipo": "respuesta", "texto": "Si quiero reagendar", "accion": "reagendar"},
+                   {"tipo": "respuesta", "texto": "Dar de baja", "accion": "baja"}]
+        vista = presentar_plantilla({"texto": "Hola {nombre}", "botones": botones})
+        self.assertFalse(vista["errores"])
+        self.assertEqual(botones_para_meta(vista["botones"])[0],
+                         {"type": "QUICK_REPLY", "text": "Si quiero reagendar"})
+
     def test_rechaza_mas_de_tres_botones(self):
         botones = [{"tipo": "respuesta", "texto": str(n), "accion": "baja"}
                    for n in range(4)]

@@ -213,6 +213,75 @@ class ParserCitasTests(unittest.TestCase):
             self.assertEqual(rows[0]["centro_codigo"], "VS")
             self.assertIsNone(rows[0]["ultimo_error_codigo"])
 
+    def test_aceptaciones_de_reagendamiento_son_explicitas(self):
+        for texto in ("Si quiero reagendar", "Quiero Reagendar", "sí quiero",
+                      "Sí, me gustaría reagendar", "Me interesa reagendar"):
+            self.assertTrue(reagendar.es_aceptacion_reagendar(texto), texto)
+        for texto in ("Quiero cancelar mi hora", "No quiero reagendar",
+                      "Sí quiero consultar precios", "Hola"):
+            self.assertFalse(reagendar.es_aceptacion_reagendar(texto), texto)
+
+    def test_aceptacion_guarda_mensaje_preparado_antes_de_responder(self):
+        conexion = MagicMock()
+        cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cur.fetchone.side_effect = [
+            {"id": 7, "paciente_nombre": "Persona Prueba",
+             "doctor_nombre": "Doctora Prueba", "clinica_nombre": "Mentalidad Saludable"},
+            None, None]
+        cur.rowcount = 1
+        with patch.object(reagendar, "conectar", return_value=conexion):
+            evento = reagendar.registrar_respuesta_reagendar(
+                "+56911111111", "12345", "wamid.in", "wamid.out", "Si quiero reagendar")
+        self.assertEqual(evento["accion"], "REAGENDAR")
+        esperado = ("Sí me gustaría agendar, mi nombre es Persona Prueba, con el médico: "
+                    "Doctora Prueba, clínica: Mentalidad Saludable")
+        self.assertEqual(evento["mensaje_preparado"], esperado)
+        insercion = next(call for call in cur.execute.call_args_list
+                         if "INSERT IGNORE INTO reagendar_interacciones" in call.args[0])
+        self.assertEqual(insercion.args[1][-1], esperado)
+        conexion.__enter__.return_value.commit.assert_called_once()
+
+    def test_sin_contexto_no_atribuye_aceptacion_a_campana_distinta(self):
+        conexion = MagicMock()
+        cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cur.fetchone.side_effect = [{"id": None}, None, None]
+        with patch.object(reagendar, "conectar", return_value=conexion):
+            evento = reagendar.registrar_respuesta_reagendar(
+                "+56911111111", "12345", "wamid.in", None, "Si quiero")
+        self.assertIsNone(evento)
+        self.assertFalse(any("INSERT IGNORE INTO reagendar_interacciones" in call.args[0]
+                             for call in cur.execute.call_args_list))
+
+    def test_sin_contexto_aceptacion_usa_ultimo_envio_de_reagendamiento(self):
+        conexion = MagicMock()
+        cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cur.fetchone.side_effect = [
+            {"id": 7, "paciente_nombre": "Persona Prueba",
+             "doctor_nombre": "Doctora Prueba", "clinica_nombre": "Mentalidad Saludable"},
+            None, None]
+        cur.rowcount = 1
+        with patch.object(reagendar, "conectar", return_value=conexion):
+            evento = reagendar.registrar_respuesta_reagendar(
+                "+56911111111", "12345", "wamid.in", None, "Quiero Reagendar")
+        self.assertEqual(evento["accion"], "REAGENDAR")
+        consulta = cur.execute.call_args_list[0]
+        self.assertIn("ORDER BY le.id DESC LIMIT 1", consulta.args[0])
+        self.assertEqual(consulta.args[1], ("+56911111111", "12345"))
+
+    def test_aceptacion_repetida_no_reenvia_boton_crm(self):
+        conexion = MagicMock()
+        cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cur.fetchone.side_effect = [
+            {"id": 7, "paciente_nombre": "Persona Prueba",
+             "doctor_nombre": "Doctora Prueba", "clinica_nombre": "Mentalidad Saludable"},
+            None, {"estado": "CONTACTO_OFRECIDO"}]
+        with patch.object(reagendar, "conectar", return_value=conexion):
+            evento = reagendar.registrar_respuesta_reagendar(
+                "+56911111111", "12345", "wamid.otra", "wamid.out", "Si quiero reagendar")
+        self.assertIsNone(evento)
+        self.assertFalse(any("INSERT IGNORE INTO reagendar_interacciones" in call.args[0]
+                             for call in cur.execute.call_args_list))
+
     def test_mentalidad_saludable_se_asocia_a_ms(self):
         for nombre in ("Mentalidad Saludable", "MENTALIDAD SALUDABLE",
                        "  Mentalidad   Saludable  "):
@@ -988,6 +1057,11 @@ class MariaDbCitasTests(unittest.TestCase):
             evento = reagendar.registrar_respuesta_reagendar(
                 telefono, "1234567890", mensaje_entrada, mensaje_origen, "Reagendar")
             self.assertEqual(evento["accion"], "REAGENDAR")
+            with conectar() as conn, conn.cursor() as cur:
+                cur.execute("SELECT mensaje_preparado FROM reagendar_interacciones"
+                            " WHERE mensaje_id=%s", (mensaje_entrada,))
+                self.assertEqual(cur.fetchone()["mensaje_preparado"],
+                                 evento["mensaje_preparado"])
             self.assertEqual(reagendar.registrar_respuesta_reagendar(
                 telefono, "1234567890", mensaje_entrada,
                 mensaje_origen, "Reagendar")["accion"], "DUPLICADO")

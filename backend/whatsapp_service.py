@@ -277,6 +277,7 @@ BOTON_ID_BAJA_INSULTO = "snw_dar_de_baja"
 ACCIONES_BOTON_TEMPLATE = {
     "interes": "snw_tpl_interes", "desinteres": "snw_tpl_desinteres",
     "baja": "snw_tpl_baja", "consulta": "snw_tpl_consulta",
+    "reagendar": "snw_tpl_reagendar",
 }
 BOTONES_RESPUESTA = [
     {"type": "QUICK_REPLY", "text": BOTON_TEXTO_INTERES},

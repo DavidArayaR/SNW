@@ -204,6 +204,7 @@ function botonesDelEditor() {
     if (tipo === "baja") return { tipo: "respuesta", texto: "Dar de baja", accion: "baja" };
     if (tipo === "interes") return { tipo: "respuesta", texto: "Me interesa", accion: "interes" };
     if (tipo === "nointeres") return { tipo: "respuesta", texto: "No me interesa", accion: "desinteres" };
+    if (tipo === "reagendar") return { tipo: "respuesta", texto: "Si quiero reagendar", accion: "reagendar" };
     const boton = { tipo, texto: fila.querySelector(".tpl-boton__texto").value.trim() };
     if (tipo === "respuesta") {
       boton.accion = fila.querySelector(".tpl-boton__accion").value;
@@ -250,6 +251,7 @@ function agregarFilaBoton(datos = {}) {
       <option value="respuesta">Respuesta rápida</option><option value="url">Abrir enlace</option>
       <option value="interes">Me interesa</option>
       <option value="nointeres">No interesa</option>
+      <option value="reagendar">Reagendar</option>
       <option value="baja">Baja</option></select></label>
     <label class="tpl-boton__campo"><span>Texto visible para el paciente</span>
       <input type="text" class="tpl-boton__texto" maxlength="20" placeholder="Texto del botón"></label>
@@ -257,6 +259,7 @@ function agregarFilaBoton(datos = {}) {
       <select class="tpl-boton__accion">
         <option value="ninguna">Solo responder</option><option value="interes">Interés</option>
         <option value="desinteres">Desinterés</option><option value="consulta">Hablar con callcenter</option>
+        <option value="reagendar">Reagendar</option>
         <option value="opciones">Ver opciones (lista)</option>
         <option value="baja">Baja</option></select></label>
     <label class="tpl-boton__campo tpl-boton__destino-campo"><span class="tpl-boton__destino-label">Destino</span>
@@ -280,21 +283,23 @@ function agregarFilaBoton(datos = {}) {
     tipo.add(opcionExistente);
   }
   tipo.value = datos.accion === "baja" || datos.tipo === "baja" ? "baja" :
+    (datos.tipo === "reagendar" || (datos.tipo === "respuesta" && datos.accion === "reagendar" && datos.texto === "Si quiero reagendar")
+      ? "reagendar" :
     (datos.tipo === "interes" || (datos.tipo === "respuesta" && datos.accion === "interes" && datos.texto === "Me interesa")
       ? "interes" : (datos.tipo === "nointeres" ||
         (datos.tipo === "respuesta" && datos.accion === "desinteres" && datos.texto === "No me interesa")
-        ? "nointeres" : (["respuesta", "url", "telefono"].includes(datos.tipo) ? datos.tipo : "respuesta")));
+        ? "nointeres" : (["respuesta", "url", "telefono"].includes(datos.tipo) ? datos.tipo : "respuesta"))));
   texto.value = datos.texto || "";
   accion.value = datos.accion || ({ "Me interesa": "interes", "No me interesa": "desinteres",
-    "Dar de baja": "baja" }[datos.texto] || "ninguna");
+    "Dar de baja": "baja", "Si quiero reagendar": "reagendar" }[datos.texto] || "ninguna");
   destino.value = datos.url || datos.telefono || "";
   for (const opcion of datos.opciones || []) agregarOpcionLista(panelOpciones, opcion);
   const sincronizarTipo = () => {
-    if (["baja", "interes", "nointeres"].includes(tipo.value)) {
-      texto.value = { baja: "Dar de baja", interes: "Me interesa", nointeres: "No me interesa" }[tipo.value];
-      accion.value = { baja: "baja", interes: "interes", nointeres: "desinteres" }[tipo.value];
+    if (["baja", "interes", "nointeres", "reagendar"].includes(tipo.value)) {
+      texto.value = { baja: "Dar de baja", interes: "Me interesa", nointeres: "No me interesa", reagendar: "Si quiero reagendar" }[tipo.value];
+      accion.value = { baja: "baja", interes: "interes", nointeres: "desinteres", reagendar: "reagendar" }[tipo.value];
     }
-    texto.readOnly = ["baja", "interes", "nointeres"].includes(tipo.value);
+    texto.readOnly = ["baja", "interes", "nointeres", "reagendar"].includes(tipo.value);
     fila.querySelector(".tpl-boton__accion-campo").hidden = tipo.value !== "respuesta";
     fila.querySelector(".tpl-boton__destino-campo").hidden = !["url", "telefono"].includes(tipo.value);
     crearLista.hidden = tipo.value !== "respuesta" || ["baja", "opciones"].includes(accion.value);
@@ -311,6 +316,7 @@ function agregarFilaBoton(datos = {}) {
       telefono: "El paciente podrá llamar al número indicado.",
       interes: "Se mostrará «Me interesa» y la respuesta se marcará como interés.",
       nointeres: "Se mostrará «No me interesa» y la respuesta se marcará como desinterés.",
+      reagendar: "Se mostrará «Si quiero reagendar» y se preparará el mensaje para el CRM de la clínica cuando responda a un reagendamiento.",
       baja: "Se mostrará «Dar de baja» y se solicitará la baja del paciente.",
     })[tipo.value] || "";
     tipo.dataset.tipoAnterior = tipo.value;
@@ -319,7 +325,7 @@ function agregarFilaBoton(datos = {}) {
     if (tipo.dataset.tipoAnterior === "telefono" && tipo.value !== "telefono") {
       tipo.querySelector('option[value="telefono"]')?.remove();
     }
-    if (["baja", "interes", "nointeres"].includes(tipo.dataset.tipoAnterior) && tipo.value !== tipo.dataset.tipoAnterior) {
+    if (["baja", "interes", "nointeres", "reagendar"].includes(tipo.dataset.tipoAnterior) && tipo.value !== tipo.dataset.tipoAnterior) {
       texto.value = "";
       accion.value = "ninguna";
     }
@@ -4436,7 +4442,12 @@ Promise.all([cargaInicialCentrosEmisores, cargaInicialPlantillas]).then(() => {
   modoNueva();
   inpCentroPlantilla.value = codigo;
   inpNombre.value = `Reagendamiento ${centro.nombre}`;
-  inpMensaje.value = "Hola {nombre},\n\nSi quieres agendar una nueva atención, responde «Me interesa» y te enviaremos el número del call center para obtener más información.";
+  inpMensaje.value = "Hola {nombre},\n\nSi quieres agendar una nueva atención, pulsa «Si quiero reagendar» o responde «Quiero reagendar». Te enviaremos un botón para abrir el chat del equipo de tu clínica.";
+  establecerBotones([
+    { tipo: "respuesta", texto: "Si quiero reagendar", accion: "reagendar" },
+    { tipo: "respuesta", texto: "No me interesa", accion: "desinteres" },
+    { tipo: "respuesta", texto: "Dar de baja", accion: "baja" },
+  ]);
   sincronizarTemplateConNombre();
   pintarCuentaPlantillaEditor();
   refrescarEditor();

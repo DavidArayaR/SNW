@@ -3105,11 +3105,8 @@ def _enviar_respuesta_reagendar(evento: dict) -> None:
             extra = None
         else:
             if accion == "REAGENDAR":
-                if not cita.get("doctor_nombre"):
-                    raise ValueError("Falta el médico para preparar el reagendamiento")
-                preparado = ("Sí me gustaría agendar, mi nombre es "
-                             f"{cita['paciente_nombre']}, con el médico: "
-                             f"{cita['doctor_nombre']}, clínica: {cita['clinica_nombre']}")
+                preparado = (evento.get("mensaje_preparado")
+                             or paciente_reagendar.mensaje_preparado_reagendar(cita))
             else:
                 preparado = "Hola, esta es mi consulta: " + evento["texto"].strip()[:500]
             numero = re.sub(r"\D", "", cfg.get(f"{canal['codigo']}_CRM_PHONE_NUMBER") or "")
