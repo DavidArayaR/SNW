@@ -213,6 +213,21 @@ class ParserCitasTests(unittest.TestCase):
             self.assertEqual(rows[0]["centro_codigo"], "VS")
             self.assertIsNone(rows[0]["ultimo_error_codigo"])
 
+    def test_mentalidad_saludable_se_asocia_a_ms(self):
+        for nombre in ("Mentalidad Saludable", "MENTALIDAD SALUDABLE",
+                       "  Mentalidad   Saludable  "):
+            rows, errors, received = reagendar.analizar_csv(csv_fila(clinica=nombre), CFG)
+            self.assertEqual((received, errors), (1, []))
+            self.assertEqual(rows[0]["centro_codigo"], "MS")
+            self.assertIsNone(rows[0]["ultimo_error_codigo"])
+
+    def test_mentalidad_saludable_no_ignora_id_externo_conflictivo(self):
+        cfg = {**CFG, "reagendar_clinicas_ids": '{"2":"VS"}'}
+        row = csv_fila(clinica="Mentalidad Saludable").replace(b"08-14,,", b"08-14,2,")
+        rows, _, _ = reagendar.analizar_csv(row, cfg)
+        self.assertIsNone(rows[0]["centro_codigo"])
+        self.assertEqual(rows[0]["ultimo_error_codigo"], "CLINICA_DESCONOCIDA")
+
     def test_alias_no_ignora_id_externo_conflictivo(self):
         cfg = {**CFG, "reagendar_clinicas_ids": '{"2":"MS"}'}
         row = csv_fila(clinica="Más Vida y Salud").replace(b"08-14,,", b"08-14,2,")

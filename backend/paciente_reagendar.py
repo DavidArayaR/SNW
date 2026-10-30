@@ -23,8 +23,11 @@ CSV_CARGA_MAX_BYTES = 50 * 1024 * 1024
 CSV_CARGA_MAX_FILAS = 100000
 REQUERIDAS = {"fecha", "ventana", "clinica_nombre", "reservo_cita_uuid",
              "paciente_nombre", "inicio_cita"}
-# Reservo usa este nombre para la misma clínica que SNW identifica como VS.
-ALIAS_CLINICAS_ORIGEN = {"mas vida y salud": "VS"}
+# Nombres del sistema de origen para clínicas registradas con otro nombre en SNW.
+ALIAS_CLINICAS_ORIGEN = {
+    "mas vida y salud": "VS",
+    "mentalidad saludable": "MS",
+}
 ZONA_CHILE = ZoneInfo("America/Santiago")
 UTC = dt.timezone.utc
 RETRASO_CARGA = dt.timedelta(minutes=3)
