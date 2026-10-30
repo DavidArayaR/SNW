@@ -189,7 +189,7 @@ def registrar_resultado_csv_remoto(estado: str, fase: str, *, http_status: int,
                                   resumen: dict | None = None, duracion_ms: int = 0) -> None:
     """Guarda el cierre de una carga remota sin CSV, identificadores ni credenciales."""
     ahora = datetime.now(_ZONA_LOG)
-    campos = ("received", "inserted", "eligible", "alreadyExists", "alreadySent",
+    campos = ("received", "inserted", "recovered", "eligible", "alreadyExists", "alreadySent",
               "rejected", "parts")
     conteos = {campo: int((resumen or {}).get(campo) or 0) for campo in campos}
     linea = (f"[{ahora:%Y-%m-%d %H:%M:%S%z}] [CSV REMOTO] {estado}"

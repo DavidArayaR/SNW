@@ -206,6 +206,70 @@ class ParserCitasTests(unittest.TestCase):
             self.assertEqual((received, errors, rows[0]["centro_codigo"]), (1, [], codigo))
             self.assertNotIn("paciente_rut", rows[0])
 
+    def test_mas_vida_y_salud_se_asocia_a_vs(self):
+        for nombre in ("Más Vida y Salud", "MAS VIDA Y SALUD", "Mas Vida y Salud"):
+            rows, errors, received = reagendar.analizar_csv(csv_fila(clinica=nombre), CFG)
+            self.assertEqual((received, errors), (1, []))
+            self.assertEqual(rows[0]["centro_codigo"], "VS")
+            self.assertIsNone(rows[0]["ultimo_error_codigo"])
+
+    def test_alias_no_ignora_id_externo_conflictivo(self):
+        cfg = {**CFG, "reagendar_clinicas_ids": '{"2":"MS"}'}
+        row = csv_fila(clinica="Más Vida y Salud").replace(b"08-14,,", b"08-14,2,")
+        rows, _, _ = reagendar.analizar_csv(row, cfg)
+        self.assertIsNone(rows[0]["centro_codigo"])
+        self.assertEqual(rows[0]["ultimo_error_codigo"], "CLINICA_DESCONOCIDA")
+
+    def test_nombre_exacto_de_clinica_configurada_tiene_prioridad_sobre_alias(self):
+        cfg = {**CFG, "wa_clinicas_adicionales":
+               '[{"codigo":"C1234ABC","nombre":"Más Vida y Salud"}]'}
+        self.assertEqual(reagendar.resolver_clinica("Más Vida y Salud", None, cfg), "C1234ABC")
+
+    def test_reimportacion_recupera_omision_de_clinica_sin_duplicar(self):
+        conexion = MagicMock()
+        cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cur.lastrowid = 22
+        cur.rowcount = 1
+        cur.fetchone.side_effect = [
+            {"id": 7, "lote_id": 11, "fecha": dt.date(2026, 10, 22),
+             "ventana": "08-14", "clinica_nombre": "Más Vida y Salud",
+             "modo_prueba": 0, "estado_envio": "OMITIDO",
+             "ultimo_error_codigo": "CLINICA_DESCONOCIDA",
+             "paciente_telefono_normalizado": "+56911111111",
+             "whatsapp_opt_out": 0, "intentos_envio": 0, "reserva_token": None,
+             "ultimo_intento_en": None, "envio_id": None, "log_envio_id": None,
+             "whatsapp_message_id": None},
+            None, None, {"cita_id": 7, "estado": "PENDIENTE"}]
+        with patch.object(reagendar, "conectar", return_value=conexion):
+            resultado = reagendar.importar(csv_fila(clinica="Más Vida y Salud"), CFG)
+        self.assertEqual(resultado["summary"]["recovered"], 1)
+        self.assertEqual(resultado["summary"]["eligible"], 1)
+        self.assertEqual(resultado["summary"]["inserted"], 0)
+        sentencias = [call.args[0] for call in cur.execute.call_args_list]
+        self.assertTrue(any("centro_codigo=%s, estado_envio='PENDIENTE'" in sql
+                            for sql in sentencias))
+        self.assertFalse(any("INSERT INTO paciente_reagendar" in sql for sql in sentencias))
+
+    def test_reimportacion_no_reactiva_una_cita_con_intento(self):
+        conexion = MagicMock()
+        cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cur.lastrowid = 22
+        cur.fetchone.return_value = {
+            "id": 7, "lote_id": 11, "fecha": dt.date(2026, 10, 22),
+            "ventana": "08-14", "clinica_nombre": "Más Vida y Salud",
+            "modo_prueba": 0, "estado_envio": "OMITIDO",
+            "ultimo_error_codigo": "CLINICA_DESCONOCIDA",
+            "paciente_telefono_normalizado": "+56911111111",
+            "whatsapp_opt_out": 0, "intentos_envio": 1, "reserva_token": None,
+            "ultimo_intento_en": None, "envio_id": None, "log_envio_id": None,
+            "whatsapp_message_id": None}
+        with patch.object(reagendar, "conectar", return_value=conexion):
+            resultado = reagendar.importar(csv_fila(clinica="Más Vida y Salud"), CFG)
+        self.assertEqual(resultado["summary"]["recovered"], 0)
+        self.assertEqual(resultado["summary"]["alreadyExists"], 1)
+        self.assertFalse(any("UPDATE paciente_reagendar SET lote_id" in call.args[0]
+                             for call in cur.execute.call_args_list))
+
     def test_bom_comillas_y_saltos_de_linea(self):
         datos = csv_fila().decode().replace("Persona Prueba", '"Persona,\nPrueba"')
         rows, errors, _ = reagendar.analizar_csv(("\ufeff" + datos).encode(), CFG)

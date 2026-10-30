@@ -23,6 +23,8 @@ CSV_CARGA_MAX_BYTES = 50 * 1024 * 1024
 CSV_CARGA_MAX_FILAS = 100000
 REQUERIDAS = {"fecha", "ventana", "clinica_nombre", "reservo_cita_uuid",
              "paciente_nombre", "inicio_cita"}
+# Reservo usa este nombre para la misma clínica que SNW identifica como VS.
+ALIAS_CLINICAS_ORIGEN = {"mas vida y salud": "VS"}
 ZONA_CHILE = ZoneInfo("America/Santiago")
 UTC = dt.timezone.utc
 RETRASO_CARGA = dt.timedelta(minutes=3)
@@ -91,9 +93,13 @@ def _normalizar_nombre(valor: str) -> str:
 
 def resolver_clinica(nombre: str, clinica_id: int | None, cfg: dict) -> str | None:
     catalogo = catalogo_centros(cfg)
+    nombre_normalizado = _normalizar_nombre(nombre)
     coincidencias = [codigo for codigo, etiqueta in catalogo.items()
-                     if _normalizar_nombre(etiqueta) == _normalizar_nombre(nombre)]
+                     if _normalizar_nombre(etiqueta) == nombre_normalizado]
     por_nombre = coincidencias[0] if len(coincidencias) == 1 else None
+    if not por_nombre and not coincidencias:
+        alias = ALIAS_CLINICAS_ORIGEN.get(nombre_normalizado)
+        por_nombre = alias if alias in catalogo else None
     try:
         mapa = json.loads(cfg.get("reagendar_clinicas_ids") or "{}")
         por_id = mapa.get(str(clinica_id)) if clinica_id is not None and isinstance(mapa, dict) else None
@@ -241,7 +247,7 @@ def importar_por_partes(datos: bytes, cfg: dict, *, modo_prueba: bool = False) -
         raise CsvInvalido("Cada archivo debe corresponder a una sola fecha y ventana de Reservo.")
 
     recibido = dt.datetime.now(UTC)
-    resumen = {clave: 0 for clave in ("received", "inserted", "eligible", "alreadyExists",
+    resumen = {clave: 0 for clave in ("received", "inserted", "recovered", "eligible", "alreadyExists",
                                      "alreadySent", "rejected")}
     resumen["omittedReasons"] = {}
     ids_lote, estados, horarios, errores, resultados = [], [], [], [], []
@@ -251,7 +257,7 @@ def importar_por_partes(datos: bytes, cfg: dict, *, modo_prueba: bool = False) -
         resultado = importar(bloque, cfg, recibido=recibido, modo_prueba=modo_prueba,
                              programar_automaticamente=False)
         parcial = resultado["summary"]
-        for clave in ("received", "inserted", "eligible", "alreadyExists",
+        for clave in ("received", "inserted", "recovered", "eligible", "alreadyExists",
                       "alreadySent", "rejected"):
             resumen[clave] += parcial.get(clave, 0)
         for motivo, cantidad in (parcial.get("omittedReasons") or {}).items():
@@ -325,7 +331,7 @@ def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None,
         raise ValueError("La recepción debe tener zona horaria")
     fecha, ventana = next(iter(pares))
     programado = None if modo_prueba else programacion_carga(fecha, ventana, recibido)
-    insertados = duplicados = ya_enviados = elegibles = 0
+    insertados = recuperados = duplicados = ya_enviados = elegibles = 0
     motivos_omitidos: dict[str, int] = {}
     from supresion import huella_telefono
     with conectar() as conn, conn.cursor() as cur:
@@ -339,13 +345,61 @@ def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None,
         for registro in registros:
             registro["modo_prueba"] = int(modo_prueba)
             telefono = registro["paciente_telefono_normalizado"]
-            cur.execute("SELECT modo_prueba, estado_envio FROM paciente_reagendar"
-                        " WHERE reservo_cita_uuid=%s", (registro["reservo_cita_uuid"],))
+            cur.execute("SELECT id, lote_id, fecha, ventana, clinica_nombre, modo_prueba,"
+                        " estado_envio, ultimo_error_codigo,"
+                        " paciente_telefono_normalizado, whatsapp_opt_out, intentos_envio,"
+                        " reserva_token, ultimo_intento_en, envio_id, log_envio_id,"
+                        " whatsapp_message_id FROM paciente_reagendar"
+                        " WHERE reservo_cita_uuid=%s FOR UPDATE", (registro["reservo_cita_uuid"],))
             existente = cur.fetchone()
             if existente:
                 if bool(existente["modo_prueba"]) != modo_prueba:
                     raise ModoImportacionIncompatible(
                         "El identificador de cita ya pertenece a otro modo de importación.")
+                # Solo una nueva importación explícita puede recuperar una cita
+                # omitida por el nombre de la clínica. Nunca reactiva envíos
+                # intentados, bajas ni un teléfono reservado por otra cita.
+                if (not modo_prueba and telefono and not registro["ultimo_error_codigo"]
+                        and existente["fecha"] == registro["fecha"]
+                        and existente["ventana"] == registro["ventana"]
+                        and _normalizar_nombre(existente["clinica_nombre"])
+                        == _normalizar_nombre(registro["clinica_nombre"])
+                        and existente["estado_envio"] == "OMITIDO"
+                        and existente["ultimo_error_codigo"] == "CLINICA_DESCONOCIDA"
+                        and existente["paciente_telefono_normalizado"] == telefono
+                        and not any(existente[clave] for clave in (
+                            "whatsapp_opt_out", "intentos_envio", "reserva_token",
+                            "ultimo_intento_en", "envio_id", "log_envio_id",
+                            "whatsapp_message_id"))):
+                    cur.execute("SELECT 1 FROM supresion_telefonos"
+                                " WHERE huella=%s AND estado <> 'exento' FOR UPDATE",
+                                (huella_telefono(telefono),))
+                    suprimido = cur.fetchone()
+                    cur.execute("SELECT 1 FROM paciente_reagendar"
+                                " WHERE paciente_telefono_normalizado=%s"
+                                " AND whatsapp_opt_out=1 LIMIT 1", (telefono,))
+                    baja = cur.fetchone()
+                    cur.execute("SELECT cita_id, estado FROM reagendar_destinatarios"
+                                " WHERE telefono=%s AND modo_prueba=0 FOR UPDATE", (telefono,))
+                    destino = cur.fetchone()
+                    if (not suprimido and not baja and destino
+                            and destino["cita_id"] == existente["id"]
+                            and destino["estado"] == "PENDIENTE"):
+                        cur.execute("UPDATE paciente_reagendar SET lote_id=%s,"
+                                    " centro_codigo=%s, estado_envio='PENDIENTE',"
+                                    " ultimo_error_codigo=NULL WHERE id=%s"
+                                    " AND estado_envio='OMITIDO'"
+                                    " AND ultimo_error_codigo='CLINICA_DESCONOCIDA'"
+                                    " AND intentos_envio=0 AND whatsapp_opt_out=0",
+                                    (lote_id, registro["centro_codigo"], existente["id"]))
+                        if cur.rowcount == 1:
+                            if existente["lote_id"] is not None:
+                                cur.execute("UPDATE reagendar_lotes"
+                                            " SET creados=GREATEST(0, creados-1) WHERE id=%s",
+                                            (existente["lote_id"],))
+                            recuperados += 1
+                            elegibles += 1
+                            continue
                 duplicados += 1
                 ya_enviados += int(existente["estado_envio"] == "ENVIADO")
                 continue
@@ -427,15 +481,15 @@ def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None,
             if programar_automaticamente:
                 programado = programacion_tras_carga(programado, dt.datetime.now(UTC))
             vigente = elegibles > 0 and programado is not None and programar_automaticamente
-            estado = "PROGRAMADO" if vigente else "REVISION" if insertados else "COMPLETADO"
+            estado = "PROGRAMADO" if vigente else "REVISION" if insertados + recuperados else "COMPLETADO"
             cur.execute(
                 "UPDATE reagendar_lotes SET estado=%s, programado_para=%s,"
                 " creados=%s, rechazados=%s, repetidos=%s, recibidos=%s WHERE id=%s",
-                (estado, programado if vigente else None, insertados, len(errores),
+                (estado, programado if vigente else None, insertados + recuperados, len(errores),
                  duplicados, recibidas, lote_id))
         conn.commit()
     return {"success": True, "testMode": modo_prueba,
-            "summary": {"received": recibidas, "inserted": insertados,
+            "summary": {"received": recibidas, "inserted": insertados, "recovered": recuperados,
             "eligible": elegibles, "alreadyExists": duplicados,
             "alreadySent": ya_enviados, "rejected": len(errores),
             "omittedReasons": motivos_omitidos,
