@@ -4455,7 +4455,7 @@ Promise.all([cargaInicialCentrosEmisores, cargaInicialPlantillas]).then(() => {
   modoNueva();
   inpCentroPlantilla.value = codigo;
   inpNombre.value = `Reagendamiento ${centro.nombre}`;
-  inpMensaje.value = "Hola {nombre},\n\nSi quieres agendar una nueva atención, pulsa «Si quiero reagendar» o responde «Quiero reagendar». Te enviaremos un botón para abrir el chat del equipo de tu clínica.";
+  inpMensaje.value = "¡Hola, {nombre_paciente}! 😊\n\nEsperamos que se encuentre bien. Queremos saber cómo le fue en su atención reciente con {nombre_doc} y si le indicaron un nuevo control.\n\nSi desea que le ayudemos a coordinar su próxima cita, pulse «Si quiero reagendar». Le enviaremos un botón para abrir el chat de atención de su clínica con un mensaje preparado para que lo envíe allí. 💚\n\nSi por ahora no necesita agendar, puede elegir «No me interesa». Si no desea recibir más notificaciones, elija «Dar de baja».";
   establecerBotones([
     { tipo: "respuesta", texto: "Si quiero reagendar", accion: "reagendar" },
     { tipo: "respuesta", texto: "No me interesa", accion: "desinteres" },
