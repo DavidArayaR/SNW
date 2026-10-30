@@ -8424,6 +8424,13 @@ async def _procesar_cita_reagendar(cita: dict, plantillas_por_centro: dict) -> N
                 != plantilla.get("clave")):
             paciente_reagendar.marcar_fallo(cita, "ENVIO_DESACTIVADO")
             return
+        # El usuario puede retirar una cita de prueba incluso después del claim.
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM paciente_reagendar WHERE id=%s"
+                        " AND reserva_token=%s AND estado_envio='PROCESANDO'",
+                        (cita["id"], cita["reserva_token"]))
+            if not cur.fetchone():
+                return
         ok, message_id, _error, resultado = await servicio.enviar(
             telefono, vista["cuerpo"], plantilla=plantilla,
             variables=vista["ejemplos"])
@@ -10241,12 +10248,12 @@ def eliminar_todos_reagendar(sesion: dict = Depends(solo_admin)):
 
 @app.get("/api/v1/paciente-reagendar/pruebas/borrado/resumen")
 def resumen_borrado_pruebas_reagendar(sesion: dict = Depends(solo_admin)):
-    return paciente_reagendar.resumen_borrado_pruebas_finalizadas()
+    return paciente_reagendar.resumen_borrado_pruebas()
 
 
 @app.delete("/api/v1/paciente-reagendar/pruebas/borrado")
 def eliminar_pruebas_reagendar(sesion: dict = Depends(solo_admin)):
-    resultado = paciente_reagendar.eliminar_pruebas_finalizadas()
+    resultado = paciente_reagendar.eliminar_pruebas()
     if resultado["pacientes_eliminados"]:
         auditoria_registrar(sesion.get("usuario", ""), "reagendar_pruebas_eliminadas",
                            "paciente_reagendar",

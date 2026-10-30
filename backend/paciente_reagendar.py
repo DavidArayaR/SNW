@@ -724,37 +724,30 @@ def _telefonos_prueba_configurados() -> tuple[str, ...]:
     return tuple(sorted(numero for numero in numeros if numero))
 
 
-def _condicion_pruebas_finalizadas(numeros: tuple[str, ...]) -> tuple[str, tuple]:
+def _condicion_borrado_pruebas(numeros: tuple[str, ...]) -> tuple[str, tuple]:
     if not numeros:
         return "1=0", ()
     marcadores = ",".join(["%s"] * len(numeros))
-    condicion = (
-        f"r.paciente_telefono_normalizado IN ({marcadores})"
-        " AND r.estado_envio='ENVIADO' AND r.whatsapp_message_id IS NOT NULL"
-        " AND (r.enviado_en <= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 24 HOUR)"
-        " OR (EXISTS (SELECT 1 FROM reagendar_flujo f WHERE f.cita_id=r.id"
-        " AND f.estado IN ('CONTACTO_OFRECIDO','FINALIZADO'))"
-        " AND NOT EXISTS (SELECT 1 FROM reagendar_interacciones i"
-        " WHERE i.cita_id=r.id AND i.respuesta_estado NOT IN ('ENVIADO','OMITIDO'))))"
-    )
+    condicion = f"r.paciente_telefono_normalizado IN ({marcadores})"
     return condicion, numeros
 
 
-def resumen_borrado_pruebas_finalizadas() -> dict:
-    """Cuenta citas de números de prueba que ya no necesitan contexto de respuesta."""
-    condicion, args = _condicion_pruebas_finalizadas(_telefonos_prueba_configurados())
+def resumen_borrado_pruebas() -> dict:
+    """Cuenta citas de números de prueba, independientemente de su estado."""
+    condicion, args = _condicion_borrado_pruebas(_telefonos_prueba_configurados())
     with conectar() as conn, conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) AS n FROM paciente_reagendar r WHERE " + condicion, args)
         return {"eliminables": int(cur.fetchone()["n"])}
 
 
-def eliminar_pruebas_finalizadas() -> dict:
-    """Retira solo citas de prueba finalizadas; conserva el historial de envíos."""
-    condicion, args = _condicion_pruebas_finalizadas(_telefonos_prueba_configurados())
+def eliminar_pruebas() -> dict:
+    """Borrado manual de citas de prueba en cualquier estado; conserva el historial."""
+    condicion, args = _condicion_borrado_pruebas(_telefonos_prueba_configurados())
     with conectar() as conn, conn.cursor() as cur:
-        cur.execute("SELECT r.id FROM paciente_reagendar r WHERE " + condicion
+        cur.execute("SELECT r.id, r.lote_id FROM paciente_reagendar r WHERE " + condicion
                     + " ORDER BY r.id FOR UPDATE", args)
-        ids = [fila["id"] for fila in cur.fetchall()]
+        filas = cur.fetchall()
+        ids = [fila["id"] for fila in filas]
         for inicio in range(0, len(ids), 1000):
             bloque = ids[inicio:inicio + 1000]
             marcadores = ",".join(["%s"] * len(bloque))
@@ -762,6 +755,12 @@ def eliminar_pruebas_finalizadas() -> dict:
                         + marcadores + ")", tuple(bloque))
             cur.execute("DELETE FROM paciente_reagendar WHERE id IN ("
                         + marcadores + ")", tuple(bloque))
+        for lote_id in {fila["lote_id"] for fila in filas if fila["lote_id"] is not None}:
+            cur.execute(
+                "UPDATE reagendar_lotes l SET estado='COMPLETADO', programado_para=NULL"
+                " WHERE l.id=%s AND NOT EXISTS (SELECT 1 FROM paciente_reagendar r"
+                " WHERE r.lote_id=l.id AND r.estado_envio IN ('PENDIENTE','REINTENTO','PROCESANDO')"
+                " AND r.ultimo_error_codigo IS NULL)", (lote_id,))
         conn.commit()
     return {"pacientes_eliminados": len(ids)}
 

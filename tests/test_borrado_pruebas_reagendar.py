@@ -19,23 +19,20 @@ class BorradoPruebasTests(unittest.TestCase):
         self.assertEqual(len(numeros), 2)
         self.assertTrue(all(numero.startswith("+569") for numero in numeros))
 
-    def test_solo_selecciona_enviados_con_conversacion_cerrada_o_24_horas(self):
-        condicion, args = reagendar._condicion_pruebas_finalizadas(("+56911111111",))
+    def test_selecciona_numeros_de_prueba_sin_restriccion_de_estado_o_tiempo(self):
+        condicion, args = reagendar._condicion_borrado_pruebas(("+56911111111",))
         self.assertEqual(args, ("+56911111111",))
-        self.assertIn("r.estado_envio='ENVIADO'", condicion)
-        self.assertIn("INTERVAL 24 HOUR", condicion)
-        self.assertIn("CONTACTO_OFRECIDO", condicion)
-        self.assertIn("respuesta_estado NOT IN ('ENVIADO','OMITIDO')", condicion)
-        self.assertNotIn("PENDIENTE' THEN", condicion)
+        self.assertEqual(condicion, "r.paciente_telefono_normalizado IN (%s)")
+        self.assertEqual(reagendar._condicion_borrado_pruebas(()), ("1=0", ()))
 
     def test_borra_solo_ids_revalidados_y_conserva_historial(self):
         conexion = MagicMock()
         cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
-        cur.fetchall.return_value = [{"id": 3}, {"id": 5}]
+        cur.fetchall.return_value = [{"id": 3, "lote_id": 7}, {"id": 5, "lote_id": 7}]
         with patch.object(reagendar, "_telefonos_prueba_configurados",
                           return_value=("+56911111111",)), \
              patch.object(reagendar, "conectar", return_value=conexion):
-            resultado = reagendar.eliminar_pruebas_finalizadas()
+            resultado = reagendar.eliminar_pruebas()
         self.assertEqual(resultado, {"pacientes_eliminados": 2})
         sentencias = [llamada.args[0] for llamada in cur.execute.call_args_list]
         self.assertIn("FOR UPDATE", sentencias[0])
@@ -45,7 +42,7 @@ class BorradoPruebasTests(unittest.TestCase):
         conexion.__enter__.return_value.commit.assert_called_once()
 
     def test_ruta_no_borra_sin_solicitud_explicita(self):
-        with patch.object(reagendar, "eliminar_pruebas_finalizadas",
+        with patch.object(reagendar, "eliminar_pruebas",
                           return_value={"pacientes_eliminados": 1}) as borrar, \
              patch.object(main, "auditoria_registrar") as auditar:
             resultado = main.eliminar_pruebas_reagendar(sesion={"usuario": "dev"})

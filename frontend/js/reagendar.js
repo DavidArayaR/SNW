@@ -26,13 +26,14 @@
       if (res.status === 401) { window.snwSesionExpirada(); return; }
       if (!res.ok) throw new Error(datos.detail || "No se pudieron revisar los números de prueba.");
       if (!datos.eliminables) {
-        mensaje.textContent = "Aún no hay números de prueba finalizados para quitar. Espera la respuesta o 24 horas desde el envío.";
+        mensaje.textContent = "No hay registros de números de prueba para quitar.";
         return;
       }
       $("textoEliminarPruebasReagendar").textContent =
         `Se quitarán ${datos.eliminables} registros de números de prueba de reagendamientos. ` +
         "El historial de mensajes se conservará y los números seguirán autorizados en Configuración. " +
-        "Podrán volver a importarse en otro CSV. Esta acción no se puede deshacer.";
+        "Podrán volver a importarse en otro CSV. Se perderá el contexto para responder a estos reagendamientos. " +
+        "Un mensaje que ya esté en envío podría llegar igualmente. Esta acción no se puede deshacer.";
       modalEliminarPruebas.hidden = false;
       confirmarEliminarPruebas.focus();
     } catch (error) {
