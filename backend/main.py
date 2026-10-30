@@ -10108,7 +10108,8 @@ def listar_citas_reagendar(centro: str | None = Query(None),
     where = " WHERE " + " AND ".join(condiciones)
     origen = (" paciente_reagendar r LEFT JOIN reagendar_destinatarios d"
               " ON d.telefono=r.paciente_telefono_normalizado"
-              " AND d.modo_prueba=r.modo_prueba")
+              " AND d.modo_prueba=r.modo_prueba"
+              " LEFT JOIN log_envios le ON le.id=r.log_envio_id")
     with conectar() as conn, conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) AS n FROM" + origen + where, tuple(args))
         total = cur.fetchone()["n"]
@@ -10119,7 +10120,7 @@ def listar_citas_reagendar(centro: str | None = Query(None),
             " r.estado_envio, r.intentos_envio, r.whatsapp_opt_out, r.envio_id,"
             " r.log_envio_id, d.estado AS destinatario_estado,"
             " r.ultimo_error_codigo, r.importado_en,"
-            " r.enviado_en, r.whatsapp_message_id,"
+            " r.enviado_en, r.whatsapp_message_id, le.entregado_en AS recibido_en,"
             " (SELECT i.accion FROM reagendar_interacciones i"
             " WHERE i.cita_id=r.id ORDER BY i.creado_en DESC,"
             " i.mensaje_id DESC LIMIT 1) AS ultima_respuesta"
@@ -10166,7 +10167,8 @@ def listar_lotes_reagendar(limite: int = Query(50, ge=1, le=200),
             "SELECT l.id, l.fecha, l.ventana, l.recibido_en, l.programado_para,"
             " l.estado, l.aplazado_en, l.aplazado_por, l.motivo_aplazamiento,"
             " l.creados, l.rechazados, l.repetidos, l.recibidos,"
-            " SUM(CASE WHEN r.estado_envio='ENVIADO' THEN 1 ELSE 0 END) AS enviados,"
+            " SUM(CASE WHEN le.estado_whatsapp IN ('delivered','read')"
+            " THEN 1 ELSE 0 END) AS recibidos_pacientes,"
             " SUM(CASE WHEN r.estado_envio='OMITIDO' THEN 1 ELSE 0 END) AS omitidos,"
             " SUM(CASE WHEN r.estado_envio IN ('PENDIENTE','REINTENTO','PROCESANDO')"
             " THEN 1 ELSE 0 END) AS pendientes,"
@@ -10176,6 +10178,7 @@ def listar_lotes_reagendar(limite: int = Query(50, ge=1, le=200),
             " OR r.log_envio_id IS NOT NULL OR r.whatsapp_message_id IS NOT NULL"
             " THEN 1 ELSE 0 END) AS no_eliminables"
             " FROM reagendar_lotes l LEFT JOIN paciente_reagendar r ON r.lote_id=l.id"
+            " LEFT JOIN log_envios le ON le.id=r.log_envio_id"
             " GROUP BY l.id ORDER BY l.id DESC LIMIT %s OFFSET %s",
             (limite, (pagina - 1) * limite))
         return cur.fetchall()

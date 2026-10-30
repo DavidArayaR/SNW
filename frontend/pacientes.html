@@ -225,7 +225,7 @@
             <h3>Archivos recibidos y envíos</h3>
             <p class="field__hint reagendar__explicacion">Cada fila representa un CSV recibido, aunque todos sus pacientes ya estuvieran registrados. Si hay pacientes nuevos y llega a tiempo, el envío comienza desde las 14:30 o 20:30, pero nunca antes de 3 minutos después de completar la carga. Durante ese plazo puedes revisar o eliminar la carga. Si llega tarde, queda para revisión.</p>
             <div class="tabla-wrap"><table id="tablaReagendarLotes" aria-busy="false">
-              <thead><tr><th>CSV de Reservo</th><th>Recibido en SNW</th><th>Envío previsto</th><th>Situación</th><th>Pacientes nuevos</th><th>Mensajes aceptados</th><th>Acciones</th></tr></thead><tbody></tbody>
+              <thead><tr><th>CSV de Reservo</th><th>Recibido en SNW</th><th>Envío previsto</th><th>Situación</th><th>Pacientes nuevos</th><th>Mensajes recibidos por pacientes</th><th>Acciones</th></tr></thead><tbody></tbody>
             </table></div>
             <p id="reagendarLotesMensaje" class="field__hint" role="status" aria-live="polite"></p>
             <button id="reagendarMasLotes" class="btn btn--ghost" type="button" hidden>Ver cargas anteriores</button>
@@ -256,7 +256,7 @@
           </div>
           <div class="tabla-wrap reagendar__tabla">
             <table aria-busy="false" id="tablaReagendar">
-              <thead><tr><th>Fecha de búsqueda</th><th>Tramo</th><th>Clínica</th><th>Paciente</th><th>Teléfono</th><th>Doctor</th><th>Tipo</th><th>Estado</th><th>Intentos</th><th>Enviado</th><th>Respuesta</th><th>Motivo</th><th>Acción</th></tr></thead>
+              <thead><tr><th>Fecha de búsqueda</th><th>Tramo</th><th>Clínica</th><th>Paciente</th><th>Teléfono</th><th>Doctor</th><th>Tipo</th><th>Estado</th><th>Intentos</th><th>Recibido</th><th>Respuesta</th><th>Motivo</th><th>Acción</th></tr></thead>
               <tbody></tbody>
             </table>
           </div>
@@ -360,7 +360,7 @@
   <script src="js/pass-toggle.js"></script>
   <script src="js/csv-chunks.js?v=csv-codificacion1"></script>
   <script src="js/pacientes.js?v=csv-codificacion1"></script>
-  <script src="js/reagendar.js?v=eliminar-todos3"></script>
+  <script src="js/reagendar.js?v=recepcion-confirmada1"></script>
   <script src="js/pacientes-tabs.js?v=aplazar-flotante1"></script>
   <script>
     (function () {

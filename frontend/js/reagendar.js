@@ -284,7 +284,8 @@
         celdaEstado.classList.add(`reagendar__estado--${estado[2]}`);
         celdaResumen(tr, `${lote.creados || 0} nuevos`,
           `${lote.repetidos || 0} ya registrados · ${lote.rechazados || 0} rechazados`);
-        celdaResumen(tr, String(lote.enviados || 0), "Meta aceptó; no implica entrega");
+        celdaResumen(tr, String(lote.recibidos_pacientes || 0),
+          "Entrega o lectura confirmada por WhatsApp");
         const acciones = document.createElement("td");
         acciones.className = "reagendar__acciones-lote";
         const revisar = document.createElement("button");
@@ -411,7 +412,8 @@
                              r.paciente_nombre, r.paciente_telefono_normalizado,
                              r.doctor_nombre, r.modo_prueba ? "Prueba" : "Operativo",
                              r.estado_envio, r.intentos_envio,
-                             fecha(r.enviado_en), r.ultima_respuesta, r.ultimo_error_codigo]) celda(tr, valor);
+                             fechaHoraChile(r.recibido_en), r.ultima_respuesta,
+                             r.ultimo_error_codigo]) celda(tr, valor);
         const acciones = document.createElement("td");
         const eliminar = document.createElement("button");
         eliminar.type = "button";
