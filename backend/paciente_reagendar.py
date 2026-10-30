@@ -941,6 +941,7 @@ def registrar_respuesta_reagendar(telefono: str, phone_id: str, mensaje_id: str,
                     " LEFT JOIN paciente_reagendar r ON r.log_envio_id=le.id"
                     " WHERE le.numero_telefono=%s AND le.wa_phone_id=%s"
                     " AND le.estado_envio='enviado'"
+                    " AND le.envio_id IS NOT NULL"
                     " AND le.plantilla_clave NOT IN ('respuesta','ajuste_manual')"
                     " AND le.fecha_hora >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
                     " ORDER BY le.id DESC LIMIT 1", (telefono, phone_id))
@@ -1004,6 +1005,11 @@ def registrar_respuesta_reagendar(telefono: str, phone_id: str, mensaje_id: str,
         if accion == "BAJA":
             cur.execute("UPDATE paciente_reagendar SET whatsapp_opt_out=1"
                         " WHERE paciente_telefono_normalizado=%s", (telefono,))
+        if cita.get("log_envio_id"):
+            cur.execute("UPDATE log_envios SET respuesta=%s WHERE id=%s"
+                        " AND wa_phone_id=%s AND numero_telefono=%s",
+                        ("baja" if accion == "BAJA" else "respondio",
+                         cita["log_envio_id"], phone_id, telefono))
         conn.commit()
     return {"accion": accion, "cita": cita, "texto": texto, "mensaje_id": mensaje_id,
             "mensaje_preparado": preparado}

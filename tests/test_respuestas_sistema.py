@@ -72,6 +72,7 @@ class RespuestasSistemaTests(unittest.TestCase):
              patch.object(main, "config_get", side_effect=lambda clave: cfg.get(clave, "")), \
              patch.object(main, "resolver_phone_id", return_value=canal), \
              patch.object(main, "WhatsAppService", return_value=servicio), \
+             patch.object(main, "registrar_historial"), \
              patch.object(main.paciente_reagendar, "marcar_respuesta_reagendar"):
             main._enviar_respuesta_reagendar({
                 "accion": "REAGENDAR", "cita": cita, "texto": "Reagendar", "mensaje_id": "wamid.in"})

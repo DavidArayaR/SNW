@@ -3121,6 +3121,10 @@ def _enviar_respuesta_reagendar(evento: dict) -> None:
         ok, respuesta_id, _error, _ = asyncio.run(
             WhatsAppService(phone_number_id=canal["phoneNumberId"]).enviar(
                 telefono, texto, plantilla=extra))
+        registrar_historial(None, cita.get("paciente_nombre") or "", telefono,
+                            "reagendar_respuesta", texto, "enviado" if ok else "error", _error,
+                            ambiente="produccion", whatsapp_message_id=respuesta_id,
+                            tabla_pacientes="paciente_reagendar", emisor=canal)
         paciente_reagendar.marcar_respuesta_reagendar(
             mensaje_id, respuesta_id, "ENVIADO" if ok else "ERROR")
     except Exception as exc:
@@ -8873,6 +8877,106 @@ def listar_historial_pagina(q: str = Query("", max_length=100),
     return {"registros": _presentar_historial(filas, sesion), "total": total}
 
 
+def _detalle_historial_reagendar(envio_id: int, sesion: dict) -> list[dict]:
+    if not _es_privilegiado(sesion):
+        raise HTTPException(403, detail="No tienes acceso a este envío de reagendamiento.")
+    with conectar("produccion") as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT le.id, le.nombre_paciente, le.numero_telefono, le.estado_envio,"
+            " le.estado_whatsapp, le.mensaje AS mensaje_enviado, le.descripcion_error, le.fecha_hora,"
+            " r.whatsapp_opt_out,"
+            " (SELECT i.accion FROM reagendar_interacciones i WHERE i.cita_id=r.id"
+            " ORDER BY i.creado_en DESC, i.mensaje_id DESC LIMIT 1) AS ultima_accion,"
+            " (SELECT COALESCE(NULLIF(cm.texto,''), CONCAT('[',cm.tipo,']'))"
+            " FROM whatsapp_conversaciones_mensajes cm"
+            " WHERE BINARY cm.wa_phone_id=BINARY le.wa_phone_id"
+            " AND BINARY cm.telefono_paciente=BINARY le.numero_telefono"
+            " AND cm.recibido >= le.fecha_hora"
+            " AND NOT EXISTS (SELECT 1 FROM log_envios nx"
+            " WHERE nx.envio_id IS NOT NULL AND nx.id>le.id"
+            " AND BINARY nx.wa_phone_id=BINARY le.wa_phone_id"
+            " AND BINARY nx.numero_telefono=BINARY le.numero_telefono"
+            " AND nx.fecha_hora <= cm.recibido)"
+            " ORDER BY cm.recibido DESC, cm.mensaje_id DESC LIMIT 1) AS mensaje_respuesta"
+            " FROM log_envios le JOIN envios e ON e.id=le.envio_id"
+            " LEFT JOIN paciente_reagendar r ON r.log_envio_id=le.id"
+            " WHERE le.envio_id=%s AND e.base_datos='paciente_reagendar' ORDER BY le.id",
+            (envio_id,))
+        filas = cur.fetchall()
+    completos = tiene_permiso(sesion, "pacientes_ver_datos")
+    for fila in filas:
+        mensaje = fila.get("mensaje_respuesta") or ""
+        accion = fila.pop("ultima_accion", None)
+        baja = fila.pop("whatsapp_opt_out", False) or accion == "BAJA"
+        desinteres = accion == "DESINTERES" or whatsapp_service.es_mensaje_no_interes(mensaje)
+        interesado = not baja and not desinteres and (
+            accion == "REAGENDAR" or paciente_reagendar.es_aceptacion_reagendar(mensaje)
+            or es_mensaje_interes(mensaje))
+        fila.update({"paciente_id": None, "reagendamiento": True,
+                     "datos_completos": completos, "interesado": bool(interesado),
+                     "respuesta_interes": bool(interesado), "puede_marcar_pendiente": False,
+                     "puede_enviar_callcenter": False,
+                     "respuesta": "baja" if baja else "no_interesado" if desinteres
+                     else "respondio" if mensaje or accion else "pendiente"})
+        fila["fecha"] = fila.pop("fecha_hora").strftime("%d-%m-%Y %H:%M")
+        codigo = re.search(r"(?<!\d)(1\d{5})(?!\d)", fila.get("descripcion_error") or "")
+        fila["codigo_error"] = codigo.group(1) if codigo else None
+        if not completos:
+            fila["nombre_paciente"] = _iniciales_paciente(fila.get("nombre_paciente"))
+            fila["numero_telefono"] = _telefono_paciente_oculto(fila.get("numero_telefono"))
+            for clave in ("mensaje_respuesta", "mensaje_enviado", "descripcion_error"):
+                fila[clave] = None
+    return filas
+
+
+def mensajes_historial_reagendar(envio_id: int, registro_id: int,
+                                sesion: dict = Depends(exigir("historial"))):
+    if not _es_privilegiado(sesion) or not tiene_permiso(sesion, "pacientes_ver_datos"):
+        raise HTTPException(403, detail="No tienes permiso para ver esta conversación.")
+    with conectar("produccion") as conn, conn.cursor() as cur:
+        cur.execute("SELECT le.* FROM log_envios le JOIN envios e ON e.id=le.envio_id"
+                    " WHERE le.id=%s AND le.envio_id=%s AND e.base_datos='paciente_reagendar'",
+                    (registro_id, envio_id))
+        origen = cur.fetchone()
+        if not origen or not origen.get("wa_phone_id"):
+            raise HTTPException(404, detail="Conversación de reagendamiento no encontrada.")
+        args = (origen["wa_phone_id"], origen["numero_telefono"], origen["fecha_hora"])
+        cur.execute("SELECT mensaje_id, tipo, texto, recibido FROM whatsapp_conversaciones_mensajes"
+                    " WHERE wa_phone_id=%s AND telefono_paciente=%s AND recibido >= %s"
+                    " ORDER BY recibido, mensaje_id LIMIT 500", args)
+        entrantes = cur.fetchall()
+        cur.execute("SELECT id, whatsapp_message_id, mensaje, plantilla_clave, estado_envio, fecha_hora"
+                    " FROM log_envios WHERE wa_phone_id=%s AND numero_telefono=%s AND fecha_hora >= %s"
+                    " AND COALESCE(plantilla_clave,'') NOT IN ('respuesta','ajuste_manual')"
+                    " ORDER BY fecha_hora, id LIMIT 500", args)
+        salientes = cur.fetchall()
+    mensajes = [{"id": f["mensaje_id"], "texto": f.get("texto") or f"[{f.get('tipo') or 'mensaje'}]",
+                 "direccion": "entrante", "fecha_dt": f["recibido"],
+                 "interes": es_mensaje_interes(f.get("texto") or ""),
+                 "etiquetas_editables": False} for f in entrantes]
+    vistos = set()
+    for f in salientes:
+        clave = f.get("whatsapp_message_id") or f"log-{f['id']}"
+        if clave in vistos:
+            continue
+        vistos.add(clave)
+        mensajes.append({"id": clave, "texto": f.get("mensaje") or "", "direccion": "saliente",
+                         "plantilla": f.get("plantilla_clave"), "estado": f.get("estado_envio"),
+                         "fecha_dt": f["fecha_hora"], "etiquetas_editables": False})
+    mensajes.sort(key=lambda f: (f["fecha_dt"], f["direccion"]))
+    for fila in mensajes:
+        fila["fecha"] = fila.pop("fecha_dt").strftime("%d-%m-%Y %H:%M")
+    ultimo_texto = (entrantes[-1].get("texto") or "") if entrantes else ""
+    baja = WhatsAppService()._es_baja(ultimo_texto)
+    no_interes = whatsapp_service.es_mensaje_no_interes(ultimo_texto)
+    interesado = not baja and not no_interes and (
+        es_mensaje_interes(ultimo_texto) or paciente_reagendar.es_aceptacion_reagendar(ultimo_texto))
+    return {"paciente": {"id": None, "nombre": origen.get("nombre_paciente"), "apellido": "",
+                         "telefono": origen["numero_telefono"], "interesado": bool(interesado),
+                         "respuesta": "baja" if baja else "no_interesado" if no_interes
+                         else "respondio" if entrantes else "pendiente"}, "mensajes": mensajes}
+
+
 def detalle_historial(envio_id: str, ambiente: str = Query("produccion"),
                       sesion: dict = Depends(exigir("historial"))):
     if str(envio_id).startswith("prog-"):
@@ -8897,8 +9001,9 @@ def detalle_historial(envio_id: str, ambiente: str = Query("produccion"),
     cols_env = columnas_tabla("envios", ambiente)
     esp_id_env = None
     tabla_env = None
-    if "area_id" in cols_env or "tabla_pacientes" in cols_env:
-        sel = []
+    _e = {}
+    if any(c in cols_env for c in ("base_datos", "area_id", "tabla_pacientes")):
+        sel = ["base_datos"] if "base_datos" in cols_env else []
         if "area_id" in cols_env:
             sel.append("area_id")
         if "tabla_pacientes" in cols_env:
@@ -8916,6 +9021,8 @@ def detalle_historial(envio_id: str, ambiente: str = Query("produccion"),
             raise HTTPException(403, detail="No tienes acceso a este envío.")
     elif not _es_privilegiado(sesion):
         raise HTTPException(403, detail="No tienes acceso a este envío.")
+    if _e.get("base_datos") == "paciente_reagendar":
+        return _detalle_historial_reagendar(envio_id, sesion)
     if tabla_env and servicio_areas.tabla_valida(tabla_env) \
             and servicio_areas.tabla_fisica_existe(tabla_env):
         t = tabla_env

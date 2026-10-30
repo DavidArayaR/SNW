@@ -686,6 +686,7 @@ class ApiCitasTests(unittest.TestCase):
                     "VS_CRM_PHONE_NUMBER": "+56922222222"}), \
                 patch.object(main, "resolver_phone_id", return_value=canal), \
                 patch.object(main, "WhatsAppService", return_value=servicio), \
+                patch.object(main, "registrar_historial") as historial, \
                 patch.object(reagendar, "marcar_respuesta_reagendar") as guardar, \
                 patch.object(main, "_encolar_derivacion_crm") as cola:
             main._enviar_respuesta_reagendar(evento)
@@ -698,6 +699,7 @@ class ApiCitasTests(unittest.TestCase):
                          "Doctora Prueba, clínica: VIDA Y SALUD")
         self.assertEqual(plantilla["cta"]["texto"], "Ir a call center")
         guardar.assert_called_once_with("wamid.in", "wamid.out", "ENVIADO")
+        self.assertEqual(historial.call_args.args[3], "reagendar_respuesta")
         cola.assert_not_called()
 
     def test_consulta_usa_texto_real(self):
@@ -713,6 +715,7 @@ class ApiCitasTests(unittest.TestCase):
                 patch.object(main, "resolver_phone_id", return_value={
                     "codigo": "VS", "phoneNumberId": "12345", "configured": True}), \
                 patch.object(main, "WhatsAppService", return_value=servicio), \
+                patch.object(main, "registrar_historial"), \
                 patch.object(reagendar, "marcar_respuesta_reagendar"):
             main._enviar_respuesta_reagendar({"accion": "CONSULTA", "cita": cita,
                                              "texto": "¿Atienden mañana?", "mensaje_id": "wamid.in"})

@@ -536,6 +536,11 @@ function pintarPaginadorHist(total) {
   if (selTam) selTam.value = String(pageSizeHist);
 }
 
+function ambienteRegistroHistorial(r) {
+  return r.base_datos === "paciente_reagendar" || (r.base_datos ?? "").includes("prod")
+    ? "produccion" : "desarrollo";
+}
+
 function render() {
   vacioEl.textContent = "Sin envíos registrados.";
   const paginas = totalPaginasHist(totalHistorial);
@@ -548,7 +553,7 @@ function render() {
   for (const r of parte) {
     const tr = document.createElement("tr");
     tr.dataset.id = String(r.id);
-    tr.dataset.amb = (r.base_datos ?? "").includes("prod") ? "produccion" : "desarrollo";
+    tr.dataset.amb = ambienteRegistroHistorial(r);
     tr.dataset.base = r.base_datos ?? "";
     tr.dataset.esp = r.area_id != null ? String(r.area_id) : "";
     const total = r.total_pacientes ?? 0;
@@ -568,7 +573,7 @@ function render() {
       : "";
     tr.innerHTML =
       `<td class="campo-fecha">${escaparHtml(r.fecha)}</td>` +
-      `<td><span class="badge badge--origen">${r.origen === "programado" ? "Programado" : "Manual"}</span></td>` +
+      `<td><span class="badge badge--origen">${r.base_datos === "paciente_reagendar" ? "Reagendamiento" : r.origen === "programado" ? "Programado" : "Manual"}</span></td>` +
       `<td>${escaparHtml(r.centro || "Emisor histórico no identificado")}` +
         `<small class="texto-suave">${escaparHtml(r.numero_emisor || "")}</small></td>` +
       `<td><span class="badge badge--db">${escaparHtml(r.base_datos ?? "—")}</span></td>` +
@@ -596,7 +601,7 @@ tbodyEl.addEventListener("click", async (e) => {
   if (!tr) return;
   const envioId = tr.dataset.id;
   const amb = tr.dataset.amb || "produccion";
-  const envio = registros.find((r) => String(r.id) === envioId && ((r.base_datos ?? "").includes("prod") ? "produccion" : "desarrollo") === amb)
+  const envio = registros.find((r) => String(r.id) === envioId && ambienteRegistroHistorial(r) === amb)
     || registros.find((r) => String(r.id) === envioId);
   ambienteDetalle = amb;
   areaDetalle = (envio && envio.area_id != null) ? envio.area_id : (tr.dataset.esp ? Number(tr.dataset.esp) : null);
@@ -709,7 +714,9 @@ function pintarDetalle() {
       const marcaInteres = d.interesado
         ? `<span class="hist-tag-interes" title="Marcado como interesado">interesado</span>`
         : "";
-      const verMensajes = d.paciente_id && d.datos_completos
+      const verMensajes = d.reagendamiento && d.datos_completos
+        ? `<button type="button" class="btn btn--sm btn--ghost" data-mensajes-reagendar="${Number(d.id)}">Ver mensajes</button>`
+        : d.paciente_id && d.datos_completos
         ? `<button type="button" class="btn btn--sm btn--ghost" data-mensajes="${d.paciente_id}">Ver mensajes</button>` : "";
       const enviarCC = d.puede_enviar_callcenter
         ? `<button type="button" class="btn btn--sm btn--ghost" data-callcenter-manual="${Number(d.id)}"${d.callcenter_ventana_abierta ? "" : ' disabled title="El paciente debe haber escrito a esta clínica en las últimas 24 horas"'}>Enviar botón de call center</button>` : "";
@@ -834,6 +841,11 @@ $("#modalDetalle").addEventListener("click", (e) => { if (e.target === $("#modal
 /* ---------- Mensajes del paciente ---------- */
 
 $("#detalleBody").addEventListener("click", (e) => {
+  const reagendar = e.target.closest("[data-mensajes-reagendar]");
+  if (reagendar && detalleActual) {
+    abrirMensajesReagendar(detalleActual.envioId, reagendar.dataset.mensajesReagendar);
+    return;
+  }
   const cc = e.target.closest("[data-callcenter-manual]");
   if (cc) {
     const fila = filasDetalle.find(d => Number(d.id) === Number(cc.dataset.callcenterManual));
@@ -896,6 +908,17 @@ async function abrirMensajes(pacienteId) {
   }
 }
 
+async function abrirMensajesReagendar(envioId, registroId) {
+  try {
+    const res = await fetch(`api/notificaciones/historial/${encodeURIComponent(envioId)}/reagendamientos/${registroId}/mensajes`, {
+      headers: authHeaders(), cache: "no-store",
+    });
+    const datos = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(datos.detail || "No se pudo cargar la conversación de reagendamiento.");
+    renderMensajes(datos);
+  } catch (err) { toast(err.message, "error"); }
+}
+
 function renderMensajes(data) {
   mensajesVistaActual = data;
   const pac = data.paciente || {};
@@ -920,7 +943,7 @@ function renderMensajes(data) {
       const meta = `${m.direccion === "entrante" ? "Paciente" : "Sistema"} · ${escaparHtml(m.fecha)}` +
         (m.interes ? " · interés" : "") +
         (m.estado === "error" ? " · no entregado" : "");
-      const etiquetas = m.direccion === "entrante" ?
+      const etiquetas = m.direccion === "entrante" && m.etiquetas_editables !== false ?
         `<div class="msg-etiquetas" aria-label="Etiquetas de esta respuesta">` +
         `<span class="msg-etiquetas-origen" title="Puedes corregir las etiquetas sugeridas sin alterar el estado del paciente">` +
         `${m.origen_etiquetas === "manual" ? "Revisadas" : "Sugeridas automáticamente"}</span>` +
