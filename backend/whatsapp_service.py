@@ -623,6 +623,7 @@ class WhatsAppService:
     # (p. ej. rotar el token) surta efecto sin reconstruir el servicio.
     def __init__(self, phone_number_id: str | None = None):
         self._phone_number_id = phone_number_id
+        self.ultimo_estado_meta: str | None = None
         self._cliente_lote: httpx.Client | None = None
         self._continuar_lote: Callable[[], bool] | None = None
 
@@ -1118,6 +1119,7 @@ class WhatsAppService:
         (campo 'whatsapp_template'), se envía como template aprobado usando los
         valores reales del paciente; en caso contrario, texto libre.
         """
+        self.ultimo_estado_meta = None
         if esta_suprimido(telefono):
             return False, None, "Número suprimido por solicitud del paciente", "failed"
         autorizado, problema = await self._validar_canal_antes_envio()
@@ -1194,6 +1196,7 @@ class WhatsAppService:
             msg_id = data["messages"][0].get("id", "") or ""
         if not msg_id:
             raise ResultadoEnvioIncierto("Meta respondió sin identificador del mensaje")
+        self.ultimo_estado_meta = (data["messages"][0].get("message_status") or "accepted")
         return True, msg_id, None, "sent"
 
     # ---------- Webhook ----------

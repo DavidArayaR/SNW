@@ -4260,13 +4260,24 @@ def enviar_prueba_plantilla(plantilla_id: int, body: PruebaPlantillaIn,
             raise HTTPException(502, detail=error or "Meta no aceptó el mensaje de prueba.")
         with _pruebas_plantilla_lock:
             _pruebas_plantilla_ultima[llave] = time.monotonic()
+        estado_meta = servicio_wa.ultimo_estado_meta or "accepted"
+        print(f"[PRUEBA PLANTILLA] id={plantilla_id} centro={emisor['codigo']} "
+              f"message_id={message_id} estado_meta={estado_meta}", flush=True)
         try:
             auditoria_registrar(sesion.get("usuario", ""), "plantilla_prueba_enviada",
                                 plantilla.get("clave", ""), "Prueba unitaria aceptada por Meta")
         except Exception as exc:
             log_error(f"Prueba de plantilla {plantilla_id}: no se pudo auditar", exc)
+        retenido = estado_meta == "held_for_quality_assessment"
+        pausado = estado_meta == "paused"
         return {"ok": True, "message_id": message_id, "centro": emisor["codigo"],
-                "mensaje": "Meta aceptó la prueba. Confirma su recepción en el teléfono."}
+                "estado_meta": estado_meta,
+                "mensaje": ("Meta retuvo la prueba para evaluar la calidad de la plantilla. "
+                            "Aún no se envió al teléfono."
+                            if retenido else
+                            "Meta pausó la entrega de esta prueba. Revisa el estado de la plantilla."
+                            if pausado else
+                            "Meta aceptó la prueba; la entrega aún debe confirmarse por webhook.")}
     except HTTPException:
         raise
     except Exception as exc:

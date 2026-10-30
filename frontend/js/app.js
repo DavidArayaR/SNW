@@ -1297,7 +1297,7 @@ btnEnviarPrueba.addEventListener("click", async () => {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.detail || `Error ${res.status}`);
     estadoEnvioPrueba.textContent = data.mensaje;
-    toast("Prueba aceptada por Meta. Comprueba que llegó al teléfono.", "ok");
+    toast(data.mensaje, ["held_for_quality_assessment", "paused"].includes(data.estado_meta) ? "info" : "ok");
   } catch (err) {
     estadoEnvioPrueba.textContent = `No se pudo enviar la prueba: ${err.message}`;
     toast(err.message, "error");

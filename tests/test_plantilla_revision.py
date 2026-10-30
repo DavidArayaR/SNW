@@ -882,6 +882,22 @@ class EndpointPruebaPlantillaTests(unittest.TestCase):
         self.assertIn("no tiene un centro emisor asociado", respuesta.json()["detail"])
         enviar.assert_not_awaited()
 
+    def test_prueba_retenida_por_meta_no_se_anuncia_como_entregada(self):
+        async def enviar_retenida(servicio, *_args, **_kwargs):
+            servicio.ultimo_estado_meta = "held_for_quality_assessment"
+            return True, "wamid-retenido", None, "sent"
+
+        with patch.object(main, "leer_plantillas", return_value=[PLANTILLA]), \
+             patch.object(main, "config_get", side_effect=self._config), \
+             patch.object(main, "_numeros_prueba_editables", return_value={TELEFONO}), \
+             patch.object(main.WhatsAppService, "configurada", return_value=True), \
+             patch.object(main.WhatsAppService, "enviar", new=enviar_retenida), \
+             patch.object(main, "auditoria_registrar"):
+            respuesta = self.cliente.post("/api/plantillas/7/prueba", json={"telefono": TELEFONO})
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(respuesta.json()["estado_meta"], "held_for_quality_assessment")
+        self.assertIn("Aún no se envió", respuesta.json()["mensaje"])
+
     def test_prueba_ignora_centro_enviado_por_cliente(self):
         with patch.object(main, "leer_plantillas", return_value=[PLANTILLA]), \
              patch.object(main, "config_get", side_effect=self._config), \
