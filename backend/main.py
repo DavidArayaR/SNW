@@ -259,10 +259,9 @@ def _validar_categoria_template(valor: str | None) -> str:
         )
     return cat
 
-# Mensaje de call center: se manda automáticamente 1s después de detectar
-# interés (ver CALL_CENTER_AUTO_SEGUNDOS más abajo). No es editable: es un
-# texto fijo con un botón al call center. El número al que lleva el botón se
-# obtiene del número CRM configurado para la clínica que recibió la respuesta.
+# El aviso de call center se manda automáticamente después de detectar interés.
+# El texto predeterminado puede personalizarse por clínica en Configuración;
+# el botón abre el número CRM de la clínica que recibió la respuesta.
 CALL_CENTER_CLAVE = "call_center"
 CALL_CENTER_TEXTO_DEFAULT = (
     "🤖 Mensaje automático: Gracias por tu interés. Pulsa «Ir a call center» "
@@ -2457,14 +2456,10 @@ def _cc_datos_envio(pac: dict, ambiente: str, consulta: str = "",
     mensaje fijo de call center. Añade el botón que abre el chat del call
     center si la clínica receptora tiene un número CRM válido. Nunca usa el
     número de otra clínica."""
-    texto = (config_get("call_center_aviso_consulta") or "").strip() if consulta else ""
-    if not texto or "automátic" not in texto.casefold():
-        texto = CALL_CENTER_PLANTILLA_FIJA["texto"]
-    if consulta and "tal como" not in texto.casefold():
-        texto += " Tu consulta quedó registrada. Envía el mensaje preparado tal como está para continuar."
+    codigo = (emisor or {}).get("codigo")
+    texto = _respuesta_sistema("consulta_callcenter" if consulta else "interes", codigo)
     texto = renderizar_mensaje(texto, pac)
     datos = {"texto": texto}
-    codigo = (emisor or {}).get("codigo")
     numero = re.sub(r"\D", "", config_get(f"{codigo}_CRM_PHONE_NUMBER") or "") if codigo else ""
     if numero and not re.fullmatch(r"[1-9]\d{7,14}", numero):
         numero = ""
@@ -2872,7 +2867,9 @@ def _enviar_aviso_consulta_campania(telefono: str, phone_id: str,
             estado = cur.fetchone() or {}
         if estado.get("estado") != "esperando" or estado.get("primer_mensaje_id") != primer_mensaje_id:
             return
-        if _enviar_mensaje_directo(telefono, _AVISO_CONSULTA_CAMPANIA,
+        emisor = resolver_phone_id(phone_id)
+        texto_aviso = _respuesta_sistema("consulta_detalle", emisor.get("codigo") if emisor else None)
+        if _enviar_mensaje_directo(telefono, texto_aviso,
                                   "consulta_aclaracion", tabla_preferida=tabla):
             return
         with conectar() as conn, conn.cursor() as cur:
@@ -2931,7 +2928,8 @@ def _gestionar_consulta_campania(telefono: str, texto: str, mensaje_id: str,
                 contexto = contextvars.copy_context()
                 timer = threading.Timer(
                     0, contexto.run,
-                    args=(_enviar_mensaje_directo, tel, _AVISO_CONSULTA_LARGA,
+                    args=(_enviar_mensaje_directo, tel,
+                          _respuesta_sistema("consulta_larga", emisor.get("codigo")),
                           "consulta_aclaracion"),
                     kwargs={"tabla_preferida": campania.get("base_datos")})
                 timer.daemon = True
@@ -3100,8 +3098,7 @@ def _enviar_respuesta_reagendar(evento: dict) -> None:
         if cfg.get("entorno") == "desarrollo" and not es_numero_prueba(telefono):
             raise ValueError("Destinatario no autorizado para desarrollo")
         if accion == "SOLICITAR_CONSULTA":
-            texto = ("Escríbenos tu consulta para prepararla y abrir el WhatsApp "
-                     "del equipo de atención de tu clínica.")
+            texto = _respuesta_sistema("reagendar_consulta", canal["codigo"])
             extra = None
         else:
             if accion == "REAGENDAR":
@@ -3113,10 +3110,9 @@ def _enviar_respuesta_reagendar(evento: dict) -> None:
             if not re.fullmatch(r"[1-9]\d{7,14}", numero):
                 raise ValueError("Número CRM de la clínica no disponible")
             url = f"https://wa.me/{numero}?text={urllib.parse.quote(preparado, safe='')}"
-            motivo = "reagendamiento" if accion == "REAGENDAR" else "consulta"
-            texto = (f"Si quieres continuar con tu {motivo}, toca «Ir a call center». "
-                     "Se abrirá un nuevo chat con un mensaje preparado para que puedas "
-                     "enviarlo al equipo. 💚")
+            tipo_respuesta = ("reagendar_derivacion" if accion == "REAGENDAR"
+                              else "consulta_reagendar_derivacion")
+            texto = _respuesta_sistema(tipo_respuesta, canal["codigo"])
             extra = {"cta": {"texto": "Ir a call center", "url": url}}
         ok, respuesta_id, _error, _ = asyncio.run(
             WhatsAppService(phone_number_id=canal["phoneNumberId"]).enviar(
@@ -3175,6 +3171,64 @@ _MENSAJE_OPCIONES_INSULTO = (
     "Lamentamos que hayas tenido una mala experiencia. Si quieres, puedes "
     "hablar con callcenter o darte de baja inmediatamente."
 )
+
+# Textos visibles al paciente. Cada clínica puede sobrescribirlos en la tabla
+# configuracion; sin valor propio se usa el texto vigente de SNW.
+_RESPUESTAS_SISTEMA = {
+    "interes": ("Interés · botón de call center", CALL_CENTER_TEXTO_DEFAULT,
+                "Se envía cuando el paciente indica interés en una campaña."),
+    "consulta_callcenter": ("Consulta · botón de call center", "",
+                            "Se envía después de registrar una consulta de campaña."),
+    "consulta_detalle": ("Consulta · pedir detalle", _AVISO_CONSULTA_CAMPANIA,
+                         "Pide la consulta completa en un solo mensaje."),
+    "consulta_larga": ("Consulta · más de 500 caracteres", _AVISO_CONSULTA_LARGA,
+                       "Se envía si la consulta supera el máximo admitido."),
+    "reagendar_consulta": ("Reagendamiento · pedir consulta",
+                           "Escríbenos tu consulta para prepararla y abrir el WhatsApp "
+                           "del equipo de atención de tu clínica.",
+                           "Se envía si el paciente pide hacer una consulta sobre su reagendamiento."),
+    "reagendar_derivacion": ("Reagendamiento · abrir nuevo chat",
+                             "Si quieres continuar con tu reagendamiento, toca «Ir a call center». "
+                             "Se abrirá un nuevo chat con un mensaje preparado para que puedas "
+                             "enviarlo al equipo. 💚",
+                             "Acompaña al botón que abre el chat del CRM para reagendar."),
+    "consulta_reagendar_derivacion": ("Consulta de reagendamiento · abrir nuevo chat",
+                                      "Si quieres continuar con tu consulta, toca «Ir a call center». "
+                                      "Se abrirá un nuevo chat con un mensaje preparado para que puedas "
+                                      "enviarlo al equipo. 💚",
+                                      "Acompaña al botón del CRM tras una consulta de reagendamiento."),
+    "baja": ("Baja · pacientes", _MENSAJE_BAJA_DESPEDIDA,
+             "Debe explicar ELIMINAR, la eliminación permanente aquí, el sistema de origen y cómo reincorporarse."),
+    "baja_prueba": ("Baja · números de prueba", _MENSAJE_BAJA_PRUEBA,
+                    "Debe aclarar que ELIMINAR solo simula el borrado en números de prueba."),
+    "reincorporacion": ("Reincorporación", _MENSAJE_BIENVENIDA_DEVUELTA,
+                        "Se envía cuando el paciente vuelve a activar sus notificaciones."),
+    "mala_experiencia": ("Mala experiencia · opciones", _MENSAJE_OPCIONES_INSULTO,
+                         "Acompaña las opciones para hablar con call center o darse de baja."),
+}
+
+
+def _clave_respuesta_sistema(codigo: str, tipo: str) -> str:
+    return f"respuesta_sistema_{codigo}_{tipo}"
+
+
+def _respuesta_sistema(tipo: str, codigo: str | None = None,
+                       cfg: dict | None = None) -> str:
+    obtener = cfg.get if cfg is not None else config_get
+    valor = obtener(_clave_respuesta_sistema(codigo, tipo)) if codigo else ""
+    if valor and valor.strip():
+        return valor.strip()
+    if tipo == "consulta_callcenter":
+        base = (obtener("call_center_aviso_consulta") or CALL_CENTER_TEXTO_DEFAULT).strip()
+        if "tal como" not in base.casefold():
+            base += " Tu consulta quedó registrada. Envía el mensaje preparado tal como está para continuar."
+        return base
+    return _RESPUESTAS_SISTEMA[tipo][1]
+
+
+def _codigo_respuesta_telefono(telefono: str) -> str | None:
+    emisor = emisor_webhook_actual() or _emisor_para_respuesta(telefono)
+    return emisor.get("codigo") if emisor else None
 
 
 def _reservar_aviso_unico(telefono: str, tipo: str) -> bool:
@@ -3297,7 +3351,8 @@ def _avisar_baja(telefono: str) -> None:
     tipo_aviso = "baja_prueba" if prueba else "baja_eliminar"
     if not _reservar_aviso_unico(telefono, tipo_aviso):
         return
-    mensaje = _MENSAJE_BAJA_PRUEBA if prueba else _MENSAJE_BAJA_DESPEDIDA
+    codigo = _codigo_respuesta_telefono(telefono)
+    mensaje = _respuesta_sistema("baja_prueba" if prueba else "baja", codigo)
     if _enviar_mensaje_directo(telefono, mensaje, "baja_aviso"):
         if not prueba:
             _reservar_aviso_unico(telefono, "eliminacion_ofrecida")
@@ -3313,7 +3368,9 @@ def _avisar_retractacion(telefono: str) -> None:
     if esta_suprimido(telefono) or eliminacion_simulada_activa(telefono):
         return
     if _reservar_aviso_unico(telefono, "reintegro"):
-        _enviar_mensaje_directo(telefono, _MENSAJE_BIENVENIDA_DEVUELTA, "retractacion_aviso")
+        _enviar_mensaje_directo(telefono,
+                               _respuesta_sistema("reincorporacion", _codigo_respuesta_telefono(telefono)),
+                               "retractacion_aviso")
 
 
 def _avisar_insulto(telefono: str) -> None:
@@ -3325,7 +3382,8 @@ def _avisar_insulto(telefono: str) -> None:
     if not _reservar_aviso_insulto(tel):
         return
     if not _enviar_mensaje_directo(
-            tel, _MENSAJE_OPCIONES_INSULTO, "insulto_aviso",
+            tel, _respuesta_sistema("mala_experiencia", _codigo_respuesta_telefono(tel)),
+            "insulto_aviso",
             plantilla={"opciones_insulto": True}):
         with conectar() as conn, conn.cursor() as cur:
             cur.execute("DELETE FROM whatsapp_avisos_unicos"
@@ -4396,13 +4454,12 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
     plantillas = leer_plantillas()
     for p in plantillas:
         if p["id"] == plantilla_id:
-            # El mensaje de call center es fijo (CALL_CENTER_PLANTILLA_FIJA):
-            # no es editable desde ningún lado. Esto solo protege registros
-            # antiguos que pudieran quedar marcados como 'especial'.
+            # El aviso se edita en Configuración, no como plantilla de Meta.
+            # Esto protege registros antiguos marcados como 'especial'.
             if p.get("especial"):
                 raise HTTPException(
                     400,
-                    detail="El mensaje de call center no es editable.",
+                    detail="Edita el aviso de call center en Configuración → Respuestas del sistema.",
                 )
             if _es_plantilla_protegida(p):
                 raise HTTPException(
@@ -4698,8 +4755,8 @@ def rechazar_plantilla(plantilla_id: int, body: RechazoPlantillaIn, sesion: dict
 
 
 # --- Registro de respuestas de call center (solo lectura) ----------------------
-# El mensaje de call center es fijo (CALL_CENTER_PLANTILLA_FIJA) y no se edita
-# desde la app; solo queda su historial de envíos acá.
+# El aviso se edita en Configuración → Respuestas del sistema;
+# el historial de sus envíos se consulta aquí.
 
 def obtener_call_center_log(sesion: dict = Depends(exigir("call_center_registro"))):
     """Últimas respuestas enviadas a pacientes interesados, con el número de
@@ -5054,8 +5111,6 @@ _CONFIG_SECCIONES = [
     {
         "id": "call_center", "titulo": "Call center", "icono": "fa-headset",
         "campos": [
-            {"clave": "call_center_aviso_consulta", "etiqueta": "Aviso automático de derivación", "tipo": "textarea",
-             "ayuda": "Debe decir explícitamente «mensaje automático». El paciente debe pulsar el botón y enviar el texto preparado."},
             {"clave": "call_center_patrones_consulta", "etiqueta": "Patrones de consulta (JSON)", "tipo": "textarea",
              "ayuda": "Usa una frase por línea en el editor sencillo o marca «Pegar JSON». Se validan antes de activarse; no incluyas datos de pacientes."},
         ],
@@ -5106,14 +5161,30 @@ for _codigo, _nombre in CENTROS.items():
     _CONFIG_SECCIONES.append(_seccion_centro(_codigo, _nombre))
 
 
+def _seccion_respuestas_centro(codigo: str, nombre: str) -> dict:
+    return {
+        "id": f"respuesta_{codigo.lower()}", "titulo": nombre,
+        "icono": "fa-comment-dots",
+        "campos": [
+            {"clave": _clave_respuesta_sistema(codigo, tipo), "etiqueta": etiqueta,
+             "tipo": "textarea", "ayuda": ayuda}
+            for tipo, (etiqueta, _predeterminado, ayuda) in _RESPUESTAS_SISTEMA.items()
+        ],
+    }
+
+
 def _config_valores(cfg: dict | None = None) -> dict:
     cfg = cfg if cfg is not None else config_all()
     claves = set(CONFIG_DEFAULTS)
     for codigo in catalogo_centros(cfg, incluir_desactivadas=True):
         claves.update(c["clave"] for c in _seccion_centro(codigo, "")["campos"]
                       if "clave" in c)
-    return {c: ("" if c in ("wa_token", "reagendar_api_token_hash") or cfg.get(c) is None else str(cfg.get(c)))
-            for c in claves}
+    valores = {c: ("" if c in ("wa_token", "reagendar_api_token_hash") or cfg.get(c) is None
+                   else str(cfg.get(c))) for c in claves}
+    for codigo in catalogo_centros(cfg, incluir_desactivadas=True):
+        for tipo in _RESPUESTAS_SISTEMA:
+            valores[_clave_respuesta_sistema(codigo, tipo)] = _respuesta_sistema(tipo, codigo, cfg)
+    return valores
 
 
 def obtener_configuracion_completa(sesion: dict = Depends(solo_dev)):
@@ -5124,6 +5195,8 @@ def obtener_configuracion_completa(sesion: dict = Depends(solo_dev)):
     secciones = [seccion for seccion in _CONFIG_SECCIONES
                  if not seccion["id"].startswith("centro_")]
     secciones.extend(_seccion_centro(codigo, nombre, activa=codigo in activos)
+                     for codigo, nombre in catalogo.items())
+    secciones.extend(_seccion_respuestas_centro(codigo, nombre)
                      for codigo, nombre in catalogo.items())
     return {"secciones": secciones, "valores": _config_valores(cfg),
             "centros": listar_canales(cfg),
@@ -5281,14 +5354,34 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
     catalogo = catalogo_centros(incluir_desactivadas=True)
     claves_clinicas = {c["clave"] for codigo, nombre in catalogo.items()
                        for c in _seccion_centro(codigo, nombre)["campos"] if "clave" in c}
+    claves_respuestas = {_clave_respuesta_sistema(codigo, tipo): tipo
+                        for codigo in catalogo for tipo in _RESPUESTAS_SISTEMA}
     for clave, valor in (body.cambios or {}).items():
         if clave == "reagendar_api_token_hash":
             raise HTTPException(400, detail="La credencial se rota desde la API de integración.")
         if clave == "wa_clinicas_adicionales":
             raise HTTPException(400, detail="Usa «Añadir clínica» para modificar el catálogo.")
-        if clave not in CONFIG_DEFAULTS and clave not in claves_clinicas:
+        if clave not in CONFIG_DEFAULTS and clave not in claves_clinicas \
+                and clave not in claves_respuestas:
             raise HTTPException(400, detail=f"Clave de configuración desconocida: «{clave}»")
         v = "" if valor is None else str(valor).strip()
+        if clave in claves_respuestas:
+            tipo = claves_respuestas[clave]
+            if not v or len(v) > 1000 or any(ord(c) < 32 and c not in "\n\t" for c in v):
+                raise HTTPException(
+                    422, detail="La respuesta debe tener entre 1 y 1000 caracteres "
+                                "y no contener caracteres de control.")
+            normalizado = v.casefold()
+            if tipo == "baja" and not all(fragmento in normalizado for fragmento in
+                                            ("eliminar", "permanent", "reincorpor", "origen")):
+                raise HTTPException(
+                    422, detail="La baja debe explicar ELIMINAR, el borrado permanente, "
+                                "la reincorporación y el sistema de origen.")
+            if tipo == "baja_prueba" and not all(fragmento in normalizado for fragmento in
+                                                   ("eliminar", "prueba", "simul")):
+                raise HTTPException(
+                    422, detail="La baja de prueba debe aclarar que ELIMINAR "
+                                "solo simula el borrado.")
         if clave == "reagendar_cors_origen" and v:
             if not re.fullmatch(r"https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?", v):
                 raise HTTPException(400, detail="El origen CSV debe ser un dominio HTTPS sin ruta ni barra final.")

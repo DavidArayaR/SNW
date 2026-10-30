@@ -21,7 +21,7 @@ function toast(msg, tipo = "ok") {
 toastEl.addEventListener("click", () => toastEl.classList.remove("visible"));
 
 const cont = $("#secciones");
-const idsTabs = ["general", "whatsapp", "clinicas", "correo", "integraciones", "logs"];
+const idsTabs = ["general", "whatsapp", "clinicas", "correo", "integraciones", "respuestas", "logs"];
 let tabConfig = "general";
 let logSeleccionado = "";
 let peticionLog = 0;
@@ -39,6 +39,7 @@ let derivados = [];        // campos calculados (ej. URL del webhook)
 
 function tabDeSeccion(id) {
   if (id.startsWith("centro_")) return "clinicas";
+  if (id.startsWith("respuesta_")) return "respuestas";
   if (id === "correo") return "correo";
   if (id === "whatsapp") return "whatsapp";
   if (id === "ia" || id === "call_center" || id === "reagendar") return "integraciones";
@@ -573,6 +574,10 @@ function render(secciones) {
       panel.dataset.centro = s.id.slice(7).toUpperCase();
       panel.dataset.activa = String(s.activa !== false);
     }
+    if (s.id.startsWith("respuesta_")) {
+      panel.dataset.respuestaCentro = s.id.slice(10).toUpperCase();
+      panel.classList.add("config-seccion--respuestas");
+    }
     panel.innerHTML =
       `<div class="panel__head"><h2><i class="${s.marca || s.icono === "fa-whatsapp" ? "fa-brands" : "fa-solid"} ${s.icono || "fa-gear"}"></i> ${escaparHtml(s.titulo)}</h2></div>` +
       `<div class="config-campos"></div>`;
@@ -836,6 +841,23 @@ function render(secciones) {
 
     }
     paneles[tabDeSeccion(s.id)].appendChild(panel);
+  }
+  const seccionesRespuestas = [...paneles.respuestas.querySelectorAll("[data-respuesta-centro]")];
+  if (seccionesRespuestas.length) {
+    const selectorWrap = document.createElement("div");
+    selectorWrap.className = "field config-respuestas-selector";
+    selectorWrap.innerHTML = '<label for="configCentroRespuesta">Clínica</label><select id="configCentroRespuesta"></select>' +
+      '<p class="field__hint">Cada clínica tiene sus propios textos. Los cambios se aplican a las próximas respuestas automáticas.</p>';
+    const selector = selectorWrap.querySelector("select");
+    seccionesRespuestas.forEach((seccion) => selector.add(new Option(
+      seccion.querySelector(".panel__head h2")?.textContent.trim() || seccion.dataset.respuestaCentro,
+      seccion.dataset.respuestaCentro)));
+    const actualizarCentro = () => seccionesRespuestas.forEach((seccion) => {
+      seccion.hidden = seccion.dataset.respuestaCentro !== selector.value;
+    });
+    selector.addEventListener("change", actualizarCentro);
+    paneles.respuestas.prepend(selectorWrap);
+    actualizarCentro();
   }
   if (!paneles.clinicas.querySelector(".config-seccion")) {
     const vacio = document.createElement("div");
