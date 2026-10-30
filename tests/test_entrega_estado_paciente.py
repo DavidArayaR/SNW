@@ -12,7 +12,7 @@ import whatsapp_service
 
 class EntregaEstadoPacienteTests(unittest.TestCase):
     def _ejecutar(self, *, estado_meta="failed", ultimo=8, estado_paciente="enviado",
-                  opt_out=0):
+                  opt_out=0, phone_number_id=None):
         cur = MagicMock()
         cur.fetchall.return_value = [{
             "id": 8, "paciente_id": 10, "numero_telefono": "+56912345678",
@@ -27,8 +27,14 @@ class EntregaEstadoPacienteTests(unittest.TestCase):
         with patch.object(whatsapp_service.servicio_areas, "tabla_valida", return_value=True), \
                 patch.object(whatsapp_service.servicio_areas, "tabla_fisica_existe", return_value=True):
             whatsapp_service.WhatsAppService._actualizar_paciente_por_entrega(
-                cur, "wamid-prueba", estado_meta, "", ())
+                cur, "wamid-prueba", estado_meta, phone_number_id)
         return cur
+
+    def test_filtro_de_emisor_se_califica_en_consulta_con_join(self):
+        cur = self._ejecutar(estado_meta="delivered", phone_number_id="1234500002")
+        sql, parametros = cur.execute.call_args_list[0].args
+        self.assertIn("le.wa_phone_id = %s OR le.wa_phone_id IS NULL", sql)
+        self.assertEqual(parametros, ("wamid-prueba", "1234500002"))
 
     def test_fallo_del_ultimo_mensaje_marca_error(self):
         cur = self._ejecutar()
