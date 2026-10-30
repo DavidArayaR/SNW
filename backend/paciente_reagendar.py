@@ -601,6 +601,84 @@ def reclamar_pendiente(centros: list[str]) -> dict | None:
     return fila
 
 
+def motivo_no_reintentar(cita: dict) -> str | None:
+    """Solo habilita fallos definitivos, nunca entregas o POST de resultado incierto."""
+    if cita.get("modo_prueba") or cita.get("whatsapp_opt_out"):
+        return "Registro de prueba de importación o paciente dado de baja."
+    if not cita.get("paciente_telefono_normalizado") or not cita.get("centro_codigo"):
+        return "Falta el teléfono o la clínica del paciente."
+    if cita.get("estado_envio") not in ("ERROR", "ENVIADO"):
+        return "Este registro no tiene un error pendiente de reintento."
+    if cita.get("ultimo_error_codigo") in ("RESULTADO_INCIERTO", "META_TEMPORAL"):
+        return "El último intento tiene un resultado incierto; revisa su entrega en Meta antes de reenviar."
+    if cita.get("estado_whatsapp") in ("delivered", "read"):
+        return "WhatsApp ya confirmó la recepción del mensaje."
+    if cita.get("whatsapp_message_id"):
+        if cita.get("estado_whatsapp") != "failed":
+            return "Meta aceptó el mensaje, pero no confirmó un fallo de entrega."
+    elif cita.get("ultimo_error_codigo") not in (
+            "META_RECHAZO", "ENVIO_DESACTIVADO", "CANAL_NO_DISPONIBLE", "PLANTILLA_INVALIDA"):
+        return "El resultado es incierto o requiere corregir los datos antes de reenviar."
+    return None
+
+
+def preparar_reintentos_manuales(ids: list[int], validar_cita) -> dict:
+    """Rehabilita citas concretas en su cola persistente; no llama a Meta."""
+    marcadores = ",".join(["%s"] * len(ids))
+    from supresion import huella_telefono
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("SELECT r.*, le.estado_whatsapp FROM paciente_reagendar r"
+                    " LEFT JOIN log_envios le ON le.id=r.log_envio_id"
+                    f" WHERE r.id IN ({marcadores}) ORDER BY r.id FOR UPDATE", tuple(ids))
+        citas = cur.fetchall()
+        if len(citas) != len(ids):
+            raise ValueError("Hay registros que ya no están disponibles. Actualiza la lista.")
+        for cita in citas:
+            motivo = motivo_no_reintentar(cita)
+            if motivo:
+                raise ValueError(f"Registro #{cita['id']}: {motivo}")
+            validar_cita(cita)
+            telefono = cita["paciente_telefono_normalizado"]
+            cur.execute("SELECT 1 FROM supresion_telefonos WHERE huella=%s"
+                        " AND estado <> 'exento' LIMIT 1", (huella_telefono(telefono),))
+            if cur.fetchone():
+                raise ValueError("La selección incluye un paciente eliminado.")
+            cur.execute("SELECT 1 FROM paciente_reagendar WHERE paciente_telefono_normalizado=%s"
+                        " AND whatsapp_opt_out=1 LIMIT 1", (telefono,))
+            if cur.fetchone():
+                raise ValueError("La selección incluye un paciente dado de baja.")
+            cur.execute("SELECT 1 FROM log_envios le JOIN envios e ON e.id=le.envio_id"
+                        " WHERE le.numero_telefono=%s AND e.base_datos='paciente_reagendar'"
+                        " AND le.estado_whatsapp IN ('delivered','read') LIMIT 1", (telefono,))
+            if cur.fetchone():
+                raise ValueError("Un paciente seleccionado ya recibió un reagendamiento.")
+            cur.execute("SELECT cita_id, estado FROM reagendar_destinatarios"
+                        " WHERE telefono=%s AND modo_prueba=0 FOR UPDATE", (telefono,))
+            destino = cur.fetchone()
+            if not destino or destino["cita_id"] != cita["id"] or destino["estado"] == "PROCESANDO":
+                raise ValueError("Un destinatario está ocupado por otro envío. Actualiza la lista.")
+            cur.execute("SELECT id, programado_para FROM reagendar_lotes WHERE id=%s FOR UPDATE",
+                        (cita["lote_id"],))
+            lote = cur.fetchone()
+            if not lote:
+                raise ValueError("No se encontró la carga de este reagendamiento.")
+            if lote.get("programado_para") and lote["programado_para"] > dt.datetime.now(UTC).replace(tzinfo=None):
+                raise ValueError("La carga está aplazada para una fecha futura; espera esa fecha o modifica su programación.")
+        for cita in citas:
+            cur.execute("UPDATE paciente_reagendar SET estado_envio='PENDIENTE',"
+                        " ultimo_error_codigo=NULL, ultimo_error_detalle=NULL,"
+                        " reserva_token=NULL, reservado_en=NULL, proximo_reintento_en=NULL"
+                        " WHERE id=%s", (cita["id"],))
+            cur.execute("UPDATE reagendar_destinatarios SET estado='PENDIENTE'"
+                        " WHERE telefono=%s AND modo_prueba=0 AND cita_id=%s",
+                        (cita["paciente_telefono_normalizado"], cita["id"]))
+            cur.execute("UPDATE reagendar_lotes SET estado='PROGRAMADO',"
+                        " programado_para=COALESCE(programado_para, UTC_TIMESTAMP()) WHERE id=%s",
+                        (cita["lote_id"],))
+        conn.commit()
+    return {"encolados": len(citas)}
+
+
 def aplazar_lote(lote_id: int, nueva_fecha_utc: dt.datetime,
                  usuario: str, motivo: str = "") -> dict:
     """No cambia citas ya reclamadas; serializa el aplazamiento con el claim."""

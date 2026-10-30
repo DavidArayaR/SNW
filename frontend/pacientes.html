@@ -243,6 +243,8 @@
             <div><h3>Pacientes de reagendamientos</h3><p id="reagendarSeleccionLote" class="field__hint" role="status">Todos los pacientes, sin duplicados. Se aplican los filtros de abajo.</p></div>
             <div class="reagendar__detalle-acciones">
               <button id="reagendarVerTodas" class="btn btn--ghost" type="button" hidden>Quitar selección de carga</button>
+              <button id="reagendarSeleccionarErrores" class="btn btn--ghost" type="button">Seleccionar errores de esta página</button>
+              <button id="reagendarReintentarSeleccionados" class="btn btn--primary" type="button" disabled>Reintentar seleccionados</button>
               <button id="reagendarEliminarPruebas" class="btn btn--ghost" type="button">Quitar números de prueba</button>
               <button id="reagendarEliminarTodos" class="btn btn--danger-ghost" type="button">Quitar todos sin envío</button>
             </div>
@@ -346,6 +348,18 @@
     </div>
   </div>
 
+  <div id="modalReintentarReagendar" class="modal" hidden>
+    <div class="modal__card" role="dialog" aria-modal="true" aria-labelledby="tituloReintentarReagendar">
+      <h3 id="tituloReintentarReagendar">Reintentar reagendamientos con error</h3>
+      <p id="textoReintentarReagendar" class="modal__texto-confirmacion"></p>
+      <p id="errorReintentarReagendar" class="field__hint" role="alert"></p>
+      <div class="modal__actions">
+        <button type="button" class="btn btn--ghost" id="cancelarReintentarReagendar">Cancelar</button>
+        <button type="button" class="btn btn--primary" id="confirmarReintentarReagendar">Confirmar reintento</button>
+      </div>
+    </div>
+  </div>
+
   <div id="modalEliminarPruebasReagendar" class="modal" hidden>
     <div class="modal__card" role="dialog" aria-modal="true" aria-labelledby="tituloEliminarPruebasReagendar">
       <h3 id="tituloEliminarPruebasReagendar">Quitar números de prueba</h3>
@@ -373,7 +387,7 @@
   <script src="js/pass-toggle.js"></script>
   <script src="js/csv-chunks.js?v=csv-codificacion1"></script>
   <script src="js/pacientes.js?v=csv-codificacion1"></script>
-  <script src="js/reagendar.js?v=borrado-pruebas-libre1"></script>
+  <script src="js/reagendar.js?v=reintento-manual1"></script>
   <script src="js/pacientes-tabs.js?v=aplazar-flotante1"></script>
   <script>
     (function () {

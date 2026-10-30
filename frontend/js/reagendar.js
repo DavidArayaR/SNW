@@ -9,6 +9,59 @@
   let loteAplazarId = null;
   let loteEliminarId = null;
   let pacienteEliminarId = null;
+  let filasReagendar = [];
+  const seleccionReintentos = new Set();
+  let idsReintento = [];
+  const modalReintentar = $("modalReintentarReagendar");
+  const confirmarReintentar = $("confirmarReintentarReagendar");
+  const botonReintentar = $("reagendarReintentarSeleccionados");
+  function actualizarSeleccionReintentos() {
+    botonReintentar.disabled = seleccionReintentos.size === 0;
+    botonReintentar.textContent = `Reintentar seleccionados${seleccionReintentos.size ? ` (${seleccionReintentos.size})` : ""}`;
+  }
+  function abrirReintento(ids) {
+    idsReintento = [...ids];
+    if (!idsReintento.length) return;
+    $("textoReintentarReagendar").textContent =
+      `Se volverán a procesar ${idsReintento.length} reagendamientos con error, ` +
+      "con los datos del paciente y médico del CSV y la plantilla aprobada asignada a su clínica. " +
+      "Corrige primero la causa del error. Los mensajes anteriores se conservarán en el historial.";
+    $("errorReintentarReagendar").textContent = "";
+    modalReintentar.hidden = false;
+    confirmarReintentar.focus();
+  }
+  function cerrarReintento() { modalReintentar.hidden = true; }
+  $("cancelarReintentarReagendar").addEventListener("click", cerrarReintento);
+  modalReintentar.addEventListener("click", e => {
+    if (e.target === modalReintentar && !confirmarReintentar.disabled) cerrarReintento();
+  });
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && !confirmarReintentar.disabled) cerrarReintento();
+  });
+  botonReintentar.addEventListener("click", () => abrirReintento(seleccionReintentos));
+  $("reagendarSeleccionarErrores").addEventListener("click", () => {
+    filasReagendar.filter(r => r.puede_reintentar).forEach(r => seleccionReintentos.add(r.id));
+    $("tablaReagendar").querySelectorAll("[data-reintento]").forEach(c => { c.checked = true; });
+    actualizarSeleccionReintentos();
+  });
+  confirmarReintentar.addEventListener("click", async () => {
+    if (confirmarReintentar.disabled) return;
+    confirmarReintentar.disabled = true;
+    $("errorReintentarReagendar").textContent = "Preparando reintentos…";
+    try {
+      const res = await fetch("api/v1/paciente-reagendar/reintentar", {
+        method: "POST", headers: { ...auth(), "Content-Type": "application/json" },
+        body: JSON.stringify({ registros: idsReintento }),
+      });
+      const datos = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(datos.detail || "No se pudieron preparar los reintentos.");
+      cerrarReintento();
+      await cargar();
+      await cargarLotes();
+      mensaje.textContent = `${datos.encolados} reagendamientos en cola para reintento. Revisa el estado al actualizar.`;
+    } catch (error) { $("errorReintentarReagendar").textContent = error.message; }
+    finally { confirmarReintentar.disabled = false; }
+  });
   const modalEliminarPruebas = $("modalEliminarPruebasReagendar");
   const confirmarEliminarPruebas = $("confirmarEliminarPruebasReagendar");
   const botonEliminarPruebas = $("reagendarEliminarPruebas");
@@ -468,15 +521,41 @@
         return cargar();
       }
       tbody.replaceChildren();
-      for (const r of datos.items || []) {
+      filasReagendar = datos.items || [];
+      seleccionReintentos.clear();
+      actualizarSeleccionReintentos();
+      $("reagendarSeleccionarErrores").disabled = !filasReagendar.some(r => r.puede_reintentar);
+      for (const r of filasReagendar) {
         const tr = document.createElement("tr");
         for (const valor of [fecha(r.fecha), r.ventana, r.clinica_nombre,
                              r.paciente_nombre, r.paciente_telefono_normalizado,
                              r.doctor_nombre, r.modo_prueba ? "Prueba" : "Operativo",
                              r.estado_envio, r.intentos_envio,
                              fechaHoraChile(r.recibido_en), r.ultima_respuesta,
-                             r.ultimo_error_codigo]) celda(tr, valor);
+                             r.error_entrega || r.ultimo_error_codigo]) celda(tr, valor);
         const acciones = document.createElement("td");
+        if (r.puede_reintentar) {
+          const etiqueta = document.createElement("label");
+          const seleccion = document.createElement("input");
+          seleccion.type = "checkbox";
+          seleccion.dataset.reintento = String(r.id);
+          seleccion.addEventListener("change", () => {
+            if (seleccion.checked) seleccionReintentos.add(r.id);
+            else seleccionReintentos.delete(r.id);
+            actualizarSeleccionReintentos();
+          });
+          etiqueta.append(seleccion, " Seleccionar");
+          const reintentar = document.createElement("button");
+          reintentar.type = "button";
+          reintentar.className = "btn btn--ghost";
+          reintentar.textContent = "Reintentar reagendamiento";
+          reintentar.addEventListener("click", () => abrirReintento([r.id]));
+          acciones.append(etiqueta, reintentar);
+        } else if (r.estado_envio === "ERROR") {
+          const motivo = document.createElement("small");
+          motivo.textContent = r.motivo_no_reintentar || "Revisa el error antes de reenviar.";
+          acciones.appendChild(motivo);
+        }
         const eliminar = document.createElement("button");
         eliminar.type = "button";
         eliminar.className = "btn btn--danger-ghost";

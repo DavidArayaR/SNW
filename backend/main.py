@@ -8435,6 +8435,12 @@ async def _procesar_cita_reagendar(cita: dict, plantillas_por_centro: dict) -> N
                         (cita["id"], cita["reserva_token"]))
             if not cur.fetchone():
                 return
+            cur.execute("SELECT 1 FROM log_envios le JOIN envios e ON e.id=le.envio_id"
+                        " WHERE le.numero_telefono=%s AND e.base_datos='paciente_reagendar'"
+                        " AND le.estado_whatsapp IN ('delivered','read') LIMIT 1", (telefono,))
+            if cur.fetchone():
+                paciente_reagendar.marcar_fallo(cita, "YA_ENTREGADO")
+                return
         ok, message_id, _error, resultado = await servicio.enviar(
             telefono, vista["cuerpo"], plantilla=plantilla,
             variables=vista["ejemplos"])
@@ -10285,8 +10291,12 @@ def listar_citas_reagendar(centro: str | None = Query(None),
     if estado:
         if estado not in ("PENDIENTE", "PROCESANDO", "ENVIADO", "REINTENTO", "ERROR", "OMITIDO"):
             raise HTTPException(422, detail="Estado inválido.")
-        condiciones.append("r.estado_envio = %s")
-        args.append(estado)
+        if estado == "ERROR":
+            condiciones.append("(r.estado_envio='ERROR' OR (r.estado_envio='ENVIADO'"
+                               " AND le.estado_whatsapp='failed'))")
+        else:
+            condiciones.append("r.estado_envio = %s")
+            args.append(estado)
     condiciones.insert(0, "(r.paciente_telefono_normalizado IS NULL OR d.cita_id=r.id)")
     where = " WHERE " + " AND ".join(condiciones)
     origen = (" paciente_reagendar r LEFT JOIN reagendar_destinatarios d"
@@ -10302,7 +10312,8 @@ def listar_citas_reagendar(centro: str | None = Query(None),
             " r.inicio_cita, r.lote_id, r.plantilla_clave, r.modo_prueba,"
             " r.estado_envio, r.intentos_envio, r.whatsapp_opt_out, r.envio_id,"
             " r.log_envio_id, d.estado AS destinatario_estado,"
-            " r.ultimo_error_codigo, r.importado_en,"
+            " r.ultimo_error_codigo, r.importado_en, le.estado_whatsapp,"
+            " le.descripcion_error AS error_entrega,"
             " r.enviado_en, r.whatsapp_message_id, le.entregado_en AS recibido_en,"
             " (SELECT i.accion FROM reagendar_interacciones i"
             " WHERE i.cita_id=r.id ORDER BY i.creado_en DESC,"
@@ -10310,7 +10321,57 @@ def listar_citas_reagendar(centro: str | None = Query(None),
             " FROM" + origen + where +
             " ORDER BY r.id DESC LIMIT %s OFFSET %s", (*args, limite, (pagina - 1) * limite))
         filas = cur.fetchall()
+    for fila in filas:
+        motivo = paciente_reagendar.motivo_no_reintentar(fila)
+        fila["puede_reintentar"] = motivo is None
+        fila["motivo_no_reintentar"] = motivo
+        if fila.get("estado_envio") == "ENVIADO" and fila.get("estado_whatsapp") == "failed":
+            fila["estado_envio"] = "ERROR"
     return {"total": total, "pagina": pagina, "limite": limite, "items": filas}
+
+
+class ReintentarReagendarIn(BaseModel):
+    registros: list[int] = Field(..., min_length=1, max_length=500)
+
+
+@app.post("/api/v1/paciente-reagendar/reintentar")
+def reintentar_reagendamientos(body: ReintentarReagendarIn,
+                              sesion: dict = Depends(solo_admin)):
+    ids = sorted(set(body.registros))
+    if any(i <= 0 for i in ids):
+        raise HTTPException(422, detail="Selecciona registros válidos.")
+    cfg = config_all(refresh=True)
+    if (cfg.get("entorno") != "produccion" or cfg.get("metodo_envio") != "api_oficial"
+            or cfg.get("reagendar_envio_activo") != "true"):
+        raise HTTPException(409, detail="Activa el procesamiento de citas atendidas en Producción con api_oficial antes de reintentar.")
+    mapa = json.loads(cfg.get("reagendar_plantillas_json") or "{}")
+    plantillas = {p.get("clave"): p for p in leer_plantillas()}
+
+    def validar(cita):
+        codigo = cita["centro_codigo"]
+        canal = resolver_centro(codigo, cfg)
+        plantilla = plantillas.get(mapa.get(codigo))
+        if (not canal.get("configured") or not plantilla
+                or plantilla.get("centro_codigo") != codigo
+                or plantilla.get("whatsapp_template_status") != "APPROVED"
+                or _aprobacion_plantilla(plantilla) != "aprobada"
+                or plantilla.get("especial") or _es_plantilla_protegida(plantilla)
+                or (plantilla.get("encabezado_media_id") and not plantilla.get("encabezado_meta_registrado"))):
+            raise ValueError(f"{codigo}: configura una plantilla aprobada de reagendamiento y su número emisor.")
+        vista = presentar_plantilla(plantilla, paciente_reagendar.variables_plantilla_reagendar(cita))
+        if vista["errores"]:
+            raise ValueError(f"{codigo}: los datos no permiten completar la plantilla de reagendamiento.")
+
+    try:
+        resultado = paciente_reagendar.preparar_reintentos_manuales(ids, validar)
+    except ValueError as exc:
+        raise HTTPException(409, detail=str(exc)) from exc
+    try:
+        auditoria_registrar(sesion.get("usuario", ""), "reagendar_reintento_manual",
+                           "paciente_reagendar", f"Reagendamientos seleccionados para reintento: {resultado['encolados']}")
+    except Exception as exc:
+        log_error("auditar reintento manual de reagendamientos", exc, solo_tipo=True)
+    return resultado
 
 
 @app.get("/api/v1/paciente-reagendar/borrado/resumen")
