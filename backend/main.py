@@ -2518,7 +2518,8 @@ def _tabla_ultimo_envio_emisor(telefono: str) -> str | None:
 
 
 def _despachar_call_center(pac: dict, ambiente: str, tabla: str | None = None,
-                           consulta: str = "") -> dict:
+                           consulta: str = "", texto_personalizado: str | None = None,
+                           emisor_forzado: dict | None = None, automatico: bool = True) -> dict:
     """Envía el mensaje fijo de call center a un paciente y lo registra en el
     historial y en call_center_log. Devuelve {ok, error, telefono}. No lanza.
     Con `tabla` (area) se etiqueta esa tabla y se salta el filtro de
@@ -2534,10 +2535,13 @@ def _despachar_call_center(pac: dict, ambiente: str, tabla: str | None = None,
         return {"ok": False, "error": "El número no está autorizado en la base de desarrollo", "telefono": telefono}
 
     nombre = " ".join(x for x in [pac.get("nombre"), pac.get("apellido")] if x)
-    emisor = _emisor_para_respuesta(telefono, tabla or tabla_pacientes(ambiente))
+    emisor = emisor_forzado or _emisor_para_respuesta(telefono, tabla or tabla_pacientes(ambiente))
     if not emisor:
         return {"ok": False, "error": "No se pudo identificar el número emisor", "telefono": telefono}
     texto, datos_plantilla, numero_cc = _cc_datos_envio(pac, ambiente, consulta, emisor)
+    if texto_personalizado is not None:
+        texto = texto_personalizado.strip()
+        datos_plantilla["texto"] = texto
     if not numero_cc:
         return {"ok": False, "error": f"{emisor['nombre']}: falta un número CRM válido", "telefono": telefono}
     esp_id = None
@@ -2571,7 +2575,7 @@ def _despachar_call_center(pac: dict, ambiente: str, tabla: str | None = None,
                      urllib.parse.urlparse(cta.get("url") or "").query).get("text", [""])[0]}
         _registrar_call_center_log(
             pac.get("id"), nombre, telefono, numero_cc, CALL_CENTER_CLAVE,
-            True, "enviado" if ok else "error", error, tabla or nombre_base(ambiente), vista,
+            automatico, "enviado" if ok else "error", error, tabla or nombre_base(ambiente), vista,
         )
     return {"ok": ok, "error": error, "telefono": telefono,
             "numero_call_center": numero_cc, "message_id": message_id}
@@ -8930,6 +8934,12 @@ def detalle_historial(envio_id: str, ambiente: str = Query("produccion"),
     sql = (
         "SELECT le.id, le.paciente_id, le.nombre_paciente, le.numero_telefono, le.estado_envio,"
         " le.estado_whatsapp, le.mensaje AS mensaje_enviado, le.descripcion_error, le.fecha_hora,"
+        " le.centro_codigo,"
+        " EXISTS (SELECT 1 FROM whatsapp_conversaciones_mensajes cm"
+        " WHERE BINARY cm.wa_phone_id=BINARY le.wa_phone_id"
+        " AND BINARY cm.telefono_paciente=BINARY le.numero_telefono"
+        " AND cm.recibido > DATE_SUB(NOW(), INTERVAL 24 HOUR)"
+        " AND cm.recibido <= NOW()) AS callcenter_ventana_abierta,"
         f" {estado_paciente_expr} AS estado_paciente,"
         "  (SELECT r.mensaje FROM log_envios r"
         "     WHERE r.paciente_id = le.paciente_id AND r.plantilla_clave = 'respuesta'"
@@ -8947,6 +8957,12 @@ def detalle_historial(envio_id: str, ambiente: str = Query("produccion"),
         filas = cur.fetchall()
     puede_ver_datos = tiene_permiso(sesion, "pacientes_ver_datos")
     for f in filas:
+        centro_cc = f.pop("centro_codigo", None)
+        f["callcenter_ventana_abierta"] = bool(f.get("callcenter_ventana_abierta"))
+        f["puede_enviar_callcenter"] = bool(tiene_permiso(sesion, "call_center")
+                                             and f.get("paciente_id") and centro_cc)
+        f["mensaje_callcenter"] = (_respuesta_sistema("interes", centro_cc)
+                                   if f["puede_enviar_callcenter"] else None)
         f["fecha"] = f.pop("fecha_hora").strftime("%d-%m-%Y %H:%M")
         codigo = re.search(r"(?<!\d)(1\d{5})(?!\d)", f.get("descripcion_error") or "")
         f["codigo_error"] = codigo.group(1) if codigo else None
@@ -8967,6 +8983,71 @@ def detalle_historial(envio_id: str, ambiente: str = Query("produccion"),
             f["descripcion_error"] = None
             f["respuesta_interes"] = False
     return filas
+
+
+class CallCenterManualIn(BaseModel):
+    mensaje: str = Field(..., min_length=1, max_length=1000)
+
+
+def enviar_callcenter_manual(envio_id: int, registro_id: int, body: CallCenterManualIn,
+                            ambiente: str = Query("produccion"),
+                            sesion: dict = Depends(exigir("historial"))):
+    if not tiene_permiso(sesion, "call_center"):
+        raise HTTPException(403, detail="No tienes permiso para enviar el botón de call center.")
+    texto = body.mensaje.strip()
+    if not texto:
+        raise HTTPException(422, detail="Escribe el mensaje que acompañará al botón.")
+    # Reutiliza la autorización por envío y área del historial.
+    detalle = detalle_historial(str(envio_id), ambiente=ambiente, sesion=sesion)
+    if not any(f["id"] == registro_id for f in detalle):
+        raise HTTPException(404, detail="Registro no encontrado en este envío.")
+    with conectar(ambiente) as conn, conn.cursor() as cur:
+        cur.execute("SELECT l.paciente_id, l.numero_telefono, l.wa_phone_id,"
+                    " COALESCE(l.tabla_pacientes, e.tabla_pacientes, e.base_datos) AS tabla"
+                    " FROM log_envios l JOIN envios e ON e.id=l.envio_id"
+                    " WHERE l.id=%s AND l.envio_id=%s", (registro_id, envio_id))
+        origen = cur.fetchone()
+        if not origen or not origen["paciente_id"]:
+            raise HTTPException(409, detail="El paciente de este registro no está disponible.")
+        tabla = origen["tabla"]
+        if tabla in ("produccion", "desarrollo", nombre_base(ambiente)):
+            tabla = tabla_pacientes(ambiente)
+        if not servicio_areas.tabla_valida(tabla) or not servicio_areas.tabla_fisica_existe(tabla):
+            raise HTTPException(409, detail="La base de este paciente no está disponible.")
+        cur.execute(f"SELECT * FROM {tabla} WHERE id=%s", (origen["paciente_id"],))
+        paciente = cur.fetchone()
+        if not paciente or paciente.get("whatsapp_opt_out"):
+            raise HTTPException(409, detail="El paciente no está disponible o se dio de baja.")
+        emisor = resolver_phone_id(origen["wa_phone_id"])
+        if not emisor or not emisor.get("configured"):
+            raise HTTPException(409, detail="La clínica emisora no está disponible.")
+        telefono = normalizar_telefono(paciente.get("telefono"))
+        if not telefono or telefono != normalizar_telefono(origen["numero_telefono"]):
+            raise HTTPException(409, detail="El teléfono del paciente cambió desde este envío.")
+        cur.execute("SELECT 1 FROM whatsapp_conversaciones_mensajes"
+                    " WHERE wa_phone_id=%s AND telefono_paciente=%s"
+                    " AND recibido > DATE_SUB(NOW(), INTERVAL 24 HOUR)"
+                    " AND recibido <= NOW() LIMIT 1",
+                    (emisor["phoneNumberId"], telefono))
+        if not cur.fetchone():
+            raise HTTPException(409, detail="El paciente debe haber escrito a esta clínica en las últimas 24 horas.")
+    if config_get("metodo_envio") != "api_oficial":
+        raise HTTPException(409, detail="Activa api_oficial para enviar este mensaje.")
+    if config_get("entorno") == "desarrollo" and telefono not in _numeros_prueba_editables("desarrollo"):
+        raise HTTPException(403, detail="En desarrollo solo puedes enviar a números de prueba.")
+    if esta_suprimido(telefono) or WhatsAppService()._estaba_opt_out(telefono):
+        raise HTTPException(409, detail="El paciente está eliminado o dado de baja.")
+    resultado = _despachar_call_center(paciente, ambiente, tabla=tabla,
+                                      texto_personalizado=texto, emisor_forzado=emisor,
+                                      automatico=False)
+    if not resultado["ok"]:
+        raise HTTPException(502, detail=resultado.get("error") or "Meta no aceptó el mensaje.")
+    try:
+        auditoria_registrar(sesion.get("usuario", ""), "callcenter_manual", str(registro_id),
+                           "Envió manualmente un mensaje con botón al CRM de la clínica")
+    except Exception as exc:
+        log_error("auditar envío manual de call center", exc, solo_tipo=True)
+    return {"ok": True, "mensaje": "Meta aceptó el mensaje con el botón de call center."}
 
 
 class FallidosPendientesIn(BaseModel):

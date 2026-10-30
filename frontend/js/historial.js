@@ -709,9 +709,11 @@ function pintarDetalle() {
       const marcaInteres = d.interesado
         ? `<span class="hist-tag-interes" title="Marcado como interesado">interesado</span>`
         : "";
-      const celdaMsgs = d.paciente_id && d.datos_completos
-        ? `<td class="hist-col-msgs"><button type="button" class="btn btn--sm btn--ghost" data-mensajes="${d.paciente_id}">Ver mensajes</button></td>`
-        : `<td class="hist-col-msgs">—</td>`;
+      const verMensajes = d.paciente_id && d.datos_completos
+        ? `<button type="button" class="btn btn--sm btn--ghost" data-mensajes="${d.paciente_id}">Ver mensajes</button>` : "";
+      const enviarCC = d.puede_enviar_callcenter
+        ? `<button type="button" class="btn btn--sm btn--ghost" data-callcenter-manual="${Number(d.id)}"${d.callcenter_ventana_abierta ? "" : ' disabled title="El paciente debe haber escrito a esta clínica en las últimas 24 horas"'}>Enviar botón de call center</button>` : "";
+      const celdaMsgs = `<td class="hist-col-msgs">${verMensajes}${enviarCC || (!verMensajes ? "—" : "")}</td>`;
       const [claseEntrega, textoEntrega] = estadoEntrega(d);
       const motivo = d.codigo_error === "131042"
         ? "Error 131042: falta configurar la moneda de la cuenta de WhatsApp Business."
@@ -832,8 +834,50 @@ $("#modalDetalle").addEventListener("click", (e) => { if (e.target === $("#modal
 /* ---------- Mensajes del paciente ---------- */
 
 $("#detalleBody").addEventListener("click", (e) => {
+  const cc = e.target.closest("[data-callcenter-manual]");
+  if (cc) {
+    const fila = filasDetalle.find(d => Number(d.id) === Number(cc.dataset.callcenterManual));
+    if (fila && detalleActual) {
+      callCenterManualActual = { envioId: detalleActual.envioId, registroId: fila.id, ambiente: detalleActual.ambiente };
+      $("#callCenterManualMensaje").value = fila.mensaje_callcenter || "";
+      $("#callCenterManualError").textContent = "";
+      $("#modalCallCenterManual").hidden = false;
+      $("#callCenterManualMensaje").focus();
+    }
+    return;
+  }
   const btn = e.target.closest("[data-mensajes]");
   if (btn) abrirMensajes(btn.dataset.mensajes);
+});
+
+let callCenterManualActual = null;
+const cerrarCallCenterManual = () => { $("#modalCallCenterManual").hidden = true; };
+$("#cancelarCallCenterManual").addEventListener("click", cerrarCallCenterManual);
+$("#modalCallCenterManual").addEventListener("click", e => {
+  if (e.target === e.currentTarget && !$("#enviarCallCenterManual").disabled) cerrarCallCenterManual();
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && !$("#enviarCallCenterManual").disabled) cerrarCallCenterManual();
+});
+$("#formCallCenterManual").addEventListener("submit", async e => {
+  e.preventDefault();
+  const objetivo = callCenterManualActual;
+  const boton = $("#enviarCallCenterManual");
+  if (!objetivo || boton.disabled) return;
+  boton.disabled = true;
+  $("#callCenterManualError").textContent = "Enviando…";
+  try {
+    const res = await fetch(`api/notificaciones/historial/${encodeURIComponent(objetivo.envioId)}/call-center/${objetivo.registroId}?ambiente=${objetivo.ambiente}`, {
+      method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ mensaje: $("#callCenterManualMensaje").value.trim() }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || "No se pudo enviar el mensaje.");
+    cerrarCallCenterManual();
+    toast(data.mensaje);
+  } catch (err) {
+    $("#callCenterManualError").textContent = err.message;
+  } finally { boton.disabled = false; }
 });
 
 async function abrirMensajes(pacienteId) {

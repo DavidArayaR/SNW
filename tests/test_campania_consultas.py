@@ -105,6 +105,18 @@ class EnrutamientoWebhookTests(unittest.TestCase):
         flujo.assert_called_once()
         derivar.assert_not_called()
 
+    def test_interesaria_con_especialidad_envia_callcenter_sin_pedir_consulta(self):
+        with patch("whatsapp_service.al_consulta_campania") as consulta, \
+             patch("whatsapp_service.al_detectar_consulta") as derivar, \
+             patch("whatsapp_service.al_respuesta_reagendar", return_value=None), \
+             patch("whatsapp_service.al_detectar_interes") as enviar, \
+             patch.object(self.servicio, "_registrar_interes") as registrar:
+            self.procesar("Me interesaría una pronta con sicológa")
+        registrar.assert_called_once_with(TELEFONO)
+        enviar.assert_called_once_with(TELEFONO)
+        consulta.assert_not_called()
+        derivar.assert_not_called()
+
     def test_botones_interes_desinteres_y_baja_no_entran_al_flujo(self):
         for texto, payload in (("Me interesa", "snw_tpl_interes"),
                                ("No me interesa", "snw_tpl_desinteres"),

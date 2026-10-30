@@ -233,6 +233,15 @@ _INTERES_DIRECTO_TEXTOS = frozenset((
 ))
 
 
+def es_interes_directo(texto: str) -> bool:
+    """Una afirmación explícita de interés puede incluir el servicio deseado."""
+    t = normalizar_intencion(texto)
+    if t in _INTERES_DIRECTO_TEXTOS:
+        return True
+    return bool(es_mensaje_interes(texto) and not any(c in texto for c in "?¿")
+                and re.search(r"\b(?:me interes(?:a|an|aria)|estoy interesad[oa])\b", t))
+
+
 def es_solo_saludo_o_estado(texto: str) -> bool:
     """No iniciar derivaciones por saludos o respuestas sociales breves."""
     normalizado = normalizar_intencion(texto)
@@ -1519,7 +1528,7 @@ class WhatsAppService:
                 continue
 
             if (tipo == "text" and reagendar is None and not estaba_opt_out
-                    and normalizar_intencion(cuerpo) not in _INTERES_DIRECTO_TEXTOS
+                    and not es_interes_directo(cuerpo)
                     and not fue_baja and not no_interes
                     and not es_solo_saludo_o_estado(cuerpo)):
                 if callable(al_consulta_campania):
@@ -1541,7 +1550,8 @@ class WhatsAppService:
             # Las bajas y la supresión siempre tienen prioridad. Una consulta
             # junto a una confirmación conserva el registro de interés, pero
             # evita disparar además el mensaje genérico de call center.
-            if clasificacion and clasificacion.derivar and not fue_baja and not no_interes:
+            if (clasificacion and clasificacion.derivar and not fue_baja and not no_interes
+                    and not es_interes_directo(cuerpo)):
                 if interes:
                     self._registrar_interes(telefono)
                     hubo_interes = True
@@ -1666,14 +1676,21 @@ class WhatsAppService:
         if not mensaje_id:
             return False
         try:
+            timestamp_paciente = int(mensaje.get("timestamp") or "")
+            if timestamp_paciente <= 0:
+                timestamp_paciente = None
+        except (TypeError, ValueError):
+            timestamp_paciente = None
+        try:
             with conectar() as conn, conn.cursor() as cur:
                 cur.execute(
                     "INSERT IGNORE INTO whatsapp_conversaciones_mensajes"
                     " (mensaje_id, centro_codigo, wa_phone_id, numero_emisor,"
-                    " telefono_paciente, tipo, texto) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                    " telefono_paciente, tipo, texto, recibido)"
+                    " VALUES (%s, %s, %s, %s, %s, %s, %s, FROM_UNIXTIME(%s))",
                     (mensaje_id[:255], emisor["codigo"], emisor["phoneNumberId"],
                      emisor["phoneNumber"], telefono, str(mensaje.get("type") or "")[:30],
-                     (texto or "")[:2000]),
+                     (texto or "")[:2000], timestamp_paciente),
                 )
                 nuevo = cur.rowcount == 1
                 conn.commit()

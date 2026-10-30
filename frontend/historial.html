@@ -219,6 +219,22 @@
     </div>
   </div>
 
+  <div id="modalCallCenterManual" class="modal" hidden>
+    <form id="formCallCenterManual" class="modal__card modal__card--detalle" role="dialog" aria-modal="true" aria-labelledby="callCenterManualTitulo">
+      <h3 id="callCenterManualTitulo">Enviar botón de call center</h3>
+      <div class="field">
+        <label for="callCenterManualMensaje">Mensaje para el paciente</label>
+        <textarea id="callCenterManualMensaje" rows="5" maxlength="1000" required></textarea>
+      </div>
+      <p class="field__hint">Puedes agregar una disculpa o adaptar el texto. Se incluirá el botón «Ir a call center» con el número CRM de la clínica de este envío. El paciente debe haber escrito en las últimas 24 horas.</p>
+      <p id="callCenterManualError" class="field__hint" role="alert"></p>
+      <div class="modal__actions">
+        <button type="button" class="btn btn--ghost" id="cancelarCallCenterManual">Cancelar</button>
+        <button type="submit" class="btn btn--primary" id="enviarCallCenterManual">Enviar mensaje y botón</button>
+      </div>
+    </form>
+  </div>
+
   <div id="modalMensajes" class="modal" hidden>
     <div class="modal__card modal__card--detalle" role="dialog" aria-modal="true">
       <h3 id="mensajesTitulo">Mensajes del paciente</h3>
@@ -268,7 +284,7 @@
 
   <script src="js/layout.js?v=permisos-acciones1"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/historial.js?v=fallidos-pendientes1"></script>
+  <script src="js/historial.js?v=callcenter-manual1"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>

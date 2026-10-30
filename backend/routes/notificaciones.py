@@ -15,6 +15,7 @@ RUTAS = (
     ("/api/notificaciones/historial", "GET", "listar_historial", None),
     ("/api/notificaciones/historial/pagina", "GET", "listar_historial_pagina", None),
     ("/api/notificaciones/historial/{envio_id}/detalle", "GET", "detalle_historial", None),
+    ("/api/notificaciones/historial/{envio_id}/call-center/{registro_id}", "POST", "enviar_callcenter_manual", None),
     ("/api/notificaciones/historial/{envio_id}/marcar-pendientes", "POST", "marcar_fallidos_pendientes", None),
     ("/api/notificaciones/historial/{registro_id}/respuesta", "PUT", "actualizar_respuesta", None),
     ("/api/notificaciones/programados", "POST", "crear_programado", None),
