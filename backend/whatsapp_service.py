@@ -1690,15 +1690,23 @@ class WhatsAppService:
         except (TypeError, ValueError):
             timestamp_paciente = None
         try:
+            boton = mensaje.get("button") or {}
+            interactivo = mensaje.get("interactive") or {}
+            opcion = interactivo.get("button_reply") or interactivo.get("list_reply") or {}
+            payload_boton = boton.get("payload") or opcion.get("id")
+            accion_boton = next((accion for accion, payload in ACCIONES_BOTON_TEMPLATE.items()
+                                 if payload_boton == payload), None)
+            if payload_boton == BOTON_ID_BAJA_INSULTO:
+                accion_boton = "baja"
             with conectar() as conn, conn.cursor() as cur:
                 cur.execute(
                     "INSERT IGNORE INTO whatsapp_conversaciones_mensajes"
                     " (mensaje_id, centro_codigo, wa_phone_id, numero_emisor,"
-                    " telefono_paciente, tipo, texto, recibido, audio_media_id)"
-                    " VALUES (%s, %s, %s, %s, %s, %s, %s, FROM_UNIXTIME(%s), %s)",
+                    " telefono_paciente, tipo, texto, accion_boton, recibido, audio_media_id)"
+                    " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, FROM_UNIXTIME(%s), %s)",
                     (mensaje_id[:255], emisor["codigo"], emisor["phoneNumberId"],
                      emisor["phoneNumber"], telefono, str(mensaje.get("type") or "")[:30],
-                     (texto or "")[:2000], timestamp_paciente,
+                     (texto or "")[:2000], accion_boton, timestamp_paciente,
                      str((mensaje.get("audio") or {}).get("id") or "")[:255]
                      if mensaje.get("type") == "audio" else None),
                 )

@@ -583,7 +583,10 @@ function render() {
       `<td class="campo-num campo-num--ok">${enviados}</td>` +
       `<td class="campo-num campo-num--error">${fallidos}</td>` +
       `<td class="campo-num campo-num--invalido">${invalidos}</td>` +
-      `<td><button class="btn btn--sm btn--ghost" data-detalle="${r.id}">Ver detalle</button></td>`;
+      `<td><div class="panel__actions historial__acciones-envio"><button class="btn btn--sm btn--ghost" data-detalle="${r.id}">Ver detalle</button>` +
+      (window.snwEsPrivilegiado && /^\d+$/.test(String(r.id)) ?
+        `<a class="btn btn--sm btn--ghost" data-estadisticas-envio href="estadisticas.html?envio=${encodeURIComponent(r.id)}&base=${encodeURIComponent(ambienteRegistroHistorial(r))}${r.area_id != null ? `&area=${Number(r.area_id)}` : ""}${r.centro_codigo ? `&centro=${encodeURIComponent(r.centro_codigo)}` : ""}"><i class="fa-solid fa-chart-pie" aria-hidden="true"></i> Estadísticas</a>` : "") +
+      `</div></td>`;
     tbodyEl.appendChild(tr);
   }
 
@@ -597,6 +600,7 @@ function render() {
 }
 
 tbodyEl.addEventListener("click", async (e) => {
+  if (e.target.closest("[data-estadisticas-envio]")) return;
   const tr = e.target.closest("tr[data-id]");
   if (!tr) return;
   const envioId = tr.dataset.id;

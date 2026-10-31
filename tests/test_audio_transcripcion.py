@@ -13,6 +13,19 @@ FILA = {"mensaje_id": "wamid.audio", "wa_phone_id": "123456",
 
 
 class AudioTests(unittest.TestCase):
+    def test_guarda_accion_de_boton_personalizado_independiente_del_titulo(self):
+        conn, cur = self.conexion()
+        token = main.whatsapp_service.EMISOR_WEBHOOK.set({
+            "codigo": "VS", "phoneNumberId": "123456", "phoneNumber": "+56922222222"})
+        try:
+            with patch.object(main.whatsapp_service, "conectar", return_value=conn):
+                self.assertTrue(main.WhatsAppService._guardar_mensaje_entrante(
+                    {"id": "wamid.boton", "type": "button", "timestamp": "1792611000",
+                     "button": {"text": "Quiero saber más", "payload": "snw_tpl_interes"}},
+                    FILA["telefono_paciente"], "Quiero saber más"))
+            self.assertEqual(cur.execute.call_args.args[1][-3], "interes")
+        finally:
+            main.whatsapp_service.EMISOR_WEBHOOK.reset(token)
     def test_webhook_conserva_referencia_audio_sin_descargarlo(self):
         conn, cur = self.conexion()
         token = main.whatsapp_service.EMISOR_WEBHOOK.set({

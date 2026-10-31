@@ -180,7 +180,9 @@ if (selCentroEst) {
 
 async function recargarTodo() {
   botonesCargados = false;
+  campanasCargadas = false;
   const cargas = [cargar(), cargarEnvios(granEnvios)];
+  if ($("#statsTabCampanas")?.classList.contains("activo")) cargas.push(cargarCampanas(true));
   if ($("#statsTabRespuestas")?.classList.contains("activo")) cargas.push(cargarBotones());
   if (ES_ADMIN && $("#panelCostos")) {
     cargas.push(cargarTarifas(), cargarCostos(granCostos));
@@ -974,7 +976,8 @@ if ($("#calendarioCostos")) {
   });
 }
 
-window.snwConCooldown($("#btnActualizarEstadisticas"), () => cargar(true));
+window.snwConCooldown($("#btnActualizarEstadisticas"), () =>
+  $("#statsTabCampanas")?.classList.contains("activo") ? cargarCampanas(false) : cargar(true));
 const barraSeries = $("#seriesTabs");
 function posicionarIndicadorSeries() {
   const activa = barraSeries?.querySelector(".stats-series-tab.activo");
@@ -1019,8 +1022,10 @@ function activarTabStats(stab, animar = true) {
   if (!statsTabs) return;
   const boton = statsTabs.querySelector(`[data-stab="${stab}"]`) || statsTabs.querySelector("[data-stab]");
   if (!boton) return;
-  const destino = boton.dataset.stab === "envios" ? $("#stabEnvios") : $("#stabRespuestas");
-  if (animar) destino?.style.setProperty("--stats-panel-entrada-x", boton.dataset.stab === "respuestas" ? "20px" : "-20px");
+  const tabs = [...statsTabs.querySelectorAll(".stats-series-tab")];
+  const anterior = tabs.findIndex(t => t.classList.contains("activo"));
+  const destino = document.getElementById(boton.getAttribute("aria-controls"));
+  if (animar) destino?.style.setProperty("--stats-panel-entrada-x", tabs.indexOf(boton) > anterior ? "20px" : "-20px");
   statsTabs.querySelectorAll(".stats-series-tab").forEach((tab) => {
     const activa = tab === boton;
     tab.classList.toggle("activo", activa);
@@ -1029,10 +1034,12 @@ function activarTabStats(stab, animar = true) {
   });
   $("#stabEnvios").hidden = boton.dataset.stab !== "envios";
   $("#stabRespuestas").hidden = boton.dataset.stab !== "respuestas";
+  $("#stabCampanas").hidden = boton.dataset.stab !== "campanas";
   posicionarIndicadorStatsTabs();
   if (paginaEstadisticasLista && boton.dataset.stab === "respuestas" && !botonesCargados) {
     cargarBotones();
   }
+  if (paginaEstadisticasLista && boton.dataset.stab === "campanas" && !campanasCargadas) cargarCampanas(true);
 }
 if (statsTabs) {
   statsTabs.querySelectorAll(".stats-series-tab").forEach((b) => b.addEventListener("click", () => {
@@ -1044,9 +1051,175 @@ if (statsTabs) {
   // Pestaña recordada (por defecto Envíos).
   let tabGuardada = "envios";
   try { tabGuardada = localStorage.getItem("snw_stats_tab") || "envios"; } catch { /* sin almacenamiento */ }
-  activarTabStats(tabGuardada === "respuestas" ? "respuestas" : "envios", false);
+  activarTabStats(["respuestas", "campanas"].includes(tabGuardada) ? tabGuardada : "envios", false);
   requestAnimationFrame(posicionarIndicadorStatsTabs);
 }
+
+let campanasCargadas = false;
+const enlaceEstadisticas = new URLSearchParams(location.search);
+let envioEnlacePendiente = /^\d+$/.test(enlaceEstadisticas.get("envio") || "") ? enlaceEstadisticas.get("envio") : null;
+let paginaCampanas = 1;
+let paginasCampanas = 1;
+let consultaCampanas;
+let consultaCampana;
+let datosCampana = null;
+const selCampana = $("#selCampanaEst");
+const estadoCampana = $("#campanaEstado");
+const resultadosCampana = $("#campanaResultados");
+async function cargarCampanas(reiniciar = false) {
+  consultaCampanas?.abort();
+  consultaCampana?.abort();
+  const control = new AbortController();
+  consultaCampanas = control;
+  if (reiniciar) paginaCampanas = 1;
+  const anterior = reiniciar ? "" : selCampana.value;
+  resultadosCampana.hidden = true;
+  $("#filtrosCampana").hidden = true;
+  selCampana.disabled = true;
+  estadoCampana.textContent = "Cargando envíos…";
+  $("#campanasAnterior").disabled = true;
+  $("#campanasSiguiente").disabled = true;
+  $("#campanasPrimera").disabled = true;
+  $("#campanasUltima").disabled = true;
+  try {
+    const q = encodeURIComponent($("#buscarCampanaEst").value.trim());
+    const res = await fetch(`api/estadisticas/campanas?pagina=${paginaCampanas}&q=${q}&tipo=${encodeURIComponent($("#tipoCampanaEst").value)}${qsEspEst()}`, {
+      headers: authHeaders(), signal: control.signal, cache: "no-store",
+    });
+    const datos = await res.json();
+    if (!res.ok) throw new Error(datos.detail || "No se pudieron cargar los envíos.");
+    if (control.signal.aborted) return;
+    selCampana.replaceChildren(new Option("— Selecciona un envío —", ""));
+    for (const envio of datos.items) selCampana.add(new Option(
+      `#${envio.id} · ${envio.plantilla_nombre || "Plantilla"} · ${envio.centro} · ${envio.fecha}`, String(envio.id)));
+    if (datos.items.some(e => String(e.id) === anterior)) selCampana.value = anterior;
+    paginaCampanas = datos.pagina;
+    paginasCampanas = datos.paginas;
+    $("#campanasPagina").value = paginaCampanas;
+    $("#campanasPagina").max = paginasCampanas;
+    $("#campanasTotalPaginas").textContent = `de ${paginasCampanas}`;
+    $("#campanasAnterior").disabled = paginaCampanas <= 1;
+    $("#campanasSiguiente").disabled = !datos.hay_mas;
+    $("#campanasPrimera").disabled = paginaCampanas <= 1;
+    $("#campanasUltima").disabled = !datos.hay_mas;
+    estadoCampana.textContent = datos.items.length ? "Selecciona un envío para ver sus resultados." : "No hay envíos en este alcance.";
+    campanasCargadas = true;
+    if (envioEnlacePendiente) {
+      if (![...selCampana.options].some(o => o.value === envioEnlacePendiente))
+        selCampana.add(new Option(`Envío #${envioEnlacePendiente}`, envioEnlacePendiente));
+      selCampana.value = envioEnlacePendiente;
+      envioEnlacePendiente = null;
+    }
+    if (selCampana.value) await cargarCampana();
+  } catch (error) {
+    if (error.name !== "AbortError") estadoCampana.textContent = error.message;
+  } finally { if (consultaCampanas === control) selCampana.disabled = false; }
+}
+
+async function cargarCampana() {
+  consultaCampana?.abort();
+  datosCampana = null;
+  $("#filtrosCampana").hidden = true;
+  const control = new AbortController();
+  consultaCampana = control;
+  resultadosCampana.hidden = true;
+  if (!selCampana.value) { estadoCampana.textContent = "Selecciona un envío para ver sus resultados."; return; }
+  estadoCampana.textContent = "Calculando resultados del envío…";
+  try {
+    const res = await fetch(`api/estadisticas/campanas/${encodeURIComponent(selCampana.value)}`, {
+      headers: authHeaders(), signal: control.signal, cache: "no-store",
+    });
+    const datos = await res.json();
+    if (!res.ok) throw new Error(datos.detail || "No se pudieron calcular las estadísticas.");
+    if (control.signal.aborted) return;
+    datosCampana = datos;
+    $("#filtroEntregaCampana").value = "todos";
+    $("#filtroResultadoCampana").value = "todos";
+    $("#filtrosCampana").hidden = false;
+    pintarCampana();
+  } catch (error) { if (error.name !== "AbortError") estadoCampana.textContent = error.message; }
+}
+
+function pintarCampana() {
+    if (!datosCampana) return;
+    const datos = window.SNWEstadisticasCampana.filtrar(datosCampana,
+      $("#filtroEntregaCampana").value, $("#filtroResultadoCampana").value);
+    const r = datos.resumen;
+    const indicadores = [["Enviados sin errores", r.validos],
+      ["Entregados (incluye leídos)", r.entregados], ["Leídos", r.leidos],
+      ["Leídos sin responder", r.vistos_sin_respuesta], ["Sin confirmación de entrega", r.sin_confirmacion]];
+    const distribucion = window.SNWEstadisticasCampana.comparar(datos, $("#comparacionCampana").value);
+    let acumulado = 0;
+    const sectores = distribucion.map(d => {
+      const inicio = acumulado;
+      acumulado += r.validos ? 100 * d.cantidad / r.validos : 0;
+      return `${d.color} ${inicio}% ${acumulado}%`;
+    }).join(",");
+    const coste = datos.costo;
+    const valorCoste = coste.importe == null ? "No disponible" : fmtMoneda(coste.importe, coste.moneda);
+    resultadosCampana.innerHTML = `<h3>${escaparHtml(datos.envio.plantilla_nombre || "Envío")} · ${escaparHtml(datos.envio.centro)}</h3>` +
+      `<div class="stats-campanas__ficha"><span>Envío #${Number(datos.envio.id)}</span><span>Primer envío: ${escaparHtml(datos.envio.inicio)}</span>` +
+      `<span>Remitente: ${escaparHtml(datos.envio.numero_emisor || "Sin registro")}</span><span>Plantilla: ${escaparHtml(datos.envio.plantilla_clave || "—")}</span></div>` +
+      `<div class="stats-campanas__numeros">${indicadores.map(([titulo, valor]) =>
+        `<div class="stats-campanas__numero"><span>${escaparHtml(titulo)}</span><strong>${num(valor)}</strong></div>`).join("")}</div>` +
+      `<h3>Resultado de los botones</h3><div class="stats-campanas__distribucion">` +
+      `<div class="stats-campanas__torta" role="img" aria-label="Distribución de interés, desinterés, bajas y sin selección; cifras en la leyenda" style="background:${r.validos ? `conic-gradient(${sectores})` : "var(--panel-2)"}"></div>` +
+      `<div class="stats-campanas__leyenda">${distribucion.map((d, i) =>
+        `<p><i aria-hidden="true" style="--color-serie:${d.color}"></i><button type="button" data-segmento-campana="${i}">${d.titulo}: <strong>${num(d.cantidad)}</strong> · ${num(r.validos ? Math.round(1000 * d.cantidad / r.validos) / 10 : 0)} %</button></p>`).join("")}</div></div>` +
+      `<p class="field__hint">Porcentajes sobre ${num(r.validos)} enviados sin errores del segmento (total del envío: ${num(datosCampana.resumen.validos)}). Se usa la última selección de cada paciente; una respuesta libre no cuenta como interés. Errores e inválidos quedan fuera. «Leídos sin responder» cuenta lecturas sin mensaje entrante, incluidos audios. Pulsa una categoría de la leyenda para filtrar.</p>` +
+      `<div class="stats-campanas__numeros"><div class="stats-campanas__numero"><span>Tasa de interés</span><strong>${num(r.tasa_interes)} %</strong></div>` +
+      `<div class="stats-campanas__numero"><span>Costo estimado del segmento</span><strong>${escaparHtml(valorCoste)}</strong></div>` +
+      `<div class="stats-campanas__numero"><span>Costo por interesado</span><strong>${coste.por_interesado == null ? "—" : escaparHtml(fmtMoneda(coste.por_interesado, coste.moneda))}</strong></div></div>` +
+      `<p class="field__hint">Costo de ${num(coste.entregas)} entregas confirmadas por API oficial, según categoría y tarifas guardadas para su fecha. No es la factura de Meta; sin tarifas o categoría conocidas aparece «No disponible».</p>` +
+      `<h3>Respuestas a botones</h3>` + (datos.botones.length ?
+        `<div class="tabla-wrap"><table><thead><tr><th>Botón u opción</th><th>Clics</th><th>Pacientes</th><th>% de enviados sin error</th></tr></thead><tbody>${datos.botones.map(b =>
+          `<tr><td>${escaparHtml(b.boton || "Sin texto")}</td><td>${b.medible === false ? "No medible" : num(b.clics)}</td><td>${b.medible === false ? "—" : num(b.pacientes)}</td><td>${b.medible === false ? "—" : `${num(b.porcentaje)} %`}</td></tr>`).join("")}</tbody></table></div>` :
+        `<p class="field__hint">Sin respuestas a botones registradas.</p>`) +
+      `<p class="field__hint">Se atribuyen respuestas desde este envío hasta la siguiente campaña al mismo paciente en la misma clínica. Los botones de enlace no informan clics. Los datos dependen de los webhooks recibidos.</p>`;
+    resultadosCampana.hidden = false;
+    estadoCampana.textContent = `Envío #${datos.envio.id} · ${num(r.validos)} de ${num(datosCampana.resumen.validos)} enviados sin errores en el segmento.`;
+    function aplicarSegmento(indice) {
+      const filtro = distribucion[indice]?.filtro || {};
+      if (filtro.entrega) $("#filtroEntregaCampana").value = filtro.entrega;
+      if (filtro.resultado) $("#filtroResultadoCampana").value = filtro.resultado;
+      if (filtro.entrega || filtro.resultado) pintarCampana();
+    }
+    resultadosCampana.querySelectorAll("[data-segmento-campana]").forEach(b =>
+      b.addEventListener("click", () => aplicarSegmento(Number(b.dataset.segmentoCampana))));
+    const torta = resultadosCampana.querySelector(".stats-campanas__torta");
+    torta.addEventListener("click", event => {
+      if (!r.validos) return;
+      const rect = torta.getBoundingClientRect();
+      const x = event.clientX - rect.left - rect.width / 2;
+      const y = event.clientY - rect.top - rect.height / 2;
+      if (Math.hypot(x, y) > rect.width / 2) return;
+      const posicion = ((Math.atan2(y, x) * 180 / Math.PI + 450) % 360) / 3.6;
+      let limite = 0;
+      for (let i = 0; i < distribucion.length; i++) {
+        limite += 100 * distribucion[i].cantidad / r.validos;
+        if (posicion < limite) { aplicarSegmento(i); break; }
+      }
+    });
+}
+selCampana.addEventListener("change", cargarCampana);
+$("#btnBuscarCampanaEst").addEventListener("click", () => cargarCampanas(true));
+$("#tipoCampanaEst").addEventListener("change", () => cargarCampanas(true));
+for (const id of ["filtroEntregaCampana", "filtroResultadoCampana", "comparacionCampana"])
+  document.getElementById(id).addEventListener("change", pintarCampana);
+$("#limpiarFiltrosCampana").addEventListener("click", () => {
+  $("#filtroEntregaCampana").value = "todos";
+  $("#filtroResultadoCampana").value = "todos";
+  $("#comparacionCampana").value = "general";
+  pintarCampana();
+});
+$("#buscarCampanaEst").addEventListener("keydown", e => { if (e.key === "Enter") cargarCampanas(true); });
+$("#campanasAnterior").addEventListener("click", () => { paginaCampanas--; cargarCampanas(); });
+$("#campanasSiguiente").addEventListener("click", () => { paginaCampanas++; cargarCampanas(); });
+$("#campanasPrimera").addEventListener("click", () => { paginaCampanas = 1; cargarCampanas(); });
+$("#campanasUltima").addEventListener("click", () => { paginaCampanas = paginasCampanas; cargarCampanas(); });
+$("#campanasPagina").addEventListener("change", e => {
+  paginaCampanas = Math.min(paginasCampanas, Math.max(1, Number(e.target.value) || 1)); cargarCampanas();
+});
 
 let yaCargada = false;
 window.snwCargarEstadisticas = function () {
@@ -1056,6 +1229,14 @@ window.snwCargarEstadisticas = function () {
     const inicioCarga = iniciarCargaEstadisticas();
     try {
       await Promise.all([cargarAreasEst(), cargarClinicasEst()]);
+      if (envioEnlacePendiente) {
+        selEntornoEst.value = enlaceEstadisticas.get("base") === "desarrollo" ? "desarrollo" : "produccion";
+        selAreaEst.value = enlaceEstadisticas.get("area") || "";
+        selCentroEst.value = enlaceEstadisticas.get("centro") || "todos";
+        if (!selCentroEst.value) selCentroEst.value = "todos";
+        pintarCampoAreaEst();
+        activarTabStats("campanas", false);
+      }
       paginaEstadisticasLista = true;
       await recargarTodo();
     } finally {
