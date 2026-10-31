@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="css/componentes.css?v=historial-carga1">
   <link rel="stylesheet" href="css/layout.css?v=navcolor1">
   <link rel="stylesheet" href="css/admin.css?v=tokens1">
-  <link rel="stylesheet" href="css/estadisticas.css?v=por-envio1">
+  <link rel="stylesheet" href="css/estadisticas.css?v=tabla-envios2">
   <link rel="stylesheet" href="css/calendario.css?v=base1">
   <link rel="stylesheet" href="css/refinamiento.css?v=merge-frontend1">
   <link rel="stylesheet" href="css/estilo-nuevo.css?v=1">
@@ -212,13 +212,27 @@
         </div>
         <div id="stabCampanas" class="stats-vista" role="tabpanel" aria-labelledby="statsTabCampanas" hidden>
           <section class="panel">
-            <div class="panel__head"><h2>Resultados de un envío masivo</h2></div>
-            <div class="stats-campanas__controles">
-              <label>Buscar por plantilla o ID<input id="buscarCampanaEst" type="search" maxlength="100" placeholder="Nombre de plantilla o número de envío"></label>
-              <button id="btnBuscarCampanaEst" type="button" class="btn btn--ghost">Buscar</button>
-              <label>Tipo de envío<select id="tipoCampanaEst"><option value="todos">Todos</option><option value="manual">Manual</option><option value="programado">Programado</option><option value="reagendamiento">Reagendamiento</option></select></label>
-              <label class="stats-campanas__selector">Envío<select id="selCampanaEst"><option value="">— Selecciona un envío —</option></select></label>
-            </div>
+            <div class="panel__head"><h2>Resultados por envío</h2></div>
+            <details id="selectorCampanaEst" class="stats-campanas__explorador" open>
+              <summary id="resumenSelectorCampana">
+                <span class="stats-campanas__seleccion-icono"><i class="fa-solid fa-paper-plane" aria-hidden="true"></i></span>
+                <span class="stats-campanas__seleccion-texto"><strong id="campanaSeleccionTitulo">Elige un envío</strong><span id="campanaSeleccionMeta">Selecciona el tipo y pulsa una fila de la tabla.</span></span>
+                <span class="stats-campanas__seleccion-accion" id="campanaSeleccionAccion">Ver envíos</span><i class="fa-solid fa-chevron-down stats-campanas__desplegar" aria-hidden="true"></i>
+              </summary>
+              <div class="stats-campanas__explorador-contenido">
+                <div class="stats-campanas__tipos" role="group" aria-label="Tipo de envío">
+                  <button type="button" data-tipo-campana="todos" aria-pressed="true">Todos</button>
+                  <button type="button" data-tipo-campana="manual" aria-pressed="false"><i class="fa-solid fa-paper-plane" aria-hidden="true"></i> Manuales</button>
+                  <button type="button" data-tipo-campana="programado" aria-pressed="false"><i class="fa-regular fa-clock" aria-hidden="true"></i> Programados</button>
+                  <button type="button" data-tipo-campana="reagendamiento" aria-pressed="false"><i class="fa-regular fa-calendar" aria-hidden="true"></i> Reagendamientos</button>
+                </div>
+                <div class="stats-campanas__busqueda"><label for="buscarCampanaEst" class="stats-campanas__buscar"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><input id="buscarCampanaEst" type="search" maxlength="100" placeholder="Buscar por plantilla o ID" aria-label="Buscar envío por plantilla o ID"></label><button id="btnBuscarCampanaEst" type="button" class="btn btn--ghost">Buscar</button><span id="campanasCantidad" aria-live="polite"></span></div>
+                <div class="stats-campanas__tabla-wrap" role="region" aria-label="Envíos disponibles para seleccionar" tabindex="0">
+                  <table class="stats-campanas__tabla" id="tablaCampanasEst" aria-busy="false">
+                    <thead><tr><th scope="col">Envío</th><th scope="col">Clínica</th><th scope="col">Fecha</th><th scope="col">Destinatarios</th><th scope="col"><span class="visually-hidden">Seleccionar</span></th></tr></thead>
+                    <tbody id="campanasTablaBody"><tr><td colspan="5" class="stats-campanas__tabla-estado">Cargando envíos…</td></tr></tbody>
+                  </table>
+                </div>
             <div class="stats-campanas__paginas">
               <button id="campanasPrimera" type="button" class="btn btn--ghost" disabled aria-label="Primera página"><i class="fa-solid fa-angles-left" aria-hidden="true"></i></button>
               <button id="campanasAnterior" type="button" class="btn btn--ghost" disabled aria-label="Página anterior"><i class="fa-solid fa-chevron-left" aria-hidden="true"></i></button>
@@ -226,13 +240,22 @@
               <button id="campanasSiguiente" type="button" class="btn btn--ghost" disabled aria-label="Página siguiente"><i class="fa-solid fa-chevron-right" aria-hidden="true"></i></button>
               <button id="campanasUltima" type="button" class="btn btn--ghost" disabled aria-label="Última página"><i class="fa-solid fa-angles-right" aria-hidden="true"></i></button>
             </div>
-            <p class="field__hint stats__respuestas-hint">La lista respeta el entorno, área y clínica de arriba. Cada envío se consulta completo, sin el filtro de fechas del gráfico. Incluye campañas manuales, programadas y reagendamientos.</p>
-            <div class="stats-campanas__controles" id="filtrosCampana" hidden>
-              <label>Entrega<select id="filtroEntregaCampana"><option value="todos">Todos los enviados sin errores</option><option value="leidos">Solo leídos</option><option value="entregados">Entregados (incluye leídos)</option><option value="sin_confirmacion">Sin confirmación de entrega</option></select></label>
-              <label>Resultado<select id="filtroResultadoCampana"><option value="todos">Todos los resultados</option><option value="interes">Interesados</option><option value="desinteres">No interesados</option><option value="baja">Se dieron de baja</option><option value="sin_seleccion">Sin selección</option><option value="vistos">Leídos sin responder</option></select></label>
+                <p class="field__hint stats-campanas__alcance">La tabla respeta el entorno, área y clínica de arriba. Cada envío se analiza completo.</p>
+              </div>
+            </details>
+            <details class="stats-campanas__filtros" id="filtrosCampana" hidden>
+              <summary><i class="fa-solid fa-sliders" aria-hidden="true"></i><strong>Filtrar resultados</strong><span id="resumenFiltrosCampana">Todos los enviados sin errores</span><i class="fa-solid fa-chevron-down stats-campanas__desplegar" aria-hidden="true"></i></summary>
+              <div class="stats-campanas__controles">
+              <fieldset class="stats-campanas__grupo"><legend>Entrega</legend><input type="hidden" id="filtroEntregaCampana" value="todos"><div class="stats-campanas__chips">
+                <button type="button" data-filtro-campana="entrega" data-valor="todos" aria-pressed="true">Todas</button><button type="button" data-filtro-campana="entrega" data-valor="leidos" aria-pressed="false">Leídos</button><button type="button" data-filtro-campana="entrega" data-valor="entregados" aria-pressed="false">Entregados</button><button type="button" data-filtro-campana="entrega" data-valor="sin_confirmacion" aria-pressed="false">Sin confirmación</button>
+              </div></fieldset>
+              <fieldset class="stats-campanas__grupo"><legend>Resultado</legend><input type="hidden" id="filtroResultadoCampana" value="todos"><div class="stats-campanas__chips">
+                <button type="button" data-filtro-campana="resultado" data-valor="todos" aria-pressed="true">Todos</button><button type="button" data-filtro-campana="resultado" data-valor="interes" aria-pressed="false">Interesados</button><button type="button" data-filtro-campana="resultado" data-valor="desinteres" aria-pressed="false">No interesados</button><button type="button" data-filtro-campana="resultado" data-valor="baja" aria-pressed="false">Bajas</button><button type="button" data-filtro-campana="resultado" data-valor="sin_seleccion" aria-pressed="false">Sin selección</button><button type="button" data-filtro-campana="resultado" data-valor="vistos" aria-pressed="false">Vistos sin respuesta</button>
+              </div></fieldset>
               <label>Comparar<select id="comparacionCampana"><option value="general">Interés, desinterés, bajas y sin selección</option><option value="interes-vistos">Interesados vs. leídos sin respuesta</option><option value="interes-desinteres">Interesados vs. no interesados</option><option value="interes-baja">Interesados vs. bajas</option><option value="interes-sin_seleccion">Interesados vs. sin selección</option><option value="baja-desinteres">Bajas vs. no interesados</option><option value="entregas">Leídos vs. entregados vs. sin confirmación</option></select></label>
               <button id="limpiarFiltrosCampana" type="button" class="btn btn--ghost">Quitar filtros del envío</button>
-            </div>
+              </div>
+            </details>
             <p id="campanaEstado" class="field__hint stats__respuestas-hint" role="status">Selecciona un envío para ver sus resultados.</p>
             <div id="campanaResultados" class="stats-campanas__resultados" hidden></div>
           </section>
@@ -249,7 +272,7 @@
   <script src="js/layout.js?v=permisos-acciones1"></script>
   <script src="js/pass-toggle.js"></script>
   <script src="js/estadisticas-campana.js?v=segmentos1"></script>
-  <script src="js/estadisticas.js?v=por-envio2"></script>
+  <script src="js/estadisticas.js?v=tabla-envios2"></script>
   <script>
     if (window.snwCargarEstadisticas) window.snwCargarEstadisticas();
   </script>

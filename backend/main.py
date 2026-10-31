@@ -9577,13 +9577,15 @@ def listar_envios_estadisticas(base: str = "produccion", area_id: int | None = Q
         total = int((cur.fetchone() or {}).get("n") or 0)
         paginas = max(1, math.ceil(total / 25))
         pagina = min(pagina, paginas)
-        cur.execute("SELECT e.id, e.plantilla_nombre, e.fecha_hora, e.centro_codigo, e.base_datos,"
+        cur.execute("SELECT e.id, e.plantilla_nombre, e.fecha_hora, e.centro_codigo, e.base_datos, e.programado_id,"
                     " e.total_pacientes FROM envios e WHERE " + " AND ".join(condiciones)
                     + " ORDER BY e.fecha_hora DESC, e.id DESC LIMIT 26 OFFSET %s",
                     (*args, (pagina - 1) * 25))
         filas = cur.fetchall()
     centros = catalogo_centros(incluir_inactivas=True)
     return {"items": [{**f, "fecha": f["fecha_hora"].strftime("%d-%m-%Y %H:%M") if f.get("fecha_hora") else "—",
+                        "tipo": "reagendamiento" if f.get("base_datos") == "paciente_reagendar" else
+                                "programado" if f.get("programado_id") else "manual",
                         "centro": centros.get(f.get("centro_codigo"), "Emisor histórico")}
                        for f in filas[:25]], "hay_mas": pagina < paginas, "pagina": pagina,
             "paginas": paginas, "total": total}

@@ -694,6 +694,11 @@ La pestaña **Por envío** permite buscar una campaña por plantilla o ID, filtr
 área, entorno y tipo (manual, programado o reagendamiento), y consultar plantilla, número
 emisor y hora del primer intento. Desde Historial, **Estadísticas** abre directamente esa campaña.
 La lista está paginada; el detalle usa conteos agrupados, sin descargar las fichas de pacientes.
+El tipo se elige con botones (Todos, Manuales, Programados y Reagendamientos).
+Pulsa una fila de la tabla para analizarla: la tabla se contrae y queda el resumen
+del envío. **Cambiar envío** vuelve a desplegarla, conservando la búsqueda y página.
+Los filtros de entrega y resultado son botones dentro de **Filtrar resultados**;
+pueden desplegarse cuando se necesite segmentar sin ocupar toda la vista inicial.
 
 Los filtros **Entrega**, **Resultado** y **Comparar** recalculan la torta, tasa de interés,
 selecciones de botones y costo estimado. También se puede filtrar pulsando una porción o

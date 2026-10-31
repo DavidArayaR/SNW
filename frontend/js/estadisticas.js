@@ -1063,19 +1063,67 @@ let paginasCampanas = 1;
 let consultaCampanas;
 let consultaCampana;
 let datosCampana = null;
-const selCampana = $("#selCampanaEst");
+const selectorCampana = $("#selectorCampanaEst");
+const tablaCampanas = $("#tablaCampanasEst");
+const cuerpoCampanas = $("#campanasTablaBody");
+let tipoCampana = "todos";
+let filasCampanas = [];
+let campanaSeleccionada = null;
+let campanaSolicitada = null;
 const estadoCampana = $("#campanaEstado");
 const resultadosCampana = $("#campanaResultados");
+
+function pintarSelectorCampana() {
+  const envio = campanaSeleccionada;
+  $("#campanaSeleccionTitulo").textContent = envio
+    ? `#${envio.id} · ${envio.plantilla_nombre || "Envío seleccionado"}` : "Elige un envío";
+  $("#campanaSeleccionMeta").textContent = envio
+    ? [envio.centro, envio.inicio || envio.fecha].filter(Boolean).join(" · ")
+    : "Selecciona el tipo y pulsa una fila de la tabla.";
+  $("#campanaSeleccionAccion").textContent = envio
+    ? selectorCampana.open ? "Ocultar tabla" : "Cambiar envío" : "Ver envíos";
+  selectorCampana.classList.toggle("stats-campanas__explorador--seleccionado", !!envio);
+}
+
+function pintarTablaCampanas() {
+  cuerpoCampanas.replaceChildren();
+  if (!filasCampanas.length) {
+    cuerpoCampanas.innerHTML = '<tr><td colspan="5" class="stats-campanas__tabla-estado">No hay envíos para este tipo y alcance.</td></tr>';
+    return;
+  }
+  for (const envio of filasCampanas) {
+    const fila = document.createElement("tr");
+    fila.dataset.campanaId = String(envio.id);
+    const seleccionada = String(campanaSeleccionada?.id) === String(envio.id);
+    fila.classList.toggle("seleccionada", seleccionada);
+    if (seleccionada) fila.setAttribute("aria-current", "true");
+    const tipo = { manual: "Manual", programado: "Programado", reagendamiento: "Reagendamiento" }[envio.tipo] || "Envío";
+    fila.innerHTML = `<td><button type="button" class="stats-campanas__elegir" data-elegir-campana="${Number(envio.id)}">${escaparHtml(envio.plantilla_nombre || "Sin nombre")}</button>` +
+      `<span class="stats-campanas__fila-meta">#${Number(envio.id)} · ${tipo}${seleccionada ? " · Seleccionado" : ""}</span></td>` +
+      `<td>${escaparHtml(envio.centro || "Sin registro")}</td><td class="stats-campanas__fila-fecha">${escaparHtml(envio.fecha)}</td>` +
+      `<td class="stats-campanas__fila-numero">${num(envio.total_pacientes)}</td><td><i class="fa-solid ${String(campanaSolicitada) === String(envio.id) ? "fa-spinner fa-spin" : seleccionada ? "fa-circle-check" : "fa-chevron-right"}" aria-hidden="true"></i></td>`;
+    cuerpoCampanas.appendChild(fila);
+  }
+}
+
 async function cargarCampanas(reiniciar = false) {
   consultaCampanas?.abort();
   consultaCampana?.abort();
+  consultaCampana = null;
+  campanaSolicitada = null;
   const control = new AbortController();
   consultaCampanas = control;
-  if (reiniciar) paginaCampanas = 1;
-  const anterior = reiniciar ? "" : selCampana.value;
-  resultadosCampana.hidden = true;
-  $("#filtrosCampana").hidden = true;
-  selCampana.disabled = true;
+  if (reiniciar) {
+    paginaCampanas = 1;
+    campanaSeleccionada = null;
+    datosCampana = null;
+    resultadosCampana.hidden = true;
+    $("#filtrosCampana").hidden = true;
+    selectorCampana.open = true;
+  }
+  pintarSelectorCampana();
+  tablaCampanas.setAttribute("aria-busy", "true");
+  cuerpoCampanas.innerHTML = '<tr><td colspan="5" class="stats-campanas__tabla-estado"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Cargando envíos…</td></tr>';
   estadoCampana.textContent = "Cargando envíos…";
   $("#campanasAnterior").disabled = true;
   $("#campanasSiguiente").disabled = true;
@@ -1083,16 +1131,15 @@ async function cargarCampanas(reiniciar = false) {
   $("#campanasUltima").disabled = true;
   try {
     const q = encodeURIComponent($("#buscarCampanaEst").value.trim());
-    const res = await fetch(`api/estadisticas/campanas?pagina=${paginaCampanas}&q=${q}&tipo=${encodeURIComponent($("#tipoCampanaEst").value)}${qsEspEst()}`, {
+    const res = await fetch(`api/estadisticas/campanas?pagina=${paginaCampanas}&q=${q}&tipo=${encodeURIComponent(tipoCampana)}${qsEspEst()}`, {
       headers: authHeaders(), signal: control.signal, cache: "no-store",
     });
     const datos = await res.json();
     if (!res.ok) throw new Error(datos.detail || "No se pudieron cargar los envíos.");
     if (control.signal.aborted) return;
-    selCampana.replaceChildren(new Option("— Selecciona un envío —", ""));
-    for (const envio of datos.items) selCampana.add(new Option(
-      `#${envio.id} · ${envio.plantilla_nombre || "Plantilla"} · ${envio.centro} · ${envio.fecha}`, String(envio.id)));
-    if (datos.items.some(e => String(e.id) === anterior)) selCampana.value = anterior;
+    filasCampanas = datos.items;
+    pintarTablaCampanas();
+    $("#campanasCantidad").textContent = `${num(datos.total)} envío${datos.total === 1 ? "" : "s"}`;
     paginaCampanas = datos.pagina;
     paginasCampanas = datos.paginas;
     $("#campanasPagina").value = paginaCampanas;
@@ -1102,42 +1149,66 @@ async function cargarCampanas(reiniciar = false) {
     $("#campanasSiguiente").disabled = !datos.hay_mas;
     $("#campanasPrimera").disabled = paginaCampanas <= 1;
     $("#campanasUltima").disabled = !datos.hay_mas;
-    estadoCampana.textContent = datos.items.length ? "Selecciona un envío para ver sus resultados." : "No hay envíos en este alcance.";
+    estadoCampana.textContent = datos.items.length ? "Pulsa un envío de la tabla para ver sus resultados." : "No hay envíos en este alcance.";
     campanasCargadas = true;
     if (envioEnlacePendiente) {
-      if (![...selCampana.options].some(o => o.value === envioEnlacePendiente))
-        selCampana.add(new Option(`Envío #${envioEnlacePendiente}`, envioEnlacePendiente));
-      selCampana.value = envioEnlacePendiente;
+      const id = envioEnlacePendiente;
       envioEnlacePendiente = null;
+      await cargarCampana(id);
+    } else if (campanaSeleccionada && !selectorCampana.open) {
+      await cargarCampana(campanaSeleccionada.id);
     }
-    if (selCampana.value) await cargarCampana();
   } catch (error) {
-    if (error.name !== "AbortError") estadoCampana.textContent = error.message;
-  } finally { if (consultaCampanas === control) selCampana.disabled = false; }
+    if (error.name !== "AbortError") {
+      estadoCampana.textContent = error.message;
+      cuerpoCampanas.replaceChildren();
+      const fila = cuerpoCampanas.insertRow();
+      const celda = fila.insertCell();
+      celda.colSpan = 5;
+      celda.className = "stats-campanas__tabla-estado";
+      celda.textContent = "No se pudo cargar la tabla. Pulsa Buscar para volver a intentarlo.";
+      selectorCampana.open = true;
+    }
+  } finally { if (consultaCampanas === control) tablaCampanas.setAttribute("aria-busy", "false"); }
 }
 
-async function cargarCampana() {
+async function cargarCampana(envioId) {
+  if (!/^\d+$/.test(String(envioId))) return;
   consultaCampana?.abort();
+  campanaSolicitada = String(envioId);
+  pintarTablaCampanas();
   datosCampana = null;
   $("#filtrosCampana").hidden = true;
   const control = new AbortController();
   consultaCampana = control;
   resultadosCampana.hidden = true;
-  if (!selCampana.value) { estadoCampana.textContent = "Selecciona un envío para ver sus resultados."; return; }
   estadoCampana.textContent = "Calculando resultados del envío…";
   try {
-    const res = await fetch(`api/estadisticas/campanas/${encodeURIComponent(selCampana.value)}`, {
+    const res = await fetch(`api/estadisticas/campanas/${encodeURIComponent(envioId)}`, {
       headers: authHeaders(), signal: control.signal, cache: "no-store",
     });
     const datos = await res.json();
     if (!res.ok) throw new Error(datos.detail || "No se pudieron calcular las estadísticas.");
     if (control.signal.aborted) return;
     datosCampana = datos;
+    campanaSeleccionada = datos.envio;
+    selectorCampana.open = false;
+    pintarSelectorCampana();
     $("#filtroEntregaCampana").value = "todos";
     $("#filtroResultadoCampana").value = "todos";
     $("#filtrosCampana").hidden = false;
     pintarCampana();
-  } catch (error) { if (error.name !== "AbortError") estadoCampana.textContent = error.message; }
+    $("#resumenSelectorCampana").focus({ preventScroll: true });
+    if (selectorCampana.getBoundingClientRect().top < 0)
+      selectorCampana.scrollIntoView({ block: "start", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  } catch (error) {
+    if (error.name !== "AbortError") {
+      estadoCampana.textContent = error.message;
+      selectorCampana.open = true;
+    }
+  } finally {
+    if (consultaCampana === control) { campanaSolicitada = null; pintarTablaCampanas(); }
+  }
 }
 
 function pintarCampana() {
@@ -1145,9 +1216,14 @@ function pintarCampana() {
     const datos = window.SNWEstadisticasCampana.filtrar(datosCampana,
       $("#filtroEntregaCampana").value, $("#filtroResultadoCampana").value);
     const r = datos.resumen;
-    const indicadores = [["Enviados sin errores", r.validos],
-      ["Entregados (incluye leídos)", r.entregados], ["Leídos", r.leidos],
-      ["Leídos sin responder", r.vistos_sin_respuesta], ["Sin confirmación de entrega", r.sin_confirmacion]];
+    document.querySelectorAll("[data-filtro-campana]").forEach(boton => {
+      const id = boton.dataset.filtroCampana === "entrega" ? "filtroEntregaCampana" : "filtroResultadoCampana";
+      boton.setAttribute("aria-pressed", String(document.getElementById(id).value === boton.dataset.valor));
+    });
+    const etiquetasFiltro = [...document.querySelectorAll('[data-filtro-campana][aria-pressed="true"]')]
+      .filter(b => b.dataset.valor !== "todos").map(b => b.textContent.trim());
+    $("#resumenFiltrosCampana").textContent = etiquetasFiltro.join(" · ") || "Todos los enviados sin errores";
+    $("#filtrosCampana").classList.toggle("stats-campanas__filtros--activos", !!etiquetasFiltro.length);
     const distribucion = window.SNWEstadisticasCampana.comparar(datos, $("#comparacionCampana").value);
     let acumulado = 0;
     const sectores = distribucion.map(d => {
@@ -1160,22 +1236,24 @@ function pintarCampana() {
     resultadosCampana.innerHTML = `<h3>${escaparHtml(datos.envio.plantilla_nombre || "Envío")} · ${escaparHtml(datos.envio.centro)}</h3>` +
       `<div class="stats-campanas__ficha"><span>Envío #${Number(datos.envio.id)}</span><span>Primer envío: ${escaparHtml(datos.envio.inicio)}</span>` +
       `<span>Remitente: ${escaparHtml(datos.envio.numero_emisor || "Sin registro")}</span><span>Plantilla: ${escaparHtml(datos.envio.plantilla_clave || "—")}</span></div>` +
-      `<div class="stats-campanas__numeros">${indicadores.map(([titulo, valor]) =>
-        `<div class="stats-campanas__numero"><span>${escaparHtml(titulo)}</span><strong>${num(valor)}</strong></div>`).join("")}</div>` +
-      `<h3>Resultado de los botones</h3><div class="stats-campanas__distribucion">` +
+      `<div class="stats-campanas__numeros stats-campanas__numeros--clave">` +
+      `<div class="stats-campanas__numero stats-campanas__numero--principal"><span>Tasa de interés</span><strong>${num(r.tasa_interes)} <small>%</small></strong><span>Sobre enviados sin errores</span></div>` +
+      `<div class="stats-campanas__numero"><span>Enviados sin errores</span><strong>${num(r.validos)}</strong><span>${num(r.entregados)} entregados confirmados</span></div>` +
+      `<div class="stats-campanas__numero"><span>Leídos sin responder</span><strong>${num(r.vistos_sin_respuesta)}</strong><span>${num(r.leidos)} lecturas en total</span></div></div>` +
+      `<div class="stats-campanas__grafico"><h3>Resultado de los botones</h3><div class="stats-campanas__distribucion">` +
       `<div class="stats-campanas__torta" role="img" aria-label="Distribución de interés, desinterés, bajas y sin selección; cifras en la leyenda" style="background:${r.validos ? `conic-gradient(${sectores})` : "var(--panel-2)"}"></div>` +
       `<div class="stats-campanas__leyenda">${distribucion.map((d, i) =>
-        `<p><i aria-hidden="true" style="--color-serie:${d.color}"></i><button type="button" data-segmento-campana="${i}">${d.titulo}: <strong>${num(d.cantidad)}</strong> · ${num(r.validos ? Math.round(1000 * d.cantidad / r.validos) / 10 : 0)} %</button></p>`).join("")}</div></div>` +
-      `<p class="field__hint">Porcentajes sobre ${num(r.validos)} enviados sin errores del segmento (total del envío: ${num(datosCampana.resumen.validos)}). Se usa la última selección de cada paciente; una respuesta libre no cuenta como interés. Errores e inválidos quedan fuera. «Leídos sin responder» cuenta lecturas sin mensaje entrante, incluidos audios. Pulsa una categoría de la leyenda para filtrar.</p>` +
-      `<div class="stats-campanas__numeros"><div class="stats-campanas__numero"><span>Tasa de interés</span><strong>${num(r.tasa_interes)} %</strong></div>` +
+        `<p><i aria-hidden="true" style="--color-serie:${d.color}"></i><button type="button" data-segmento-campana="${i}"><span>${d.titulo}</span><strong>${num(r.validos ? Math.round(1000 * d.cantidad / r.validos) / 10 : 0)} %</strong><small>${num(d.cantidad)} pacientes</small></button></p>`).join("")}</div></div>` +
+      `<p class="field__hint">Base: ${num(r.validos)} enviados sin errores de ${num(datosCampana.resumen.validos)} en total. Pulsa una categoría para filtrar.</p></div>` +
+      `<div class="stats-campanas__numeros stats-campanas__numeros--costos">` +
       `<div class="stats-campanas__numero"><span>Costo estimado del segmento</span><strong>${escaparHtml(valorCoste)}</strong></div>` +
       `<div class="stats-campanas__numero"><span>Costo por interesado</span><strong>${coste.por_interesado == null ? "—" : escaparHtml(fmtMoneda(coste.por_interesado, coste.moneda))}</strong></div></div>` +
-      `<p class="field__hint">Costo de ${num(coste.entregas)} entregas confirmadas por API oficial, según categoría y tarifas guardadas para su fecha. No es la factura de Meta; sin tarifas o categoría conocidas aparece «No disponible».</p>` +
+      `<p class="field__hint">Estimación de ${num(coste.entregas)} entregas confirmadas · ${num(r.sin_confirmacion)} mensajes sin confirmación de entrega.</p>` +
       `<h3>Respuestas a botones</h3>` + (datos.botones.length ?
         `<div class="tabla-wrap"><table><thead><tr><th>Botón u opción</th><th>Clics</th><th>Pacientes</th><th>% de enviados sin error</th></tr></thead><tbody>${datos.botones.map(b =>
           `<tr><td>${escaparHtml(b.boton || "Sin texto")}</td><td>${b.medible === false ? "No medible" : num(b.clics)}</td><td>${b.medible === false ? "—" : num(b.pacientes)}</td><td>${b.medible === false ? "—" : `${num(b.porcentaje)} %`}</td></tr>`).join("")}</tbody></table></div>` :
         `<p class="field__hint">Sin respuestas a botones registradas.</p>`) +
-      `<p class="field__hint">Se atribuyen respuestas desde este envío hasta la siguiente campaña al mismo paciente en la misma clínica. Los botones de enlace no informan clics. Los datos dependen de los webhooks recibidos.</p>`;
+      `<details class="stats-campanas__calculo"><summary>Cómo se calculan estos resultados</summary><p>Se usa la última selección de cada paciente. Una respuesta libre no cuenta como interés; errores e inválidos quedan fuera. Un audio sí cuenta como respuesta al calcular los leídos sin responder. Las respuestas se atribuyen hasta la siguiente campaña de la misma clínica. Los botones de enlace no informan clics. Los costos son estimaciones según tarifas guardadas y entregas confirmadas, no la factura de Meta. Los datos dependen de los webhooks recibidos.</p></details>`;
     resultadosCampana.hidden = false;
     estadoCampana.textContent = `Envío #${datos.envio.id} · ${num(r.validos)} de ${num(datosCampana.resumen.validos)} enviados sin errores en el segmento.`;
     function aplicarSegmento(indice) {
@@ -1201,9 +1279,23 @@ function pintarCampana() {
       }
     });
 }
-selCampana.addEventListener("change", cargarCampana);
+selectorCampana.addEventListener("toggle", pintarSelectorCampana);
+cuerpoCampanas.addEventListener("click", e => {
+  const fila = e.target.closest("tr[data-campana-id]");
+  if (fila) cargarCampana(fila.dataset.campanaId);
+});
+document.querySelectorAll("[data-tipo-campana]").forEach(boton => boton.addEventListener("click", () => {
+  if (tipoCampana === boton.dataset.tipoCampana) return;
+  tipoCampana = boton.dataset.tipoCampana;
+  document.querySelectorAll("[data-tipo-campana]").forEach(b => b.setAttribute("aria-pressed", String(b === boton)));
+  cargarCampanas(true);
+}));
+document.querySelectorAll("[data-filtro-campana]").forEach(boton => boton.addEventListener("click", () => {
+  const id = boton.dataset.filtroCampana === "entrega" ? "filtroEntregaCampana" : "filtroResultadoCampana";
+  document.getElementById(id).value = boton.dataset.valor;
+  pintarCampana();
+}));
 $("#btnBuscarCampanaEst").addEventListener("click", () => cargarCampanas(true));
-$("#tipoCampanaEst").addEventListener("change", () => cargarCampanas(true));
 for (const id of ["filtroEntregaCampana", "filtroResultadoCampana", "comparacionCampana"])
   document.getElementById(id).addEventListener("change", pintarCampana);
 $("#limpiarFiltrosCampana").addEventListener("click", () => {

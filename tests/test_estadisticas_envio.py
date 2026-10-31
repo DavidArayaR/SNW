@@ -90,6 +90,8 @@ class EstadisticasEnvioTests(unittest.TestCase):
         cur = conn.__enter__.return_value.cursor.return_value.__enter__.return_value
         cur.fetchone.return_value = {"n": 51}
         cur.fetchall.return_value = [{"id": i, "fecha_hora": None} for i in range(26)]
+        cur.fetchall.return_value[0]["base_datos"] = "paciente_reagendar"
+        cur.fetchall.return_value[1]["programado_id"] = 9
         with patch.object(main, "conectar", return_value=conn), \
              patch.object(main, "_alcance_estadisticas"), \
              patch.object(main, "catalogo_centros", return_value={"VS": "Clínica"}):
@@ -97,6 +99,8 @@ class EstadisticasEnvioTests(unittest.TestCase):
                 centro="VS", pagina=2, q="promocion", sesion={"rol": "desarrollador"})
         self.assertEqual(len(resultado["items"]), 25)
         self.assertTrue(resultado["hay_mas"])
+        self.assertEqual([f["tipo"] for f in resultado["items"][:3]],
+                         ["reagendamiento", "programado", "manual"])
         sql, args = cur.execute.call_args.args
         self.assertIn("e.area_id=%s", sql)
         self.assertIn("e.centro_codigo=%s", sql)
