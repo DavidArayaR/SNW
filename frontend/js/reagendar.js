@@ -25,7 +25,9 @@
     $("textoReintentarReagendar").textContent =
       `Se volverán a procesar ${idsReintento.length} reagendamientos con error, ` +
       "con los datos del paciente y médico del CSV y la plantilla aprobada asignada a su clínica. " +
-      "Corrige primero la causa del error. Los mensajes anteriores se conservarán en el historial.";
+      "Corrige primero la causa del error. Los mensajes anteriores se conservarán en el historial. " +
+      "Si el resultado anterior es incierto, revisa su entrega en Meta: al confirmar autorizas el reenvío " +
+      "aunque el paciente pudiera haberlo recibido. Puedes reintentar nuevamente si vuelve a fallar.";
     $("errorReintentarReagendar").textContent = "";
     modalReintentar.hidden = false;
     confirmarReintentar.focus();
@@ -51,7 +53,7 @@
     try {
       const res = await fetch("api/v1/paciente-reagendar/reintentar", {
         method: "POST", headers: { ...auth(), "Content-Type": "application/json" },
-        body: JSON.stringify({ registros: idsReintento }),
+        body: JSON.stringify({ registros: idsReintento, confirmar_riesgo_duplicado: true }),
       });
       const datos = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(datos.detail || "No se pudieron preparar los reintentos.");

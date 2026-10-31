@@ -54,8 +54,38 @@ class ReintentoReagendarTests(unittest.TestCase):
         self.assertIn("FOR UPDATE", sql[0])
         self.assertTrue(any("estado_envio='PENDIENTE'" in s for s in sql))
         self.assertFalse(any("DELETE" in s or "intentos_envio=0" in s for s in sql))
-        self.assertFalse(any("whatsapp_message_id=NULL" in s for s in sql))
+        # Desvincular el intento actual evita usar el fallo anterior para el nuevo;
+        # los mensajes originales siguen guardados en log_envios.
+        self.assertTrue(any("whatsapp_message_id=NULL, log_envio_id=NULL" in s for s in sql))
         conn.__enter__.return_value.commit.assert_called_once()
+
+    def test_incierto_requiere_confirmacion_y_nunca_permite_entrega_confirmada(self):
+        for codigo in ("RESULTADO_INCIERTO", "META_TEMPORAL"):
+            cita = {**CITA, "ultimo_error_codigo": codigo}
+            self.assertIsNotNone(reagendar.motivo_no_reintentar(cita))
+            self.assertIsNone(reagendar.motivo_no_reintentar(cita, permitir_incierto=True))
+            for estado in ("delivered", "read"):
+                self.assertIsNotNone(reagendar.motivo_no_reintentar(
+                    {**cita, "estado_whatsapp": estado}, permitir_incierto=True))
+
+    def test_permite_repetir_reintento_manual_tras_cada_nuevo_error(self):
+        for intento in (1, 2, 3, 10, 100):
+            with self.subTest(intento=intento):
+                cita = {**CITA, "intentos_envio": intento,
+                        "ultimo_error_codigo": "RESULTADO_INCIERTO"}
+                conn, cur = self.conexion(cita=cita)
+                with patch.object(reagendar, "conectar", return_value=conn), \
+                     patch("supresion.huella_telefono", return_value="huella-prueba"):
+                    self.assertEqual(reagendar.preparar_reintentos_manuales(
+                        [12], lambda c: None, permitir_incierto=True), {"encolados": 1})
+                conn.__enter__.return_value.commit.assert_called_once()
+
+    def test_api_incierto_sin_confirmacion_no_modifica_cola(self):
+        conn, cur = self.conexion(cita={**CITA, "ultimo_error_codigo": "RESULTADO_INCIERTO"})
+        with patch.object(reagendar, "conectar", return_value=conn), \
+             self.assertRaisesRegex(ValueError, "confirma el riesgo"):
+            reagendar.preparar_reintentos_manuales([12], lambda c: None)
+        self.assertFalse(any(c.args[0].startswith("UPDATE") for c in cur.execute.call_args_list))
 
     def test_rechaza_entrega_previa_sin_modificar_la_cola(self):
         conn, cur = self.conexion(entregado=True)

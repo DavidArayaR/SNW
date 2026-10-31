@@ -10458,7 +10458,7 @@ def listar_citas_reagendar(centro: str | None = Query(None),
             " ORDER BY r.id DESC LIMIT %s OFFSET %s", (*args, limite, (pagina - 1) * limite))
         filas = cur.fetchall()
     for fila in filas:
-        motivo = paciente_reagendar.motivo_no_reintentar(fila)
+        motivo = paciente_reagendar.motivo_no_reintentar(fila, permitir_incierto=True)
         fila["puede_reintentar"] = motivo is None
         fila["motivo_no_reintentar"] = motivo
         if fila.get("estado_envio") == "ENVIADO" and fila.get("estado_whatsapp") == "failed":
@@ -10468,6 +10468,7 @@ def listar_citas_reagendar(centro: str | None = Query(None),
 
 class ReintentarReagendarIn(BaseModel):
     registros: list[int] = Field(..., min_length=1, max_length=500)
+    confirmar_riesgo_duplicado: bool = False
 
 
 @app.post("/api/v1/paciente-reagendar/reintentar")
@@ -10499,12 +10500,14 @@ def reintentar_reagendamientos(body: ReintentarReagendarIn,
             raise ValueError(f"{codigo}: los datos no permiten completar la plantilla de reagendamiento.")
 
     try:
-        resultado = paciente_reagendar.preparar_reintentos_manuales(ids, validar)
+        resultado = paciente_reagendar.preparar_reintentos_manuales(
+            ids, validar, permitir_incierto=body.confirmar_riesgo_duplicado)
     except ValueError as exc:
         raise HTTPException(409, detail=str(exc)) from exc
     try:
         auditoria_registrar(sesion.get("usuario", ""), "reagendar_reintento_manual",
-                           "paciente_reagendar", f"Reagendamientos seleccionados para reintento: {resultado['encolados']}")
+                           "paciente_reagendar", f"Reagendamientos seleccionados para reintento: {resultado['encolados']}; "
+                           f"riesgo de duplicado confirmado: {body.confirmar_riesgo_duplicado}")
     except Exception as exc:
         log_error("auditar reintento manual de reagendamientos", exc, solo_tipo=True)
     return resultado

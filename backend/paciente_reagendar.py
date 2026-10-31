@@ -602,18 +602,20 @@ def reclamar_pendiente(centros: list[str]) -> dict | None:
     return fila
 
 
-def motivo_no_reintentar(cita: dict) -> str | None:
-    """Solo habilita fallos definitivos, nunca entregas o POST de resultado incierto."""
+def motivo_no_reintentar(cita: dict, *, permitir_incierto: bool = False) -> str | None:
+    """Los resultados inciertos requieren autorización manual explícita."""
     if cita.get("modo_prueba") or cita.get("whatsapp_opt_out"):
         return "Registro de prueba de importación o paciente dado de baja."
     if not cita.get("paciente_telefono_normalizado") or not cita.get("centro_codigo"):
         return "Falta el teléfono o la clínica del paciente."
     if cita.get("estado_envio") not in ("ERROR", "ENVIADO"):
         return "Este registro no tiene un error pendiente de reintento."
-    if cita.get("ultimo_error_codigo") in ("RESULTADO_INCIERTO", "META_TEMPORAL"):
-        return "El último intento tiene un resultado incierto; revisa su entrega en Meta antes de reenviar."
     if cita.get("estado_whatsapp") in ("delivered", "read"):
         return "WhatsApp ya confirmó la recepción del mensaje."
+    if cita.get("ultimo_error_codigo") in ("RESULTADO_INCIERTO", "META_TEMPORAL"):
+        if permitir_incierto and cita.get("estado_envio") == "ERROR":
+            return None
+        return "El último intento tiene un resultado incierto; confirma el riesgo de duplicado para reenviar."
     if cita.get("whatsapp_message_id"):
         if cita.get("estado_whatsapp") != "failed":
             return "Meta aceptó el mensaje, pero no confirmó un fallo de entrega."
@@ -623,7 +625,7 @@ def motivo_no_reintentar(cita: dict) -> str | None:
     return None
 
 
-def preparar_reintentos_manuales(ids: list[int], validar_cita) -> dict:
+def preparar_reintentos_manuales(ids: list[int], validar_cita, *, permitir_incierto: bool = False) -> dict:
     """Rehabilita citas concretas en su cola persistente; no llama a Meta."""
     marcadores = ",".join(["%s"] * len(ids))
     from supresion import huella_telefono
@@ -635,7 +637,7 @@ def preparar_reintentos_manuales(ids: list[int], validar_cita) -> dict:
         if len(citas) != len(ids):
             raise ValueError("Hay registros que ya no están disponibles. Actualiza la lista.")
         for cita in citas:
-            motivo = motivo_no_reintentar(cita)
+            motivo = motivo_no_reintentar(cita, permitir_incierto=permitir_incierto)
             if motivo:
                 raise ValueError(f"Registro #{cita['id']}: {motivo}")
             validar_cita(cita)
@@ -668,6 +670,7 @@ def preparar_reintentos_manuales(ids: list[int], validar_cita) -> dict:
         for cita in citas:
             cur.execute("UPDATE paciente_reagendar SET estado_envio='PENDIENTE',"
                         " ultimo_error_codigo=NULL, ultimo_error_detalle=NULL,"
+                        " whatsapp_message_id=NULL, log_envio_id=NULL,"
                         " reserva_token=NULL, reservado_en=NULL, proximo_reintento_en=NULL"
                         " WHERE id=%s", (cita["id"],))
             cur.execute("UPDATE reagendar_destinatarios SET estado='PENDIENTE'"
