@@ -58,10 +58,40 @@ class DespachoConcurrenteTests(unittest.TestCase):
             patch.object(main, "limpiar_interes_paciente"),
             patch.object(main, "registrar_historial"),
             patch.object(main, "log_error"),
+            patch.object(main, "politica_despacho", return_value={"mps": 10}),
         ]
         mocks = [p.start() for p in parches]
         self.addCleanup(lambda: [p.stop() for p in reversed(parches)])
         return job, mocks
+
+    def test_a_un_mensaje_por_segundo_solo_hay_un_trabajador(self):
+        activos = maximos = 0
+        lock = threading.Lock()
+
+        def enviar(telefono):
+            nonlocal activos, maximos
+            with lock:
+                activos += 1
+                maximos = max(maximos, activos)
+            time.sleep(0.01)
+            with lock:
+                activos -= 1
+            return True, f"wamid-{telefono}", None
+
+        job, _ = self.preparar(enviar, cantidad=6)
+        with patch.object(main, "politica_despacho", return_value={"mps": 1}):
+            main._procesar_job("test_concurrente")
+        self.assertEqual(maximos, 1)
+        self.assertEqual(job["enviados"], 6)
+        self.assertEqual(job["estado"], "completado")
+
+    def test_no_envia_si_no_puede_leer_el_limite(self):
+        enviar = MagicMock()
+        job, _ = self.preparar(enviar)
+        with patch.object(main, "politica_despacho", side_effect=RuntimeError("BD no disponible")):
+            main._procesar_job("test_concurrente")
+        enviar.assert_not_called()
+        self.assertEqual(job["estado"], "error")
 
     def test_limita_solicitudes_por_numero_y_registra_todos(self):
         activos = maximos = 0

@@ -1,6 +1,7 @@
 """Reservas distribuidas del despacho; nunca llama a Meta ni usa pacientes reales."""
 
 import sys
+import datetime as dt
 import threading
 import unittest
 import uuid
@@ -14,6 +15,39 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 from db import conectar
 import wa_dispatch_limit as dispatch
 from wa_dispatch_limit import bloquear, politica, registrar_aceptado, reservar, huella_pareja
+
+
+class ReservaSinCargaInnecesariaTests(unittest.TestCase):
+    def conexion(self, respuestas):
+        conn = MagicMock()
+        cur = conn.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cur.fetchone.side_effect = respuestas
+        return conn, cur
+
+    def test_emisor_ocupado_no_inserta_ni_bloquea_parejas(self):
+        ahora = dt.datetime(2026, 10, 31, 12)
+        for campo in ("proximo_turno", "bloqueado_hasta"):
+            canal = {"proximo_turno": None, "bloqueado_hasta": None, "mps_actual": 1,
+                     campo: ahora + dt.timedelta(seconds=1)}
+            conn, cur = self.conexion([canal, {"ahora": ahora}, None])
+            with patch.object(dispatch, "conectar", return_value=conn):
+                self.assertEqual(dispatch._reservar_una_vez("phone", "huella", {"mps": 1}), 1)
+            sql = [c.args[0] for c in cur.execute.call_args_list]
+            self.assertFalse(any("wa_despacho_pares" in s and ("INSERT" in s or "FOR UPDATE" in s) for s in sql))
+            self.assertIn("FOR UPDATE", sql[1])
+            self.assertIn("UTC_TIMESTAMP", sql[2])
+            conn.__enter__.return_value.commit.assert_called_once()
+
+    def test_limite_uno_prevalece_sobre_capacidad_anterior_mayor(self):
+        ahora = dt.datetime(2026, 10, 31, 12)
+        canal = {"proximo_turno": None, "bloqueado_hasta": None, "mps_actual": 60}
+        conn, cur = self.conexion([canal, {"ahora": ahora}, {"proximo_turno": ahora}])
+        with patch.object(dispatch, "conectar", return_value=conn):
+            self.assertEqual(dispatch._reservar_una_vez(
+                "phone", "huella", {"mps": 1, "mps_inicial": 1, "pair_seconds": 6}), 0)
+        cambio = next(c for c in cur.execute.call_args_list
+                      if c.args[0].startswith("UPDATE wa_despacho_canales"))
+        self.assertEqual(cambio.args[1][1:3], (1_000_000, 1))
 
 
 def configuracion():
@@ -161,6 +195,25 @@ class ReservaMySQLTests(unittest.TestCase):
         bloquear(phone_id, 130429, 4)
         self.assertGreater(reservar(phone_id, "56900000002"), 3)
         self.assertEqual(reservar(self.ids[1], "56900000002"), 0)
+
+    def test_uno_por_segundo_comparte_turno_entre_cuatro_workers(self):
+        self.reglas.update(mps=1, mps_inicial=1)
+        barrera = threading.Barrier(4)
+        resultados = []
+
+        def intentar(i):
+            barrera.wait()
+            resultados.append(reservar(self.ids[0], f"5690000000{i}"))
+
+        hilos = [threading.Thread(target=intentar, args=(i,)) for i in range(4)]
+        for hilo in hilos:
+            hilo.start()
+        for hilo in hilos:
+            hilo.join(5)
+            self.assertFalse(hilo.is_alive())
+        self.assertEqual(len(resultados), 4)
+        self.assertEqual(sum(espera == 0 for espera in resultados), 1)
+        self.assertTrue(all(0 <= espera <= 1 for espera in resultados))
 
     def test_130429_reduce_velocidad_solo_del_emisor_afectado(self):
         self.assertEqual(reservar(self.ids[0], "56900000001"), 0)

@@ -124,11 +124,24 @@ def reservar(phone_id: str, destinatario: str, *, cfg: dict | None = None) -> fl
 def _reservar_una_vez(phone_id: str, huella: str, reglas: dict) -> float:
     with conectar() as conn, conn.cursor() as cur:
         cur.execute("INSERT IGNORE INTO wa_despacho_canales (phone_id) VALUES (%s)", (phone_id,))
-        cur.execute("SELECT UTC_TIMESTAMP(6) AS ahora")
-        ahora = cur.fetchone()["ahora"]
         cur.execute("SELECT proximo_turno, bloqueado_hasta, mps_actual FROM wa_despacho_canales"
                     " WHERE phone_id = %s FOR UPDATE", (phone_id,))
         canal = cur.fetchone()
+        # Obtener la hora después del bloqueo: bajo contención la lectura
+        # anterior podía quedar obsoleta mientras esperaba otra transacción.
+        cur.execute("SELECT UTC_TIMESTAMP(6) AS ahora")
+        ahora = cur.fetchone()["ahora"]
+        espera_canal = max(_segundos(canal["proximo_turno"], ahora),
+                           _segundos(canal["bloqueado_hasta"], ahora))
+        if espera_canal > 0:
+            # Consultar una pareja existente conserva su espera completa,
+            # sin insertar filas ni tomar otro bloqueo mientras falta turno.
+            cur.execute("SELECT proximo_turno FROM wa_despacho_pares"
+                        " WHERE phone_id = %s AND destinatario_hash = %s",
+                        (phone_id, huella))
+            pareja = cur.fetchone() or {}
+            conn.commit()
+            return max(espera_canal, _segundos(pareja.get("proximo_turno"), ahora))
         cur.execute("INSERT IGNORE INTO wa_despacho_pares"
                     " (phone_id, destinatario_hash, proximo_turno) VALUES (%s, %s, %s)",
                     (phone_id, huella, ahora))

@@ -6292,6 +6292,15 @@ def _procesar_job_api_concurrente(job_id: str, canal: MotorApiOficial) -> None:
     envio_id = job.get("envio_id")
     area_id = job.get("area_id")
     destinatarios = job["destinatarios"]
+    try:
+        reglas = politica_despacho(emisor["phoneNumberId"])
+        trabajadores = min(MAX_SOLICITUDES_SIMULTANEAS_POR_NUMERO, max(1, int(reglas["mps"])))
+    except Exception as exc:
+        log_error(f"procesar_job {job_id}: política de despacho", exc)
+        job["estado"] = "error"
+        job["detalle"] = "No se pudo verificar el ritmo del número emisor. No se inició el envío."
+        actualizar_envio_batch(envio_id, amb, estado="error")
+        return
     detener = threading.Event()
     cupo_emisor = _semaforo_emisor(emisor["phoneNumberId"])
 
@@ -6389,10 +6398,10 @@ def _procesar_job_api_concurrente(job_id: str, canal: MotorApiOficial) -> None:
     siguiente = 0
     futuros = set()
     with canal.servicio.cliente_compartido_envio(continuar=activo):
-        with ThreadPoolExecutor(max_workers=MAX_SOLICITUDES_SIMULTANEAS_POR_NUMERO) as pool:
+        with ThreadPoolExecutor(max_workers=trabajadores) as pool:
             while True:
                 while siguiente < len(destinatarios) \
-                        and len(futuros) < MAX_SOLICITUDES_SIMULTANEAS_POR_NUMERO \
+                        and len(futuros) < trabajadores \
                         and not job.get("pausado") and not job.get("cancelado") \
                         and not detener.is_set():
                     d = destinatarios[siguiente]
