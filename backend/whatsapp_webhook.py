@@ -13,6 +13,7 @@ import re
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from starlette.requests import ClientDisconnect
+from starlette.concurrency import run_in_threadpool
 
 from db import config_all, config_get, log_error
 from whatsapp_channels import catalogo_centros, listar_canales
@@ -114,7 +115,7 @@ def _evento_corresponde_canal(payload: dict, canal: dict) -> bool:
 
 @router.post("/webhook/{codigo}")
 async def recibir_evento_centro(codigo: str, request: Request):
-    encontrado = _canal_webhook(codigo)
+    encontrado = await run_in_threadpool(_canal_webhook, codigo)
     if not encontrado:
         return JSONResponse({"detail": "Webhook no disponible"}, status_code=404)
     config, canal = encontrado
@@ -128,7 +129,7 @@ async def recibir_evento_centro(codigo: str, request: Request):
 async def _recibir_evento(request: Request, *, secreto: str | None = None,
                           canal: dict | None = None):
     if secreto is None:
-        secreto = (config_get("wa_app_secret") or "").strip()
+        secreto = (await run_in_threadpool(config_get, "wa_app_secret") or "").strip()
     if not secreto:
         log_error("webhook: falta wa_app_secret en configuración; evento no procesado")
         return JSONResponse({"detail": "Webhook no configurado"}, status_code=503)
@@ -157,7 +158,10 @@ async def _recibir_evento(request: Request, *, secreto: str | None = None,
         return JSONResponse({"detail": "Evento de otro centro emisor"}, status_code=403)
 
     try:
-        acciones = handler.procesar(payload)
+        # PyMySQL y las comprobaciones del evento son síncronas. Esperar su
+        # resultado fuera del event loop mantiene disponible el resto del sitio.
+        # No confirmar a Meta antes de terminar ni cambiar la deduplicación.
+        acciones = await run_in_threadpool(handler.procesar, payload)
     except Exception as e:
         # No romper el sistema; Meta reintentaría y volvería a fallar.
         log_error("webhook: fallo procesando evento", e)

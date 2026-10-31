@@ -3,6 +3,7 @@ import hmac
 import asyncio
 import json
 import sys
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -17,6 +18,33 @@ from whatsapp_webhook import _recibir_evento, firma_meta_valida
 
 
 class FirmaWebhookTests(unittest.TestCase):
+    def test_mysql_lento_en_webhook_no_bloquea_otras_tareas_web(self):
+        request = AsyncMock()
+        request.body.return_value = self.cuerpo
+        request.json.return_value = json.loads(self.cuerpo)
+        request.headers = {"X-Hub-Signature-256": self.firma}
+        libre = threading.Event()
+        atendido = []
+        hilo_web = threading.get_ident()
+
+        def procesar(_payload):
+            atendido.append(threading.get_ident() != hilo_web)
+            atendido.append(libre.wait(timeout=1))
+            return ["ok"]
+
+        async def comprobar():
+            async def otra_peticion():
+                await asyncio.sleep(0.02)
+                libre.set()
+            with patch("whatsapp_webhook.handler.procesar", side_effect=procesar):
+                respuesta, _ = await asyncio.gather(
+                    _recibir_evento(request, secreto=self.secreto), otra_peticion())
+            self.assertEqual(respuesta.status_code, 200)
+            self.assertEqual(json.loads(respuesta.body)["acciones"], ["ok"])
+
+        asyncio.run(comprobar())
+        self.assertEqual(atendido, [True, True])
+
     def setUp(self):
         self.cuerpo = json.dumps({"entry": [{"changes": []}]}).encode("utf-8")
         self.secreto = "secreto-de-prueba"
