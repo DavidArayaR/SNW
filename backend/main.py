@@ -1531,6 +1531,16 @@ def expr_respuesta_efectiva(alias: str = "p", tiene_opt_out: bool = True,
         + (f" AND le.tabla_pacientes = '{tabla_log}'" if tabla_log else "")
         + f" AND le.respuesta = '{r}') THEN '{r}' "
     )
+    audio = (
+        f"WHEN EXISTS(SELECT 1 FROM log_envios la"
+        " JOIN whatsapp_conversaciones_mensajes cm"
+        " ON BINARY cm.wa_phone_id=BINARY la.wa_phone_id"
+        " AND BINARY cm.telefono_paciente=BINARY la.numero_telefono"
+        f" WHERE la.paciente_id={alias}.id AND la.envio_id IS NOT NULL"
+        " AND la.estado_envio='enviado' AND cm.tipo='audio' AND cm.recibido>=la.fecha_hora"
+        + (f" AND la.tabla_pacientes='{tabla_log}'" if tabla_log else "")
+        + ") THEN 'respondio' "
+    )
     return (
         "(CASE "
         + baja_opt
@@ -1538,6 +1548,7 @@ def expr_respuesta_efectiva(alias: str = "p", tiene_opt_out: bool = True,
         + ex("baja")
         + no_interes
         + ex("respondio")
+        + audio
         + interes
         + "ELSE 'pendiente' END)"
     )
@@ -2274,7 +2285,7 @@ def mensajes_paciente(paciente_id: int, ambiente: str = Query("produccion"),
             raise HTTPException(404, detail="Paciente no encontrado")
         cond_log, args_log = _cond_tabla_log_segura(t if _esp else None, ambiente)
         cur.execute(
-            "SELECT id, fecha_hora, mensaje, plantilla_clave, estado_envio, descripcion_error, wa_phone_id"
+            "SELECT id, fecha_hora, mensaje, plantilla_clave, estado_envio, descripcion_error, wa_phone_id, whatsapp_message_id"
             " FROM log_envios WHERE paciente_id = %s"
             "   AND ((mensaje IS NOT NULL AND mensaje <> '') OR plantilla_clave = 'respuesta')"
             "   AND COALESCE(plantilla_clave, '') <> 'ajuste_manual'"
@@ -2332,7 +2343,12 @@ def mensajes_paciente(paciente_id: int, ambiente: str = Query("produccion"),
                         " FROM whatsapp_conversaciones_mensajes WHERE tipo='audio'"
                         f" AND telefono_paciente=%s AND wa_phone_id IN ({marcas})"
                         " ORDER BY recibido LIMIT 500", (normalizar_telefono(pac["telefono"]), *emisores))
-            for audio in cur.fetchall():
+            audios = cur.fetchall()
+            ids_audio = {a["mensaje_id"] for a in audios}
+            logs_audio = {f["id"] for f in filas if f.get("plantilla_clave") == "respuesta"
+                          and f.get("whatsapp_message_id") in ids_audio}
+            mensajes = [m for m in mensajes if m["id"] not in logs_audio]
+            for audio in audios:
                 mensajes.append(_presentar_audio(audio))
         mensajes.sort(key=lambda m: datetime.datetime.strptime(m["fecha"], "%d-%m-%Y %H:%M"))
     return {"paciente": pac, "mensajes": mensajes}

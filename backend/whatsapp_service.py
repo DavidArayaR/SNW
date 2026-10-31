@@ -1330,6 +1330,14 @@ class WhatsAppService:
                     "image", "video", "document") else ""
                 if not self._guardar_mensaje_entrante(mensaje, telefono, pie):
                     continue
+                if tipo == "audio":
+                    # Cuenta como respuesta humana sin inferir intención,
+                    # reactivar una baja ni enviar mensajes automáticos.
+                    info = self._registrar_respuesta(
+                        telefono, "[Audio recibido]", mensaje.get("timestamp"),
+                        mensaje_id=mensaje.get("id"),
+                        referencia_meta_id=(mensaje.get("context") or {}).get("id"))
+                    acciones.append(f"respuesta_audio_{info}")
                 if not es_solicitud_eliminar(pie):
                     self._guardar_corpus_respuesta(pie, telefono)
                     if callable(al_derivar_crm):

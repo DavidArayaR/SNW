@@ -21,6 +21,35 @@ TELEFONO = "+56912345678"
 
 
 class WebhookCrmTests(unittest.TestCase):
+    def test_audio_historico_se_cuenta_respetando_base_clinica_y_baja(self):
+        sql = main.expr_respuesta_efectiva(tabla_log="pacientes_area", tiene_manual=True)
+        self.assertIn("cm.tipo='audio'", sql)
+        self.assertIn("cm.recibido>=la.fecha_hora", sql)
+        self.assertIn("la.tabla_pacientes='pacientes_area'", sql)
+        self.assertIn("cm.wa_phone_id=BINARY la.wa_phone_id", sql)
+        self.assertLess(sql.index("whatsapp_opt_out"), sql.index("cm.tipo='audio'"))
+        self.assertLess(sql.index("respuesta_manual"), sql.index("cm.tipo='audio'"))
+
+    def test_audio_cuenta_como_respuesta_sin_inferir_interes_ni_enviar_respuesta(self):
+        with patch.object(self.servicio, "_registrar_respuesta", return_value="registrada") as registrar, \
+             patch.object(self.servicio, "_registrar_retractacion") as reincorporar, \
+             patch.object(whatsapp_service, "al_detectar_interes") as interes, \
+             patch.object(whatsapp_service, "al_detectar_consulta") as consulta:
+            resultado = self.procesar("", tipo="audio", contexto="wamid.campania")
+        registrar.assert_called_once_with(
+            TELEFONO, "[Audio recibido]", "1792611000", mensaje_id="wamid.nuevo",
+            referencia_meta_id="wamid.campania")
+        self.assertIn("respuesta_audio_registrada", resultado)
+        reincorporar.assert_not_called()
+        interes.assert_not_called()
+        consulta.assert_not_called()
+
+    def test_audio_duplicado_no_registra_dos_respuestas(self):
+        with patch.object(self.servicio, "_guardar_mensaje_entrante", return_value=False), \
+             patch.object(self.servicio, "_registrar_respuesta") as registrar:
+            self.procesar("", tipo="audio")
+        registrar.assert_not_called()
+
     def setUp(self):
         self.servicio = WhatsAppService()
         self.parches = [
