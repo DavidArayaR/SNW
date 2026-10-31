@@ -23,6 +23,36 @@ def conexion_falsa():
 
 
 class EstadoBatchTests(unittest.TestCase):
+    def test_historial_error_si_fallidos_superan_la_mitad_del_total(self):
+        for total, fallidos, invalidos, estado, esperado in (
+                (100, 51, 0, "completado", "error"),
+                (100, 50, 0, "completado", "completado"),
+                (100, 49, 0, "completado", "completado"),
+                (3, 2, 0, "completado", "error"),
+                (100, 60, 0, "sin_confirmar", "error"),
+                (100, 60, 0, "cancelado", "cancelado"),
+                (100, 60, 0, "en_proceso", "en_proceso"),
+                (100, 60, 0, "pausado", "pausado"),
+                (100, 0, 60, "completado", "completado"),
+                (0, 0, 0, "completado", "completado")):
+            with self.subTest(total=total, fallidos=fallidos, estado=estado):
+                fila = {"id": 7, "_orden": None, "estado": estado,
+                        "total_pacientes": total, "fallidos": fallidos,
+                        "invalidos": invalidos, "enviados": max(0, total - fallidos - invalidos)}
+                with patch.dict(main.JOBS, {}, clear=True), \
+                     patch.dict(main.PENDIENTES, {}, clear=True), \
+                     patch.object(main, "catalogo_centros", return_value={}):
+                    resultado = main._presentar_historial([fila], {})[0]
+                self.assertEqual(resultado["estado"], esperado)
+
+    def test_historial_no_oculta_job_activo_con_mayoria_de_errores(self):
+        fila = {"id": 7, "_orden": None, "estado": "completado", "total_pacientes": 100}
+        with patch.dict(main.JOBS, {"activo": {"envio_id": 7, "estado": "en_proceso", "fallidos": 60}}, clear=True), \
+             patch.dict(main.PENDIENTES, {}, clear=True), \
+             patch.object(main, "catalogo_centros", return_value={}), \
+             patch.object(main, "_puede_controlar_job", return_value=False):
+            self.assertEqual(main._presentar_historial([fila], {})[0]["estado"], "en_progreso")
+
     def test_lote_nuevo_no_nace_completado(self):
         conn, cur = conexion_falsa()
         cur.lastrowid = 7

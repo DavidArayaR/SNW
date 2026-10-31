@@ -8753,6 +8753,12 @@ def _presentar_historial(filas: list[dict], sesion: dict, limite: int | None = N
                     # Lote antiguo sin actualización final: no presentar un
                     # resultado exitoso que la base no puede demostrar.
                     f["estado"] = "pendiente" if f["id"] in pendientes else "sin_confirmar"
+        # Aplicar también a registros antiguos al leerlos, sin alterar un
+        # trabajo activo ni ocultar una cancelación o un error ya registrado.
+        if (f.get("estado") in ("completado", "sin_confirmar")
+                and int(f.get("total_pacientes") or 0) > 0
+                and int(f.get("fallidos") or 0) * 2 > int(f["total_pacientes"])):
+            f["estado"] = "error"
     return filas
 
 
