@@ -714,7 +714,7 @@ function pintarDetalle() {
       const marcaInteres = d.interesado
         ? `<span class="hist-tag-interes" title="Marcado como interesado">interesado</span>`
         : "";
-      const verMensajes = d.reagendamiento && d.datos_completos
+      const verMensajes = d.reagendamiento && d.chat_disponible !== false && d.datos_completos
         ? `<button type="button" class="btn btn--sm btn--ghost" data-mensajes-reagendar="${Number(d.id)}">Ver mensajes</button>`
         : d.paciente_id && d.datos_completos
         ? `<button type="button" class="btn btn--sm btn--ghost" data-mensajes="${d.paciente_id}">Ver mensajes</button>` : "";

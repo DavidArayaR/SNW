@@ -83,6 +83,7 @@ from schemas import (
 from telefono import normalizar_telefono
 import servicio_areas
 import paciente_reagendar
+import reagendar_batches
 from servicio_areas import CSV_MAX_BYTES
 from routes import auth, configuracion, estadisticas as rutas_estadisticas
 from routes import notificaciones, pacientes, plantillas, usuarios, areas
@@ -8469,8 +8470,14 @@ async def _procesar_cita_reagendar(cita: dict, plantillas_por_centro: dict) -> N
 
 
 async def _loop_reagendar() -> None:
+    agrupado = False
     while True:
         try:
+            if not agrupado:
+                cantidad = await asyncio.to_thread(reagendar_batches.agrupar_existentes)
+                if cantidad:
+                    print(f"[REAGENDAMIENTOS] Historial agrupado: {cantidad} cargas/clínicas", flush=True)
+                agrupado = True
             await asyncio.to_thread(paciente_reagendar.recuperar_abandonados)
             cfg = config_all(refresh=True)
             if (cfg.get("reagendar_envio_activo") == "true"
@@ -8531,7 +8538,7 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
     sql = ("SELECT id, base_datos, plantilla_clave, plantilla_nombre, total_pacientes,"
            f" enviados, fallidos, invalidos, estado, {com_col}, {esp_col}, {tab_col},"
            f" {prog_col}, {prog_fecha}, centro_codigo, numero_emisor, fecha_hora FROM envios")
-    condiciones: list[str] = []
+    condiciones: list[str] = ["NOT EXISTS (SELECT 1 FROM reagendar_envios_agrupados ag WHERE ag.envio_id=envios.id)"]
     args: list = []
     if centro != "todos":
         condiciones.append("centro_codigo = %s")
@@ -8650,6 +8657,11 @@ def _presentar_historial(filas: list[dict], sesion: dict, limite: int | None = N
     filas.sort(key=lambda r: (r["_orden"] is not None, r["_orden"]), reverse=True)
     if limite is not None:
         filas = filas[:limite]
+    resumenes_reagendar = reagendar_batches.resumenes([
+        f["id"] for f in filas if f.get("base_datos") == "paciente_reagendar" and not f.get("_sin_lote")])
+    for fila in filas:
+        if fila.get("id") in resumenes_reagendar:
+            fila.update(resumenes_reagendar[fila["id"]])
     with JOBS_LOCK:
         trabajos = {j.get("envio_id"): (jid, dict(j))
                     for jid, j in JOBS.items() if j.get("envio_id")}
@@ -8741,7 +8753,7 @@ def _fuentes_historial_pagina(sesion: dict, ambiente: str, area_id: int | None,
     like = f"%{q.strip()}%" if q.strip() else None
 
     if origen != "programado" or "programado_id" in cols_env:
-        cond_e, args_e = [], []
+        cond_e, args_e = ["NOT EXISTS (SELECT 1 FROM reagendar_envios_agrupados ag WHERE ag.envio_id=e.id)"], []
         if origen == "manual" and "programado_id" in cols_env:
             cond_e.append("e.programado_id IS NULL")
         elif origen == "programado":
@@ -8900,9 +8912,24 @@ def _detalle_historial_reagendar(envio_id: int, sesion: dict) -> list[dict]:
             " ORDER BY cm.recibido DESC, cm.mensaje_id DESC LIMIT 1) AS mensaje_respuesta"
             " FROM log_envios le JOIN envios e ON e.id=le.envio_id"
             " LEFT JOIN paciente_reagendar r ON r.log_envio_id=le.id"
-            " WHERE le.envio_id=%s AND e.base_datos='paciente_reagendar' ORDER BY le.id",
+            " WHERE le.envio_id=%s AND e.base_datos='paciente_reagendar'"
+            " AND NOT EXISTS (SELECT 1 FROM log_envios siguiente WHERE siguiente.envio_id=le.envio_id"
+            " AND BINARY siguiente.numero_telefono=BINARY le.numero_telefono AND siguiente.id>le.id)"
+            " ORDER BY le.id",
             (envio_id,))
-        filas = cur.fetchall()
+        filas = list(cur.fetchall())
+        cur.execute(
+            "SELECT -r.id AS id, r.paciente_nombre AS nombre_paciente,"
+            " r.paciente_telefono_normalizado AS numero_telefono,"
+            " CASE WHEN r.estado_envio='ERROR' THEN 'error' ELSE 'pendiente' END AS estado_envio,"
+            " NULL AS estado_whatsapp, NULL AS mensaje_enviado,"
+            " r.ultimo_error_codigo AS descripcion_error, r.importado_en AS fecha_hora,"
+            " r.whatsapp_opt_out, NULL AS ultima_accion, NULL AS mensaje_respuesta"
+            " FROM reagendar_batches b JOIN paciente_reagendar r ON r.lote_id=b.lote_id"
+            " AND r.centro_codigo=b.centro_codigo WHERE b.envio_id=%s AND r.log_envio_id IS NULL"
+            " AND r.modo_prueba=0 AND r.estado_envio<>'OMITIDO'"
+            " AND r.paciente_telefono_normalizado IS NOT NULL ORDER BY r.id", (envio_id,))
+        filas.extend(cur.fetchall())
     completos = tiene_permiso(sesion, "pacientes_ver_datos")
     for fila in filas:
         mensaje = fila.get("mensaje_respuesta") or ""
@@ -8913,6 +8940,7 @@ def _detalle_historial_reagendar(envio_id: int, sesion: dict) -> list[dict]:
             accion == "REAGENDAR" or paciente_reagendar.es_aceptacion_reagendar(mensaje)
             or es_mensaje_interes(mensaje))
         fila.update({"paciente_id": None, "reagendamiento": True,
+                     "chat_disponible": fila["id"] > 0,
                      "datos_completos": completos, "interesado": bool(interesado),
                      "respuesta_interes": bool(interesado), "puede_marcar_pendiente": False,
                      "puede_enviar_callcenter": False,
@@ -8933,6 +8961,7 @@ def mensajes_historial_reagendar(envio_id: int, registro_id: int,
                                 sesion: dict = Depends(exigir("historial"))):
     if not _es_privilegiado(sesion) or not tiene_permiso(sesion, "pacientes_ver_datos"):
         raise HTTPException(403, detail="No tienes permiso para ver esta conversación.")
+    envio_id = reagendar_batches.resolver_envio(envio_id)
     with conectar("produccion") as conn, conn.cursor() as cur:
         cur.execute("SELECT le.* FROM log_envios le JOIN envios e ON e.id=le.envio_id"
                     " WHERE le.id=%s AND le.envio_id=%s AND e.base_datos='paciente_reagendar'",
@@ -9022,7 +9051,7 @@ def detalle_historial(envio_id: str, ambiente: str = Query("produccion"),
     elif not _es_privilegiado(sesion):
         raise HTTPException(403, detail="No tienes acceso a este envío.")
     if _e.get("base_datos") == "paciente_reagendar":
-        return _detalle_historial_reagendar(envio_id, sesion)
+        return _detalle_historial_reagendar(reagendar_batches.resolver_envio(envio_id), sesion)
     if tabla_env and servicio_areas.tabla_valida(tabla_env) \
             and servicio_areas.tabla_fisica_existe(tabla_env):
         t = tabla_env

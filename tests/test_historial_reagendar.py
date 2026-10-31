@@ -14,6 +14,11 @@ FECHA = dt.datetime(2026, 10, 30, 14, 0)
 
 
 class HistorialReagendarTests(unittest.TestCase):
+    def setUp(self):
+        parche = patch.object(main.reagendar_batches, "resolver_envio", side_effect=lambda i: i)
+        parche.start()
+        self.addCleanup(parche.stop)
+
     def conexion(self):
         conn = MagicMock()
         cur = conn.__enter__.return_value.cursor.return_value.__enter__.return_value
@@ -28,7 +33,7 @@ class HistorialReagendarTests(unittest.TestCase):
 
     def test_detalle_muestra_respuesta_independiente_de_entrega_leida(self):
         conn, cur = self.conexion()
-        cur.fetchall.return_value = [self.fila()]
+        cur.fetchall.side_effect = [[self.fila()], []]
         with patch.object(main, "conectar", return_value=conn):
             fila = main._detalle_historial_reagendar(7, DEV)[0]
         self.assertIsNone(fila["paciente_id"])
@@ -49,7 +54,7 @@ class HistorialReagendarTests(unittest.TestCase):
 
     def test_desinteres_no_se_confunde_con_interes(self):
         conn, cur = self.conexion()
-        cur.fetchall.return_value = [{**self.fila(), "mensaje_respuesta": "No me interesa", "ultima_accion": "DESINTERES"}]
+        cur.fetchall.side_effect = [[{**self.fila(), "mensaje_respuesta": "No me interesa", "ultima_accion": "DESINTERES"}], []]
         with patch.object(main, "conectar", return_value=conn):
             fila = main._detalle_historial_reagendar(7, DEV)[0]
         self.assertEqual(fila["respuesta"], "no_interesado")
@@ -71,6 +76,15 @@ class HistorialReagendarTests(unittest.TestCase):
         self.assertIsNone(datos["paciente"]["id"])
         self.assertEqual(cur.execute.call_args_list[1].args[1], ("12345", "+56911111111", FECHA))
         self.assertFalse(datos["mensajes"][1]["etiquetas_editables"])
+
+    def test_batch_incluye_pacientes_pendientes_sin_chat(self):
+        conn, cur = self.conexion()
+        cur.fetchall.side_effect = [[], [{**self.fila(), "id": -12, "estado_envio": "pendiente",
+                                         "mensaje_respuesta": None, "ultima_accion": None}]]
+        with patch.object(main, "conectar", return_value=conn):
+            fila = main._detalle_historial_reagendar(7, DEV)[0]
+        self.assertFalse(fila["chat_disponible"])
+        self.assertEqual(fila["respuesta"], "pendiente")
 
     def test_no_expone_conversacion_de_otro_envio_o_sin_permiso(self):
         conn, cur = self.conexion()

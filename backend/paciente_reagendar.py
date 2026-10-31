@@ -12,6 +12,7 @@ import unicodedata
 from zoneinfo import ZoneInfo
 
 import pymysql
+import reagendar_batches
 
 from db import conectar, config_all
 from telefono import normalizar_telefono
@@ -900,6 +901,10 @@ def completar_lote_si_corresponde(lote_id: int) -> None:
                     " AND centro_codigo IS NOT NULL", (lote_id,))
         if cur.fetchone()["n"] == 0:
             cur.execute("UPDATE reagendar_lotes SET estado='COMPLETADO' WHERE id=%s", (lote_id,))
+            cur.execute("SELECT envio_id FROM reagendar_batches WHERE lote_id=%s AND envio_id IS NOT NULL",
+                        (lote_id,))
+            for batch in cur.fetchall():
+                reagendar_batches.guardar_resumen(cur, batch["envio_id"])
         conn.commit()
 
 
@@ -1037,16 +1042,10 @@ def marcar_respuesta_reagendar(mensaje_id: str, respuesta_id: str | None,
 
 
 def registrar_lote(cita: dict, plantilla: dict, canal: dict) -> int:
-    """Crea el contenedor del historial antes de tocar Meta."""
+    """Comparte el contenedor del historial entre pacientes de la carga y clínica."""
     with conectar() as conn, conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO envios (base_datos, plantilla_clave, plantilla_nombre,"
-            " total_pacientes, estado, usuario, centro_codigo, wa_phone_id, numero_emisor)"
-            " VALUES ('paciente_reagendar', %s, %s, 1, 'completado',"
-            " 'integracion_reagendar', %s, %s, %s)",
-            (plantilla["clave"], plantilla.get("nombre") or plantilla["clave"],
-             canal["codigo"], canal["phoneNumberId"], canal["phoneNumber"]))
-        lote_id = cur.lastrowid
+        lote_id = reagendar_batches.asegurar_grupo(
+            cur, cita["lote_id"], canal["codigo"], plantilla, canal)
         cur.execute(
             "UPDATE paciente_reagendar SET envio_id=%s, plantilla_clave=%s"
             " WHERE id=%s AND reserva_token=%s AND estado_envio='PROCESANDO'",

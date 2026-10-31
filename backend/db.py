@@ -521,6 +521,18 @@ def asegurar_tabla_config() -> None:
                 " KEY idx_reagendar_lote_vencimiento (estado, programado_para)"
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
             )
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS reagendar_batches ("
+                " lote_id BIGINT UNSIGNED NOT NULL, centro_codigo VARCHAR(10) NOT NULL,"
+                " envio_id BIGINT UNSIGNED NULL, PRIMARY KEY (lote_id, centro_codigo),"
+                " UNIQUE KEY uq_reagendar_batch_envio (envio_id)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci")
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS reagendar_envios_agrupados ("
+                " envio_id BIGINT UNSIGNED NOT NULL PRIMARY KEY,"
+                " batch_envio_id BIGINT UNSIGNED NOT NULL,"
+                " KEY idx_reagendar_envio_agrupado (batch_envio_id)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci")
             cur.execute("SELECT COLUMN_NAME FROM information_schema.COLUMNS"
                         " WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='reagendar_lotes'")
             _columnas_lote = {r["COLUMN_NAME"] for r in cur.fetchall()}
