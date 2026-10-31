@@ -1082,7 +1082,7 @@ def marcar_fallo(cita: dict, codigo: str, *, reintentar: bool = False) -> None:
 
 
 def marcar_enviado(cita: dict, canal: dict, plantilla: dict,
-                   texto: str, message_id: str) -> None:
+                   texto: str, message_id: str, *, precio: dict | None = None) -> None:
     """Resultado y entrada de historial juntos, o ninguno (sin reenvío)."""
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(
@@ -1095,11 +1095,14 @@ def marcar_enviado(cita: dict, canal: dict, plantilla: dict,
             "INSERT INTO log_envios (envio_id, paciente_id, nombre_paciente,"
             " numero_telefono, mensaje, plantilla_clave, estado_envio,"
             " whatsapp_message_id, estado_whatsapp, wa_phone_id,"
-            " centro_codigo, numero_emisor, tabla_pacientes)"
-            " VALUES (%s, NULL, %s, %s, %s, %s, 'enviado', %s, 'sent', %s, %s, %s, NULL)",
+            " centro_codigo, numero_emisor, tabla_pacientes, precio_unitario, precio_moneda,"
+            " precio_categoria, precio_tarifa_fecha)"
+            " VALUES (%s, NULL, %s, %s, %s, %s, 'enviado', %s, 'sent', %s, %s, %s, NULL, %s, %s, %s, %s)",
             (cita["envio_id"], cita["paciente_nombre"],
              cita["paciente_telefono_normalizado"], texto, plantilla["clave"],
-             message_id, canal["phoneNumberId"], canal["codigo"], canal["phoneNumber"]))
+             message_id, canal["phoneNumberId"], canal["codigo"], canal["phoneNumber"],
+             (precio or {}).get("unitario"), (precio or {}).get("moneda"),
+             (precio or {}).get("categoria"), (precio or {}).get("tarifa_fecha")))
         log_id = cur.lastrowid
         cur.execute(
             "UPDATE paciente_reagendar SET estado_envio='ENVIADO',"

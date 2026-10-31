@@ -690,9 +690,42 @@ tiene template de Meta (va como texto libre, ventana de 24 h). No hay gestión d
 
 Las cuentas `usuario` y `supervisor` reciben 403 en estos endpoints (y la migración les retira los permisos `estadisticas`/`tarifas_editar` si los tenían).
 
+La pestaña **Por envío** permite buscar una campaña por plantilla o ID, filtrar por clínica,
+área, entorno y tipo (manual, programado o reagendamiento), y consultar plantilla, número
+emisor y hora del primer intento. Desde Historial, **Estadísticas** abre directamente esa campaña.
+La lista está paginada; el detalle usa conteos agrupados, sin descargar las fichas de pacientes.
+
+Los filtros **Entrega**, **Resultado** y **Comparar** recalculan la torta, tasa de interés,
+selecciones de botones y costo estimado. También se puede filtrar pulsando una porción o
+su leyenda. Los porcentajes usan los enviados sin errores del segmento seleccionado;
+la pantalla indica también el total original. Errores e inválidos quedan fuera. Interés,
+desinterés y baja usan la última selección de botón por paciente, no cualquier texto recibido;
+**Sin selección** completa el total. **Leídos sin responder** excluye a quienes enviaron
+un mensaje, incluidos audios. Las respuestas se atribuyen desde el envío hasta la siguiente
+campaña del mismo número emisor al mismo paciente. Los clics repetidos se muestran separados
+del número de pacientes; los enlaces externos no informan clics.
+
+El costo y costo por interesado usan entregas confirmadas con ID de Meta y tarifas guardadas
+para su fecha; se recalculan para el segmento. Son estimaciones, no la factura de Meta.
+Si falta categoría o tarifa, se muestra **No disponible**. Las acciones de botones nuevos
+se conservan en `whatsapp_conversaciones_mensajes.accion_boton`; en eventos antiguos se
+utiliza el texto y la definición disponible, por lo que acciones personalizadas eliminadas
+o modificadas pueden quedar sin clasificar. Los webhooks ausentes no pueden reconstruirse.
+Los reagendamientos nuevos conservan en `log_envios` el precio unitario, moneda,
+categoría y fecha efectiva de la tarifa (`precio_unitario`, `precio_moneda`,
+`precio_categoria`, `precio_tarifa_fecha`) al aceptar Meta el mensaje. El precio se
+consulta antes del envío y se guarda en la misma transacción que el historial;
+las estadísticas por envío priorizan ese valor aunque se borre la plantilla o
+cambie el tarifario. Sin tarifa disponible se conserva `NULL`, nunca un cero ficticio.
+Los registros anteriores usan la estimación histórica disponible, sin inventar
+ni sobrescribir un precio original que no se guardó.
+Reiniciar el backend aplica las columnas y el índice de consulta por envío/destinatario.
+
 | Método | Endpoint | Descripción |
 |---|---|---|
 | GET | `/api/estadisticas` | Resumen de producción (predeterminado) o `?base=desarrollo`: mensajes del mes, totales, respuestas, interés y salud del webhook. `?area_id=N` filtra un área de producción; no se combina con desarrollo. |
+| GET | `/api/estadisticas/campanas` | Lista paginada de campañas; `base`, `area_id`, `centro`, `tipo`, `q` y `pagina`. Excluye alias históricos de reagendamiento. |
+| GET | `/api/estadisticas/campanas/{id}` | Identificación del envío, resultados y segmentos agregados, botones y costo estimado. Solo admin/dev, sin fichas ni mensajes de pacientes. |
 | GET | `/api/estadisticas/envios?granularidad=dia\|mes\|anio` | Mensajes enviados y fechas disponibles para el calendario, separados por `base=produccion\|desarrollo` o `area_id=N`. Los envíos simulados también aparecen como actividad. |
 | GET | `/api/estadisticas/costos?granularidad=dia\|mes\|anio` | (permiso `tarifas_editar`) Costo estimado por `base=produccion\|desarrollo` o `area_id=N`. Solo se valoran mensajes reales por `api_oficial`; los simulados no se cobran. El cupo de servicio gratuito se calcula con todas las bases y áreas juntas para el mismo número emisor antes de filtrar la vista. |
 | GET | `/api/tarifas` | (permiso `tarifas_editar`) Tarifas guardadas: `vigente`, `proxima` (tarifa futura ya publicada por Meta), `usd_vigente`, `historial`, moneda de la cuenta y fecha de la última descarga |

@@ -758,26 +758,28 @@ class ApiCitasTests(unittest.TestCase):
         conexion.__enter__.return_value = conexion
         cursor = conexion.cursor.return_value
         cursor.__enter__.return_value = cursor
-        cursor.fetchone.return_value = None
+        cursor.fetchone.side_effect = [None, None, {"reserva": 1}, None]
         servicio = MagicMock()
         servicio._pacientes_con_tel.return_value = []
         servicio.enviar = AsyncMock(return_value=(True, "wamid.prueba", None, "sent"))
         cfg = {"reagendar_envio_activo": "true", "entorno": "produccion",
                "metodo_envio": "api_oficial", "reagendar_plantillas_json": '{"VS":"reagendar_vs"}'}
         vista = {"errores": [], "cuerpo": "Hola Persona", "ejemplos": {"nombre": "Persona"}}
+        precio = {"unitario": 12.5, "moneda": "CLP", "categoria": "utility", "tarifa_fecha": "2026-10-01"}
         with patch.object(main, "config_all", return_value=cfg), \
                 patch.object(main, "resolver_centro", return_value=canal), \
                 patch.object(main, "WhatsAppService", return_value=servicio) as construir, \
                 patch.object(main, "esta_suprimido", return_value=False), \
                 patch.object(main, "conectar", return_value=conexion), \
                 patch.object(main, "presentar_plantilla", return_value=vista), \
+                patch.object(main, "_precio_reagendamiento", return_value=precio), \
                 patch.object(reagendar, "registrar_lote", return_value=123), \
                 patch.object(reagendar, "marcar_enviado") as guardar, \
                 patch.object(reagendar, "marcar_fallo") as fallo:
             asyncio.run(main._procesar_cita_reagendar(cita, {"VS": plantilla}))
         construir.assert_called_once_with(phone_number_id="phone-vs")
         servicio.enviar.assert_awaited_once()
-        guardar.assert_called_once_with(cita, canal, plantilla, "Hola Persona", "wamid.prueba")
+        guardar.assert_called_once_with(cita, canal, plantilla, "Hola Persona", "wamid.prueba", precio=precio)
         fallo.assert_not_called()
 
     def test_resultado_incierto_no_se_reintenta(self):

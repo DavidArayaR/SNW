@@ -972,7 +972,8 @@ def asegurar_tabla_config() -> None:
             cur.execute("SHOW COLUMNS FROM whatsapp_conversaciones_mensajes")
             columnas_audio = {fila["Field"] for fila in cur.fetchall()}
             for columna, tipo_sql in (("audio_media_id", "VARCHAR(255) NULL"),
-                                      ("audio_transcripcion", "TEXT NULL")):
+                                      ("audio_transcripcion", "TEXT NULL"),
+                                      ("accion_boton", "VARCHAR(30) NULL")):
                 if columna not in columnas_audio:
                     cur.execute(f"ALTER TABLE whatsapp_conversaciones_mensajes ADD COLUMN {columna} {tipo_sql}")
             # Cuentas de la aplicación (antes en data/usuarios.json).
@@ -1385,6 +1386,20 @@ def asegurar_tabla_config() -> None:
                 cur.execute("ALTER TABLE log_envios ADD INDEX idx_log_resp_tel_fecha"
                             " (numero_telefono, fecha_hora)")
 
+            cur.execute("SHOW COLUMNS FROM log_envios")
+            columnas_precio = {fila["Field"] for fila in cur.fetchall()}
+            for columna, tipo_sql in (("precio_unitario", "DECIMAL(18,8) NULL"),
+                                      ("precio_moneda", "VARCHAR(8) NULL"),
+                                      ("precio_categoria", "VARCHAR(20) NULL"),
+                                      ("precio_tarifa_fecha", "DATE NULL")):
+                if columna not in columnas_precio:
+                    cur.execute(f"ALTER TABLE log_envios ADD COLUMN {columna} {tipo_sql}")
+            cur.execute("SELECT COUNT(*) AS n FROM information_schema.STATISTICS"
+                        " WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='log_envios'"
+                        " AND INDEX_NAME='idx_log_envio_destinatario'")
+            if not (cur.fetchone() or {}).get("n"):
+                cur.execute("ALTER TABLE log_envios ADD INDEX idx_log_envio_destinatario"
+                            " (envio_id, numero_telefono, id)")
             # Migración única: separar creación y aprobación por tipo de envío
             # sin quitar capacidades a las cuentas que ya las tenían. El
             # marcador evita volver a otorgar permisos que después se revoquen.

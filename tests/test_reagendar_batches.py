@@ -69,7 +69,9 @@ class BatchesReagendarTests(unittest.TestCase):
             codigo = cita["centro_codigo"]
             reagendar.marcar_enviado(cita, {"codigo": codigo, "phoneNumberId": "test-phone-" + codigo,
                                            "phoneNumber": "+56900000000"},
-                                    {"clave": "test_batch"}, "Prueba", self.prefijo + str(cita["id"]))
+                                    {"clave": "test_batch"}, "Prueba", self.prefijo + str(cita["id"]),
+                                    precio={"unitario": 12.5, "moneda": "CLP", "categoria": "utility",
+                                            "tarifa_fecha": "2026-10-01"})
         with conectar() as conn, conn.cursor() as cur:
             cur.execute("UPDATE reagendar_lotes SET estado='EN_CURSO' WHERE id=%s", (self.lote,))
             conn.commit()
@@ -77,6 +79,14 @@ class BatchesReagendarTests(unittest.TestCase):
         with conectar() as conn, conn.cursor() as cur:
             cur.execute("SELECT total_pacientes,enviados,estado FROM envios WHERE id=%s", (ids[0],))
             final = cur.fetchone()
+            cur.execute("SELECT precio_unitario,precio_moneda,precio_categoria,precio_tarifa_fecha"
+                        " FROM log_envios WHERE envio_id=%s", (ids[0],))
+            precios = cur.fetchall()
+            self.assertEqual(len(precios), 2)
+            for precio in precios:
+                self.assertEqual(float(precio["precio_unitario"]), 12.5)
+                self.assertEqual(precio["precio_moneda"], "CLP")
+                self.assertEqual(precio["precio_categoria"], "utility")
         self.assertEqual((final["total_pacientes"], final["enviados"], final["estado"]), (2, 2, "completado"))
 
     def test_historicos_conservan_mensajes_y_redireccion_de_ids(self):

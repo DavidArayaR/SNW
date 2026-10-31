@@ -27,6 +27,7 @@ import ssl
 
 import httpx
 import audio_transcripcion
+import estadisticas_envio
 import pymysql
 from fastapi import (BackgroundTasks, Depends, FastAPI, File, Form, HTTPException,
                      Query, Request, UploadFile, status)
@@ -5876,6 +5877,29 @@ def _costo_estimado_por_clave(clave: str, total: int) -> dict | None:
     }
 
 
+def _precio_reagendamiento(plantilla: dict, fecha: datetime.date | None = None) -> dict:
+    """Instantánea previa al POST; no convertir falta de tarifa en precio cero."""
+    categoria = str(plantilla.get("whatsapp_template_categoria") or "").strip().lower()
+    precio = {"categoria": categoria if categoria in _CATS_FACTURABLES else None,
+              "moneda": None, "unitario": None, "tarifa_fecha": None}
+    if not precio["categoria"]:
+        return precio
+    try:
+        dia = (fecha or datetime.date.today()).isoformat()
+        moneda = _moneda_cuenta()
+        tarifas = _tarifas_guardadas(moneda) or _tarifas_guardadas("USD")
+        vigentes = [t for t in tarifas if not t.get("efectiva_desde") or t["efectiva_desde"] <= dia]
+        tarifa = _tarifa_para_fecha(vigentes, dia)
+        if tarifa and tarifa.get(categoria) is not None:
+            precio.update(unitario=tarifa[categoria], moneda=tarifa.get("moneda") or moneda,
+                          tarifa_fecha=tarifa.get("efectiva_desde"))
+    except Exception as exc:
+        # La falta de un cálculo informativo no vuelve incierto un POST que
+        # todavía no se ha realizado ni impide el aviso al paciente.
+        log_error("reagendar: no se pudo obtener el precio del mensaje", exc, solo_tipo=True)
+    return precio
+
+
 def _formatear_entero(valor: int) -> str:
     return f"{int(valor):,}".replace(",", ".")
 
@@ -8509,11 +8533,13 @@ async def _procesar_cita_reagendar(cita: dict, plantillas_por_centro: dict) -> N
             if cur.fetchone():
                 paciente_reagendar.marcar_fallo(cita, "YA_ENTREGADO")
                 return
+        precio = _precio_reagendamiento(plantilla)
         ok, message_id, _error, resultado = await servicio.enviar(
             telefono, vista["cuerpo"], plantilla=plantilla,
             variables=vista["ejemplos"])
         if ok:
-            paciente_reagendar.marcar_enviado(cita, canal, plantilla, vista["cuerpo"], message_id)
+            paciente_reagendar.marcar_enviado(cita, canal, plantilla, vista["cuerpo"], message_id,
+                                             precio=precio)
         else:
             paciente_reagendar.marcar_fallo(
                 cita, "META_RECHAZO" if resultado == "failed" else "META_TEMPORAL",
@@ -9515,6 +9541,135 @@ def _alcance_estadisticas(sesion: dict, area_id: int | None, base: str):
         return _SOLO_DEV, _SOLO_DEV_O_AUTO, "", (), None
     filtro_esp, args_esp, esp = _filtro_esp_estadisticas(sesion, area_id)
     return _SOLO_PROD, _SOLO_PROD_O_AUTO, filtro_esp, args_esp, esp
+
+
+def listar_envios_estadisticas(base: str = "produccion", area_id: int | None = Query(None),
+                              centro: str = "todos", pagina: int = Query(1, ge=1),
+                              tipo: str = "todos",
+                              q: str = Query("", max_length=100),
+                              sesion: dict = Depends(solo_admin)):
+    _alcance_estadisticas(sesion, area_id, base)
+    if centro != "todos" and centro not in catalogo_centros(incluir_inactivas=True):
+        raise HTTPException(422, detail="Centro emisor inválido.")
+    condiciones = ["e.base_datos='pacientes_dev'" if base == "desarrollo"
+                   else "COALESCE(e.base_datos,'')<>'pacientes_dev'",
+                   "NOT EXISTS (SELECT 1 FROM reagendar_envios_agrupados a WHERE a.envio_id=e.id)"]
+    args = []
+    if tipo not in ("todos", "manual", "programado", "reagendamiento"):
+        raise HTTPException(422, detail="Tipo de envío inválido.")
+    if tipo == "reagendamiento":
+        condiciones.append("e.base_datos='paciente_reagendar'")
+    elif tipo in ("manual", "programado"):
+        condiciones.append("COALESCE(e.base_datos,'')<>'paciente_reagendar'")
+        condiciones.append("e.programado_id IS NULL" if tipo == "manual" else "e.programado_id IS NOT NULL")
+    if area_id is not None:
+        condiciones.append("(e.area_id=%s OR (e.area_id IS NULL AND EXISTS"
+                           " (SELECT 1 FROM log_envios l WHERE l.envio_id=e.id AND l.area_id=%s)))")
+        args.extend((area_id, area_id))
+    if centro != "todos":
+        condiciones.append("e.centro_codigo=%s")
+        args.append(centro)
+    if q.strip():
+        condiciones.append("(e.plantilla_nombre LIKE %s OR CAST(e.id AS CHAR)=%s)")
+        args.extend((f"%{q.strip()}%", q.strip()))
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) AS n FROM envios e WHERE " + " AND ".join(condiciones), tuple(args))
+        total = int((cur.fetchone() or {}).get("n") or 0)
+        paginas = max(1, math.ceil(total / 25))
+        pagina = min(pagina, paginas)
+        cur.execute("SELECT e.id, e.plantilla_nombre, e.fecha_hora, e.centro_codigo, e.base_datos,"
+                    " e.total_pacientes FROM envios e WHERE " + " AND ".join(condiciones)
+                    + " ORDER BY e.fecha_hora DESC, e.id DESC LIMIT 26 OFFSET %s",
+                    (*args, (pagina - 1) * 25))
+        filas = cur.fetchall()
+    centros = catalogo_centros(incluir_inactivas=True)
+    return {"items": [{**f, "fecha": f["fecha_hora"].strftime("%d-%m-%Y %H:%M") if f.get("fecha_hora") else "—",
+                        "centro": centros.get(f.get("centro_codigo"), "Emisor histórico")}
+                       for f in filas[:25]], "hay_mas": pagina < paginas, "pagina": pagina,
+            "paginas": paginas, "total": total}
+
+
+def obtener_estadisticas_envio(envio_id: int, sesion: dict = Depends(solo_admin)):
+    envio_id = reagendar_batches.resolver_envio(envio_id)
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("SELECT e.id, e.plantilla_clave, e.plantilla_nombre, e.total_pacientes,"
+                    " e.centro_codigo, e.numero_emisor, e.fecha_hora, e.base_datos,"
+                    " (SELECT MIN(l.fecha_hora) FROM log_envios l WHERE l.envio_id=e.id) AS inicio_envio"
+                    " FROM envios e WHERE e.id=%s", (envio_id,))
+        envio = cur.fetchone()
+        if not envio:
+            raise HTTPException(404, detail="Envío no encontrado.")
+        datos = estadisticas_envio.resumen(cur, envio)
+    plantilla = next((p for p in leer_plantillas() if p.get("clave") == envio.get("plantilla_clave")
+                      and p.get("centro_codigo") == envio.get("centro_codigo")), {})
+    acciones = {str(b.get("texto") or "").strip().casefold(): b.get("accion")
+                for b in plantilla.get("botones") or []}
+
+    def accion(fila):
+        valor = fila.get("accion") or acciones.get(str(fila.get("boton") or "").strip().casefold())
+        if valor == "reagendar":
+            return "interes"
+        if valor:
+            return valor
+        texto = fila.get("boton") or ""
+        if WhatsAppService._es_baja(texto):
+            return "baja"
+        if whatsapp_service.es_mensaje_no_interes(texto):
+            return "desinteres"
+        return "interes" if es_mensaje_interes(texto) else "sin_clasificar"
+
+    estadisticas_envio.clasificar_decisiones(datos, accion)
+    for boton in plantilla.get("botones") or []:
+        if not any(str(f.get("boton") or "").strip().casefold() == str(boton.get("texto") or "").strip().casefold()
+                   for f in datos["botones"]):
+            datos["botones"].append({"boton": boton.get("texto"), "accion": boton.get("accion"),
+                "clics": 0, "pacientes": 0, "porcentaje": 0,
+                "medible": boton.get("tipo") not in ("url", "telefono")})
+    moneda = _moneda_cuenta()
+    tarifas = _tarifas_guardadas(moneda) or _tarifas_guardadas("USD")
+    categorias = _categorias_por_clave()
+    coste, mensajes_coste, incompleto = 0.0, 0, False
+    moneda_coste = None
+    segmentos = []
+    datos.pop("entregas_coste")
+    for celda in datos["segmentos"]:
+        if not celda["validos"]:
+            continue
+        importe = 0.0
+        mensajes = int(celda["facturables"])
+        if mensajes:
+            if celda.get("precio_unitario") is not None:
+                unitario = float(celda["precio_unitario"])
+                moneda_fila = celda.get("precio_moneda")
+            else:
+                cat = celda.get("precio_categoria") or categorias.get(celda["clave"])
+                tarifa = _tarifa_para_fecha(tarifas, str(celda["fecha"]))
+                unitario = (tarifa or {}).get(cat) if cat in _CATS_FACTURABLES else None
+                moneda_fila = (tarifa or {}).get("moneda") or moneda
+            if (unitario is None or not moneda_fila
+                    or (moneda_coste and moneda_coste != moneda_fila)):
+                incompleto = True
+                importe = None
+            else:
+                moneda_coste = moneda_fila
+                importe = float(unitario) * mensajes
+                coste += importe
+                mensajes_coste += mensajes
+        segmentos.append({"cantidad": int(celda["pacientes"]),
+            "resultado": celda.get("resultado", "sin_seleccion"),
+            "entrega": "leidos" if celda.get("estado_whatsapp") == "read" else "entregados"
+                       if celda.get("estado_whatsapp") == "delivered" else "sin_confirmacion",
+            "visto_sin_respuesta": bool(celda.get("estado_whatsapp") == "read" and not celda["respondio"]),
+            "costo": round(importe, 4) if importe is not None else None, "facturables": mensajes})
+    datos["segmentos"] = segmentos
+    interesados = datos["interacciones"]["interes"]["pacientes"]
+    datos["costo"] = {"importe": None if incompleto else round(coste, 4),
+                      "moneda": moneda_coste or moneda, "entregas": mensajes_coste,
+                      "por_interesado": round(coste / interesados, 4) if interesados and not incompleto else None}
+    envio["fecha"] = envio["fecha_hora"].strftime("%d-%m-%Y %H:%M") if envio.get("fecha_hora") else "—"
+    envio["inicio"] = envio["inicio_envio"].strftime("%d-%m-%Y %H:%M") if envio.get("inicio_envio") else "Sin intentos registrados"
+    envio["centro"] = catalogo_centros(incluir_inactivas=True).get(envio.get("centro_codigo"), "Emisor histórico")
+    return {"envio": envio, **datos}
 
 
 def _resumen_pacientes_estadisticas(base: str, esp: dict | None,
