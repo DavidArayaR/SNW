@@ -969,6 +969,12 @@ def asegurar_tabla_config() -> None:
                 " INDEX idx_conversacion (wa_phone_id, telefono_paciente, recibido)"
                 ") CHARACTER SET utf8mb4"
             )
+            cur.execute("SHOW COLUMNS FROM whatsapp_conversaciones_mensajes")
+            columnas_audio = {fila["Field"] for fila in cur.fetchall()}
+            for columna, tipo_sql in (("audio_media_id", "VARCHAR(255) NULL"),
+                                      ("audio_transcripcion", "TEXT NULL")):
+                if columna not in columnas_audio:
+                    cur.execute(f"ALTER TABLE whatsapp_conversaciones_mensajes ADD COLUMN {columna} {tipo_sql}")
             # Cuentas de la aplicación (antes en data/usuarios.json).
             cur.execute(
                 "CREATE TABLE IF NOT EXISTS usuarios ("

@@ -26,6 +26,7 @@ import smtplib
 import ssl
 
 import httpx
+import audio_transcripcion
 import pymysql
 from fastapi import (BackgroundTasks, Depends, FastAPI, File, Form, HTTPException,
                      Query, Request, UploadFile, status)
@@ -2273,7 +2274,7 @@ def mensajes_paciente(paciente_id: int, ambiente: str = Query("produccion"),
             raise HTTPException(404, detail="Paciente no encontrado")
         cond_log, args_log = _cond_tabla_log_segura(t if _esp else None, ambiente)
         cur.execute(
-            "SELECT id, fecha_hora, mensaje, plantilla_clave, estado_envio, descripcion_error"
+            "SELECT id, fecha_hora, mensaje, plantilla_clave, estado_envio, descripcion_error, wa_phone_id"
             " FROM log_envios WHERE paciente_id = %s"
             "   AND ((mensaje IS NOT NULL AND mensaje <> '') OR plantilla_clave = 'respuesta')"
             "   AND COALESCE(plantilla_clave, '') <> 'ajuste_manual'"
@@ -2323,7 +2324,44 @@ def mensajes_paciente(paciente_id: int, ambiente: str = Query("produccion"),
             "etiquetas": etiqueta_info["etiquetas"],
             "origen_etiquetas": etiqueta_info["origen"],
         })
+    emisores = list({f.get("wa_phone_id") for f in filas if f.get("wa_phone_id")})
+    if emisores:
+        with conectar() as conn, conn.cursor() as cur:
+            marcas = ",".join(["%s"] * len(emisores))
+            cur.execute("SELECT mensaje_id, recibido, audio_media_id, audio_transcripcion"
+                        " FROM whatsapp_conversaciones_mensajes WHERE tipo='audio'"
+                        f" AND telefono_paciente=%s AND wa_phone_id IN ({marcas})"
+                        " ORDER BY recibido LIMIT 500", (normalizar_telefono(pac["telefono"]), *emisores))
+            for audio in cur.fetchall():
+                mensajes.append(_presentar_audio(audio))
+        mensajes.sort(key=lambda m: datetime.datetime.strptime(m["fecha"], "%d-%m-%Y %H:%M"))
     return {"paciente": pac, "mensajes": mensajes}
+
+
+def _presentar_audio(fila):
+    return {"id": fila["mensaje_id"], "texto": "[Audio recibido]", "tipo": "audio",
+            "fecha": fila["recibido"].strftime("%d-%m-%Y %H:%M") if fila.get("recibido") else "01-01-1970 00:00",
+            "direccion": "entrante", "etiquetas_editables": False,
+            "puede_transcribir": bool(fila.get("audio_media_id")),
+            "transcripcion": fila.get("audio_transcripcion")}
+
+
+class TranscribirAudioIn(BaseModel):
+    mensaje_id: str = Field(..., min_length=1, max_length=255)
+
+
+def transcribir_audio_paciente(paciente_id: int, body: TranscribirAudioIn,
+                              ambiente: str = Query("produccion"), area_id: int | None = Query(None),
+                              sesion: dict = Depends(sesion_actual)):
+    datos = mensajes_paciente(paciente_id, ambiente=ambiente, area_id=area_id, sesion=sesion)
+    return _transcribir_audio_visible(datos, body, sesion)
+
+
+def _transcribir_audio_visible(datos, body, sesion):
+    if not any(m.get("id") == body.mensaje_id and m.get("tipo") == "audio"
+               for m in datos["mensajes"]):
+        raise HTTPException(404, detail="Audio no encontrado en esta conversación.")
+    return audio_transcripcion.transcribir(body.mensaje_id, sesion.get("usuario", ""))
 
 
 def _call_center_numeros() -> list[str]:
@@ -8970,7 +9008,7 @@ def mensajes_historial_reagendar(envio_id: int, registro_id: int,
         if not origen or not origen.get("wa_phone_id"):
             raise HTTPException(404, detail="Conversación de reagendamiento no encontrada.")
         args = (origen["wa_phone_id"], origen["numero_telefono"], origen["fecha_hora"])
-        cur.execute("SELECT mensaje_id, tipo, texto, recibido FROM whatsapp_conversaciones_mensajes"
+        cur.execute("SELECT mensaje_id, tipo, texto, recibido, audio_media_id, audio_transcripcion FROM whatsapp_conversaciones_mensajes"
                     " WHERE wa_phone_id=%s AND telefono_paciente=%s AND recibido >= %s"
                     " ORDER BY recibido, mensaje_id LIMIT 500", args)
         entrantes = cur.fetchall()
@@ -8982,7 +9020,9 @@ def mensajes_historial_reagendar(envio_id: int, registro_id: int,
     mensajes = [{"id": f["mensaje_id"], "texto": f.get("texto") or f"[{f.get('tipo') or 'mensaje'}]",
                  "direccion": "entrante", "fecha_dt": f["recibido"],
                  "interes": es_mensaje_interes(f.get("texto") or ""),
-                 "etiquetas_editables": False} for f in entrantes]
+                 "etiquetas_editables": False,
+                 "tipo": f.get("tipo"), "puede_transcribir": bool(f.get("audio_media_id")),
+                 "transcripcion": f.get("audio_transcripcion")} for f in entrantes]
     vistos = set()
     for f in salientes:
         clave = f.get("whatsapp_message_id") or f"log-{f['id']}"
@@ -9004,6 +9044,12 @@ def mensajes_historial_reagendar(envio_id: int, registro_id: int,
                          "telefono": origen["numero_telefono"], "interesado": bool(interesado),
                          "respuesta": "baja" if baja else "no_interesado" if no_interes
                          else "respondio" if entrantes else "pendiente"}, "mensajes": mensajes}
+
+
+def transcribir_audio_reagendar(envio_id: int, registro_id: int, body: TranscribirAudioIn,
+                               sesion: dict = Depends(exigir("historial"))):
+    datos = mensajes_historial_reagendar(envio_id, registro_id, sesion=sesion)
+    return _transcribir_audio_visible(datos, body, sesion)
 
 
 def detalle_historial(envio_id: str, ambiente: str = Query("produccion"),

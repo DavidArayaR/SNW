@@ -87,7 +87,7 @@ class CallCenterManualTests(unittest.TestCase):
                 self.assertTrue(main.WhatsAppService._guardar_mensaje_entrante(
                     {"id": "wamid.test", "type": "text", "timestamp": "1792611000"},
                     "+56911111111", "Hola"))
-            self.assertEqual(cur.execute.call_args.args[1][-1], 1792611000)
+            self.assertEqual(cur.execute.call_args.args[1][-2], 1792611000)
             self.assertIn("FROM_UNIXTIME", cur.execute.call_args.args[0])
         finally:
             whatsapp_service.EMISOR_WEBHOOK.reset(token)

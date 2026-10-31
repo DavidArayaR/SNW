@@ -901,6 +901,7 @@ async function abrirMensajes(pacienteId) {
     if (r.status === 401) { window.snwSesionExpirada(); return; }
     if (!r.ok) throw new Error();
     const data = await r.json();
+    data.audio_url = `api/pacientes/${pacienteId}/audios/transcribir?ambiente=${ambienteDetalle}${qsEsp}`;
     renderMensajes(data);
   } catch {
     console.error("[historial.js abrirMensajes()]");
@@ -915,6 +916,7 @@ async function abrirMensajesReagendar(envioId, registroId) {
     });
     const datos = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(datos.detail || "No se pudo cargar la conversación de reagendamiento.");
+    datos.audio_url = `api/notificaciones/historial/${encodeURIComponent(envioId)}/reagendamientos/${registroId}/audios/transcribir`;
     renderMensajes(datos);
   } catch (err) { toast(err.message, "error"); }
 }
@@ -954,6 +956,13 @@ function renderMensajes(data) {
         `</div>` : "";
       return `<div class="msg-burbuja msg-burbuja--${m.direccion}${m.interes ? " msg-burbuja--interes" : ""}">` +
         `<div class="msg-texto">${escaparHtml(texto)}</div>` +
+        (m.tipo === "audio" ? `<div class="msg-audio">` +
+          (m.transcripcion ? `<p class="field__hint">Transcripción automática · puede contener errores</p>` +
+            `<div class="msg-texto">${escaparHtml(m.transcripcion)}</div>` :
+            m.puede_transcribir ? `<button type="button" class="btn btn--ghost" data-transcribir-audio="${encodeURIComponent(m.id)}">Transcribir audio</button>` +
+              `<p class="field__hint">Se enviará el audio a Groq para convertirlo a texto.</p>` :
+              `<p class="field__hint">Audio antiguo sin referencia disponible. Pide que lo reenvíen.</p>`) +
+          `<p class="field__hint" role="status" data-audio-estado></p></div>` : "") +
         `<div class="msg-meta">${meta}</div>${etiquetas}</div>`;
     }).join("");
   }
@@ -979,6 +988,29 @@ const ETIQUETAS_MENSAJE = {
 };
 let mensajesVistaActual = null;
 const guardandoEtiquetas = new Set();
+
+$("#msgHilo").addEventListener("click", async event => {
+  const boton = event.target.closest("[data-transcribir-audio]");
+  const vista = mensajesVistaActual;
+  if (!boton || boton.disabled || !vista?.audio_url) return;
+  boton.disabled = true;
+  boton.textContent = "Transcribiendo…";
+  const estado = boton.closest(".msg-audio").querySelector("[data-audio-estado]");
+  const mensajeId = decodeURIComponent(boton.dataset.transcribirAudio);
+  estado.textContent = "Descargando y transcribiendo el audio…";
+  try {
+    const res = await fetch(vista.audio_url, {
+      method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ mensaje_id: mensajeId }),
+    });
+    const datos = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(datos.detail || "No se pudo transcribir el audio.");
+    const mensaje = vista.mensajes.find(m => m.id === mensajeId);
+    if (mensaje) mensaje.transcripcion = datos.texto;
+    if (mensajesVistaActual === vista && !$("#modalMensajes").hidden) renderMensajes(vista);
+  } catch (error) { estado.textContent = error.message; }
+  finally { boton.disabled = false; boton.textContent = "Transcribir audio"; }
+});
 
 $("#msgHilo").addEventListener("click", async (event) => {
   const boton = event.target.closest("[data-etiqueta-id]");

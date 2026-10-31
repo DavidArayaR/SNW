@@ -1324,8 +1324,8 @@ class WhatsAppService:
                 texto = br.get("title", "")
                 extra = br.get("id", "") or br.get("description", "")
             if not texto and not extra:
-                # Los adjuntos sin texto también cuentan en el corpus, pero
-                # nunca se copia el archivo ni su identificador de Meta.
+                # El audio conserva su referencia para transcripción manual;
+                # el archivo no se descarga durante el webhook.
                 pie = (mensaje.get(tipo) or {}).get("caption", "") if tipo in (
                     "image", "video", "document") else ""
                 if not self._guardar_mensaje_entrante(mensaje, telefono, pie):
@@ -1686,11 +1686,13 @@ class WhatsAppService:
                 cur.execute(
                     "INSERT IGNORE INTO whatsapp_conversaciones_mensajes"
                     " (mensaje_id, centro_codigo, wa_phone_id, numero_emisor,"
-                    " telefono_paciente, tipo, texto, recibido)"
-                    " VALUES (%s, %s, %s, %s, %s, %s, %s, FROM_UNIXTIME(%s))",
+                    " telefono_paciente, tipo, texto, recibido, audio_media_id)"
+                    " VALUES (%s, %s, %s, %s, %s, %s, %s, FROM_UNIXTIME(%s), %s)",
                     (mensaje_id[:255], emisor["codigo"], emisor["phoneNumberId"],
                      emisor["phoneNumber"], telefono, str(mensaje.get("type") or "")[:30],
-                     (texto or "")[:2000], timestamp_paciente),
+                     (texto or "")[:2000], timestamp_paciente,
+                     str((mensaje.get("audio") or {}).get("id") or "")[:255]
+                     if mensaje.get("type") == "audio" else None),
                 )
                 nuevo = cur.rowcount == 1
                 conn.commit()
