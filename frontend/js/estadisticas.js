@@ -1097,7 +1097,7 @@ function pintarTablaCampanas() {
     const seleccionada = String(campanaSeleccionada?.id) === String(envio.id);
     fila.classList.toggle("seleccionada", seleccionada);
     if (seleccionada) fila.setAttribute("aria-current", "true");
-    const tipo = { manual: "Manual", programado: "Programado", reagendamiento: "Reagendamiento" }[envio.tipo] || "Envío";
+    const tipo = { manual: "Manual", programado: "Programado", reagendamiento: "Reagendamiento", simulado: "Simulado" }[envio.tipo] || "Envío";
     fila.innerHTML = `<td><button type="button" class="stats-campanas__elegir" data-elegir-campana="${Number(envio.id)}">${escaparHtml(envio.plantilla_nombre || "Sin nombre")}</button>` +
       `<span class="stats-campanas__fila-meta">#${Number(envio.id)} · ${tipo}${seleccionada ? " · Seleccionado" : ""}</span></td>` +
       `<td>${escaparHtml(envio.centro || "Sin registro")}</td><td class="stats-campanas__fila-fecha">${escaparHtml(envio.fecha)}</td>` +
@@ -1119,6 +1119,7 @@ async function cargarCampanas(reiniciar = false) {
     datosCampana = null;
     resultadosCampana.hidden = true;
     $("#filtrosCampana").hidden = true;
+    $("#campanaSimulacionAviso").hidden = true;
     selectorCampana.open = true;
   }
   pintarSelectorCampana();
@@ -1182,6 +1183,7 @@ async function cargarCampana(envioId) {
   const control = new AbortController();
   consultaCampana = control;
   resultadosCampana.hidden = true;
+  $("#campanaSimulacionAviso").hidden = true;
   estadoCampana.textContent = "Calculando resultados del envío…";
   try {
     const res = await fetch(`api/estadisticas/campanas/${encodeURIComponent(envioId)}`, {
@@ -1191,6 +1193,7 @@ async function cargarCampana(envioId) {
     if (!res.ok) throw new Error(datos.detail || "No se pudieron calcular las estadísticas.");
     if (control.signal.aborted) return;
     datosCampana = datos;
+    $("#campanaSimulacionAviso").hidden = !datos.simulacion;
     campanaSeleccionada = datos.envio;
     selectorCampana.open = false;
     pintarSelectorCampana();
@@ -1246,9 +1249,9 @@ function pintarCampana() {
         `<p><i aria-hidden="true" style="--color-serie:${d.color}"></i><button type="button" data-segmento-campana="${i}"><span>${d.titulo}</span><strong>${num(r.validos ? Math.round(1000 * d.cantidad / r.validos) / 10 : 0)} %</strong><small>${num(d.cantidad)} pacientes</small></button></p>`).join("")}</div></div>` +
       `<p class="field__hint">Base: ${num(r.validos)} enviados sin errores de ${num(datosCampana.resumen.validos)} en total. Pulsa una categoría para filtrar.</p></div>` +
       `<div class="stats-campanas__numeros stats-campanas__numeros--costos">` +
-      `<div class="stats-campanas__numero"><span>Costo estimado del segmento</span><strong>${escaparHtml(valorCoste)}</strong></div>` +
-      `<div class="stats-campanas__numero"><span>Costo por interesado</span><strong>${coste.por_interesado == null ? "—" : escaparHtml(fmtMoneda(coste.por_interesado, coste.moneda))}</strong></div></div>` +
-      `<p class="field__hint">Estimación de ${num(coste.entregas)} entregas confirmadas · ${num(r.sin_confirmacion)} mensajes sin confirmación de entrega.</p>` +
+      `<div class="stats-campanas__numero"><span>${datos.simulacion ? "Costo ficticio del segmento" : "Costo estimado del segmento"}</span><strong>${escaparHtml(valorCoste)}</strong></div>` +
+      `<div class="stats-campanas__numero"><span>${datos.simulacion ? "Costo ficticio por interesado" : "Costo por interesado"}</span><strong>${coste.por_interesado == null ? "—" : escaparHtml(fmtMoneda(coste.por_interesado, coste.moneda))}</strong></div></div>` +
+      `<p class="field__hint">${datos.simulacion ? "Datos de demostración, sin cobros reales" : "Estimación de entregas confirmadas"} · ${num(coste.entregas)} entregas · ${num(r.sin_confirmacion)} mensajes sin confirmación de entrega.</p>` +
       `<h3>Respuestas a botones</h3>` + (datos.botones.length ?
         `<div class="tabla-wrap"><table><thead><tr><th>Botón u opción</th><th>Clics</th><th>Pacientes</th><th>% de enviados sin error</th></tr></thead><tbody>${datos.botones.map(b =>
           `<tr><td>${escaparHtml(b.boton || "Sin texto")}</td><td>${b.medible === false ? "No medible" : num(b.clics)}</td><td>${b.medible === false ? "—" : num(b.pacientes)}</td><td>${b.medible === false ? "—" : `${num(b.porcentaje)} %`}</td></tr>`).join("")}</tbody></table></div>` :
@@ -1280,6 +1283,33 @@ function pintarCampana() {
     });
 }
 selectorCampana.addEventListener("toggle", pintarSelectorCampana);
+let solicitudSimulacion = null;
+$("#simularCampanaEst").addEventListener("click", async () => {
+  const boton = $("#simularCampanaEst");
+  if (boton.disabled) return;
+  boton.disabled = true;
+  solicitudSimulacion ||= crypto.randomUUID();
+  estadoCampana.textContent = "Guardando simulación de 350 mensajes. No se enviará nada por WhatsApp…";
+  try {
+    const res = await fetch("api/estadisticas/campanas/simulacion", {
+      method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ solicitud_id: solicitudSimulacion }),
+    });
+    const datos = await res.json();
+    if (!res.ok) throw new Error(datos.detail || "No se pudo guardar la simulación.");
+    solicitudSimulacion = null;
+    selEntornoEst.value = "produccion";
+    selAreaEst.value = "";
+    selCentroEst.value = "todos";
+    pintarCampoAreaEst();
+    tipoCampana = "simulado";
+    document.querySelectorAll("[data-tipo-campana]").forEach(b =>
+      b.setAttribute("aria-pressed", String(b.dataset.tipoCampana === tipoCampana)));
+    envioEnlacePendiente = String(datos.envio_id);
+    await cargarCampanas(true);
+  } catch (error) { estadoCampana.textContent = error.message; }
+  finally { boton.disabled = false; }
+});
 cuerpoCampanas.addEventListener("click", e => {
   const fila = e.target.closest("tr[data-campana-id]");
   if (fila) cargarCampana(fila.dataset.campanaId);

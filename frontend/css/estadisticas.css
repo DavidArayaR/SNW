@@ -74,6 +74,9 @@ details[open] > summary > .stats-campanas__desplegar { transform: rotate(180deg)
 .stats-campanas__tabla-estado i { margin-right: 8px; }
 .stats-campanas__paginas { padding-top: 14px; }
 .stats-campanas__alcance { color: var(--texto); font-size: .8rem; margin: 12px 18px 16px; }
+.stats-campanas__simulacion { display: flex; gap: 12px; margin: 18px; padding: 16px; color: var(--warn-fg); background: var(--warn-bg); border: 1px solid var(--warn-bd); border-radius: 12px; }
+.stats-campanas__simulacion[hidden] { display: none; }
+.stats-campanas__simulacion p { margin: 6px 0 0; font-size: .85rem; line-height: 1.6; }
 .stats-campanas__filtros { margin: 18px; background: var(--panel-2); border: 1px solid var(--borde); border-radius: 12px; }
 .stats-campanas__filtros[hidden] { display: none; }
 .stats-campanas__filtros--activos { border-color: var(--verde); }

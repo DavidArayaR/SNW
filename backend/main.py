@@ -28,6 +28,7 @@ import ssl
 import httpx
 import audio_transcripcion
 import estadisticas_envio
+import simulacion_envio
 import pymysql
 from fastapi import (BackgroundTasks, Depends, FastAPI, File, Form, HTTPException,
                      Query, Request, UploadFile, status)
@@ -8757,7 +8758,8 @@ def _presentar_historial(filas: list[dict], sesion: dict, limite: int | None = N
     pendientes = {p.get("envio_id") for p in PENDIENTES.values()
                   if p.get("estado") == "pendiente" and p.get("envio_id")}
     for f in filas:
-        f["centro"] = catalogo_centros(incluir_inactivas=True).get(f.get("centro_codigo"), "Emisor histórico no identificado")
+        f["centro"] = ("Clínica simulada" if f.get("base_datos") == "simulacion" else
+                       catalogo_centros(incluir_inactivas=True).get(f.get("centro_codigo"), "Emisor histórico no identificado"))
         orden = f.pop("_orden", None)
         if f.pop("_sin_lote", False):
             pc = _prog_a_respuesta(f, sesion)
@@ -9555,12 +9557,14 @@ def listar_envios_estadisticas(base: str = "produccion", area_id: int | None = Q
                    else "COALESCE(e.base_datos,'')<>'pacientes_dev'",
                    "NOT EXISTS (SELECT 1 FROM reagendar_envios_agrupados a WHERE a.envio_id=e.id)"]
     args = []
-    if tipo not in ("todos", "manual", "programado", "reagendamiento"):
+    if tipo not in ("todos", "manual", "programado", "reagendamiento", "simulado"):
         raise HTTPException(422, detail="Tipo de envío inválido.")
-    if tipo == "reagendamiento":
+    if tipo == "simulado":
+        condiciones.append("e.base_datos='simulacion'")
+    elif tipo == "reagendamiento":
         condiciones.append("e.base_datos='paciente_reagendar'")
     elif tipo in ("manual", "programado"):
-        condiciones.append("COALESCE(e.base_datos,'')<>'paciente_reagendar'")
+        condiciones.append("COALESCE(e.base_datos,'') NOT IN ('paciente_reagendar','simulacion')")
         condiciones.append("e.programado_id IS NULL" if tipo == "manual" else "e.programado_id IS NOT NULL")
     if area_id is not None:
         condiciones.append("(e.area_id=%s OR (e.area_id IS NULL AND EXISTS"
@@ -9584,9 +9588,10 @@ def listar_envios_estadisticas(base: str = "produccion", area_id: int | None = Q
         filas = cur.fetchall()
     centros = catalogo_centros(incluir_inactivas=True)
     return {"items": [{**f, "fecha": f["fecha_hora"].strftime("%d-%m-%Y %H:%M") if f.get("fecha_hora") else "—",
-                        "tipo": "reagendamiento" if f.get("base_datos") == "paciente_reagendar" else
+                        "tipo": "simulado" if f.get("base_datos") == "simulacion" else
+                                "reagendamiento" if f.get("base_datos") == "paciente_reagendar" else
                                 "programado" if f.get("programado_id") else "manual",
-                        "centro": centros.get(f.get("centro_codigo"), "Emisor histórico")}
+                        "centro": "Clínica simulada" if f.get("base_datos") == "simulacion" else centros.get(f.get("centro_codigo"), "Emisor histórico")}
                        for f in filas[:25]], "hay_mas": pagina < paginas, "pagina": pagina,
             "paginas": paginas, "total": total}
 
@@ -9601,6 +9606,11 @@ def obtener_estadisticas_envio(envio_id: int, sesion: dict = Depends(solo_admin)
         envio = cur.fetchone()
         if not envio:
             raise HTTPException(404, detail="Envío no encontrado.")
+        if envio.get("base_datos") == "simulacion":
+            datos = simulacion_envio.obtener(envio_id)
+            if not datos:
+                raise HTTPException(404, detail="Simulación no encontrada.")
+            return datos
         datos = estadisticas_envio.resumen(cur, envio)
     plantilla = next((p for p in leer_plantillas() if p.get("clave") == envio.get("plantilla_clave")
                       and p.get("centro_codigo") == envio.get("centro_codigo")), {})
@@ -9672,6 +9682,20 @@ def obtener_estadisticas_envio(envio_id: int, sesion: dict = Depends(solo_admin)
     envio["inicio"] = envio["inicio_envio"].strftime("%d-%m-%Y %H:%M") if envio.get("inicio_envio") else "Sin intentos registrados"
     envio["centro"] = catalogo_centros(incluir_inactivas=True).get(envio.get("centro_codigo"), "Emisor histórico")
     return {"envio": envio, **datos}
+
+
+class SimularEnvioIn(BaseModel):
+    solicitud_id: uuid.UUID
+
+
+def crear_envio_simulado(body: SimularEnvioIn, sesion: dict = Depends(solo_admin)):
+    try:
+        datos = simulacion_envio.crear(str(body.solicitud_id), sesion.get("usuario", ""))
+    except ValueError as exc:
+        raise HTTPException(409, detail=str(exc)) from exc
+    auditoria_registrar(sesion.get("usuario", ""), "envio_simulado_creado", "envios",
+                       f"Simulación de 350 mensajes, envío #{datos['envio']['id']}; sin envíos reales.")
+    return {"envio_id": datos["envio"]["id"], "simulacion": True}
 
 
 def _resumen_pacientes_estadisticas(base: str, esp: dict | None,

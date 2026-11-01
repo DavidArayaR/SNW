@@ -726,11 +726,23 @@ Los registros anteriores usan la estimación histórica disponible, sin inventar
 ni sobrescribir un precio original que no se guardó.
 Reiniciar el backend aplica las columnas y el índice de consulta por envío/destinatario.
 
+**Simular 350 mensajes** crea un ejemplo persistente, exclusivo de admin/dev, visible
+en Historial como **Simulado** y en **Por envío → Simulados**. Guarda un batch de
+350 destinatarios ficticios (300 sin errores, 40 errores, 10 inválidos) y sus estadísticas
+en `envios_simulaciones`, con base `simulacion`. No crea pacientes, mensajes en
+`log_envios` ni eventos de WhatsApp; no envía nada a Meta, no cambia configuraciones
+y no entra al alcance de producción real ni a su facturación. Incluye 90 interesados,
+45 no interesados, 15 bajas, 80 vistos sin responder, clics repetidos y cambios de
+elección; la tasa de interés es 30 % sobre 300 enviados sin errores. El precio de
+60 CLP por entrega es ficticio y se identifica expresamente en pantalla. Cada solicitud
+usa un UUID idempotente para evitar duplicar el ejemplo si se repite por un fallo de red.
+
 | Método | Endpoint | Descripción |
 |---|---|---|
 | GET | `/api/estadisticas` | Resumen de producción (predeterminado) o `?base=desarrollo`: mensajes del mes, totales, respuestas, interés y salud del webhook. `?area_id=N` filtra un área de producción; no se combina con desarrollo. |
 | GET | `/api/estadisticas/campanas` | Lista paginada de campañas; `base`, `area_id`, `centro`, `tipo`, `q` y `pagina`. Excluye alias históricos de reagendamiento. |
 | GET | `/api/estadisticas/campanas/{id}` | Identificación del envío, resultados y segmentos agregados, botones y costo estimado. Solo admin/dev, sin fichas ni mensajes de pacientes. |
+| POST | `/api/estadisticas/campanas/simulacion` | Crea/recupera un ejemplo de 350 mensajes con `{solicitud_id: UUID}`. Solo admin/dev, auditado e idempotente; sin envíos reales. |
 | GET | `/api/estadisticas/envios?granularidad=dia\|mes\|anio` | Mensajes enviados y fechas disponibles para el calendario, separados por `base=produccion\|desarrollo` o `area_id=N`. Los envíos simulados también aparecen como actividad. |
 | GET | `/api/estadisticas/costos?granularidad=dia\|mes\|anio` | (permiso `tarifas_editar`) Costo estimado por `base=produccion\|desarrollo` o `area_id=N`. Solo se valoran mensajes reales por `api_oficial`; los simulados no se cobran. El cupo de servicio gratuito se calcula con todas las bases y áreas juntas para el mismo número emisor antes de filtrar la vista. |
 | GET | `/api/tarifas` | (permiso `tarifas_editar`) Tarifas guardadas: `vigente`, `proxima` (tarifa futura ya publicada por Meta), `usd_vigente`, `historial`, moneda de la cuenta y fecha de la última descarga |

@@ -1386,6 +1386,11 @@ def asegurar_tabla_config() -> None:
                 cur.execute("ALTER TABLE log_envios ADD INDEX idx_log_resp_tel_fecha"
                             " (numero_telefono, fecha_hora)")
 
+            cur.execute("CREATE TABLE IF NOT EXISTS envios_simulaciones ("
+                        " solicitud_id CHAR(36) PRIMARY KEY, usuario VARCHAR(150) NOT NULL,"
+                        " envio_id INT NULL UNIQUE, datos_json MEDIUMTEXT NULL,"
+                        " creado DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4")
             cur.execute("SHOW COLUMNS FROM log_envios")
             columnas_precio = {fila["Field"] for fila in cur.fetchall()}
             for columna, tipo_sql in (("precio_unitario", "DECIMAL(18,8) NULL"),

@@ -537,7 +537,7 @@ function pintarPaginadorHist(total) {
 }
 
 function ambienteRegistroHistorial(r) {
-  return r.base_datos === "paciente_reagendar" || (r.base_datos ?? "").includes("prod")
+  return ["paciente_reagendar", "simulacion"].includes(r.base_datos) || (r.base_datos ?? "").includes("prod")
     ? "produccion" : "desarrollo";
 }
 
@@ -573,7 +573,7 @@ function render() {
       : "";
     tr.innerHTML =
       `<td class="campo-fecha">${escaparHtml(r.fecha)}</td>` +
-      `<td><span class="badge badge--origen">${r.base_datos === "paciente_reagendar" ? "Reagendamiento" : r.origen === "programado" ? "Programado" : "Manual"}</span></td>` +
+      `<td><span class="badge badge--origen">${r.base_datos === "simulacion" ? "Simulado" : r.base_datos === "paciente_reagendar" ? "Reagendamiento" : r.origen === "programado" ? "Programado" : "Manual"}</span></td>` +
       `<td>${escaparHtml(r.centro || "Emisor histórico no identificado")}` +
         `<small class="texto-suave">${escaparHtml(r.numero_emisor || "")}</small></td>` +
       `<td><span class="badge badge--db">${escaparHtml(r.base_datos ?? "—")}</span></td>` +
@@ -583,7 +583,8 @@ function render() {
       `<td class="campo-num campo-num--ok">${enviados}</td>` +
       `<td class="campo-num campo-num--error">${fallidos}</td>` +
       `<td class="campo-num campo-num--invalido">${invalidos}</td>` +
-      `<td><div class="panel__actions historial__acciones-envio"><button class="btn btn--sm btn--ghost" data-detalle="${r.id}">Ver detalle</button>` +
+      `<td><div class="panel__actions historial__acciones-envio">` +
+      (r.base_datos === "simulacion" ? "" : `<button class="btn btn--sm btn--ghost" data-detalle="${r.id}">Ver detalle</button>`) +
       (window.snwEsPrivilegiado && /^\d+$/.test(String(r.id)) ?
         `<a class="btn btn--sm btn--ghost" data-estadisticas-envio href="estadisticas.html?envio=${encodeURIComponent(r.id)}&base=${encodeURIComponent(ambienteRegistroHistorial(r))}${r.area_id != null ? `&area=${Number(r.area_id)}` : ""}${r.centro_codigo ? `&centro=${encodeURIComponent(r.centro_codigo)}` : ""}"><i class="fa-solid fa-chart-pie" aria-hidden="true"></i> Estadísticas</a>` : "") +
       `</div></td>`;
@@ -607,6 +608,11 @@ tbodyEl.addEventListener("click", async (e) => {
   const amb = tr.dataset.amb || "produccion";
   const envio = registros.find((r) => String(r.id) === envioId && ambienteRegistroHistorial(r) === amb)
     || registros.find((r) => String(r.id) === envioId);
+  if (envio?.base_datos === "simulacion") {
+    const enlace = tr.querySelector("[data-estadisticas-envio]");
+    if (enlace) location.href = enlace.href;
+    return;
+  }
   ambienteDetalle = amb;
   areaDetalle = (envio && envio.area_id != null) ? envio.area_id : (tr.dataset.esp ? Number(tr.dataset.esp) : null);
   detalleActual = { envioId, ambiente: amb, envio };
