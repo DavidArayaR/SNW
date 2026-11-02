@@ -112,6 +112,10 @@ details[open] > summary > .stats-campanas__desplegar { transform: rotate(180deg)
 .stats-campanas__grafico { border: 1px solid var(--borde); border-radius: 14px; padding: 22px; }
 .stats-campanas__grafico > h3 { margin: 0; font-size: 1.05rem; }
 .stats-campanas__distribucion { gap: 32px; justify-content: space-evenly; }
+.stats-campanas__base-grafico { flex: 0 1 180px; min-width: 140px; padding: 16px 0; color: var(--texto); }
+.stats-campanas__base-grafico > span { display: block; font-size: .9rem; }
+.stats-campanas__base-grafico strong { display: block; margin: 6px 0; font-size: clamp(2.8rem,4vw,3.8rem); font-weight: 750; line-height: 1.1; font-variant-numeric: tabular-nums; color: var(--brand-tint-fg); }
+.stats-campanas__base-grafico small { display: block; margin-top: 10px; font-size: .78rem; line-height: 1.5; color: var(--texto-suave); }
 .stats-campanas__leyenda { flex: 1; max-width: 420px; min-width: min(240px,100%); gap: 9px; }
 .stats-campanas__leyenda p { padding: 5px 0; }
 .stats-campanas__leyenda button { flex: 1; display: grid; grid-template-columns: 1fr auto; gap: 2px 16px; align-items: center; padding: 7px; border-radius: 8px; }

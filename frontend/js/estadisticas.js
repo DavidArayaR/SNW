@@ -1300,9 +1300,10 @@ function pintarCampana() {
       (multiple ? `<h3>Envíos incluidos</h3><div class="tabla-wrap"><table><thead><tr><th>Envío</th><th>Plantilla</th><th>Clínica</th><th>Fecha</th></tr></thead><tbody>${datosCampana.envios.map(e => `<tr><td>#${Number(e.id)}</td><td>${escaparHtml(e.plantilla_nombre || "—")}</td><td>${escaparHtml(e.centro || "—")}</td><td>${escaparHtml(e.inicio || "—")}</td></tr>`).join("")}</tbody></table></div>` : "") +
       `<div class="stats-campanas__grafico"><h3>Qué opción eligieron los pacientes</h3><div class="stats-campanas__distribucion">` +
       `<div class="stats-campanas__torta" role="img" aria-label="Distribución de interés, desinterés, bajas y sin selección; cifras en la leyenda" style="background:${r.validos ? `conic-gradient(${sectores})` : "var(--panel-2)"}"></div>` +
+      `<div class="stats-campanas__base-grafico"><span>Total del gráfico</span><strong>${num(r.validos)}</strong><span>${unidad}</span><small>Base para calcular los porcentajes</small></div>` +
       `<div class="stats-campanas__leyenda">${distribucion.map((d, i) =>
         `<p><i aria-hidden="true" style="--color-serie:${d.color}"></i><button type="button" data-segmento-campana="${i}"><span>${d.titulo}</span><strong>${num(r.validos ? Math.round(1000 * d.cantidad / r.validos) / 10 : 0)} %</strong><small>${num(d.cantidad)} pacientes</small></button></p>`).join("")}</div></div>` +
-      `<p class="field__hint">Los porcentajes de este gráfico usan los ${num(r.validos)} pacientes del detalle actual. «Sin selección» significa que no eligieron interés, desinterés o baja; pueden haber respondido con texto o audio. Pulsa una categoría para explorarla.</p></div>` +
+      `<p class="field__hint">«Sin selección» significa que no eligieron interés, desinterés o baja; pueden haber respondido con texto o audio. Pulsa una categoría para explorarla.</p></div>` +
       `<dl class="stats-campanas__costos-resumen">` +
       `<div><dt>${datos.simulacion ? "Costo ficticio del segmento" : "Costo estimado del segmento"}</dt><dd>${escaparHtml(valorCoste)}</dd></div>` +
       `<div><dt>${datos.simulacion ? "Costo ficticio por interesado" : "Costo por interesado"}</dt><dd>${coste.por_interesado == null ? "—" : escaparHtml(fmtMoneda(coste.por_interesado, coste.moneda))}</dd></div></dl>` +
