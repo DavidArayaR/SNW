@@ -19,6 +19,7 @@ const datos = {
 const todos = filtrar(datos);
 assert.equal(todos.resumen.tasa_interes, 10);
 assert.equal(todos.resumen.vistos_sin_respuesta, 40); // Respuestas malas no cuentan como interés ni como visto.
+assert.equal(todos.resumen.leidos_con_respuesta, 25); // Incluye respuestas sin interés; solo lecturas confirmadas.
 assert.equal(todos.costo.importe, 850);
 assert.equal(todos.costo.por_interesado, 85);
 const leidos = filtrar(datos, "leidos");
@@ -30,10 +31,12 @@ assert.equal(leidos.botones[0].porcentaje, 15.4);
 const vistos = filtrar(datos, "todos", "vistos");
 assert.equal(vistos.resumen.validos, 40);
 assert.equal(vistos.resumen.tasa_interes, 0);
+assert.equal(vistos.resumen.leidos_con_respuesta, 0);
 assert.equal(vistos.botones.length, 0);
 assert.equal(filtrar(datos, "entregados").resumen.validos, 85); // Incluye lecturas.
 const vacio = filtrar(datos, "sin_confirmacion", "interes");
 assert.equal(vacio.resumen.validos, 0);
+assert.equal(vacio.resumen.leidos_con_respuesta, 0);
 assert.equal(vacio.resumen.tasa_interes, 0);
 assert.equal(vacio.costo.por_interesado, null);
 assert.equal(comparar(todos, "general").reduce((n, s) => n + s.cantidad, 0), 100);

@@ -1240,23 +1240,23 @@ function pintarCampana() {
       `<div class="stats-campanas__ficha"><span>Envío #${Number(datos.envio.id)}</span><span>Primer envío: ${escaparHtml(datos.envio.inicio)}</span>` +
       `<span>Remitente: ${escaparHtml(datos.envio.numero_emisor || "Sin registro")}</span><span>Plantilla: ${escaparHtml(datos.envio.plantilla_clave || "—")}</span></div>` +
       `<div class="stats-campanas__numeros stats-campanas__numeros--clave">` +
-      `<div class="stats-campanas__numero stats-campanas__numero--principal"><span>Tasa de interés</span><strong>${num(r.tasa_interes)} <small>%</small></strong><span>Sobre enviados sin errores</span></div>` +
-      `<div class="stats-campanas__numero"><span>Enviados sin errores</span><strong>${num(r.validos)}</strong><span>${num(r.entregados)} entregados confirmados</span></div>` +
-      `<div class="stats-campanas__numero"><span>Leídos sin responder</span><strong>${num(r.vistos_sin_respuesta)}</strong><span>${num(r.leidos)} lecturas en total</span></div></div>` +
+      `<div class="stats-campanas__numero stats-campanas__numero--principal"><span>Tasa de interesados</span><strong>${num(r.tasa_interes)} <small>%</small></strong><span>Interesados ÷ enviados sin errores</span></div>` +
+      `<div class="stats-campanas__numero"><span>Leídos con respuesta</span><strong>${num(r.leidos_con_respuesta)}</strong><span>Leyeron y respondieron, incluido audio</span></div>` +
+      `<div class="stats-campanas__numero"><span>Total de enviados sin errores</span><strong>${num(r.validos)}</strong><span>Excluye errores y números inválidos</span></div></div>` +
       `<div class="stats-campanas__grafico"><h3>Resultado de los botones</h3><div class="stats-campanas__distribucion">` +
       `<div class="stats-campanas__torta" role="img" aria-label="Distribución de interés, desinterés, bajas y sin selección; cifras en la leyenda" style="background:${r.validos ? `conic-gradient(${sectores})` : "var(--panel-2)"}"></div>` +
       `<div class="stats-campanas__leyenda">${distribucion.map((d, i) =>
         `<p><i aria-hidden="true" style="--color-serie:${d.color}"></i><button type="button" data-segmento-campana="${i}"><span>${d.titulo}</span><strong>${num(r.validos ? Math.round(1000 * d.cantidad / r.validos) / 10 : 0)} %</strong><small>${num(d.cantidad)} pacientes</small></button></p>`).join("")}</div></div>` +
       `<p class="field__hint">Base: ${num(r.validos)} enviados sin errores de ${num(datosCampana.resumen.validos)} en total. Pulsa una categoría para filtrar.</p></div>` +
-      `<div class="stats-campanas__numeros stats-campanas__numeros--costos">` +
-      `<div class="stats-campanas__numero"><span>${datos.simulacion ? "Costo ficticio del segmento" : "Costo estimado del segmento"}</span><strong>${escaparHtml(valorCoste)}</strong></div>` +
-      `<div class="stats-campanas__numero"><span>${datos.simulacion ? "Costo ficticio por interesado" : "Costo por interesado"}</span><strong>${coste.por_interesado == null ? "—" : escaparHtml(fmtMoneda(coste.por_interesado, coste.moneda))}</strong></div></div>` +
+      `<dl class="stats-campanas__costos-resumen">` +
+      `<div><dt>${datos.simulacion ? "Costo ficticio del segmento" : "Costo estimado del segmento"}</dt><dd>${escaparHtml(valorCoste)}</dd></div>` +
+      `<div><dt>${datos.simulacion ? "Costo ficticio por interesado" : "Costo por interesado"}</dt><dd>${coste.por_interesado == null ? "—" : escaparHtml(fmtMoneda(coste.por_interesado, coste.moneda))}</dd></div></dl>` +
       `<p class="field__hint">${datos.simulacion ? "Datos de demostración, sin cobros reales" : "Estimación de entregas confirmadas"} · ${num(coste.entregas)} entregas · ${num(r.sin_confirmacion)} mensajes sin confirmación de entrega.</p>` +
       `<h3>Respuestas a botones</h3>` + (datos.botones.length ?
         `<div class="tabla-wrap"><table><thead><tr><th>Botón u opción</th><th>Clics</th><th>Pacientes</th><th>% de enviados sin error</th></tr></thead><tbody>${datos.botones.map(b =>
           `<tr><td>${escaparHtml(b.boton || "Sin texto")}</td><td>${b.medible === false ? "No medible" : num(b.clics)}</td><td>${b.medible === false ? "—" : num(b.pacientes)}</td><td>${b.medible === false ? "—" : `${num(b.porcentaje)} %`}</td></tr>`).join("")}</tbody></table></div>` :
         `<p class="field__hint">Sin respuestas a botones registradas.</p>`) +
-      `<details class="stats-campanas__calculo"><summary>Cómo se calculan estos resultados</summary><p>Se usa la última selección de cada paciente. Una respuesta libre no cuenta como interés; errores e inválidos quedan fuera. Un audio sí cuenta como respuesta al calcular los leídos sin responder. Las respuestas se atribuyen hasta la siguiente campaña de la misma clínica. Los botones de enlace no informan clics. Los costos son estimaciones según tarifas guardadas y entregas confirmadas, no la factura de Meta. Los datos dependen de los webhooks recibidos.</p></details>`;
+      `<details class="stats-campanas__calculo"><summary>Cómo se calculan estos resultados</summary><p>Se usa la última selección de cada paciente. Una respuesta libre no cuenta como interés; errores e inválidos quedan fuera. «Leídos con respuesta» cuenta pacientes con lectura confirmada que respondieron por texto, botón o audio, aunque su respuesta no sea de interés. Las respuestas se atribuyen hasta la siguiente campaña de la misma clínica. Los botones de enlace no informan clics. Los costos son estimaciones según tarifas guardadas y entregas confirmadas, no la factura de Meta. Los datos dependen de los webhooks recibidos.</p></details>`;
     resultadosCampana.hidden = false;
     estadoCampana.textContent = `Envío #${datos.envio.id} · ${num(r.validos)} de ${num(datosCampana.resumen.validos)} enviados sin errores en el segmento.`;
     function aplicarSegmento(indice) {

@@ -18,6 +18,7 @@
     const resumen = { ...datos.resumen, validos,
       entregados: suma(c => ["entregados", "leidos"].includes(c.entrega)),
       leidos: suma(c => c.entrega === "leidos"), vistos_sin_respuesta: suma(c => c.visto_sin_respuesta),
+      leidos_con_respuesta: suma(c => c.entrega === "leidos" && !c.visto_sin_respuesta),
       sin_confirmacion: suma(c => c.entrega === "sin_confirmacion"),
       sin_seleccion: suma(c => c.resultado === "sin_seleccion"),
       tasa_interes: interacciones.interes.porcentaje,

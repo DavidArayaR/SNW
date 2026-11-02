@@ -103,8 +103,9 @@ details[open] > summary > .stats-campanas__desplegar { transform: rotate(180deg)
 .stats-campanas__leyenda button strong { font-size: 1.15rem; font-variant-numeric: tabular-nums; }
 .stats-campanas__leyenda button small { font-size: .78rem; color: var(--texto); grid-column: 1 / -1; }
 .stats-campanas__torta { cursor: pointer; }
-.stats-campanas__numeros--costos { grid-template-columns: repeat(2,minmax(0,1fr)); margin-top: 24px; }
-.stats-campanas__numeros--costos strong { font-size: clamp(1.2rem,2.3vw,1.9rem); overflow-wrap: anywhere; }
+.stats-campanas__costos-resumen { display: flex; flex-wrap: wrap; gap: 16px 32px; margin: 24px 0 8px; padding: 16px 0; border-block: 1px solid var(--borde); }
+.stats-campanas__costos-resumen dt { color: var(--texto-suave); font-size: .82rem; font-weight: 500; }
+.stats-campanas__costos-resumen dd { margin: 5px 0 0; color: var(--texto); font-size: 1rem; font-weight: 700; overflow-wrap: anywhere; }
 .stats-campanas__calculo { margin-top: 20px; color: var(--texto); font-size: .85rem; }
 .stats-campanas__calculo summary { cursor: pointer; font-weight: 600; }
 .stats-campanas__calculo p { margin: 12px 0 0; line-height: 1.7; }
