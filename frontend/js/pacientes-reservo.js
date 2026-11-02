@@ -204,7 +204,7 @@
   }
 
   async function cargarPacientes() {
-    ui.patients.innerHTML = '<tr><td colspan="6" class="reservo-vacio">Cargando pacientes…</td></tr>';
+    ui.patients.innerHTML = '<tr><td colspan="7" class="reservo-vacio">Cargando pacientes…</td></tr>';
     try {
       const data = await request(`api/reservo/pacientes?${parametrosPacientes()}`);
       pages = Math.max(1, Number(data.paginas || 1));
@@ -217,17 +217,18 @@
       ["reservoPrimera", "reservoAnterior"].forEach((id) => { $(`#${id}`).disabled = page <= 1; });
       ["reservoSiguiente", "reservoUltima"].forEach((id) => { $(`#${id}`).disabled = page >= pages; });
       if (!(data.items || []).length) {
-        ui.patients.innerHTML = '<tr><td colspan="6" class="reservo-vacio">No hay pacientes para estos filtros.</td></tr>';
+        ui.patients.innerHTML = '<tr><td colspan="7" class="reservo-vacio">No hay pacientes para estos filtros.</td></tr>';
         return;
       }
       ui.patients.innerHTML = data.items.map((item) =>
-        `<tr><td><strong>${escapar([item.paciente_nombre, item.paciente_apellido].filter(Boolean).join(" ") || "—")}</strong></td>` +
+        `<tr><td><strong>${escapar(item.paciente_nombre || "—")}</strong></td>` +
+        `<td>${escapar(item.paciente_apellido || "—")}</td>` +
         `<td>${escapar(item.paciente_telefono || "—")}</td><td>${escapar(item.clinica_nombre)}</td>` +
         `<td><code>${escapar(item.cliente_uuid_parcial)}</code></td>` +
         `<td>${escapar(item.tratamientos_nombre || "—")}</td>` +
         `<td>${escapar(formatoFecha(item.ultima_sincronizacion_en))}</td></tr>`).join("");
     } catch (error) {
-      ui.patients.innerHTML = `<tr><td colspan="6" class="reservo-vacio reservo-vacio--error">${escapar(error.message)}</td></tr>`;
+      ui.patients.innerHTML = `<tr><td colspan="7" class="reservo-vacio reservo-vacio--error">${escapar(error.message)}</td></tr>`;
     }
   }
 

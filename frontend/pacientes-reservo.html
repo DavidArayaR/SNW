@@ -14,7 +14,7 @@
   <link rel="stylesheet" href="css/admin.css?v=tokens1">
   <link rel="stylesheet" href="css/refinamiento.css?v=merge-frontend1">
   <link rel="stylesheet" href="css/estilo-nuevo.css?v=ui-unslop1">
-  <link rel="stylesheet" href="css/pacientes-reservo.css?v=modulo-reservo5">
+  <link rel="stylesheet" href="css/pacientes-reservo.css?v=modulo-reservo6">
   <script src="js/tema.js?v=scrollbar1"></script>
 </head>
 <body data-pagina="pacientes_reservo" data-seccion="administracion">
@@ -110,9 +110,9 @@
             <button class="btn btn--ghost" id="btnFiltrarReservo" type="button"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> Buscar</button>
           </div>
           <div class="reservo-tabla-wrap">
-            <table class="table reservo-tabla">
-              <thead><tr><th>Paciente</th><th>Teléfono</th><th>Clínica</th><th>UUID Reservo</th><th>Tratamientos</th><th>Última sincronización</th></tr></thead>
-              <tbody id="reservoPacientes"><tr><td colspan="6" class="reservo-vacio">Cargando pacientes…</td></tr></tbody>
+            <table class="table reservo-tabla reservo-tabla--pacientes">
+              <thead><tr><th>Nombre</th><th>Apellido paterno</th><th>Teléfono</th><th>Clínica</th><th>UUID Reservo</th><th>Tratamientos</th><th>Última sincronización</th></tr></thead>
+              <tbody id="reservoPacientes"><tr><td colspan="7" class="reservo-vacio">Cargando pacientes…</td></tr></tbody>
             </table>
           </div>
           <div class="reservo-paginacion">
@@ -133,7 +133,7 @@
     </div>
   </div>
   <script src="js/layout.js?v=reservo-nav2"></script>
-  <script src="js/pacientes-reservo.js?v=reservo-modulo3"></script>
+  <script src="js/pacientes-reservo.js?v=reservo-modulo4"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>
