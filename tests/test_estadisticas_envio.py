@@ -105,7 +105,30 @@ class EstadisticasEnvioTests(unittest.TestCase):
         self.assertIn("e.area_id=%s", sql)
         self.assertIn("e.centro_codigo=%s", sql)
         self.assertIn("reagendar_envios_agrupados", sql)
-        self.assertEqual(args, (4, 4, "VS", "%promocion%", "promocion", 25))
+        self.assertEqual(args, (4, 4, "VS", "%promocion%", "promocion", 26, 25))
+
+    def test_cantidad_por_pagina_y_ultima_pagina_respetan_el_limite(self):
+        for limite in (10, 25, 50, 100):
+            with self.subTest(limite=limite):
+                conn = MagicMock()
+                cur = conn.__enter__.return_value.cursor.return_value.__enter__.return_value
+                cur.fetchone.return_value = {"n": 103}
+                cur.fetchall.return_value = [{"id": i, "fecha_hora": None} for i in range(limite + 1)]
+                with patch.object(main, "conectar", return_value=conn), \
+                     patch.object(main, "_alcance_estadisticas"), \
+                     patch.object(main, "catalogo_centros", return_value={}):
+                    resultado = main.listar_envios_estadisticas(base="produccion", area_id=None,
+                        centro="todos", pagina=999, q="", limite=limite, sesion={"rol": "desarrollador"})
+                ultima = (103 + limite - 1) // limite
+                self.assertEqual(resultado["pagina"], ultima)
+                self.assertEqual(resultado["paginas"], ultima)
+                self.assertEqual(len(resultado["items"]), limite)
+                self.assertFalse(resultado["hay_mas"])
+                self.assertEqual(cur.execute.call_args.args[1][-2:], (limite + 1, (ultima - 1) * limite))
+        for limite in (0, 101):
+            with self.assertRaises(main.HTTPException) as error:
+                main.listar_envios_estadisticas(limite=limite, sesion={"rol": "desarrollador"})
+            self.assertEqual(error.exception.status_code, 422)
 
     def test_rutas_exigen_la_misma_autorizacion_que_estadisticas(self):
         import inspect

@@ -9585,7 +9585,10 @@ def listar_envios_estadisticas(base: str = "produccion", area_id: int | None = Q
                               centro: str = "todos", pagina: int = Query(1, ge=1),
                               tipo: str = "todos",
                               q: str = Query("", max_length=100),
+                              limite: int = 25,
                               sesion: dict = Depends(solo_admin)):
+    if not 1 <= limite <= 100:
+        raise HTTPException(422, detail="La cantidad por página debe estar entre 1 y 100.")
     _alcance_estadisticas(sesion, area_id, base)
     if centro != "todos" and centro not in catalogo_centros(incluir_inactivas=True):
         raise HTTPException(422, detail="Centro emisor inválido.")
@@ -9615,12 +9618,12 @@ def listar_envios_estadisticas(base: str = "produccion", area_id: int | None = Q
     with conectar() as conn, conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) AS n FROM envios e WHERE " + " AND ".join(condiciones), tuple(args))
         total = int((cur.fetchone() or {}).get("n") or 0)
-        paginas = max(1, math.ceil(total / 25))
+        paginas = max(1, math.ceil(total / limite))
         pagina = min(pagina, paginas)
         cur.execute("SELECT e.id, e.plantilla_nombre, e.fecha_hora, e.centro_codigo, e.base_datos, e.programado_id,"
                     " e.total_pacientes FROM envios e WHERE " + " AND ".join(condiciones)
-                    + " ORDER BY e.fecha_hora DESC, e.id DESC LIMIT 26 OFFSET %s",
-                    (*args, (pagina - 1) * 25))
+                    + " ORDER BY e.fecha_hora DESC, e.id DESC LIMIT %s OFFSET %s",
+                    (*args, limite + 1, (pagina - 1) * limite))
         filas = cur.fetchall()
     centros = catalogo_centros(incluir_inactivas=True)
     return {"items": [{**f, "fecha": f["fecha_hora"].strftime("%d-%m-%Y %H:%M") if f.get("fecha_hora") else "—",
@@ -9628,8 +9631,8 @@ def listar_envios_estadisticas(base: str = "produccion", area_id: int | None = Q
                                 "reagendamiento" if f.get("base_datos") == "paciente_reagendar" else
                                 "programado" if f.get("programado_id") else "manual",
                         "centro": "Clínica simulada" if f.get("base_datos") == "simulacion" else centros.get(f.get("centro_codigo"), "Emisor histórico")}
-                       for f in filas[:25]], "hay_mas": pagina < paginas, "pagina": pagina,
-            "paginas": paginas, "total": total}
+                       for f in filas[:limite]], "hay_mas": pagina < paginas, "pagina": pagina,
+            "paginas": paginas, "total": total, "limite": limite}
 
 
 def obtener_estadisticas_envio(envio_id: int, sesion: dict = Depends(solo_admin)):
