@@ -398,7 +398,8 @@ def obtener_sincronizacion(job_id: int) -> dict | None:
         cur.execute("SELECT id,clinica_codigo,tratamiento_uuid,estado_atendido_codigo,fecha_desde,fecha_hasta,estado,"
                     "periodos_total,periodos_completados,paginas_consultadas,citas_recibidas,"
                     "citas_atendidas,citas_tratamiento,pacientes_unicos,pacientes_nuevos,"
-                    "pacientes_actualizados,pacientes_descartados,pacientes_duplicados,errores,"
+                    "pacientes_actualizados,pacientes_descartados,pacientes_duplicados,"
+                    "pacientes_revertidos,errores,"
                     "ultimo_error,creado_por,creado_en,iniciado_en,terminado_en,heartbeat_en,tratamientos_json "
                     "FROM reservo_sincronizaciones WHERE id=%s", (job_id,))
         fila = cur.fetchone()
@@ -484,7 +485,7 @@ def _claim_job() -> dict | None:
 
 
 def _guardar_paciente_cursor(cur, codigo: str, cliente: dict,
-                             tratamientos: list[dict]) -> str:
+                             tratamientos: list[dict]) -> tuple[str, int]:
     uuid = normalizar_cliente_uuid(cliente["uuid"])
     nombre = texto_cliente(cliente, "nombre", 200)
     apellido = (texto_cliente(cliente, "apellido_paterno", 200)
@@ -522,7 +523,7 @@ def _guardar_paciente_cursor(cur, codigo: str, cliente: dict,
             " ultima_sincronizacion_en=UTC_TIMESTAMP()",
             (paciente_id, codigo, uuid, tratamiento["uuid"], tratamiento["nombre"]),
         )
-    return resultado
+    return resultado, int(paciente_id)
 
 
 def _guardar_pagina(job_id: int, codigo: str,
@@ -537,7 +538,13 @@ def _guardar_pagina(job_id: int, codigo: str,
     cambios = {campo: int(progreso[campo]) for campo in campos if campo in progreso}
     with conectar() as conn, conn.cursor() as cur:
         for cliente, tratamientos in filas:
-            resultado = _guardar_paciente_cursor(cur, codigo, cliente, tratamientos)
+            resultado, paciente_id = _guardar_paciente_cursor(cur, codigo, cliente, tratamientos)
+            cur.execute(
+                "INSERT INTO reservo_sincronizacion_pacientes (job_id,paciente_id,nuevo)"
+                " VALUES (%s,%s,%s) ON DUPLICATE KEY UPDATE"
+                " nuevo=GREATEST(nuevo,VALUES(nuevo))",
+                (job_id, paciente_id, resultado == "nuevo"),
+            )
             if resultado == "nuevo":
                 nuevos += 1
             else:
@@ -678,6 +685,118 @@ def recuperar_sincronizaciones_interrumpidas() -> int:
     return cantidad
 
 
+def deshacer_sincronizacion(job_id: int) -> dict:
+    """Quita solo pacientes creados por este trabajo y no usados por otro."""
+    from db import conectar
+
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("SELECT clinica_codigo FROM reservo_sincronizaciones WHERE id=%s", (job_id,))
+        fila = cur.fetchone()
+        if not fila:
+            raise LookupError("No se encontró la búsqueda.")
+        lock_name = f"snw-reservo-{fila['clinica_codigo']}"
+        cur.execute("SELECT GET_LOCK(%s, 0) AS adquirido", (lock_name,))
+        if not (cur.fetchone() or {}).get("adquirido"):
+            raise RuntimeError("Hay otra operación de esta clínica en curso. Inténtalo de nuevo.")
+        try:
+            return _deshacer_sincronizacion_bloqueada(job_id)
+        finally:
+            cur.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
+
+
+def _limpiar_pacientes_de_busquedas_deshachas(cur, codigo: str) -> int:
+    """Retira pacientes cuya creación y usos conocidos ya fueron deshechos."""
+    cur.execute(
+        "DELETE p FROM reservo_pacientes p"
+        " WHERE p.clinica_codigo=%s"
+        " AND EXISTS (SELECT 1 FROM reservo_sincronizaciones origen"
+        " WHERE origen.clinica_codigo=p.clinica_codigo AND origen.estado='deshecho'"
+        " AND p.primera_sincronizacion_en BETWEEN origen.iniciado_en AND origen.terminado_en)"
+        " AND NOT EXISTS (SELECT 1 FROM reservo_sincronizaciones vigente"
+        " WHERE vigente.clinica_codigo=p.clinica_codigo AND vigente.estado<>'deshecho'"
+        " AND vigente.iniciado_en<=p.ultima_sincronizacion_en"
+        " AND (vigente.terminado_en IS NULL"
+        " OR vigente.terminado_en>=p.primera_sincronizacion_en))"
+        " AND NOT EXISTS (SELECT 1 FROM reservo_sincronizacion_pacientes referencia"
+        " JOIN reservo_sincronizaciones vigente ON vigente.id=referencia.job_id"
+        " WHERE referencia.paciente_id=p.id AND vigente.estado<>'deshecho')",
+        (codigo,),
+    )
+    return cur.rowcount
+
+
+def _deshacer_sincronizacion_bloqueada(job_id: int) -> dict:
+    from db import conectar
+
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT id,clinica_codigo,estado,iniciado_en,terminado_en"
+            " FROM reservo_sincronizaciones WHERE id=%s FOR UPDATE", (job_id,),
+        )
+        job = cur.fetchone()
+        if not job:
+            raise LookupError("No se encontró la búsqueda.")
+        if job["estado"] not in ("completado", "completado_con_advertencias", "error", "deshecho"):
+            raise ValueError("Solo se puede deshacer una búsqueda terminada.")
+        cur.execute("SELECT id FROM reservo_sincronizaciones WHERE clinica_codigo=%s"
+                    " AND id<>%s AND estado IN ('pendiente','ejecutando') LIMIT 1 FOR UPDATE",
+                    (job["clinica_codigo"], job_id))
+        if cur.fetchone():
+            raise ValueError("Espera a que termine la búsqueda activa de esta clínica para deshacer.")
+        if job["estado"] == "deshecho":
+            eliminados = _limpiar_pacientes_de_busquedas_deshachas(cur, job["clinica_codigo"])
+            if eliminados:
+                cur.execute("UPDATE reservo_sincronizaciones SET"
+                            " pacientes_revertidos=pacientes_revertidos+%s WHERE id=%s",
+                            (eliminados, job_id))
+            conn.commit()
+            return {"id": job_id, "estado": "deshecho", "pacientes_eliminados": eliminados}
+        cur.execute("SELECT COUNT(*) AS total FROM reservo_sincronizacion_pacientes"
+                    " WHERE job_id=%s", (job_id,))
+        con_referencias = int((cur.fetchone() or {}).get("total") or 0) > 0
+        if con_referencias:
+            cur.execute(
+                "DELETE p FROM reservo_pacientes p"
+                " JOIN reservo_sincronizacion_pacientes actual"
+                " ON actual.paciente_id=p.id AND actual.job_id=%s AND actual.nuevo=1"
+                " LEFT JOIN reservo_sincronizacion_pacientes otra"
+                " ON otra.paciente_id=p.id AND otra.job_id<>%s"
+                " WHERE otra.paciente_id IS NULL", (job_id, job_id),
+            )
+        elif job["iniciado_en"] and job["terminado_en"]:
+            # Trabajos anteriores al registro de procedencia: las fechas solo
+            # permiten identificar pacientes creados y no sincronizados después.
+            cur.execute(
+                "SELECT COUNT(*) AS total FROM reservo_sincronizaciones"
+                " WHERE clinica_codigo=%s AND id<>%s"
+                " AND iniciado_en<=%s AND terminado_en>=%s",
+                (job["clinica_codigo"], job_id, job["terminado_en"], job["iniciado_en"]),
+            )
+            if int((cur.fetchone() or {}).get("total") or 0):
+                raise ValueError("Esta búsqueda antigua coincide en horario con otra y no puede deshacerse con seguridad.")
+            cur.execute(
+                "DELETE p FROM reservo_pacientes p"
+                " LEFT JOIN reservo_sincronizacion_pacientes otra ON otra.paciente_id=p.id"
+                " WHERE p.clinica_codigo=%s"
+                " AND p.primera_sincronizacion_en BETWEEN %s AND %s"
+                " AND p.ultima_sincronizacion_en BETWEEN %s AND %s"
+                " AND otra.paciente_id IS NULL",
+                (job["clinica_codigo"], job["iniciado_en"], job["terminado_en"],
+                 job["iniciado_en"], job["terminado_en"]),
+            )
+        else:
+            raise ValueError("Esta búsqueda antigua no tiene fechas suficientes para deshacerla con seguridad.")
+        eliminados = cur.rowcount
+        cur.execute("DELETE FROM reservo_sincronizacion_pacientes WHERE job_id=%s", (job_id,))
+        cur.execute("UPDATE reservo_sincronizaciones SET estado='deshecho',"
+                    " heartbeat_en=UTC_TIMESTAMP() WHERE id=%s", (job_id,))
+        eliminados += _limpiar_pacientes_de_busquedas_deshachas(cur, job["clinica_codigo"])
+        cur.execute("UPDATE reservo_sincronizaciones SET pacientes_revertidos=%s WHERE id=%s",
+                    (eliminados, job_id))
+        conn.commit()
+    return {"id": job_id, "estado": "deshecho", "pacientes_eliminados": eliminados}
+
+
 def configurar_tablas(cur):
     """Migración idempotente llamada por `asegurar_tabla_config`."""
     cur.execute(
@@ -722,6 +841,7 @@ def configurar_tablas(cur):
         " citas_tratamiento INT UNSIGNED NOT NULL DEFAULT 0,pacientes_unicos INT UNSIGNED NOT NULL DEFAULT 0,"
         " pacientes_nuevos INT UNSIGNED NOT NULL DEFAULT 0,pacientes_actualizados INT UNSIGNED NOT NULL DEFAULT 0,"
         " pacientes_descartados INT UNSIGNED NOT NULL DEFAULT 0,pacientes_duplicados INT UNSIGNED NOT NULL DEFAULT 0,"
+        " pacientes_revertidos INT UNSIGNED NOT NULL DEFAULT 0,"
         " errores INT UNSIGNED NOT NULL DEFAULT 0,ultimo_error VARCHAR(240) NULL,"
         " creado_por VARCHAR(150) NOT NULL,creado_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
         " iniciado_en DATETIME NULL,terminado_en DATETIME NULL,heartbeat_en DATETIME NULL,"
@@ -738,14 +858,29 @@ def configurar_tablas(cur):
     if "tratamientos_json" not in columnas:
         cur.execute("ALTER TABLE reservo_sincronizaciones ADD COLUMN tratamientos_json LONGTEXT NULL"
                     " AFTER tratamiento_uuid")
+    if "pacientes_revertidos" not in columnas:
+        cur.execute("ALTER TABLE reservo_sincronizaciones ADD COLUMN pacientes_revertidos"
+                    " INT UNSIGNED NOT NULL DEFAULT 0 AFTER pacientes_duplicados")
+    cur.execute(
+        "CREATE TABLE IF NOT EXISTS reservo_sincronizacion_pacientes ("
+        " job_id BIGINT UNSIGNED NOT NULL,paciente_id BIGINT UNSIGNED NOT NULL,"
+        " nuevo TINYINT(1) NOT NULL DEFAULT 0,"
+        " PRIMARY KEY (job_id,paciente_id),KEY idx_reservo_referencia_paciente (paciente_id),"
+        " CONSTRAINT fk_reservo_referencia_job FOREIGN KEY (job_id)"
+        " REFERENCES reservo_sincronizaciones(id) ON DELETE CASCADE,"
+        " CONSTRAINT fk_reservo_referencia_paciente FOREIGN KEY (paciente_id)"
+        " REFERENCES reservo_pacientes(id) ON DELETE CASCADE"
+        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    )
 
 
 def tablas_disponibles() -> bool:
     """Evita arrancar el worker si el esquema no quedó instalado."""
     from db import conectar
-    requeridas = ("reservo_pacientes", "reservo_paciente_tratamientos", "reservo_sincronizaciones")
+    requeridas = ("reservo_pacientes", "reservo_paciente_tratamientos",
+                 "reservo_sincronizaciones", "reservo_sincronizacion_pacientes")
     with conectar() as conn, conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) AS cantidad FROM information_schema.TABLES"
-                    " WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN (%s,%s,%s)", requeridas)
+                    " WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN (%s,%s,%s,%s)", requeridas)
         return int((cur.fetchone() or {}).get("cantidad") or 0) == len(requeridas)
 

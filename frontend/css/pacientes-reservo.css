@@ -72,8 +72,13 @@
 .reservo-estado--warning { color: var(--warn-fg); background: var(--warn-bg); }
 .reservo-estado--error { color: var(--danger-fg); background: var(--danger-bg); }
 .reservo-estado--proceso { color: var(--info-fg); background: var(--info-bg); }
+.reservo-estado--deshecho { color: var(--neutral-fg); background: var(--neutral-bg); }
 .reservo-error-detalle { margin: .35rem 0 0; color: var(--danger-fg); font-size: .85rem; max-width: 34rem; overflow-wrap: anywhere; }
 .reservo-reintentar { white-space: nowrap; }
+.reservo-acciones { display: flex; align-items: flex-start; flex-wrap: wrap; gap: .5rem; }
+.reservo-acciones > .btn { white-space: nowrap; }
+.reservo-confirmacion { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; width: 100%; padding: .75rem; border: 1px solid var(--danger-bd); border-radius: var(--radio-control); background: var(--danger-bg); }
+.reservo-confirmacion small { flex-basis: 100%; color: var(--danger-fg); }
 .reservo-vacio { padding: 1.5rem !important; color: var(--texto-suave); text-align: center; }
 .reservo-vacio--error { color: var(--danger-fg); }
 .reservo-total { color: var(--texto-suave); font-weight: 700; }

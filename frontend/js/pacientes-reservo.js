@@ -128,12 +128,26 @@
     if (estado === "completado") return "reservo-estado--ok";
     if (estado === "completado_con_advertencias") return "reservo-estado--warning";
     if (estado === "error") return "reservo-estado--error";
+    if (estado === "deshecho") return "reservo-estado--deshecho";
     return "reservo-estado--proceso";
   }
 
   function estadoTexto(estado) {
     return ({ pendiente: "Pendiente", ejecutando: "En curso", completado: "Completado",
-      completado_con_advertencias: "Con advertencias", error: "Error" })[estado] || estado || "—";
+      completado_con_advertencias: "Con advertencias", error: "Error",
+      deshecho: "Deshecho" })[estado] || estado || "—";
+  }
+
+  async function deshacer(id, boton) {
+    boton.disabled = true;
+    try {
+      const resultado = await request(`api/reservo/sincronizaciones/${id}/deshacer`, { method: "POST" });
+      mostrarAviso(`Búsqueda deshecha: ${Number(resultado.pacientes_eliminados || 0)} pacientes exclusivos quitados. Los compartidos con otras búsquedas se conservaron.`, "success");
+      await Promise.all([cargarSincronizaciones(), cargarPacientes()]);
+    } catch (error) {
+      mostrarAviso(error.message || "No se pudo deshacer la búsqueda.", "error");
+      boton.disabled = false;
+    }
   }
 
   async function reintentar(id, boton) {
@@ -163,8 +177,13 @@
       const progreso = item.estado === "completado" || item.estado === "completado_con_advertencias"
         ? 100 : Math.min(100, Math.round(100 * Number(item.periodos_completados || 0) / Math.max(1, Number(item.periodos_total || 0))));
       const pacientes = `${Number(item.pacientes_unicos || 0)} únicos · ${Number(item.pacientes_nuevos || 0)} nuevos · ${Number(item.pacientes_actualizados || 0)} actualizados`;
-      const accion = ["error", "completado_con_advertencias"].includes(item.estado)
+      const reintentarBoton = ["error", "completado_con_advertencias"].includes(item.estado)
         ? `<button type="button" class="btn btn--ghost reservo-reintentar" data-reintentar="${Number(item.id)}"><i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Reintentar</button>` : "";
+      const deshacerBoton = ["completado", "completado_con_advertencias", "error", "deshecho"].includes(item.estado)
+        ? `<button type="button" class="btn btn--danger-ghost" data-deshacer="${Number(item.id)}"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i> ${item.estado === "deshecho" ? "Completar deshacer" : "Deshacer búsqueda"}</button>` : "";
+      const accion = item.estado === "deshecho"
+        ? `<div class="reservo-acciones"><small>${Number(item.pacientes_revertidos || 0)} pacientes quitados</small>${deshacerBoton}</div>`
+        : `<div class="reservo-acciones">${reintentarBoton}${deshacerBoton}</div>`;
       return `<tr><td><strong>${escapar(item.clinica_nombre)}</strong><br><small>${periodo}</small></td>` +
         `<td>${escapar(item.tratamiento_nombre || "Tratamiento histórico")}</td>` +
         `<td><span class="reservo-estado ${estadoClase(item.estado)}">${estadoTexto(item.estado)}</span></td>` +
@@ -174,6 +193,20 @@
     }).join("");
     ui.syncs.querySelectorAll("[data-reintentar]").forEach((boton) =>
       boton.addEventListener("click", () => reintentar(boton.dataset.reintentar, boton)));
+    ui.syncs.querySelectorAll("[data-deshacer]").forEach((boton) =>
+      boton.addEventListener("click", () => {
+        const acciones = boton.closest(".reservo-acciones");
+        if (acciones.querySelector(".reservo-confirmacion")) return;
+        const confirmacion = document.createElement("div");
+        confirmacion.className = "reservo-confirmacion";
+        confirmacion.innerHTML = '<small>Se quitarán los pacientes exclusivos de esta búsqueda.</small>' +
+          '<button type="button" class="btn btn--danger" data-confirmar>Confirmar</button>' +
+          '<button type="button" class="btn btn--ghost" data-volver>Volver</button>';
+        acciones.append(confirmacion);
+        confirmacion.querySelector("[data-confirmar]").addEventListener("click", () =>
+          deshacer(boton.dataset.deshacer, confirmacion.querySelector("[data-confirmar]")));
+        confirmacion.querySelector("[data-volver]").addEventListener("click", () => confirmacion.remove());
+      }));
     return filas.some((item) => ["pendiente", "ejecutando"].includes(item.estado));
   }
 

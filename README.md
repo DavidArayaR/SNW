@@ -33,8 +33,21 @@ errores de una página intermedia dejan el trabajo como error, conservan los
 resultados ya guardados y permiten reintentar el rango completo de forma
 idempotente.
 
+En el historial, **Deshacer búsqueda** permite quitar los pacientes nuevos de
+una consulta terminada. Los pacientes presentes en otra consulta vigente se
+conservan; si también se deshace esa consulta, se retiran al completar la
+última. Las consultas nuevas registran la relación exacta entre
+trabajo y paciente; para consultas anteriores a ese registro, SNW solo quita
+pacientes creados y no sincronizados después dentro de la ventana de ejecución.
+Si esa ventana coincide con otra búsqueda o faltan fechas, no permite deshacerla
+para evitar borrar datos ajenos. Las filas ya marcadas «Deshecho» ofrecen
+**Completar deshacer** para limpiar pacientes compartidos que quedaron de la
+versión anterior. El historial conserva la marca y el número de pacientes
+retirados.
+
 La persistencia aislada usa `reservo_pacientes`,
-`reservo_paciente_tratamientos` y `reservo_sincronizaciones`. La identidad es
+`reservo_paciente_tratamientos`, `reservo_sincronizaciones` y
+`reservo_sincronizacion_pacientes`. La identidad es
 `(clinica_codigo, cliente_uuid)`, sin deduplicación por nombre o teléfono. Se
 extraen `cliente.nombre`, `cliente.apellido_paterno` y `cliente.telefono_1`; el
 UUID de cliente y los UUID de tratamientos se conservan internamente solo para

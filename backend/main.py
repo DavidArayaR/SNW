@@ -5507,6 +5507,23 @@ def reintentar_sincronizacion_reservo(job_id: int, sesion: dict = Depends(solo_a
     return job
 
 
+def deshacer_sincronizacion_reservo(job_id: int, sesion: dict = Depends(solo_admin)):
+    try:
+        resultado = reservo_pacientes.deshacer_sincronizacion(job_id)
+    except LookupError as exc:
+        raise HTTPException(404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, detail=str(exc)) from exc
+    except Exception as exc:
+        log_error("deshacer búsqueda Reservo", exc, solo_tipo=True)
+        raise HTTPException(503, detail="No se pudo deshacer la búsqueda.") from exc
+    auditoria_registrar(sesion.get("usuario", ""), "reservo_sincronizacion_deshecha",
+                        str(job_id), f"{resultado['pacientes_eliminados']} pacientes exclusivos eliminados")
+    return resultado
+
+
 def listar_pacientes_reservo(
         clinica: str | None = Query(None, max_length=8),
         tratamiento: str | None = Query(None, max_length=200),

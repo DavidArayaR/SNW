@@ -8,6 +8,7 @@ RUTAS = (
     ("/api/reservo/sincronizaciones", "POST", "iniciar_sincronizacion_reservo", 202),
     ("/api/reservo/sincronizaciones/{job_id}", "GET", "obtener_sincronizacion_reservo", None),
     ("/api/reservo/sincronizaciones/{job_id}/reintentar", "POST", "reintentar_sincronizacion_reservo", 202),
+    ("/api/reservo/sincronizaciones/{job_id}/deshacer", "POST", "deshacer_sincronizacion_reservo", None),
     ("/api/reservo/pacientes", "GET", "listar_pacientes_reservo", None),
 )
 

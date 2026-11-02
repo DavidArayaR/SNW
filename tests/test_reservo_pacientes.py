@@ -240,7 +240,8 @@ class TestPersistenciaAtomica(unittest.TestCase):
                    "nombre": "Paciente prueba", "telefono": "+56912345678"}
         with patch.object(db, "conectar", return_value=conexion):
             nuevos, actualizados = rp._guardar_pagina(
-                9, "SMPT", tratamiento, [(cliente, "Tratamiento de prueba")], {
+                9, "SMPT", [(cliente, [{"uuid": tratamiento,
+                                          "nombre": "Tratamiento de prueba"}])], {
                     "paginas_consultadas": 1, "citas_recibidas": 2,
                     "citas_atendidas": 1, "citas_tratamiento": 1,
                     "pacientes_unicos": 1, "pacientes_descartados": 0,
@@ -252,6 +253,9 @@ class TestPersistenciaAtomica(unittest.TestCase):
         parametros_insert = next(params for sql, params in conexion.cur.consultas
                                  if sql.startswith("INSERT INTO reservo_pacientes"))
         self.assertEqual(parametros_insert[1], "aabbccdd-1111-2222-3333-001122334455")
+        parametros_referencia = next(params for sql, params in conexion.cur.consultas
+                                     if sql.startswith("INSERT INTO reservo_sincronizacion_pacientes"))
+        self.assertEqual(parametros_referencia, (9, 44, True))
         self.assertTrue(any("pacientes_nuevos=pacientes_nuevos+%s" in sql
                             for sql, _ in conexion.cur.consultas))
 
@@ -262,7 +266,8 @@ class TestPersistenciaAtomica(unittest.TestCase):
         cliente = {"uuid": "cliente-44", "nombre": "Paciente prueba"}
         with patch.object(db, "conectar", return_value=conexion):
             with self.assertRaisesRegex(RuntimeError, "Fallo sintético"):
-                rp._guardar_pagina(9, "SMPT", "tratamiento-1", [(cliente, None)], {
+                rp._guardar_pagina(9, "SMPT", [(cliente, [{"uuid": "tratamiento-1",
+                                                           "nombre": "Tratamiento de prueba"}])], {
                     "paginas_consultadas": 1, "citas_recibidas": 1,
                     "citas_atendidas": 1, "citas_tratamiento": 1,
                     "pacientes_unicos": 1, "pacientes_descartados": 0,
@@ -327,7 +332,7 @@ class TestFalloParcial(unittest.TestCase):
         self.assertNotIn("56912345678", error)
         self.assertNotIn("secreto", error)
         self.assertEqual(len(paginas_guardadas), 1)
-        self.assertEqual(paginas_guardadas[0][3][0][0]["uuid"], "cliente-sintetico")
+        self.assertEqual(paginas_guardadas[0][2][0][0]["uuid"], "cliente-sintetico")
 
 
 if __name__ == "__main__":
