@@ -25,6 +25,7 @@
   let pages = 1;
   let pollTimer = null;
   let searchTimer = null;
+  let confirmacionActiva = null;
   let treatmentsByUuid = new Map();
   let loadingTreatments = false;
 
@@ -138,11 +139,72 @@
       deshecho: "Deshecho" })[estado] || estado || "—";
   }
 
+  function ubicarConfirmacion() {
+    if (!confirmacionActiva) return;
+    const { panel, boton } = confirmacionActiva;
+    if (!boton.isConnected) { cerrarConfirmacion(false); return; }
+    const origen = boton.getBoundingClientRect();
+    const ancho = panel.getBoundingClientRect().width;
+    const alto = panel.getBoundingClientRect().height;
+    const margen = 12;
+    const arriba = origen.bottom + alto + margen > window.innerHeight && origen.top > alto + margen;
+    const posicionVertical = arriba ? origen.top - alto - 8 : origen.bottom + 8;
+    panel.style.left = `${Math.max(margen, Math.min(origen.left, window.innerWidth - ancho - margen))}px`;
+    panel.style.top = `${Math.max(margen, Math.min(posicionVertical, window.innerHeight - alto - margen))}px`;
+  }
+
+  function cerrarConfirmacion(restaurarFoco = true) {
+    if (!confirmacionActiva) return;
+    const { panel, boton } = confirmacionActiva;
+    document.removeEventListener("pointerdown", cerrarConfirmacionExterior);
+    document.removeEventListener("keydown", cerrarConfirmacionEscape);
+    window.removeEventListener("scroll", ubicarConfirmacion, true);
+    window.removeEventListener("resize", ubicarConfirmacion);
+    panel.remove();
+    confirmacionActiva = null;
+    if (restaurarFoco && boton.isConnected) boton.focus();
+  }
+
+  function cerrarConfirmacionExterior(evento) {
+    if (confirmacionActiva && !confirmacionActiva.panel.contains(evento.target) &&
+        !confirmacionActiva.boton.contains(evento.target)) cerrarConfirmacion(false);
+  }
+
+  function cerrarConfirmacionEscape(evento) {
+    if (evento.key === "Escape") cerrarConfirmacion();
+  }
+
+  function mostrarConfirmacion(boton) {
+    if (confirmacionActiva?.boton === boton) { cerrarConfirmacion(); return; }
+    cerrarConfirmacion(false);
+    const panel = document.createElement("div");
+    panel.className = "reservo-confirmacion";
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-labelledby", "reservoConfirmarTitulo");
+    panel.innerHTML = '<strong id="reservoConfirmarTitulo">¿Deshacer esta búsqueda?</strong>' +
+      '<p>Se quitarán los pacientes exclusivos de las búsquedas deshechas. Los de búsquedas vigentes se conservarán.</p>' +
+      '<div class="reservo-confirmacion__acciones">' +
+      '<button type="button" class="btn btn--ghost" data-volver>Volver</button>' +
+      '<button type="button" class="btn btn--danger" data-confirmar>Confirmar deshacer</button></div>';
+    document.body.append(panel);
+    confirmacionActiva = { panel, boton };
+    ubicarConfirmacion();
+    document.addEventListener("pointerdown", cerrarConfirmacionExterior);
+    document.addEventListener("keydown", cerrarConfirmacionEscape);
+    window.addEventListener("scroll", ubicarConfirmacion, true);
+    window.addEventListener("resize", ubicarConfirmacion);
+    panel.querySelector("[data-volver]").addEventListener("click", () => cerrarConfirmacion());
+    const confirmar = panel.querySelector("[data-confirmar]");
+    confirmar.addEventListener("click", () => deshacer(boton.dataset.deshacer, confirmar));
+    confirmar.focus();
+  }
+
   async function deshacer(id, boton) {
     boton.disabled = true;
     try {
       const resultado = await request(`api/reservo/sincronizaciones/${id}/deshacer`, { method: "POST" });
       mostrarAviso(`Búsqueda deshecha: ${Number(resultado.pacientes_eliminados || 0)} pacientes exclusivos quitados. Los compartidos con otras búsquedas se conservaron.`, "success");
+      cerrarConfirmacion(false);
       await Promise.all([cargarSincronizaciones(), cargarPacientes()]);
     } catch (error) {
       mostrarAviso(error.message || "No se pudo deshacer la búsqueda.", "error");
@@ -166,6 +228,7 @@
 
   async function cargarSincronizaciones() {
     const data = await request("api/reservo/sincronizaciones?limite=50");
+    cerrarConfirmacion(false);
     const filas = data.items || [];
     if (!filas.length) {
       ui.syncs.innerHTML = '<tr><td colspan="6" class="reservo-vacio">Todavía no hay sincronizaciones.</td></tr>';
@@ -194,19 +257,7 @@
     ui.syncs.querySelectorAll("[data-reintentar]").forEach((boton) =>
       boton.addEventListener("click", () => reintentar(boton.dataset.reintentar, boton)));
     ui.syncs.querySelectorAll("[data-deshacer]").forEach((boton) =>
-      boton.addEventListener("click", () => {
-        const acciones = boton.closest(".reservo-acciones");
-        if (acciones.querySelector(".reservo-confirmacion")) return;
-        const confirmacion = document.createElement("div");
-        confirmacion.className = "reservo-confirmacion";
-        confirmacion.innerHTML = '<small>Se quitarán los pacientes exclusivos de esta búsqueda.</small>' +
-          '<button type="button" class="btn btn--danger" data-confirmar>Confirmar</button>' +
-          '<button type="button" class="btn btn--ghost" data-volver>Volver</button>';
-        acciones.append(confirmacion);
-        confirmacion.querySelector("[data-confirmar]").addEventListener("click", () =>
-          deshacer(boton.dataset.deshacer, confirmacion.querySelector("[data-confirmar]")));
-        confirmacion.querySelector("[data-volver]").addEventListener("click", () => confirmacion.remove());
-      }));
+      boton.addEventListener("click", () => mostrarConfirmacion(boton)));
     return filas.some((item) => ["pendiente", "ejecutando"].includes(item.estado));
   }
 
