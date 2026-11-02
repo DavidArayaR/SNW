@@ -49,3 +49,40 @@ assert.equal(filtrar(sinTarifa).costo.importe, null);
 assert.equal(filtrar(sinTarifa, "todos", "desinteres").costo.importe, 200);
 assert.equal(datos.resumen.validos, 100); // No mutar el resultado original al filtrar.
 console.log("Segmentación, comparaciones, porcentajes y costos: OK");
+
+// La cifra principal conserva el envío completo aunque se explore un segmento.
+const fs = require("node:fs");
+const vm = require("node:vm");
+const codigo = fs.readFileSync(require("node:path").join(__dirname, "../frontend/js/estadisticas.js"), "utf8");
+const controles = {
+  "#filtroEntregaCampana": { value: "todos" },
+  "#filtroResultadoCampana": { value: "todos" },
+  "#comparacionCampana": { value: "general" },
+  "#resumenFiltrosCampana": {},
+  "#filtrosCampana": { classList: { toggle() {} } },
+  "#detalleCampana": {},
+  "#campanaDetalleResultados": { innerHTML: "", querySelectorAll: () => [], querySelector: () => ({ addEventListener() {} }) },
+};
+const contexto = {
+  window, document: { querySelectorAll: () => [] },
+  $: selector => controles[selector], num: String, escaparHtml: String,
+  fmtMoneda: importe => String(importe),
+  resultadosCampana: { innerHTML: "" }, estadoCampana: {},
+  datosCampana: { ...datos, envio: { id: 1, plantilla_nombre: "Prueba", centro: "Clínica", inicio: "2026-11-02" } },
+};
+vm.createContext(contexto);
+vm.runInContext(codigo.slice(codigo.indexOf("function pintarCampana()"), codigo.indexOf('selectorCampana.addEventListener("toggle"')), contexto);
+contexto.pintarCampana();
+const resumenCompleto = contexto.resultadosCampana.innerHTML;
+assert.equal((resumenCompleto.match(/<strong>/g) || []).length, 3);
+assert.ok(resumenCompleto.includes("10 de 100 pacientes mostraron interés"));
+assert.ok(resumenCompleto.includes("<strong>25</strong>"));
+assert.ok(!resumenCompleto.includes("stats-campanas__torta"));
+controles["#filtroResultadoCampana"].value = "interes";
+contexto.pintarCampana();
+assert.equal(contexto.resultadosCampana.innerHTML, resumenCompleto);
+assert.ok(controles["#campanaDetalleResultados"].innerHTML.includes("Se muestran 10 de 100 pacientes"));
+contexto.datosCampana = { ...contexto.datosCampana, segmentos: [], botones: [] };
+contexto.pintarCampana();
+assert.ok(contexto.resultadosCampana.innerHTML.includes("<strong>—</strong>"));
+console.log("Resumen estable de tres cifras y detalle filtrado independiente: OK");

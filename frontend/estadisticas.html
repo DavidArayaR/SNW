@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="css/componentes.css?v=historial-carga1">
   <link rel="stylesheet" href="css/layout.css?v=navcolor1">
   <link rel="stylesheet" href="css/admin.css?v=tokens1">
-  <link rel="stylesheet" href="css/estadisticas.css?v=indicadores-envio1">
+  <link rel="stylesheet" href="css/estadisticas.css?v=resumen-claro1">
   <link rel="stylesheet" href="css/calendario.css?v=base1">
   <link rel="stylesheet" href="css/refinamiento.css?v=merge-frontend1">
   <link rel="stylesheet" href="css/estilo-nuevo.css?v=1">
@@ -245,8 +245,13 @@
               </div>
             </details>
             <div id="campanaSimulacionAviso" class="stats-campanas__simulacion" role="status" hidden><i class="fa-solid fa-flask" aria-hidden="true"></i><div><strong>SIMULACIÓN · datos ficticios</strong><p>350 destinatarios: 300 enviados sin errores, 40 errores y 10 inválidos. No se contactó a pacientes ni se enviaron mensajes a WhatsApp. Los costos usan un precio ficticio de $60 CLP por entrega y no se suman a la facturación real.</p></div></div>
+            <p id="campanaEstado" class="field__hint stats__respuestas-hint" role="status">Selecciona un envío para ver sus resultados.</p>
+            <div id="campanaResultados" class="stats-campanas__resultados" hidden></div>
+            <details id="detalleCampana" class="stats-campanas__detalle" hidden>
+              <summary>Ver respuestas, filtros y costos <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></summary>
+              <p class="field__hint stats-campanas__detalle-ayuda">Los filtros de aquí solo cambian este detalle. Las tres cifras de arriba siempre muestran el envío completo.</p>
             <details class="stats-campanas__filtros" id="filtrosCampana" hidden>
-              <summary><i class="fa-solid fa-sliders" aria-hidden="true"></i><strong>Filtrar resultados</strong><span id="resumenFiltrosCampana">Todos los enviados sin errores</span><i class="fa-solid fa-chevron-down stats-campanas__desplegar" aria-hidden="true"></i></summary>
+              <summary><i class="fa-solid fa-sliders" aria-hidden="true"></i><strong>Filtrar el detalle</strong><span id="resumenFiltrosCampana">Todos los enviados sin errores</span><i class="fa-solid fa-chevron-down stats-campanas__desplegar" aria-hidden="true"></i></summary>
               <div class="stats-campanas__controles">
               <fieldset class="stats-campanas__grupo"><legend>Entrega</legend><input type="hidden" id="filtroEntregaCampana" value="todos"><div class="stats-campanas__chips">
                 <button type="button" data-filtro-campana="entrega" data-valor="todos" aria-pressed="true">Todas</button><button type="button" data-filtro-campana="entrega" data-valor="leidos" aria-pressed="false">Leídos</button><button type="button" data-filtro-campana="entrega" data-valor="entregados" aria-pressed="false">Entregados</button><button type="button" data-filtro-campana="entrega" data-valor="sin_confirmacion" aria-pressed="false">Sin confirmación</button>
@@ -258,8 +263,8 @@
               <button id="limpiarFiltrosCampana" type="button" class="btn btn--ghost">Quitar filtros del envío</button>
               </div>
             </details>
-            <p id="campanaEstado" class="field__hint stats__respuestas-hint" role="status">Selecciona un envío para ver sus resultados.</p>
-            <div id="campanaResultados" class="stats-campanas__resultados" hidden></div>
+              <div id="campanaDetalleResultados" class="stats-campanas__resultados"></div>
+            </details>
           </section>
         </div>
           </div>
@@ -274,7 +279,7 @@
   <script src="js/layout.js?v=permisos-acciones1"></script>
   <script src="js/pass-toggle.js"></script>
   <script src="js/estadisticas-campana.js?v=indicadores-envio1"></script>
-  <script src="js/estadisticas.js?v=indicadores-envio1"></script>
+  <script src="js/estadisticas.js?v=resumen-claro1"></script>
   <script>
     if (window.snwCargarEstadisticas) window.snwCargarEstadisticas();
   </script>

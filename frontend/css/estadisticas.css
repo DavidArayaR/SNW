@@ -10,6 +10,14 @@
 .stats-campanas__paginas label { margin: 0; white-space: nowrap; }
 @media (max-width: 540px) { .stats-campanas__paginas { justify-content: center; flex-wrap: wrap; gap: 6px; } }
 .stats-campanas__resultados { padding: 18px; }
+.stats-campanas__lectura { margin: 16px 0 0; font-size: .88rem; line-height: 1.6; color: var(--texto-suave); }
+.stats-campanas__detalle { margin: 0 18px 18px; border: 1px solid var(--borde); border-radius: 12px; background: var(--panel); }
+.stats-campanas__detalle[hidden] { display: none; }
+.stats-campanas__detalle > summary { display: flex; justify-content: space-between; gap: 12px; padding: 18px; list-style: none; font-weight: 700; cursor: pointer; color: var(--texto); }
+.stats-campanas__detalle > summary::-webkit-details-marker { display: none; }
+.stats-campanas__detalle > summary:focus-visible { outline: 2px solid var(--verde); outline-offset: -4px; }
+.stats-campanas__detalle[open] > summary > i { transform: rotate(180deg); }
+.stats-campanas__detalle-ayuda { margin: 0 18px; }
 .stats-campanas__numeros { display: grid; grid-template-columns: repeat(auto-fit,minmax(155px,1fr)); gap: 12px; margin: 18px 0; }
 .stats-campanas__numero { padding: 16px; border: 1px solid var(--borde); border-radius: 12px; background: var(--panel-2); }
 .stats-campanas__numero span { display: block; font-size: .85rem; color: var(--texto-suave); }
@@ -88,7 +96,7 @@ details[open] > summary > .stats-campanas__desplegar { transform: rotate(180deg)
 .stats-campanas__numeros--clave { grid-template-columns: 1.2fr 1fr 1fr; gap: 16px; margin: 24px 0; }
 .stats-campanas__numeros--clave .stats-campanas__numero { padding: 22px; }
 .stats-campanas__numeros--clave .stats-campanas__numero > span { color: var(--texto); font-size: .88rem; }
-.stats-campanas__numeros--clave .stats-campanas__numero > span:last-child { margin-top: 8px; font-size: .78rem; }
+.stats-campanas__numeros--clave .stats-campanas__numero > span:last-child { margin-top: 12px; font-size: .85rem; line-height: 1.6; color: var(--texto-suave); }
 .stats-campanas__numeros--clave .stats-campanas__numero strong { font-size: clamp(2.2rem,3vw,3.1rem); line-height: 1.15; margin-top: 12px; }
 .stats-campanas__numero--principal { background: var(--brand-tint); border-color: var(--brand-tint-bd); border-top: 3px solid var(--verde); }
 .stats-campanas__numero--principal strong { color: var(--brand-tint-fg); }
