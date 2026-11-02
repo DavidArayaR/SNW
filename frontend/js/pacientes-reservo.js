@@ -242,10 +242,10 @@
       const pacientes = `${Number(item.pacientes_unicos || 0)} únicos · ${Number(item.pacientes_nuevos || 0)} nuevos · ${Number(item.pacientes_actualizados || 0)} actualizados`;
       const reintentarBoton = ["error", "completado_con_advertencias"].includes(item.estado)
         ? `<button type="button" class="btn btn--ghost reservo-reintentar" data-reintentar="${Number(item.id)}"><i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Reintentar</button>` : "";
-      const deshacerBoton = ["completado", "completado_con_advertencias", "error", "deshecho"].includes(item.estado)
-        ? `<button type="button" class="btn btn--danger-ghost" data-deshacer="${Number(item.id)}"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i> ${item.estado === "deshecho" ? "Completar deshacer" : "Deshacer búsqueda"}</button>` : "";
+      const deshacerBoton = ["completado", "completado_con_advertencias", "error"].includes(item.estado)
+        ? `<button type="button" class="btn btn--danger-ghost" data-deshacer="${Number(item.id)}"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Deshacer búsqueda</button>` : "";
       const accion = item.estado === "deshecho"
-        ? `<div class="reservo-acciones"><small>${Number(item.pacientes_revertidos || 0)} pacientes quitados</small>${deshacerBoton}</div>`
+        ? `<small>${Number(item.pacientes_revertidos || 0)} pacientes quitados</small>`
         : `<div class="reservo-acciones">${reintentarBoton}${deshacerBoton}</div>`;
       return `<tr><td><strong>${escapar(item.clinica_nombre)}</strong><br><small>${periodo}</small></td>` +
         `<td>${escapar(item.tratamiento_nombre || "Tratamiento histórico")}</td>` +

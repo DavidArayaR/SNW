@@ -40,10 +40,8 @@ conservan; si también se deshace esa consulta, se retiran al completar la
 trabajo y paciente; para consultas anteriores a ese registro, SNW solo quita
 pacientes creados y no sincronizados después dentro de la ventana de ejecución.
 Si esa ventana coincide con otra búsqueda o faltan fechas, no permite deshacerla
-para evitar borrar datos ajenos. Las filas ya marcadas «Deshecho» ofrecen
-**Completar deshacer** para limpiar pacientes compartidos que quedaron de la
-versión anterior. El historial conserva la marca y el número de pacientes
-retirados.
+para evitar borrar datos ajenos. El historial conserva la marca «Deshecho» y el
+número de pacientes retirados.
 
 La persistencia aislada usa `reservo_pacientes`,
 `reservo_paciente_tratamientos`, `reservo_sincronizaciones` y
