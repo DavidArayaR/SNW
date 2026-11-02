@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="css/componentes.css?v=historial-carga1">
   <link rel="stylesheet" href="css/layout.css?v=navcolor1">
   <link rel="stylesheet" href="css/admin.css?v=tokens1">
-  <link rel="stylesheet" href="css/estadisticas.css?v=resumen-claro1">
+  <link rel="stylesheet" href="css/estadisticas.css?v=seleccion-multiple1">
   <link rel="stylesheet" href="css/calendario.css?v=base1">
   <link rel="stylesheet" href="css/refinamiento.css?v=merge-frontend1">
   <link rel="stylesheet" href="css/estilo-nuevo.css?v=1">
@@ -216,7 +216,7 @@
             <details id="selectorCampanaEst" class="stats-campanas__explorador" open>
               <summary id="resumenSelectorCampana">
                 <span class="stats-campanas__seleccion-icono"><i class="fa-solid fa-paper-plane" aria-hidden="true"></i></span>
-                <span class="stats-campanas__seleccion-texto"><strong id="campanaSeleccionTitulo">Elige un envío</strong><span id="campanaSeleccionMeta">Selecciona el tipo y pulsa una fila de la tabla.</span></span>
+                <span class="stats-campanas__seleccion-texto"><strong id="campanaSeleccionTitulo">Elige uno o varios envíos</strong><span id="campanaSeleccionMeta">Marca los envíos y pulsa «Ver resultados seleccionados».</span></span>
                 <span class="stats-campanas__seleccion-accion" id="campanaSeleccionAccion">Ver envíos</span><i class="fa-solid fa-chevron-down stats-campanas__desplegar" aria-hidden="true"></i>
               </summary>
               <div class="stats-campanas__explorador-contenido">
@@ -230,7 +230,7 @@
                 <div class="stats-campanas__busqueda"><label for="buscarCampanaEst" class="stats-campanas__buscar"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><input id="buscarCampanaEst" type="search" maxlength="100" placeholder="Buscar por plantilla o ID" aria-label="Buscar envío por plantilla o ID"></label><button id="btnBuscarCampanaEst" type="button" class="btn btn--ghost">Buscar</button><span id="campanasCantidad" aria-live="polite"></span></div>
                 <div class="stats-campanas__tabla-wrap" role="region" aria-label="Envíos disponibles para seleccionar" tabindex="0">
                   <table class="stats-campanas__tabla" id="tablaCampanasEst" aria-busy="false">
-                    <thead><tr><th scope="col">Envío</th><th scope="col">Clínica</th><th scope="col">Fecha</th><th scope="col">Destinatarios</th><th scope="col"><span class="visually-hidden">Seleccionar</span></th></tr></thead>
+                    <thead><tr><th scope="col">Envío</th><th scope="col">Clínica</th><th scope="col">Fecha</th><th scope="col">Destinatarios</th><th scope="col">Seleccionar</th></tr></thead>
                     <tbody id="campanasTablaBody"><tr><td colspan="5" class="stats-campanas__tabla-estado">Cargando envíos…</td></tr></tbody>
                   </table>
                 </div>
@@ -241,7 +241,8 @@
               <button id="campanasSiguiente" type="button" class="btn btn--ghost" disabled aria-label="Página siguiente"><i class="fa-solid fa-chevron-right" aria-hidden="true"></i></button>
               <button id="campanasUltima" type="button" class="btn btn--ghost" disabled aria-label="Última página"><i class="fa-solid fa-angles-right" aria-hidden="true"></i></button>
             </div>
-                <p class="field__hint stats-campanas__alcance">La tabla respeta el entorno, área y clínica de arriba. Cada envío se analiza completo.</p>
+                <div class="stats-campanas__seleccion-multiple"><span id="campanasSeleccionCantidad" role="status">0 seleccionados</span><button id="verCampanasSeleccionadas" type="button" class="btn btn--primary" disabled>Ver resultados seleccionados</button><button id="limpiarSeleccionCampanas" type="button" class="btn btn--ghost" disabled>Quitar selección</button></div>
+                <p class="field__hint stats-campanas__alcance">La selección se conserva al cambiar de página, tipo o búsqueda. Cambiar entorno, área o clínica inicia una selección nueva.</p>
               </div>
             </details>
             <div id="campanaSimulacionAviso" class="stats-campanas__simulacion" role="status" hidden><i class="fa-solid fa-flask" aria-hidden="true"></i><div><strong>SIMULACIÓN · datos ficticios</strong><p>350 destinatarios: 300 enviados sin errores, 40 errores y 10 inválidos. No se contactó a pacientes ni se enviaron mensajes a WhatsApp. Los costos usan un precio ficticio de $60 CLP por entrega y no se suman a la facturación real.</p></div></div>
@@ -278,8 +279,8 @@
 
   <script src="js/layout.js?v=permisos-acciones1"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/estadisticas-campana.js?v=indicadores-envio1"></script>
-  <script src="js/estadisticas.js?v=resumen-claro1"></script>
+  <script src="js/estadisticas-campana.js?v=seleccion-multiple1"></script>
+  <script src="js/estadisticas.js?v=seleccion-multiple1"></script>
   <script>
     if (window.snwCargarEstadisticas) window.snwCargarEstadisticas();
   </script>

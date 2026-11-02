@@ -68,5 +68,26 @@
     if (resto) series.push({ titulo: "Fuera de esta comparación", color: "#87978f", cantidad: resto, filtro: {} });
     return series;
   }
-  window.SNWEstadisticasCampana = { filtrar, comparar };
+  function combinar(envios) {
+    const unicos = [...new Map(envios.map(d => [String(d.envio.id), d])).values()];
+    if (!unicos.length) throw new Error("Selecciona al menos un envío.");
+    if (unicos.length === 1) return unicos[0];
+    if (new Set(unicos.map(d => !!d.simulacion)).size > 1)
+      throw new Error("Selecciona envíos reales o simulados por separado.");
+    const mismaMoneda = new Set(unicos.map(d => d.costo.moneda)).size === 1;
+    const resumen = {};
+    for (const clave of ["total", "intentados", "errores", "invalidos", "sin_intento"])
+      resumen[clave] = unicos.reduce((n, d) => n + Number(d.resumen[clave] || 0), 0);
+    return {
+      envios: unicos.map(d => d.envio), simulacion: !!unicos[0].simulacion,
+      envio: { id: null, plantilla_nombre: `${unicos.length} envíos seleccionados`,
+        centro: [...new Set(unicos.map(d => d.envio.centro))].join(" · "),
+        inicio: "Varias fechas", numero_emisor: "Varios envíos", plantilla_clave: "Varias plantillas" },
+      resumen, costo: { moneda: mismaMoneda ? unicos[0].costo.moneda : null },
+      monedas_distintas: !mismaMoneda,
+      segmentos: unicos.flatMap(d => d.segmentos.map(c => ({ ...c, costo: mismaMoneda ? c.costo : null }))),
+      botones: unicos.flatMap(d => d.botones),
+    };
+  }
+  window.SNWEstadisticasCampana = { filtrar, comparar, combinar };
 })();

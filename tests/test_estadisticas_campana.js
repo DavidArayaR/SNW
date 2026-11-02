@@ -86,3 +86,30 @@ contexto.datosCampana = { ...contexto.datosCampana, segmentos: [], botones: [] }
 contexto.pintarCampana();
 assert.ok(contexto.resultadosCampana.innerHTML.includes("<strong>—</strong>"));
 console.log("Resumen estable de tres cifras y detalle filtrado independiente: OK");
+
+const { combinar } = window.SNWEstadisticasCampana;
+const primero = { ...structuredClone(datos), envio: { id: 1, centro: "Clínica A" } };
+const segundo = { ...structuredClone(datos), envio: { id: 2, centro: "Clínica B" },
+  segmentos: [{ cantidad: 10, resultado: "interes", entrega: "leidos", visto_sin_respuesta: false, costo: 100, facturables: 10 }],
+  botones: [{ boton: "Me interesa", accion: "interes", resultado: "interes", entrega: "read", clics: 12, pacientes: 10 }],
+};
+const conjunto = combinar([primero, segundo, primero]);
+const suma = filtrar(conjunto);
+assert.equal(conjunto.envios.length, 2); // Un ID repetido no duplica sus resultados.
+assert.equal(suma.resumen.validos, 110);
+assert.equal(suma.resumen.tasa_interes, 18.2); // 20/110, nunca promedio de 10 % y 100 %.
+assert.equal(suma.resumen.leidos_con_respuesta, 35);
+assert.equal(suma.costo.importe, 950);
+assert.equal(suma.botones.find(b => b.accion === "interes").pacientes, 20);
+assert.equal(filtrar(conjunto, "todos", "interes").resumen.validos, 20);
+assert.equal(filtrar(combinar([primero, { ...segundo, costo: { moneda: "USD" } }])).costo.importe, null);
+assert.throws(() => combinar([primero, { ...segundo, simulacion: true }]), /por separado/);
+assert.throws(() => combinar([]), /Selecciona/);
+assert.equal(combinar([primero]), primero); // Los enlaces de un único envío siguen funcionando.
+contexto.datosCampana = conjunto;
+contexto.pintarCampana();
+assert.ok(contexto.resultadosCampana.innerHTML.includes("20 de 110 registros de pacientes"));
+assert.ok(contexto.resultadosCampana.innerHTML.includes("si participó en varios, cuenta en cada uno"));
+assert.ok(!contexto.resultadosCampana.innerHTML.includes("Envío #0"));
+assert.ok(controles["#campanaDetalleResultados"].innerHTML.includes("Envíos incluidos"));
+console.log("Selección múltiple: ponderación, deduplicación de IDs, monedas y separación de simulaciones: OK");
