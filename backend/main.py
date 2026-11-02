@@ -87,9 +87,17 @@ from telefono import normalizar_telefono
 import servicio_areas
 import paciente_reagendar
 import reagendar_batches
+import reservo_pacientes
+from reservo_catalogo import (
+    RESERVO_CLINICAS, CLAVES_TOKEN as CLAVES_TOKEN_RESERVO,
+    clave_estado_atendido as clave_estado_atendido_reservo,
+    clave_estado_verificado as clave_estado_verificado_reservo,
+    clave_token as clave_token_reservo,
+)
 from servicio_areas import CSV_MAX_BYTES
 from routes import auth, configuracion, estadisticas as rutas_estadisticas
 from routes import notificaciones, pacientes, plantillas, usuarios, areas
+from routes import pacientes_reservo as rutas_pacientes_reservo
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -5219,6 +5227,28 @@ _CONFIG_SECCIONES = [
         ],
     },
 ]
+
+for _codigo_reservo, _nombre_reservo in RESERVO_CLINICAS.items():
+    _CONFIG_SECCIONES.append({
+        "id": f"reservo_{_codigo_reservo.lower()}",
+        "titulo": f"Reservo · {_nombre_reservo}",
+        "icono": "fa-hospital",
+        "campos": [
+            {"clave": clave_token_reservo(_codigo_reservo),
+             "etiqueta": "Token API de Reservo", "tipo": "password",
+             "ayuda": "Se almacena en la tabla configuracion. Deja el campo vacío para conservar el valor guardado."},
+            {"clave": clave_estado_atendido_reservo(_codigo_reservo),
+             "etiqueta": "Código de estado «Atendido»", "tipo": "text",
+             "ayuda": "Pega el estado.codigo de una cita que hayas confirmado como atendida en Reservo. No uses códigos de pago ni supongas un valor."},
+            {"clave": clave_estado_verificado_reservo(_codigo_reservo),
+             "etiqueta": "Confirmo que verifiqué el código en una cita real atendida", "tipo": "bool",
+             "ayuda": "La sincronización queda bloqueada hasta guardar el código y activar esta confirmación."},
+            {"tipo": "accion_reservo", "codigo": _codigo_reservo,
+             "etiqueta": "Probar conexión", "icono": "fa-plug",
+             "ayuda": "Consulta una página de la fecha indicada (o de hoy si se deja vacía). No guarda pacientes; muestra estados y nombres de tratamientos observados."},
+        ],
+    })
+
 _CONFIG_ENUM = {
     "entorno": ("desarrollo", "produccion"),
     "metodo_envio": ("simulado", "api_oficial"),
@@ -5284,6 +5314,10 @@ def _config_valores(cfg: dict | None = None) -> dict:
                       if "clave" in c)
     valores = {c: ("" if c in ("wa_token", "reagendar_api_token_hash") or cfg.get(c) is None
                    else str(cfg.get(c))) for c in claves}
+    # Los tokens Reservo se consultan solo desde el backend: ni GET ni PUT los
+    # devuelven al navegador. El campo password siempre se vuelve a vaciar.
+    for clave in CLAVES_TOKEN_RESERVO:
+        valores[clave] = ""
     for codigo in catalogo_centros(cfg, incluir_desactivadas=True):
         for tipo in _RESPUESTAS_SISTEMA:
             valores[_clave_respuesta_sistema(codigo, tipo)] = _respuesta_sistema(tipo, codigo, cfg)
@@ -5322,6 +5356,217 @@ def obtener_configuracion_completa(sesion: dict = Depends(solo_dev)):
             "wa_token_configurado": bool(cfg.get("wa_token")),
             "groq_api_key_configurada": bool(config_get("groq_api_key")),
             "supresion": resumen_supresion()}
+
+
+class ReservoSincronizarIn(BaseModel):
+    clinica_codigo: str = Field(..., min_length=2, max_length=8)
+    fecha_desde: str = Field(..., min_length=10, max_length=10)
+    fecha_hasta: str = Field(..., min_length=10, max_length=10)
+    tratamientos: list[dict]
+
+
+class ReservoBuscarTratamientosIn(BaseModel):
+    clinica_codigo: str = Field(..., min_length=2, max_length=8)
+    fecha_desde: str = Field(..., min_length=10, max_length=10)
+    fecha_hasta: str = Field(..., min_length=10, max_length=10)
+
+
+class ReservoProbarIn(BaseModel):
+    fecha: str | None = Field(None, min_length=10, max_length=10)
+
+
+def _fecha_reservo(valor: str) -> datetime.date:
+    try:
+        fecha = datetime.date.fromisoformat(valor)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(422, detail="Usa fechas válidas con formato AAAA-MM-DD.") from exc
+    if fecha.isoformat() != valor:
+        raise HTTPException(422, detail="Usa fechas válidas con formato AAAA-MM-DD.")
+    return fecha
+
+
+def _config_reservo_publica(cfg: dict | None = None) -> dict:
+    valores = cfg if cfg is not None else config_all()
+    return {"clinicas": [{
+        "codigo": codigo, "nombre": nombre,
+        "estado_atendido_codigo": str(valores.get(clave_estado_atendido_reservo(codigo)) or ""),
+        "estado_atendido_verificado": str(valores.get(clave_estado_verificado_reservo(codigo)) or "").lower()
+            in ("true", "1", "si", "sí"),
+        "token_disponible": bool(str(valores.get(clave_token_reservo(codigo)) or "").strip()),
+    } for codigo, nombre in RESERVO_CLINICAS.items()]}
+
+
+def listar_configuracion_reservo(sesion: dict = Depends(solo_admin)):
+    return _config_reservo_publica(config_all(refresh=True))
+
+
+def probar_conexion_reservo(codigo: str, body: ReservoProbarIn | None = None,
+                            sesion: dict = Depends(solo_admin)):
+    if codigo not in RESERVO_CLINICAS:
+        raise HTTPException(404, detail="Clínica Reservo no reconocida.")
+    config = config_all(refresh=True)
+    token = str(config.get(clave_token_reservo(codigo)) or "").strip()
+    if not token:
+        raise HTTPException(409, detail="Configura el token API de esta clínica en Configuración → Integraciones.")
+    from zoneinfo import ZoneInfo
+    hoy = datetime.datetime.now(ZoneInfo("America/Santiago")).date()
+    fecha_muestra = _fecha_reservo(body.fecha) if body and body.fecha else hoy
+    cliente = None
+    try:
+        cliente = reservo_pacientes.ClienteReservo(token)
+        resultado = cliente.probar_conexion(fecha_muestra)
+        auditoria_registrar(sesion.get("usuario", ""), "reservo_conexion_probada", codigo,
+                            f"HTTP accesible; fecha {fecha_muestra}; muestra de {resultado['citas_en_muestra']} citas; sin guardar pacientes")
+        return resultado
+    except reservo_pacientes.ReservoError as exc:
+        log_error(f"probar conexión Reservo {codigo}: {exc.categoria}")
+        auditoria_registrar(sesion.get("usuario", ""), "reservo_conexion_fallida", codigo, exc.categoria)
+        raise HTTPException(502, detail=exc.categoria) from exc
+    except Exception as exc:
+        log_error(f"probar conexión Reservo {codigo}", exc, solo_tipo=True)
+        raise HTTPException(502, detail="No se pudo completar la prueba de conexión con Reservo.") from exc
+    finally:
+        if cliente:
+            cliente.close()
+
+
+def listar_tratamientos_reservo(body: ReservoBuscarTratamientosIn,
+                                sesion: dict = Depends(solo_admin)):
+    if body.clinica_codigo not in RESERVO_CLINICAS:
+        raise HTTPException(404, detail="Clínica Reservo no reconocida.")
+    desde, hasta = _fecha_reservo(body.fecha_desde), _fecha_reservo(body.fecha_hasta)
+    if desde > hasta:
+        raise HTTPException(422, detail="La fecha inicial no puede ser posterior a la fecha final.")
+    config = config_all(refresh=True)
+    token = str(config.get(clave_token_reservo(body.clinica_codigo)) or "").strip()
+    if not token:
+        raise HTTPException(409, detail="Configura el token API de esta clínica en Configuración → Integraciones.")
+    cliente = None
+    try:
+        cliente = reservo_pacientes.ClienteReservo(token)
+        tratamientos = cliente.listar_tratamientos(desde, hasta)
+        auditoria_registrar(sesion.get("usuario", ""), "reservo_tratamientos_consultados",
+                            body.clinica_codigo,
+                            f"Rango {desde} a {hasta}; {len(tratamientos)} nombres de tratamiento; sin guardar pacientes")
+        return {"items": tratamientos}
+    except reservo_pacientes.ReservoError as exc:
+        log_error(f"listar tratamientos Reservo {body.clinica_codigo}: {exc.categoria}")
+        raise HTTPException(502, detail=exc.categoria) from exc
+    except Exception as exc:
+        log_error("listar tratamientos Reservo", exc, solo_tipo=True)
+        raise HTTPException(502, detail="No se pudieron consultar los tratamientos de Reservo.") from exc
+    finally:
+        if cliente:
+            cliente.close()
+
+
+def iniciar_sincronizacion_reservo(body: ReservoSincronizarIn,
+                                    sesion: dict = Depends(solo_admin)):
+    desde, hasta = _fecha_reservo(body.fecha_desde), _fecha_reservo(body.fecha_hasta)
+    config = config_all(refresh=True)
+    try:
+        job = reservo_pacientes.crear_sincronizacion(
+            body.clinica_codigo, desde, hasta, sesion.get("usuario", ""), config,
+            [item for item in body.tratamientos])
+    except ValueError as exc:
+        raise HTTPException(422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, detail=str(exc)) from exc
+    except Exception as exc:
+        log_error("crear sincronización Reservo", exc, solo_tipo=True)
+        raise HTTPException(503, detail="No se pudo iniciar la sincronización.") from exc
+    auditoria_registrar(sesion.get("usuario", ""), "reservo_sincronizacion_iniciada",
+                        str(job["id"]), f"Clínica {job['clinica_codigo']}; rango {desde} a {hasta}")
+    return job
+
+
+def listar_sincronizaciones_reservo(limite: int = Query(50, ge=1, le=100),
+                                     sesion: dict = Depends(solo_admin)):
+    return {"items": reservo_pacientes.listar_sincronizaciones(limite)}
+
+
+def obtener_sincronizacion_reservo(job_id: int, sesion: dict = Depends(solo_admin)):
+    job = reservo_pacientes.obtener_sincronizacion(job_id)
+    if not job:
+        raise HTTPException(404, detail="No se encontró la sincronización.")
+    return job
+
+
+def reintentar_sincronizacion_reservo(job_id: int, sesion: dict = Depends(solo_admin)):
+    try:
+        job = reservo_pacientes.reintentar_sincronizacion(
+            job_id, sesion.get("usuario", ""), config_all(refresh=True))
+    except LookupError as exc:
+        raise HTTPException(404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, detail=str(exc)) from exc
+    auditoria_registrar(sesion.get("usuario", ""), "reservo_sincronizacion_reintentada",
+                        str(job_id), f"Nueva sincronización #{job['id']}")
+    return job
+
+
+def listar_pacientes_reservo(
+        clinica: str | None = Query(None, max_length=8),
+        tratamiento: str | None = Query(None, max_length=200),
+        desde: str | None = Query(None, min_length=10, max_length=10),
+        hasta: str | None = Query(None, min_length=10, max_length=10),
+        q: str | None = Query(None, max_length=100),
+        pagina: int = Query(1, ge=1), por_pagina: int = Query(25, ge=10, le=100),
+        sesion: dict = Depends(solo_admin)):
+    if clinica and clinica not in RESERVO_CLINICAS:
+        raise HTTPException(422, detail="Selecciona una clínica Reservo válida.")
+    if tratamiento:
+        tratamiento = " ".join(tratamiento.split()).strip()
+    if desde:
+        desde = _fecha_reservo(desde).isoformat()
+    if hasta:
+        hasta = _fecha_reservo(hasta).isoformat()
+    if desde and hasta and desde > hasta:
+        raise HTTPException(422, detail="La fecha inicial no puede ser posterior a la fecha final.")
+    condiciones, parametros = [], []
+    if clinica:
+        condiciones.append("p.clinica_codigo=%s")
+        parametros.append(clinica)
+    if tratamiento:
+        condiciones.append("EXISTS (SELECT 1 FROM reservo_paciente_tratamientos t"
+                           " WHERE t.paciente_id=p.id AND t.tratamiento_nombre LIKE %s)")
+        parametros.append(f"%{tratamiento}%")
+    if desde:
+        condiciones.append("DATE(p.ultima_sincronizacion_en)>=%s")
+        parametros.append(desde)
+    if hasta:
+        condiciones.append("DATE(p.ultima_sincronizacion_en)<=%s")
+        parametros.append(hasta)
+    if q:
+        patron = f"%{q.strip()}%"
+        condiciones.append("(p.paciente_nombre LIKE %s OR p.paciente_apellido LIKE %s"
+                           " OR p.cliente_uuid LIKE %s OR p.paciente_telefono LIKE %s)")
+        parametros.extend([patron] * 4)
+    where = " WHERE " + " AND ".join(condiciones) if condiciones else ""
+    offset = (pagina - 1) * por_pagina
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) AS total FROM reservo_pacientes p" + where, parametros)
+        total = int((cur.fetchone() or {}).get("total") or 0)
+        cur.execute(
+            "SELECT p.id,p.clinica_codigo,p.paciente_nombre,p.paciente_apellido,"
+            "p.paciente_telefono,CONCAT('…',RIGHT(p.cliente_uuid,8)) AS cliente_uuid_parcial,"
+            "p.primera_sincronizacion_en,p.ultima_sincronizacion_en,"
+            "(SELECT GROUP_CONCAT(DISTINCT t.tratamiento_nombre ORDER BY t.tratamiento_nombre SEPARATOR ', ')"
+            " FROM reservo_paciente_tratamientos t WHERE t.paciente_id=p.id) AS tratamientos_nombre"
+            " FROM reservo_pacientes p" + where +
+            " ORDER BY p.ultima_sincronizacion_en DESC,p.id DESC LIMIT %s OFFSET %s",
+            (*parametros, por_pagina, offset),
+        )
+        filas = list(cur.fetchall())
+    for fila in filas:
+        fila["clinica_nombre"] = RESERVO_CLINICAS.get(fila["clinica_codigo"], fila["clinica_codigo"])
+        for campo in ("primera_sincronizacion_en", "ultima_sincronizacion_en"):
+            if fila.get(campo):
+                fila[campo] = fila[campo].isoformat(sep=" ")
+    return {"items": filas, "pagina": pagina, "por_pagina": por_pagina,
+            "total": total, "paginas": (total + por_pagina - 1) // por_pagina}
 
 
 def listar_centros_whatsapp(incluir_inactivas: bool = Query(False),
@@ -5471,6 +5716,8 @@ def eliminar_clinica_whatsapp(codigo: str, sesion: dict = Depends(solo_dev)):
 def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends(solo_dev)):
     cambios: dict[str, str] = {}
     catalogo = catalogo_centros(incluir_desactivadas=True)
+    claves_estado_reservo = {clave_estado_atendido_reservo(c) for c in RESERVO_CLINICAS}
+    claves_verificado_reservo = {clave_estado_verificado_reservo(c) for c in RESERVO_CLINICAS}
     claves_clinicas = {c["clave"] for codigo, nombre in catalogo.items()
                        for c in _seccion_centro(codigo, nombre)["campos"] if "clave" in c}
     claves_respuestas = {_clave_respuesta_sistema(codigo, tipo): tipo
@@ -5484,6 +5731,16 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
                 and clave not in claves_respuestas:
             raise HTTPException(400, detail=f"Clave de configuración desconocida: «{clave}»")
         v = "" if valor is None else str(valor).strip()
+        if clave in CLAVES_TOKEN_RESERVO:
+            # Un campo password vacío nunca reemplaza un token válido.
+            if not v:
+                continue
+            if len(v) > 4096 or any(ord(c) < 33 or ord(c) == 127 for c in v):
+                raise HTTPException(422, detail="El token API de Reservo tiene un formato no válido.")
+        if clave in claves_estado_reservo and (len(v) > 80 or any(ord(c) < 32 for c in v)):
+            raise HTTPException(422, detail="El código de estado de Reservo no es válido.")
+        if clave in claves_verificado_reservo:
+            v = "true" if v.lower() in ("true", "1", "on", "si", "sí") else "false"
         if clave in claves_respuestas:
             tipo = claves_respuestas[clave]
             if not v or len(v) > 1000 or any(ord(c) < 32 and c not in "\n\t" for c in v):
@@ -5590,6 +5847,25 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
         if clave.endswith("_CRM_PHONE_NUMBER") and v and not re.fullmatch(r"\+?[1-9]\d{7,14}", v):
             raise HTTPException(422, detail="El número CRM debe tener código de país y entre 8 y 15 dígitos.")
         cambios[clave] = v
+
+    configuracion_anterior = config_all(refresh=True)
+    for codigo_reservo in RESERVO_CLINICAS:
+        clave_token_clinica = clave_token_reservo(codigo_reservo)
+        clave_estado = clave_estado_atendido_reservo(codigo_reservo)
+        clave_verificado = clave_estado_verificado_reservo(codigo_reservo)
+        if clave_token_clinica in cambios:
+            # Un token nuevo puede apuntar a otra cuenta Reservo; exige validar
+            # de nuevo el estado «Atendido» antes de extraer pacientes.
+            cambios[clave_verificado] = "false"
+        estado_nuevo = cambios.get(clave_estado, str(configuracion_anterior.get(clave_estado) or "")).strip()
+        estado_anterior = str(configuracion_anterior.get(clave_estado) or "").strip()
+        if clave_estado in cambios and estado_nuevo != estado_anterior and clave_verificado not in cambios:
+            # Cambiar el código invalida la confirmación anterior.
+            cambios[clave_verificado] = "false"
+        verificado = cambios.get(clave_verificado,
+                                 str(configuracion_anterior.get(clave_verificado) or "false"))
+        if verificado == "true" and not estado_nuevo:
+            raise HTTPException(422, detail="Guarda el código de estado antes de confirmarlo.")
 
     if any(clave.endswith(("_WSP_ACCESS_TOKEN", "_WSP_VERIFY_TOKEN")) for clave in cambios):
         estado = {**config_all(refresh=True), **cambios}
@@ -8676,6 +8952,16 @@ async def _arrancar_scheduler_programados() -> None:
     asyncio.create_task(_loop_programados())
     asyncio.create_task(_loop_supresion())
     asyncio.create_task(_loop_reagendar())
+    try:
+        esquema_reservo_listo = await asyncio.to_thread(reservo_pacientes.tablas_disponibles)
+    except Exception as exc:
+        log_error("verificar esquema de pacientes Reservo", exc, solo_tipo=True)
+    else:
+        if esquema_reservo_listo:
+            asyncio.create_task(reservo_pacientes.loop_trabajos())
+        else:
+            print("[RESERVO] Worker inactivo: falta instalar el esquema de Pacientes Reservo.",
+                  flush=True)
 
 def listar_historial(q: str | None = Query(None), estado: str | None = Query(None),
                      ambiente: str = Query("produccion"),
@@ -11002,7 +11288,7 @@ def aplazar_lote_reagendar(lote_id: int, body: AplazarReagendarIn,
 for registrar in (
     auth.registrar, usuarios.registrar, pacientes.registrar, plantillas.registrar,
     configuracion.registrar, notificaciones.registrar, rutas_estadisticas.registrar,
-    areas.registrar,
+    areas.registrar, rutas_pacientes_reservo.registrar,
 ):
     app.include_router(registrar(globals()))
 

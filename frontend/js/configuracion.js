@@ -40,6 +40,7 @@ let derivados = [];        // campos calculados (ej. URL del webhook)
 function tabDeSeccion(id) {
   if (id.startsWith("centro_")) return "clinicas";
   if (id.startsWith("respuesta_")) return "respuestas";
+  if (id.startsWith("reservo_")) return "integraciones";
   if (id === "correo") return "correo";
   if (id === "whatsapp") return "whatsapp";
   if (id === "ia" || id === "call_center" || id === "reagendar") return "integraciones";
@@ -781,6 +782,47 @@ function render(secciones) {
     }
 
     for (const c of s.campos) {
+      if (c.tipo === "accion_reservo") {
+        const accion = document.createElement("div");
+        accion.className = "field config-campo config-reservo-test";
+        accion.innerHTML = `<label class="config-reservo-test__fecha">Fecha de una cita atendida conocida (opcional)` +
+          `<input type="date" data-reservo-fecha aria-label="Fecha de una cita atendida conocida"></label>` +
+          `<button type="button" class="btn btn--ghost" data-probar-reservo="${escaparAtributo(c.codigo)}">` +
+          `<i class="fa-solid ${escaparAtributo(c.icono || "fa-plug")}" aria-hidden="true"></i> ${escaparHtml(c.etiqueta)}</button>` +
+          `<p class="field__hint">${escaparHtml(c.ayuda || "")}</p>` +
+          `<p class="config-reservo-test__resultado" data-reservo-resultado aria-live="polite"></p>`;
+        grid.appendChild(accion);
+        const boton = accion.querySelector("[data-probar-reservo]");
+        boton.addEventListener("click", async () => {
+          const salida = accion.querySelector("[data-reservo-resultado]");
+          boton.disabled = true;
+          salida.textContent = "Consultando una página de hoy…";
+          salida.className = "config-reservo-test__resultado";
+          try {
+            const respuesta = await fetch(`api/reservo/clinicas/${encodeURIComponent(boton.dataset.probarReservo)}/probar`, {
+              method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
+              body: JSON.stringify({ fecha: accion.querySelector("[data-reservo-fecha]").value || null }),
+              cache: "no-store",
+            });
+            const datos = await respuesta.json().catch(() => ({}));
+            if (respuesta.status === 401) { window.snwSesionExpirada(); return; }
+            if (!respuesta.ok) throw new Error(datos.detail || "No se pudo contactar a Reservo.");
+            const estados = (datos.estados_observados || []).map((estado) =>
+              `${estado.descripcion || "Sin descripción"} · código ${estado.codigo} · ${estado.cantidad}`);
+            const tratamientos = (datos.tratamientos_observados || []).join(", ");
+            salida.textContent = `Conexión correcta. Fecha consultada: ${accion.querySelector("[data-reservo-fecha]").value || "hoy"}. Muestra de ${datos.citas_en_muestra || 0} cita(s)` +
+              (estados.length ? `: ${estados.join("; ")}` : ". No se recibieron estados en esta página.") +
+              (tratamientos ? ` Tratamientos: ${tratamientos}.` : "");
+            salida.classList.add("config-reservo-test__resultado--ok");
+          } catch (error) {
+            salida.textContent = error.message || "No se pudo contactar a Reservo.";
+            salida.classList.add("config-reservo-test__resultado--error");
+          } finally {
+            boton.disabled = false;
+          }
+        });
+        continue;
+      }
       // Campo calculado de solo lectura (ej. URL completa del webhook).
       if (c.tipo === "derivado") {
         const wrap = document.createElement("div");
@@ -856,7 +898,9 @@ function render(secciones) {
       } else {
         const t = c.tipo === "number" ? "number" : c.tipo === "password" ? "password" : "text";
         const placeholder = c.clave === "wa_token" && tokenGlobalConfigurado
-          ? ' placeholder="Token guardado · escribe uno nuevo para reemplazarlo"' : "";
+          ? ' placeholder="Token guardado · escribe uno nuevo para reemplazarlo"'
+          : c.clave?.endsWith("_RESERVO_API_TOKEN")
+            ? ' placeholder="Pega el token; vacío conserva el que ya esté guardado"' : "";
         control = `<input type="${t}" id="${id}" data-clave="${c.clave}" value="${escaparAtributo(val)}"${placeholder} autocomplete="off" spellcheck="false">`;
       }
 

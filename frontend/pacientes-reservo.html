@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SNW · Pacientes Reservo</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
+  <link rel="stylesheet" href="css/tema.css?v=tokens1">
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="css/componentes.css?v=paginador-cinco1">
+  <link rel="stylesheet" href="css/pacientes.css?v=reagendar-paginacion1">
+  <link rel="stylesheet" href="css/layout.css?v=navcolor1">
+  <link rel="stylesheet" href="css/admin.css?v=tokens1">
+  <link rel="stylesheet" href="css/refinamiento.css?v=merge-frontend1">
+  <link rel="stylesheet" href="css/estilo-nuevo.css?v=ui-unslop1">
+  <link rel="stylesheet" href="css/pacientes-reservo.css?v=modulo-reservo5">
+  <script src="js/tema.js?v=scrollbar1"></script>
+</head>
+<body data-pagina="pacientes_reservo" data-seccion="administracion">
+  <div class="app-shell">
+    <nav class="sidebar" id="sidebar"></nav>
+    <div class="sidebar-backdrop"></div>
+    <div class="app-main">
+      <header class="app-topbar">
+        <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="Abrir menú">
+          <i class="fa-solid fa-bars"></i>
+        </button>
+        <span class="app-topbar__titulo">Pacientes Reservo</span>
+      </header>
+      <main class="layout layout--ancho reservo-layout">
+        <section class="panel reservo-intro">
+          <div>
+            <h1>Pacientes Reservo</h1>
+            <p>Consulta citas atendidas por clínica y tratamiento. Los pacientes se guardan aquí, separados por clínica; esta consulta no inicia envíos de WhatsApp.</p>
+          </div>
+          <a class="btn btn--ghost" href="configuracion.html" aria-label="Configurar conexión de Reservo">
+            <i class="fa-solid fa-gear" aria-hidden="true"></i> Configurar integración
+          </a>
+        </section>
+
+        <section class="panel reservo-panel">
+          <div class="panel__head">
+            <h2><i class="fa-solid fa-cloud-arrow-down" aria-hidden="true"></i> Sincronizar desde Reservo</h2>
+            <button class="btn btn--ghost" id="btnActualizarReservo" type="button"><i class="fa-solid fa-rotate" aria-hidden="true"></i> Actualizar</button>
+          </div>
+          <p class="field__hint">Elige un período, revisa los tratamientos encontrados y selecciona los que deseas importar.</p>
+          <form id="formSincronizarReservo" class="reservo-form">
+            <div class="reservo-form__paso"><span>1</span><strong>Clínica y período</strong></div>
+            <div class="field">
+              <label for="reservoClinica">Clínica</label>
+              <select id="reservoClinica" required></select>
+            </div>
+            <div class="field">
+              <label for="reservoDesde">Fecha inicial</label>
+              <input id="reservoDesde" type="date" required>
+            </div>
+            <div class="field">
+              <label for="reservoHasta">Fecha final</label>
+              <input id="reservoHasta" type="date" required>
+            </div>
+            <div class="reservo-form__accion">
+              <button class="btn btn--ghost" id="btnBuscarTratamientos" type="button">
+                <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> Consultar tratamientos
+              </button>
+            </div>
+            <div class="field reservo-form__tratamientos">
+              <div class="reservo-form__paso"><span>2</span><strong>Tratamientos disponibles</strong><small id="reservoSeleccionados">0 seleccionados</small></div>
+              <div class="reservo-tratamientos__herramientas" id="reservoHerramientas" hidden>
+                <input id="reservoBuscarTratamiento" type="search" placeholder="Buscar tratamiento" aria-label="Buscar tratamiento">
+                <button class="btn btn--ghost" id="reservoSeleccionarTodos" type="button">Seleccionar todos</button>
+                <button class="btn btn--ghost" id="reservoLimpiarSeleccion" type="button">Limpiar selección</button>
+              </div>
+              <div id="reservoTratamientos" class="reservo-tratamientos" aria-live="polite">
+                Selecciona la clínica y el rango, luego consulta los tratamientos.
+              </div>
+              <small class="field__hint">Se importarán únicamente citas con estado «Atendido» verificado.</small>
+            </div>
+            <div class="reservo-form__accion reservo-form__accion--final">
+              <div class="reservo-form__paso"><span>3</span><strong>Iniciar consulta</strong></div>
+              <button class="btn btn--primary" id="btnIniciarReservo" type="submit">
+                <i class="fa-solid fa-play" aria-hidden="true"></i> Iniciar consulta
+              </button>
+            </div>
+          </form>
+          <div id="reservoAviso" class="reservo-aviso" role="status" aria-live="polite"></div>
+        </section>
+
+        <section class="panel reservo-panel">
+          <div class="panel__head"><h2><i class="fa-solid fa-list-check" aria-hidden="true"></i> Historial de sincronizaciones</h2></div>
+          <div class="reservo-tabla-wrap">
+            <table class="table reservo-tabla">
+              <thead><tr><th>Clínica y período</th><th>Tratamientos</th><th>Estado</th><th>Progreso</th><th>Pacientes</th><th>Detalle</th></tr></thead>
+              <tbody id="reservoSincronizaciones"><tr><td colspan="6" class="reservo-vacio">Cargando historial…</td></tr></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel reservo-panel">
+          <div class="panel__head">
+            <h2><i class="fa-solid fa-user-group" aria-hidden="true"></i> Pacientes obtenidos</h2>
+            <span class="reservo-total" id="reservoTotal">0 pacientes</span>
+          </div>
+          <div class="reservo-filtros">
+            <label class="field"><span>Clínica</span><select id="filtroReservoClinica"><option value="">Todas</option></select></label>
+            <label class="field"><span>Tratamiento</span><input id="filtroReservoTratamiento" type="search" maxlength="200" placeholder="Nombre del tratamiento"></label>
+            <label class="field"><span>Sincronizados desde</span><input id="filtroReservoDesde" type="date"></label>
+            <label class="field"><span>Hasta</span><input id="filtroReservoHasta" type="date"></label>
+            <label class="field reservo-filtros__buscar"><span>Nombre, UUID o teléfono</span><input id="filtroReservoBuscar" type="search" maxlength="100" placeholder="Buscar…"></label>
+            <button class="btn btn--ghost" id="btnFiltrarReservo" type="button"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> Buscar</button>
+          </div>
+          <div class="reservo-tabla-wrap">
+            <table class="table reservo-tabla">
+              <thead><tr><th>Paciente</th><th>Teléfono</th><th>Clínica</th><th>UUID Reservo</th><th>Tratamientos</th><th>Última sincronización</th></tr></thead>
+              <tbody id="reservoPacientes"><tr><td colspan="6" class="reservo-vacio">Cargando pacientes…</td></tr></tbody>
+            </table>
+          </div>
+          <div class="reservo-paginacion">
+            <label for="reservoPorPagina">Filas</label>
+            <select id="reservoPorPagina"><option>10</option><option selected>25</option><option>50</option><option>100</option></select>
+            <span id="reservoPaginaInfo" class="pag-info"></span>
+            <div class="pag-grupo">
+              <button type="button" class="btn btn--ghost" id="reservoPrimera" aria-label="Primera página"><i class="fa-solid fa-angles-left" aria-hidden="true"></i></button>
+              <button type="button" class="btn btn--ghost" id="reservoAnterior" aria-label="Página anterior"><i class="fa-solid fa-angle-left" aria-hidden="true"></i></button>
+              <input type="number" id="reservoPaginaIr" min="1" value="1" aria-label="Ir a la página">
+              <button type="button" class="btn btn--ghost" id="reservoSiguiente" aria-label="Página siguiente"><i class="fa-solid fa-angle-right" aria-hidden="true"></i></button>
+              <button type="button" class="btn btn--ghost" id="reservoUltima" aria-label="Última página"><i class="fa-solid fa-angles-right" aria-hidden="true"></i></button>
+            </div>
+          </div>
+        </section>
+        <div id="toast" class="toast" role="status" aria-live="polite"></div>
+      </main>
+    </div>
+  </div>
+  <script src="js/layout.js?v=reservo-nav2"></script>
+  <script src="js/pacientes-reservo.js?v=reservo-modulo3"></script>
+  <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
+</body>
+</html>

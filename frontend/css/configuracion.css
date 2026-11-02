@@ -464,3 +464,8 @@ body[data-pagina="configuracion"] #secciones {
   background: var(--panel);
   color: var(--btn-primary-bg);
 }
+.config-reservo-test { grid-column: 1 / -1; padding-top: .25rem; }
+.config-reservo-test__fecha { display: grid; gap: .35rem; max-width: 22rem; margin-bottom: .75rem; }
+.config-reservo-test__resultado { min-height: 1.4rem; margin: .55rem 0 0; color: var(--texto-suave); overflow-wrap: anywhere; }
+.config-reservo-test__resultado--ok { color: var(--ok-fg); }
+.config-reservo-test__resultado--error { color: var(--danger-fg); }

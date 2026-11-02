@@ -18,6 +18,10 @@ from dotenv import load_dotenv
 from legacy_config_secrets import leer_credencial_antigua
 from telefono import normalizar_telefono
 from whatsapp_channels import CENTROS, claves_centro
+from reservo_catalogo import (
+    RESERVO_CLINICAS, clave_estado_atendido, clave_estado_verificado,
+    clave_token,
+)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
@@ -398,6 +402,13 @@ for _centro in CENTROS:
     CONFIG_DEFAULTS[f"{_centro}_WSP_APP_ID"] = ""
     CONFIG_DEFAULTS[f"{_centro}_CRM_PHONE_NUMBER"] = ""
 
+# Credenciales y filtros de la integración directa a Reservo. Los tres códigos
+# son propios de este módulo y no se convierten automáticamente en emisores WA.
+for _codigo_reservo in RESERVO_CLINICAS:
+    CONFIG_DEFAULTS[clave_token(_codigo_reservo)] = ""
+    CONFIG_DEFAULTS[clave_estado_atendido(_codigo_reservo)] = ""
+    CONFIG_DEFAULTS[clave_estado_verificado(_codigo_reservo)] = "false"
+
 _CLAVES_CENTRO_ANTIGUAS = {
     "SMPT_WSP_PHONE_NUMER": "SMPT_WSP_PHONE_NUMBER",
     "SMPT_WSP_PHONE_NUMER_ID": "SMPT_WSP_PHONE_NUMBER_ID",
@@ -506,6 +517,10 @@ def asegurar_tabla_config() -> None:
             cur.execute("DELETE FROM configuracion WHERE clave = 'wa_business_account_id'")
             _migrar_claves_centro(cur)
             _migrar_ids_globales_smpt(cur)
+            # Tablas aisladas para consultas de solo lectura a Reservo. No se
+            # enlazan con campañas ni bases de pacientes de WhatsApp.
+            from reservo_pacientes import configurar_tablas as _configurar_tablas_reservo
+            _configurar_tablas_reservo(cur)
             cur.execute(
                 "CREATE TABLE IF NOT EXISTS reagendar_lotes ("
                 " id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,"

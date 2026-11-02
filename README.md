@@ -1,5 +1,88 @@
 # SNW — Sistema de Notificaciones WhatsApp
 
+## Pacientes desde la API pública de Reservo
+
+El módulo administrativo **Pacientes Reservo** consulta citas de las clínicas
+`SMPT`, `MS` y `MVYS` desde `GET /citas/` en la [documentación oficial de
+Reservo](https://reservo.cl/APIpublica/v2/documentacion/#/citas/citas_list).
+`MVYS` es un identificador propio de este módulo y se mantiene separado de los
+códigos de emisores de WhatsApp, incluso si el nombre visible coincide con otra
+clínica en SNW.
+
+Los tokens API se editan en **Configuración → Integraciones → Reservo** y se
+guardan en la tabla `configuracion`; no se agregaron variables a `.env`. Son
+independientes de Meta. SNW no devuelve el token al navegador, ni lo registra en
+logs. La tabla actual no cifra secretos en reposo: aquí se reutiliza el mecanismo
+vigente de configuración, por lo que el control de acceso a MySQL sigue siendo
+necesario. El módulo no llama a WhatsApp, CRM o reagendamientos.
+
+En **Pacientes Reservo**, el usuario elige clínica y fechas y pulsa
+**Consultar tratamientos**. SNW obtiene las páginas de citas de ese rango y
+devuelve solo los nombres de los tratamientos y sus UUID internos, sin datos de
+pacientes. Se pueden elegir varios; la pantalla muestra los nombres, no los
+UUID. La sincronización guarda solo citas cuyo `estado.codigo` coincide con el
+código «Atendido» verificado para esa clínica y cuyos tratamientos fueron
+seleccionados. **Probar conexión** muestra estados y nombres observados; el
+administrador confirma el código real en Configuración → Integraciones. Una
+cita confirmada o pagada no se interpreta como atendida.
+
+Las consultas usan `fecha_inicial`, `fecha_final` y `pagina`; el rango se parte
+en tramos inclusivos de hasta 31 días y se sigue `pagina_siguiente` hasta
+completar `resultados`. La conexión usa `Authorization: Token <token>`. Los
+errores de una página intermedia dejan el trabajo como error, conservan los
+resultados ya guardados y permiten reintentar el rango completo de forma
+idempotente.
+
+La persistencia aislada usa `reservo_pacientes`,
+`reservo_paciente_tratamientos` y `reservo_sincronizaciones`. La identidad es
+`(clinica_codigo, cliente_uuid)`, sin deduplicación por nombre o teléfono. Se
+extraen `cliente.nombre`, `cliente.apellido_paterno` y `cliente.telefono_1`; el
+UUID de cliente y los UUID de tratamientos se conservan internamente solo para
+deduplicar y relacionar registros. Las tablas muestran los nombres de los
+tratamientos. No se guarda correo, historial médico, diagnósticos ni datos de
+la cita cuya estructura de fecha aún no está confirmada en la referencia
+interactiva.
+
+El acceso a la configuración es de desarrollador; la consulta, sincronización y
+visualización de datos requiere administrador o desarrollador. La lectura de
+pacientes se pagina en el servidor y filtra por clínica, nombre de tratamiento,
+fecha de sincronización o texto. Para un período mayor a 31 días SNW crea un
+trabajo persistente, informa tramos, páginas y conteos, y lo procesa en segundo plano.
+Los trabajos interrumpidos se marcan como reintentables tras diez minutos sin
+heartbeat. La sincronización repetida no duplica pacientes.
+
+Rutas del módulo:
+
+- `GET /api/reservo/configuracion`
+- `POST /api/reservo/clinicas/{codigo}/probar`
+- `POST /api/reservo/tratamientos` (nombres en un rango; no guarda pacientes)
+- `GET/POST /api/reservo/sincronizaciones`
+- `GET /api/reservo/sincronizaciones/{job_id}`
+- `POST /api/reservo/sincronizaciones/{job_id}/reintentar`
+- `GET /api/reservo/pacientes`
+
+Las rutas de consulta requieren sesión de administrador o desarrollador. La
+edición de tokens permanece en las rutas de Configuración, exclusivas del
+desarrollador. Cambiar un token invalida la verificación del código de estado
+para esa clínica. El worker solo arranca cuando las tres tablas del módulo
+están instaladas.
+
+Los componentes principales son `backend/reservo_catalogo.py`,
+`backend/reservo_pacientes.py`, `backend/routes/pacientes_reservo.py`, la vista
+`frontend/pacientes-reservo.html` y su JS/CSS homónimos. Las pruebas sintéticas
+se ejecutan sin credenciales ni consultan pacientes reales:
+
+```bash
+python -m unittest tests.test_reservo_pacientes tests.test_reservo_configuracion
+```
+
+La página interactiva oficial no expuso contenido legible durante esta
+implementación y no se proporcionó un token ni una respuesta real sanitizada.
+Por eso el código exacto de «Atendido» debe verificarse en la cuenta de cada
+clínica antes de importar. El campo de fecha/hora de atención tampoco se mapea
+hasta confirmar su nombre en el esquema real; se registra la fecha del período
+consultado, no se inventa una fecha de cita.
+
 ## Integración de citas atendidas para reagendar
 
 SNW recibe el CSV del sistema externo por `POST /api/v1/paciente-reagendar/importar-csv`.
