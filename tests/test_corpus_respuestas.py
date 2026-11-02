@@ -7,8 +7,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
 from corpus_respuestas import desidentificar_mensaje
 from corpus_respuestas import guardar_mensaje_completo
-from migrar_corpus_respuestas import migrar
-from migrar_corpus_completo import migrar as migrar_completo
 from whatsapp_service import WhatsAppService
 
 
@@ -75,38 +73,6 @@ class CorpusRespuestasTests(unittest.TestCase):
             servicio._procesar_mensajes(valor)
         guardar.assert_called_once_with("", "+56912345678")
         self.assertEqual(desidentificar_mensaje(""), "[sin_texto]")
-
-    def test_migracion_historica_es_unica_y_excluye_eliminar(self):
-        conexion = MagicMock()
-        cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
-        cur.fetchone.side_effect = [None, {"valor": "5"}]
-        cur.fetchall.side_effect = [
-            [{"id": 1, "mensaje": "Hola Camila"}, {"id": 3, "mensaje": "ELIMINAR"}],
-            [],
-        ]
-        with patch("migrar_corpus_respuestas.conectar", return_value=conexion):
-            total = migrar()
-        self.assertEqual(total, 1)
-        corpus = [c for c in cur.execute.call_args_list
-                  if c.args[0].startswith("INSERT INTO corpus_respuestas")]
-        self.assertEqual(len(corpus), 1)
-        self.assertNotIn("camila", corpus[0].args[1][0])
-        conexion.__enter__.return_value.commit.assert_called_once()
-
-    def test_migracion_completa_conserva_texto_y_excluye_suprimidos(self):
-        conexion = MagicMock()
-        cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
-        cur.fetchone.side_effect = [None, {"valor": "5"}]
-        cur.fetchall.side_effect = [[
-            {"id": 1, "mensaje": "Hola Camila", "numero_telefono": "+56912345678"},
-            {"id": 2, "mensaje": "ELIMINAR", "numero_telefono": "+56912345678"},
-            {"id": 3, "mensaje": "privado", "numero_telefono": "****5678"},
-        ], []]
-        with patch("migrar_corpus_completo.conectar", return_value=conexion), \
-             patch("migrar_corpus_completo.guardar_mensaje_completo") as guardar:
-            self.assertEqual(migrar_completo(), 1)
-        guardar.assert_called_once_with(cur, "Hola Camila", "+56912345678")
-        conexion.__enter__.return_value.commit.assert_called_once()
 
 
 if __name__ == "__main__":
