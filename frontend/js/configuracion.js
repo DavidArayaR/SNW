@@ -335,6 +335,12 @@ function htmlEditorPatrones(clave, valor) {
   }).join("");
   return `<div class="config-patrones" data-modo="${obj ? "facil" : "json"}">` +
     `<label class="config-patrones__toggle"><input type="checkbox" data-pegar-json${obj ? "" : " checked"}> Pegar JSON</label>` +
+    `<div class="config-patrones__exportar">` +
+      `<label for="corpusExportar">Corpus para revisar</label>` +
+      `<select id="corpusExportar" data-corpus-origen><option value="completo">Mensajes completos</option>` +
+      `<option value="desidentificado">Mensajes desidentificados (legado)</option><option value="ambos">Ambos corpus</option></select>` +
+      `<button type="button" class="btn btn--ghost" data-descargar-corpus><i class="fa-solid fa-download" aria-hidden="true"></i> Descargar corpus CSV</button>` +
+      `<p class="field__hint">Completa la columna tipo_respuesta para clasificar los mensajes y preparar tus patrones del JSON. La descarga no modifica los patrones.</p></div>` +
     `<div class="config-patrones__facil"${obj ? "" : " hidden"}>` +
       `<p class="config-patrones__intro">Escribe una frase por línea en la categoría correspondiente.</p>` +
       `<div class="config-patrones__grupos">${grupos}</div>` +
@@ -344,6 +350,41 @@ function htmlEditorPatrones(clave, valor) {
       `<textarea id="patrones_json_raw" data-patrones-raw rows="12" spellcheck="false">${escaparHtml(obj ? JSON.stringify(obj, null, 2) : valor)}</textarea>` +
       `<p class="config-patrones__error" data-error-json hidden></p></div>` +
     `<textarea id="cf_${clave}" data-clave="${clave}" hidden>${escaparHtml(valor)}</textarea></div>`;
+}
+
+async function descargarCorpus(wrap) {
+  const boton = wrap.querySelector("[data-descargar-corpus]");
+  const selector = wrap.querySelector("[data-corpus-origen]");
+  if (boton.disabled) return;
+  const original = boton.innerHTML;
+  boton.disabled = selector.disabled = true;
+  boton.textContent = "Generando CSV…";
+  try {
+    const origen = selector.value;
+    const r = await fetch(`api/configuracion/corpus.csv?origen=${encodeURIComponent(origen)}`, {
+      headers: authHeaders(), cache: "no-store",
+    });
+    if (r.status === 401) { window.snwSesionExpirada(); return; }
+    if (!r.ok) {
+      const error = await r.json().catch(() => ({}));
+      throw new Error(error.detail || "No se pudo descargar el corpus.");
+    }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const enlace = document.createElement("a");
+    enlace.href = url;
+    enlace.download = r.headers.get("Content-Disposition")?.match(/filename="([^"]+)"/)?.[1] || `corpus-${origen}.csv`;
+    document.body.appendChild(enlace);
+    enlace.click();
+    enlace.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    toast("CSV descargado para revisar y clasificar.");
+  } catch (e) {
+    toast(e.message || "No se pudo descargar el corpus.", "error");
+  } finally {
+    boton.innerHTML = original;
+    boton.disabled = selector.disabled = false;
+  }
 }
 
 function actualizarEditorPatrones(wrap) {
@@ -830,6 +871,7 @@ function render(secciones) {
       input.addEventListener("input", marcarCambios);
       input.addEventListener("change", marcarCambios);
       if (c.clave === "call_center_patrones_consulta" && wrap.querySelector(".config-patrones")) {
+        wrap.querySelector("[data-descargar-corpus]").addEventListener("click", () => descargarCorpus(wrap));
         wrap.querySelectorAll("[data-patron]").forEach((textarea) =>
           textarea.addEventListener("input", () => actualizarEditorPatrones(wrap)));
         wrap.querySelector("[data-patrones-raw]").addEventListener("input", () => actualizarJsonPatrones(wrap));

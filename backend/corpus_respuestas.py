@@ -1,12 +1,69 @@
-"""Corpus de respuestas y compatibilidad con el corpus desidentificado legado.
+"""Guarda respuestas completas y exporta corpus para revisión manual.
 
-Solo sobreviven palabras de un vocabulario cerrado. Nombres, teléfonos,
-direcciones, diagnósticos y cualquier palabra no aprobada se sustituyen.
-No es una copia recuperable del mensaje original.
+El corpus desidentificado legado conserva solo un vocabulario cerrado;
+sus sustituciones no permiten recuperar el mensaje original.
 """
 
 import re
 import unicodedata
+import csv
+import io
+
+from db import conectar
+
+_CORPUS_EXPORTABLES = {
+    "completo": ("corpus_respuestas_completas", "mensaje"),
+    "desidentificado": ("corpus_respuestas", "texto_desidentificado"),
+}
+_FILAS_EXPORTACION = 500
+
+
+def preparar_csv(origen: str):
+    """CSV por bloques, sin teléfonos, huellas ni IDs de pacientes.
+
+    Captura un límite superior para que nuevas respuestas no prolonguen una
+    descarga. Cada bloque usa su propia conexión y respeta borrados posteriores.
+    """
+    if origen not in (*_CORPUS_EXPORTABLES, "ambos"):
+        raise ValueError("Corpus inválido")
+    fuentes = list(_CORPUS_EXPORTABLES) if origen == "ambos" else [origen]
+    limites = {}
+    with conectar() as conn, conn.cursor() as cur:
+        for fuente in fuentes:
+            tabla, _ = _CORPUS_EXPORTABLES[fuente]
+            cur.execute(f"SELECT COALESCE(MAX(id),0) AS ultimo FROM {tabla}")
+            limites[fuente] = int(cur.fetchone()["ultimo"])
+
+    def fila_csv(valores):
+        salida = io.StringIO(newline="")
+        # Evitar que Excel interprete mensajes como fórmulas al abrir el CSV.
+        seguros = []
+        for valor in valores:
+            valor = str(valor)
+            if valor.lstrip().startswith(("=", "+", "-", "@")) or valor.startswith(("\t", "\r", "\n")):
+                valor = "'" + valor
+            seguros.append(valor)
+        csv.writer(salida).writerow(seguros)
+        return salida.getvalue()
+
+    def generar():
+        yield "\ufeff" + fila_csv(("corpus", "mensaje", "tipo_respuesta"))
+        for fuente in fuentes:
+            tabla, columna = _CORPUS_EXPORTABLES[fuente]
+            ultimo = 0
+            while ultimo < limites[fuente]:
+                with conectar() as conn, conn.cursor() as cur:
+                    cur.execute(
+                        f"SELECT id, {columna} AS mensaje FROM {tabla}"
+                        " WHERE id>%s AND id<=%s ORDER BY id LIMIT %s",
+                        (ultimo, limites[fuente], _FILAS_EXPORTACION))
+                    filas = cur.fetchall()
+                if not filas:
+                    break
+                for fila in filas:
+                    yield fila_csv((fuente, fila["mensaje"] or "", ""))
+                ultimo = filas[-1]["id"]
+    return generar()
 
 
 def guardar_mensaje_completo(cur, texto: str, telefono: str) -> None:

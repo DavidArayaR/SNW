@@ -32,7 +32,7 @@ import simulacion_envio
 import pymysql
 from fastapi import (BackgroundTasks, Depends, FastAPI, File, Form, HTTPException,
                      Query, Request, UploadFile, status)
-from fastapi.responses import HTMLResponse, PlainTextResponse, FileResponse, Response
+from fastapi.responses import HTMLResponse, PlainTextResponse, FileResponse, Response, StreamingResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
@@ -5250,6 +5250,22 @@ def _config_valores(cfg: dict | None = None) -> dict:
         for tipo in _RESPUESTAS_SISTEMA:
             valores[_clave_respuesta_sistema(codigo, tipo)] = _respuesta_sistema(tipo, codigo, cfg)
     return valores
+
+
+def descargar_corpus_csv(origen: str = Query("completo"),
+                        sesion: dict = Depends(solo_dev)):
+    from corpus_respuestas import preparar_csv
+
+    if origen not in ("completo", "desidentificado", "ambos"):
+        raise HTTPException(422, detail="Selecciona un corpus válido.")
+    contenido = preparar_csv(origen)
+    auditoria_registrar(sesion.get("usuario") or "", "corpus_csv_exportado", origen)
+    fecha = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    return StreamingResponse(contenido, media_type="text/csv; charset=utf-8", headers={
+        "Content-Disposition": f'attachment; filename="corpus-{origen}-{fecha}.csv"',
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+    })
 
 
 def obtener_configuracion_completa(sesion: dict = Depends(solo_dev)):

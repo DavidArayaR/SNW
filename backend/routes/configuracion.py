@@ -1,6 +1,7 @@
 from ._registry import crear_router
 
 RUTAS = (
+    ("/api/configuracion/corpus.csv", "GET", "descargar_corpus_csv", None),
     ("/api/configuracion/logs", "GET", "listar_logs_consola", None),
     ("/api/configuracion/logs/{nombre}", "GET", "leer_log_consola", None),
     ("/api/configuracion", "GET", "obtener_configuracion", None), ("/api/configuracion", "PUT", "actualizar_configuracion", None),

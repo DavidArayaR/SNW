@@ -278,6 +278,11 @@ body[data-pagina="configuracion"] #secciones {
   cursor: pointer;
 }
 .config-patrones__toggle input { width: 18px; height: 18px; accent-color: var(--verde); }
+.config-patrones__exportar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 18px; padding: 14px; background: var(--surface-2); border: 1px solid var(--borde); border-radius: 10px; }
+.config-patrones__exportar label { margin: 0; }
+.config-patrones__exportar select { flex: 1 1 220px; min-width: 0; }
+.config-patrones__exportar .btn { width: auto; }
+.config-patrones__exportar .field__hint { flex-basis: 100%; margin: 0; }
 .config-patrones__facil[hidden], .config-patrones__raw[hidden],
 .config-patrones__error[hidden] { display: none; }
 .config-patrones__intro { margin: 0 0 12px; color: var(--texto-suave); font-size: .86rem; }
