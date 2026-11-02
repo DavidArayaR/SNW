@@ -1116,7 +1116,7 @@ function pintarTablaCampanas() {
     if (seleccionada) fila.setAttribute("aria-current", "true");
     const tipo = { manual: "Manual", programado: "Programado", reagendamiento: "Reagendamiento", simulado: "Simulado" }[envio.tipo] || "Envío";
     fila.innerHTML = `<td><input type="checkbox" data-marcar-campana="${Number(envio.id)}" aria-label="Seleccionar envío #${Number(envio.id)}"${seleccionada ? " checked" : ""}></td><td><button type="button" class="stats-campanas__elegir" data-elegir-campana="${Number(envio.id)}" aria-pressed="${seleccionada}">${escaparHtml(envio.plantilla_nombre || "Sin nombre")}</button>` +
-      `<span class="stats-campanas__fila-meta">#${Number(envio.id)} · ${tipo}${seleccionada ? " · Seleccionado" : ""}</span></td>` +
+      `<span class="stats-campanas__fila-meta">#${Number(envio.id)} · ${tipo}</span></td>` +
       `<td>${escaparHtml(envio.centro || "Sin registro")}</td><td class="stats-campanas__fila-fecha">${escaparHtml(envio.fecha)}</td>` +
       `<td class="stats-campanas__fila-numero">${num(envio.total_pacientes)}</td>`;
     cuerpoCampanas.appendChild(fila);

@@ -229,7 +229,6 @@
                 </div>
                 <div class="stats-campanas__busqueda"><label for="buscarCampanaEst" class="stats-campanas__buscar"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><input id="buscarCampanaEst" type="search" maxlength="100" placeholder="Buscar por plantilla o ID" aria-label="Buscar envío por plantilla o ID"></label><button id="btnBuscarCampanaEst" type="button" class="btn btn--ghost">Buscar</button><span id="campanasCantidad" aria-live="polite"></span></div>
                 <div class="stats-campanas__seleccion-multiple"><span id="campanasSeleccionCantidad" role="status">0 seleccionados</span><button id="seleccionarPaginaCampanas" type="button" class="btn btn--ghost">Seleccionar esta página</button><button id="limpiarSeleccionCampanas" type="button" class="btn btn--ghost" disabled>Quitar selección</button><button id="verCampanasSeleccionadas" type="button" class="btn btn--primary" disabled>Ver estadísticas</button></div>
-                <div id="campanasElegidas" class="stats-campanas__elegidas" aria-label="Envíos seleccionados" hidden></div>
                 <p class="field__hint stats-campanas__alcance">Marca la casilla o pulsa cualquier parte de una fila. Puedes elegir envíos de varias páginas y después pulsar «Ver estadísticas».</p>
                 <div class="stats-campanas__tabla-wrap" role="region" aria-label="Envíos disponibles para seleccionar" tabindex="0">
                   <table class="stats-campanas__tabla" id="tablaCampanasEst" aria-busy="false">
@@ -245,6 +244,7 @@
               <button id="campanasSiguiente" type="button" class="btn btn--ghost" disabled aria-label="Página siguiente"><i class="fa-solid fa-chevron-right" aria-hidden="true"></i></button>
               <button id="campanasUltima" type="button" class="btn btn--ghost" disabled aria-label="Última página"><i class="fa-solid fa-angles-right" aria-hidden="true"></i></button>
             </div>
+                <div id="campanasElegidas" class="stats-campanas__elegidas" aria-label="Envíos seleccionados" hidden></div>
                 <p class="field__hint stats-campanas__alcance">La selección se conserva al cambiar de página, tipo o búsqueda. Cambiar entorno, área o clínica inicia una selección nueva.</p>
               </div>
             </details>
@@ -283,7 +283,7 @@
   <script src="js/layout.js?v=permisos-acciones1"></script>
   <script src="js/pass-toggle.js"></script>
   <script src="js/estadisticas-campana.js?v=costo-total-fijo1"></script>
-  <script src="js/estadisticas.js?v=costo-total-fijo1"></script>
+  <script src="js/estadisticas.js?v=seleccion-sin-saltos1"></script>
   <script>
     if (window.snwCargarEstadisticas) window.snwCargarEstadisticas();
   </script>
