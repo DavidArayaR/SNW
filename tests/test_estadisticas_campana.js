@@ -113,3 +113,22 @@ assert.ok(contexto.resultadosCampana.innerHTML.includes("si participó en varios
 assert.ok(!contexto.resultadosCampana.innerHTML.includes("Envío #0"));
 assert.ok(controles["#campanaDetalleResultados"].innerHTML.includes("Envíos incluidos"));
 console.log("Selección múltiple: ponderación, deduplicación de IDs, monedas y separación de simulaciones: OK");
+
+const { alternarResultado, resultadosSeleccionados } = window.SNWEstadisticasCampana;
+let seleccionResultados = "todos";
+assert.equal(resultadosSeleccionados(seleccionResultados).length, 5);
+for (const resultado of ["vistos", "sin_seleccion", "baja"])
+  seleccionResultados = alternarResultado(seleccionResultados, resultado);
+assert.deepEqual(resultadosSeleccionados(seleccionResultados), ["interes", "desinteres"]);
+assert.equal(alternarResultado(seleccionResultados, "interes"), null); // No permite dejar un único resultado.
+assert.equal(alternarResultado(seleccionResultados, "desinteres"), null);
+assert.equal(alternarResultado(seleccionResultados, "todos"), "todos");
+const dosResultados = filtrar(datos, "todos", seleccionResultados);
+assert.equal(dosResultados.resumen.validos, 30);
+assert.equal(dosResultados.resumen.tasa_interes, 33.3);
+assert.equal(dosResultados.botones.length, 2);
+assert.equal(filtrar(datos, "leidos", seleccionResultados).resumen.validos, 10);
+// «Vistos» es un subconjunto de «sin selección»: una unión no duplica pacientes.
+assert.equal(filtrar(datos, "todos", "sin_seleccion,vistos").resumen.validos, 65);
+assert.equal(filtrar(datos, "todos", ["interes", "desinteres", "interes"]).resumen.validos, 30);
+console.log("Resultados múltiples: mínimo de dos, filtros combinados y unión sin duplicados: OK");

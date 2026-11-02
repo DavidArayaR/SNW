@@ -257,8 +257,8 @@
               <fieldset class="stats-campanas__grupo"><legend>Entrega</legend><input type="hidden" id="filtroEntregaCampana" value="todos"><div class="stats-campanas__chips">
                 <button type="button" data-filtro-campana="entrega" data-valor="todos" aria-pressed="true">Todas</button><button type="button" data-filtro-campana="entrega" data-valor="leidos" aria-pressed="false">Leídos</button><button type="button" data-filtro-campana="entrega" data-valor="entregados" aria-pressed="false">Entregados</button><button type="button" data-filtro-campana="entrega" data-valor="sin_confirmacion" aria-pressed="false">Sin confirmación</button>
               </div></fieldset>
-              <fieldset class="stats-campanas__grupo"><legend>Resultado</legend><input type="hidden" id="filtroResultadoCampana" value="todos"><div class="stats-campanas__chips">
-                <button type="button" data-filtro-campana="resultado" data-valor="todos" aria-pressed="true">Todos</button><button type="button" data-filtro-campana="resultado" data-valor="interes" aria-pressed="false">Interesados</button><button type="button" data-filtro-campana="resultado" data-valor="desinteres" aria-pressed="false">No interesados</button><button type="button" data-filtro-campana="resultado" data-valor="baja" aria-pressed="false">Bajas</button><button type="button" data-filtro-campana="resultado" data-valor="sin_seleccion" aria-pressed="false">Sin selección</button><button type="button" data-filtro-campana="resultado" data-valor="vistos" aria-pressed="false">Vistos sin respuesta</button>
+              <fieldset class="stats-campanas__grupo" aria-describedby="ayudaResultadosCampana"><legend>Resultados a comparar</legend><p id="ayudaResultadosCampana" class="field__hint">Selecciona al menos 2 resultados. Pulsa los botones para incluirlos o quitarlos de la comparación.</p><input type="hidden" id="filtroResultadoCampana" value="todos"><div class="stats-campanas__chips">
+                <button type="button" data-filtro-campana="resultado" data-valor="todos" aria-pressed="true">Seleccionar todos</button><button type="button" data-filtro-campana="resultado" data-valor="interes" aria-pressed="true">Interesados</button><button type="button" data-filtro-campana="resultado" data-valor="desinteres" aria-pressed="true">No interesados</button><button type="button" data-filtro-campana="resultado" data-valor="baja" aria-pressed="true">Bajas</button><button type="button" data-filtro-campana="resultado" data-valor="sin_seleccion" aria-pressed="true">Sin selección</button><button type="button" data-filtro-campana="resultado" data-valor="vistos" aria-pressed="true">Vistos sin respuesta</button>
               </div></fieldset>
               <label>Comparar<select id="comparacionCampana"><option value="general">Interés, desinterés, bajas y sin selección</option><option value="interes-vistos">Interesados vs. leídos sin respuesta</option><option value="interes-desinteres">Interesados vs. no interesados</option><option value="interes-baja">Interesados vs. bajas</option><option value="interes-sin_seleccion">Interesados vs. sin selección</option><option value="baja-desinteres">Bajas vs. no interesados</option><option value="entregas">Leídos vs. entregados vs. sin confirmación</option></select></label>
               <button id="limpiarFiltrosCampana" type="button" class="btn btn--ghost">Quitar filtros del envío</button>
@@ -279,8 +279,8 @@
 
   <script src="js/layout.js?v=permisos-acciones1"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/estadisticas-campana.js?v=seleccion-multiple1"></script>
-  <script src="js/estadisticas.js?v=seleccion-multiple1"></script>
+  <script src="js/estadisticas-campana.js?v=resultados-multiples1"></script>
+  <script src="js/estadisticas.js?v=resultados-multiples1"></script>
   <script>
     if (window.snwCargarEstadisticas) window.snwCargarEstadisticas();
   </script>

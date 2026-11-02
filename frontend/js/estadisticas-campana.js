@@ -1,10 +1,25 @@
 /* Cálculos de segmentación sobre agregados; no contiene datos de pacientes. */
 (function () {
+  const RESULTADOS = ["interes", "desinteres", "baja", "sin_seleccion", "vistos"];
+  function resultadosSeleccionados(valor) {
+    if (valor === "todos") return [...RESULTADOS];
+    const lista = Array.isArray(valor) ? valor : String(valor).split(",");
+    return [...new Set(lista.filter(r => RESULTADOS.includes(r)))];
+  }
+  function alternarResultado(actual, resultado) {
+    if (resultado === "todos") return "todos";
+    if (!RESULTADOS.includes(resultado)) return null;
+    const elegidos = new Set(resultadosSeleccionados(actual));
+    if (elegidos.has(resultado)) elegidos.delete(resultado);
+    else elegidos.add(resultado);
+    if (elegidos.size < 2) return null;
+    return elegidos.size === RESULTADOS.length ? "todos" : [...elegidos].join(",");
+  }
   function coincide(celda, entrega, resultado) {
     const entregaOk = entrega === "todos" || celda.entrega === entrega ||
       (entrega === "entregados" && celda.entrega === "leidos");
-    return entregaOk && (resultado === "todos" ||
-      (resultado === "vistos" ? celda.visto_sin_respuesta : celda.resultado === resultado));
+    return entregaOk && (resultado === "todos" || resultadosSeleccionados(resultado).some(r =>
+      r === "vistos" ? celda.visto_sin_respuesta : celda.resultado === r));
   }
 
   function filtrar(datos, entrega = "todos", resultado = "todos") {
@@ -89,5 +104,5 @@
       botones: unicos.flatMap(d => d.botones),
     };
   }
-  window.SNWEstadisticasCampana = { filtrar, comparar, combinar };
+  window.SNWEstadisticasCampana = { filtrar, comparar, combinar, resultadosSeleccionados, alternarResultado };
 })();

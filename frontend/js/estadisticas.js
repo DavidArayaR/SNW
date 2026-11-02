@@ -1256,10 +1256,14 @@ function pintarCampana() {
     const r = datos.resumen;
     document.querySelectorAll("[data-filtro-campana]").forEach(boton => {
       const id = boton.dataset.filtroCampana === "entrega" ? "filtroEntregaCampana" : "filtroResultadoCampana";
-      boton.setAttribute("aria-pressed", String(document.getElementById(id).value === boton.dataset.valor));
+      const valor = document.getElementById(id).value;
+      const activo = boton.dataset.filtroCampana === "resultado" && boton.dataset.valor !== "todos"
+        ? window.SNWEstadisticasCampana.resultadosSeleccionados(valor).includes(boton.dataset.valor)
+        : valor === boton.dataset.valor;
+      boton.setAttribute("aria-pressed", String(activo));
     });
     const etiquetasFiltro = [...document.querySelectorAll('[data-filtro-campana][aria-pressed="true"]')]
-      .filter(b => b.dataset.valor !== "todos").map(b => b.textContent.trim());
+      .filter(b => b.dataset.valor !== "todos" && (b.dataset.filtroCampana !== "resultado" || $("#filtroResultadoCampana").value !== "todos")).map(b => b.textContent.trim());
     $("#resumenFiltrosCampana").textContent = etiquetasFiltro.join(" · ") || "Todos los enviados sin errores";
     $("#filtrosCampana").classList.toggle("stats-campanas__filtros--activos", !!etiquetasFiltro.length);
     const distribucion = window.SNWEstadisticasCampana.comparar(datos, $("#comparacionCampana").value);
@@ -1302,8 +1306,8 @@ function pintarCampana() {
     function aplicarSegmento(indice) {
       const filtro = distribucion[indice]?.filtro || {};
       if (filtro.entrega) $("#filtroEntregaCampana").value = filtro.entrega;
-      if (filtro.resultado) $("#filtroResultadoCampana").value = filtro.resultado;
-      if (filtro.entrega || filtro.resultado) pintarCampana();
+      if (filtro.resultado) cambiarResultadoCampana(filtro.resultado);
+      else if (filtro.entrega) pintarCampana();
     }
     detalleResultados.querySelectorAll("[data-segmento-campana]").forEach(b =>
       b.addEventListener("click", () => aplicarSegmento(Number(b.dataset.segmentoCampana))));
@@ -1396,9 +1400,22 @@ document.querySelectorAll("[data-tipo-campana]").forEach(boton => boton.addEvent
   document.querySelectorAll("[data-tipo-campana]").forEach(b => b.setAttribute("aria-pressed", String(b === boton)));
   cargarCampanas(true, true);
 }));
+function cambiarResultadoCampana(resultado) {
+  const input = $("#filtroResultadoCampana");
+  const siguiente = window.SNWEstadisticasCampana.alternarResultado(input.value, resultado);
+  if (siguiente === null) {
+    toast("Selecciona al menos 2 resultados para compararlos.", "error");
+    return;
+  }
+  input.value = siguiente;
+  pintarCampana();
+}
 document.querySelectorAll("[data-filtro-campana]").forEach(boton => boton.addEventListener("click", () => {
-  const id = boton.dataset.filtroCampana === "entrega" ? "filtroEntregaCampana" : "filtroResultadoCampana";
-  document.getElementById(id).value = boton.dataset.valor;
+  if (boton.dataset.filtroCampana === "resultado") {
+    cambiarResultadoCampana(boton.dataset.valor);
+    return;
+  }
+  $("#filtroEntregaCampana").value = boton.dataset.valor;
   pintarCampana();
 }));
 $("#btnBuscarCampanaEst").addEventListener("click", () => cargarCampanas(true, true));
