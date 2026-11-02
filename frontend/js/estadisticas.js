@@ -1059,6 +1059,13 @@ let campanasCargadas = false;
 const enlaceEstadisticas = new URLSearchParams(location.search);
 let envioEnlacePendiente = /^\d+$/.test(enlaceEstadisticas.get("envio") || "") ? enlaceEstadisticas.get("envio") : null;
 let paginaCampanas = 1;
+const tamanosCampanas = [10, 25, 50, 100];
+let tamanoCampanas = 25;
+try {
+  const guardado = Number(localStorage.getItem("snw_page_size_campanas"));
+  if (tamanosCampanas.includes(guardado)) tamanoCampanas = guardado;
+} catch { /* Mantener 25 si el navegador no permite guardar preferencias. */ }
+$("#campanasPorPagina").value = String(tamanoCampanas);
 let paginasCampanas = 1;
 let consultaCampanas;
 let consultaCampana;
@@ -1080,11 +1087,16 @@ function pintarSelectorCampana() {
   $("#campanasSeleccionCantidad").textContent = `${cantidad} seleccionado${cantidad === 1 ? "" : "s"}`;
   $("#verCampanasSeleccionadas").disabled = !cantidad || !!campanaSolicitada;
   $("#limpiarSeleccionCampanas").disabled = !cantidad;
+  $("#seleccionarPaginaCampanas").disabled = !filasCampanas.length;
+  const elegidas = $("#campanasElegidas");
+  elegidas.hidden = !cantidad;
+  elegidas.innerHTML = [...seleccionEnvios.values()].map(e =>
+    `<button type="button" data-quitar-envio="${Number(e.id)}" aria-label="Quitar envío #${Number(e.id)}"><span>#${Number(e.id)} · ${escaparHtml(e.plantilla_nombre || "Envío")}${e.centro ? ` · ${escaparHtml(e.centro)}` : ""}</span><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>`).join("");
   $("#campanaSeleccionTitulo").textContent = envio
     ? `${envio.id == null ? "" : `#${envio.id} · `}${envio.plantilla_nombre || "Envío seleccionado"}` : "Elige uno o varios envíos";
   $("#campanaSeleccionMeta").textContent = envio
     ? [envio.centro, envio.inicio || envio.fecha].filter(Boolean).join(" · ")
-    : "Marca los envíos y pulsa «Ver resultados seleccionados».";
+    : "Marca uno o varios envíos y pulsa «Ver estadísticas».";
   $("#campanaSeleccionAccion").textContent = envio
     ? selectorCampana.open ? "Ocultar tabla" : "Cambiar selección" : "Ver envíos";
   selectorCampana.classList.toggle("stats-campanas__explorador--seleccionado", !!envio);
@@ -1103,10 +1115,10 @@ function pintarTablaCampanas() {
     fila.classList.toggle("seleccionada", seleccionada);
     if (seleccionada) fila.setAttribute("aria-current", "true");
     const tipo = { manual: "Manual", programado: "Programado", reagendamiento: "Reagendamiento", simulado: "Simulado" }[envio.tipo] || "Envío";
-    fila.innerHTML = `<td><button type="button" class="stats-campanas__elegir" data-elegir-campana="${Number(envio.id)}">${escaparHtml(envio.plantilla_nombre || "Sin nombre")}</button>` +
+    fila.innerHTML = `<td><input type="checkbox" data-marcar-campana="${Number(envio.id)}" aria-label="Seleccionar envío #${Number(envio.id)}"${seleccionada ? " checked" : ""}></td><td><button type="button" class="stats-campanas__elegir" data-elegir-campana="${Number(envio.id)}" aria-pressed="${seleccionada}">${escaparHtml(envio.plantilla_nombre || "Sin nombre")}</button>` +
       `<span class="stats-campanas__fila-meta">#${Number(envio.id)} · ${tipo}${seleccionada ? " · Seleccionado" : ""}</span></td>` +
       `<td>${escaparHtml(envio.centro || "Sin registro")}</td><td class="stats-campanas__fila-fecha">${escaparHtml(envio.fecha)}</td>` +
-      `<td class="stats-campanas__fila-numero">${num(envio.total_pacientes)}</td><td><input type="checkbox" data-marcar-campana="${Number(envio.id)}" aria-label="Seleccionar envío #${Number(envio.id)}"${seleccionada ? " checked" : ""}></td>`;
+      `<td class="stats-campanas__fila-numero">${num(envio.total_pacientes)}</td>`;
     cuerpoCampanas.appendChild(fila);
   }
 }
@@ -1140,7 +1152,7 @@ async function cargarCampanas(reiniciar = false, conservarSeleccion = false) {
   $("#campanasUltima").disabled = true;
   try {
     const q = encodeURIComponent($("#buscarCampanaEst").value.trim());
-    const res = await fetch(`api/estadisticas/campanas?pagina=${paginaCampanas}&q=${q}&tipo=${encodeURIComponent(tipoCampana)}${qsEspEst()}`, {
+    const res = await fetch(`api/estadisticas/campanas?pagina=${paginaCampanas}&limite=${tamanoCampanas}&q=${q}&tipo=${encodeURIComponent(tipoCampana)}${qsEspEst()}`, {
       headers: authHeaders(), signal: control.signal, cache: "no-store",
     });
     const datos = await res.json();
@@ -1158,7 +1170,8 @@ async function cargarCampanas(reiniciar = false, conservarSeleccion = false) {
     $("#campanasSiguiente").disabled = !datos.hay_mas;
     $("#campanasPrimera").disabled = paginaCampanas <= 1;
     $("#campanasUltima").disabled = !datos.hay_mas;
-    estadoCampana.textContent = datos.items.length ? "Marca uno o varios envíos y pulsa «Ver resultados seleccionados»." : "No hay envíos en este alcance.";
+    estadoCampana.textContent = datos.items.length ? "Marca uno o varios envíos y pulsa «Ver estadísticas»." : "No hay envíos en este alcance.";
+    pintarSelectorCampana();
     campanasCargadas = true;
     if (envioEnlacePendiente) {
       const id = envioEnlacePendiente;
@@ -1201,7 +1214,6 @@ async function cargarSeleccionCampanas() {
   consultaCampana = control;
   resultadosCampana.hidden = true;
   $("#detalleCampana").hidden = true;
-  $("#detalleCampana").open = false;
   $("#campanaSimulacionAviso").hidden = true;
   estadoCampana.textContent = "Calculando resultados del envío…";
   try {
@@ -1385,11 +1397,29 @@ function invalidarResumenSeleccion() {
   resultadosCampana.hidden = true;
   $("#detalleCampana").hidden = true;
   $("#campanaSimulacionAviso").hidden = true;
-  estadoCampana.textContent = "Pulsa «Ver resultados seleccionados» para aplicar la selección.";
+  estadoCampana.textContent = "Pulsa «Ver estadísticas» para aplicar la selección.";
   pintarTablaCampanas();
   pintarSelectorCampana();
 }
 $("#verCampanasSeleccionadas").addEventListener("click", cargarSeleccionCampanas);
+$("#campanasElegidas").addEventListener("click", e => {
+  const boton = e.target.closest("[data-quitar-envio]");
+  if (!boton) return;
+  seleccionEnvios.delete(boton.dataset.quitarEnvio);
+  invalidarResumenSeleccion();
+});
+$("#seleccionarPaginaCampanas").addEventListener("click", () => {
+  if (!filasCampanas.length) return;
+  const primero = seleccionEnvios.values().next().value || filasCampanas[0];
+  const simulado = primero.tipo === "simulado";
+  let omitidos = 0;
+  for (const envio of filasCampanas) {
+    if ((envio.tipo === "simulado") !== simulado) { omitidos++; continue; }
+    seleccionEnvios.set(String(envio.id), envio);
+  }
+  invalidarResumenSeleccion();
+  if (omitidos) toast("Los envíos reales y simulados se seleccionan por separado.", "error");
+});
 $("#limpiarSeleccionCampanas").addEventListener("click", () => {
   seleccionEnvios.clear();
   invalidarResumenSeleccion();
@@ -1434,6 +1464,13 @@ $("#campanasPrimera").addEventListener("click", () => { paginaCampanas = 1; carg
 $("#campanasUltima").addEventListener("click", () => { paginaCampanas = paginasCampanas; cargarCampanas(); });
 $("#campanasPagina").addEventListener("change", e => {
   paginaCampanas = Math.min(paginasCampanas, Math.max(1, Number(e.target.value) || 1)); cargarCampanas();
+});
+$("#campanasPorPagina").addEventListener("change", e => {
+  const nuevo = Number(e.target.value);
+  if (!tamanosCampanas.includes(nuevo)) return;
+  tamanoCampanas = nuevo;
+  try { localStorage.setItem("snw_page_size_campanas", String(nuevo)); } catch { /* sin almacenamiento */ }
+  cargarCampanas(true, true);
 });
 
 let yaCargada = false;
