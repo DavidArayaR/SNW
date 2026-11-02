@@ -4,6 +4,10 @@
   const $ = id => document.getElementById(id);
   let pagina = 1;
   let paginas = 1;
+  const tamanosPagina = [10, 25, 50, 100];
+  const tamanoGuardado = Number(localStorage.getItem("snw_page_size_reagendar"));
+  let porPagina = tamanosPagina.includes(tamanoGuardado) ? tamanoGuardado : 25;
+  $("reagendarPorPagina").value = String(porPagina);
   let paginaLotes = 1;
   let loteActual = null;
   let loteAplazarId = null;
@@ -503,7 +507,7 @@
       mensaje.textContent = "Usa el formato AAAA-MM-DD para la fecha.";
       return;
     }
-    const params = new URLSearchParams({ pagina: String(pagina), limite: "25" });
+    const params = new URLSearchParams({ pagina: String(pagina), limite: String(porPagina) });
     if (loteActual) params.set("lote_id", String(loteActual));
     for (const [id, clave] of [["reagendarCentro", "centro"], ["reagendarFecha", "fecha"],
                                ["reagendarVentana", "ventana"], ["reagendarEstado", "estado"],
@@ -518,8 +522,8 @@
         headers: { Authorization: "Bearer " + (localStorage.getItem("snw_token") || "") }, cache: "no-store" });
       if (!res.ok) throw new Error("No se pudieron cargar los pacientes.");
       const datos = await res.json();
-      if (pagina > 1 && (datos.total || 0) <= (pagina - 1) * 25) {
-        pagina -= 1;
+      if (pagina > 1 && (datos.total || 0) <= (pagina - 1) * porPagina) {
+        pagina = Math.max(1, Math.ceil((datos.total || 0) / porPagina));
         return cargar();
       }
       tbody.replaceChildren();
@@ -574,7 +578,7 @@
         tr.appendChild(acciones);
         tbody.appendChild(tr);
       }
-      paginas = Math.max(1, Math.ceil((datos.total || 0) / 25));
+      paginas = Math.max(1, Math.ceil((datos.total || 0) / porPagina));
       $("reagendarIr").value = String(pagina);
       $("reagendarIr").max = String(paginas);
       $("reagendarPrimera").disabled = $("reagendarAnterior").disabled = pagina <= 1;
@@ -601,6 +605,14 @@
     } catch (_) { /* La tabla puede cargarse sin el selector. */ }
   }
   $("reagendarFiltrar").addEventListener("click", () => { pagina = 1; cargar(); });
+  $("reagendarPorPagina").addEventListener("change", e => {
+    const nuevo = Number(e.target.value);
+    if (!tamanosPagina.includes(nuevo)) return;
+    porPagina = nuevo;
+    localStorage.setItem("snw_page_size_reagendar", String(porPagina));
+    pagina = 1;
+    cargar();
+  });
   $("reagendarMasLotes").addEventListener("click", () => {
     paginaLotes += 1; cargarLotes(true);
   });
