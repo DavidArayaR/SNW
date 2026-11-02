@@ -9687,7 +9687,8 @@ def obtener_estadisticas_envio(envio_id: int, sesion: dict = Depends(solo_admin)
         if not celda["validos"]:
             continue
         importe = 0.0
-        mensajes = int(celda["facturables"])
+        mensajes = int(celda["pacientes"])
+        mensajes_coste += mensajes
         if mensajes:
             if celda.get("precio_unitario") is not None:
                 unitario = float(celda["precio_unitario"])
@@ -9705,7 +9706,6 @@ def obtener_estadisticas_envio(envio_id: int, sesion: dict = Depends(solo_admin)
                 moneda_coste = moneda_fila
                 importe = float(unitario) * mensajes
                 coste += importe
-                mensajes_coste += mensajes
         segmentos.append({"cantidad": int(celda["pacientes"]),
             "resultado": celda.get("resultado", "sin_seleccion"),
             "entrega": "leidos" if celda.get("estado_whatsapp") == "read" else "entregados"
@@ -9715,7 +9715,8 @@ def obtener_estadisticas_envio(envio_id: int, sesion: dict = Depends(solo_admin)
     datos["segmentos"] = segmentos
     interesados = datos["interacciones"]["interes"]["pacientes"]
     datos["costo"] = {"importe": None if incompleto else round(coste, 4),
-                      "moneda": moneda_coste or moneda, "entregas": mensajes_coste,
+                      "moneda": moneda_coste or moneda, "mensajes": mensajes_coste,
+                      "base": "enviados_sin_errores", "entregas": datos["resumen"].get("entregados", 0),
                       "por_interesado": round(coste / interesados, 4) if interesados and not incompleto else None}
     envio["fecha"] = envio["fecha_hora"].strftime("%d-%m-%Y %H:%M") if envio.get("fecha_hora") else "—"
     envio["inicio"] = envio["inicio_envio"].strftime("%d-%m-%Y %H:%M") if envio.get("inicio_envio") else "Sin intentos registrados"

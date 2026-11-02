@@ -6,6 +6,7 @@ import sys
 import unittest
 import uuid
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 import main
@@ -19,7 +20,7 @@ class DatosSimulacionTests(unittest.TestCase):
         resumen = datos["resumen"]
         self.assertEqual(resumen["validos"] + resumen["errores"] + resumen["invalidos"], 350)
         self.assertEqual(sum(s["cantidad"] for s in datos["segmentos"]), 300)
-        self.assertEqual(sum(s["costo"] for s in datos["segmentos"]), 16200)
+        self.assertEqual(sum(s["costo"] for s in datos["segmentos"]), 18000)
         self.assertEqual(sum(s["cantidad"] for s in datos["segmentos"] if s["visto_sin_respuesta"]), 80)
         for clave, cantidad in (("interes", 90), ("desinteres", 45), ("baja", 15)):
             self.assertEqual(sum(s["cantidad"] for s in datos["segmentos"] if s["resultado"] == clave), cantidad)
@@ -27,6 +28,21 @@ class DatosSimulacionTests(unittest.TestCase):
         self.assertGreater(sum(b["clics"] for b in datos["botones"]), 150)
         self.assertTrue(datos["simulacion"])
         self.assertNotIn("telefono_paciente", json.dumps(datos))
+
+    def test_simulacion_antigua_se_presenta_con_precio_de_todos_los_enviados(self):
+        datos = simulacion.datos_ejemplo(7, dt.datetime(2026, 10, 31, 12))
+        datos["segmentos"][-1]["costo"] = 0
+        datos["segmentos"][-1]["facturables"] = 0
+        datos["costo"].update(importe=16200, por_interesado=180)
+        conn = MagicMock()
+        cur = conn.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cur.fetchone.return_value = {"datos_json": json.dumps(datos)}
+        with patch.object(simulacion, "conectar", return_value=conn):
+            actualizado = simulacion.obtener(7)
+        self.assertEqual(actualizado["costo"]["importe"], 18000)
+        self.assertEqual(actualizado["costo"]["mensajes"], 300)
+        self.assertEqual(actualizado["resumen"], datos["resumen"])
+        self.assertEqual(cur.execute.call_count, 1)
 
     def test_endpoint_solo_admin_y_desarrolladores(self):
         self.assertIs(inspect.signature(main.crear_envio_simulado).parameters["sesion"].default.dependency,

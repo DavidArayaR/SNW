@@ -13,7 +13,7 @@ def datos_ejemplo(envio_id, fecha):
         (10, "baja", "leidos", False), (5, "baja", "entregados", False),
         (80, "sin_seleccion", "leidos", True), (20, "sin_seleccion", "leidos", False),
         (20, "sin_seleccion", "entregados", False), (30, "sin_seleccion", "sin_confirmacion", False)):
-        facturables = cantidad if entrega != "sin_confirmacion" else 0
+        facturables = cantidad
         segmentos.append(dict(cantidad=cantidad, resultado=resultado, entrega=entrega,
             visto_sin_respuesta=visto, facturables=facturables, costo=facturables * 60))
     botones = []
@@ -37,7 +37,8 @@ def datos_ejemplo(envio_id, fecha):
             respuestas=170, sin_respuesta=180, sin_intento=0, clasificados=150, sin_seleccion=150, tasa_interes=30),
         "interacciones": {k: {"pacientes": n, "porcentaje": p} for k, n, p in
             (("interes", 90, 30), ("desinteres", 45, 15), ("baja", 15, 5))},
-        "costo": {"importe": 16200, "moneda": "CLP", "entregas": 270, "por_interesado": 180},
+        "costo": {"importe": 18000, "moneda": "CLP", "mensajes": 300,
+                  "base": "enviados_sin_errores", "entregas": 270, "por_interesado": 200},
         "segmentos": segmentos, "botones": botones}
 
 
@@ -70,4 +71,16 @@ def obtener(envio_id):
     with conectar() as conn, conn.cursor() as cur:
         cur.execute("SELECT datos_json FROM envios_simulaciones WHERE envio_id=%s", (envio_id,))
         fila = cur.fetchone()
-    return json.loads(fila["datos_json"]) if fila else None
+    if not fila:
+        return None
+    datos = json.loads(fila["datos_json"])
+    # Actualizar también demostraciones guardadas con el criterio anterior,
+    # conservando sus conteos y sin reescribir los datos persistidos.
+    for segmento in datos["segmentos"]:
+        segmento["facturables"] = segmento["cantidad"]
+        segmento["costo"] = segmento["cantidad"] * 60
+    total = sum(s["cantidad"] for s in datos["segmentos"])
+    interesados = datos["interacciones"]["interes"]["pacientes"]
+    datos["costo"].update(importe=total * 60, mensajes=total, base="enviados_sin_errores",
+                          por_interesado=total * 60 / interesados if interesados else None)
+    return datos

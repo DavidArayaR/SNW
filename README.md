@@ -710,8 +710,11 @@ un mensaje, incluidos audios. Las respuestas se atribuyen desde el envío hasta 
 campaña del mismo número emisor al mismo paciente. Los clics repetidos se muestran separados
 del número de pacientes; los enlaces externos no informan clics.
 
-El costo y costo por interesado usan entregas confirmadas con ID de Meta y tarifas guardadas
-para su fecha; se recalculan para el segmento. Son estimaciones, no la factura de Meta.
+El costo total aplica la tarifa guardada correspondiente a todos los enviados sin errores,
+incluso sin confirmación de entrega. El costo por interesado divide ese total por los
+interesados del envío completo. Ambos permanecen fijos al cambiar filtros; al seleccionar
+varios envíos se suman sus costos solo si tienen la misma moneda. Son estimaciones,
+no la factura de Meta.
 Si falta categoría o tarifa, se muestra **No disponible**. Las acciones de botones nuevos
 se conservan en `whatsapp_conversaciones_mensajes.accion_boton`; en eventos antiguos se
 utiliza el texto y la definición disponible, por lo que acciones personalizadas eliminadas

@@ -25,7 +25,7 @@ assert.equal(todos.costo.por_interesado, 85);
 const leidos = filtrar(datos, "leidos");
 assert.equal(leidos.resumen.validos, 65);
 assert.equal(leidos.resumen.tasa_interes, 15.4);
-assert.equal(leidos.costo.importe, 650);
+assert.equal(leidos.costo.importe, 850);
 assert.equal(leidos.botones.length, 1);
 assert.equal(leidos.botones[0].porcentaje, 15.4);
 const vistos = filtrar(datos, "todos", "vistos");
@@ -38,7 +38,7 @@ const vacio = filtrar(datos, "sin_confirmacion", "interes");
 assert.equal(vacio.resumen.validos, 0);
 assert.equal(vacio.resumen.leidos_con_respuesta, 0);
 assert.equal(vacio.resumen.tasa_interes, 0);
-assert.equal(vacio.costo.por_interesado, null);
+assert.equal(vacio.costo.por_interesado, 85);
 assert.equal(comparar(todos, "general").reduce((n, s) => n + s.cantidad, 0), 100);
 const versus = comparar(todos, "interes-vistos");
 assert.deepEqual(versus.map(s => s.cantidad), [10, 40, 50]); // Conserva denominador, sin inflar el interés a 20 %.
@@ -46,7 +46,10 @@ assert.equal(comparar(todos, "entregas").reduce((n, s) => n + s.cantidad, 0), 10
 const sinTarifa = structuredClone(datos);
 sinTarifa.segmentos[0].costo = null;
 assert.equal(filtrar(sinTarifa).costo.importe, null);
-assert.equal(filtrar(sinTarifa, "todos", "desinteres").costo.importe, 200);
+assert.equal(filtrar(sinTarifa, "todos", "desinteres").costo.importe, null);
+for (const resultados of ["todos", "interes,desinteres", "baja,sin_seleccion"])
+  for (const entrega of ["todos", "leidos", "entregados", "sin_confirmacion"])
+    assert.deepEqual(filtrar(datos, entrega, resultados).costo, todos.costo);
 assert.equal(datos.resumen.validos, 100); // No mutar el resultado original al filtrar.
 console.log("Segmentación, comparaciones, porcentajes y costos: OK");
 

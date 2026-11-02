@@ -38,11 +38,15 @@
       sin_seleccion: suma(c => c.resultado === "sin_seleccion"),
       tasa_interes: interacciones.interes.porcentaje,
     };
-    const desconocido = celdas.some(c => c.costo == null);
-    const importe = desconocido ? null : celdas.reduce((n, c) => n + Number(c.costo), 0);
+    // El costo representa el envío completo; los filtros solo segmentan respuestas.
+    const celdasPrecio = datos.segmentos;
+    const interesadosTotales = celdasPrecio.reduce((n, c) => n + (c.resultado === "interes" ? Number(c.cantidad) : 0), 0);
+    const desconocido = celdasPrecio.some(c => c.costo == null);
+    const importe = desconocido ? null : celdasPrecio.reduce((n, c) => n + Number(c.costo), 0);
     const costo = { ...datos.costo, importe,
-      entregas: celdas.reduce((n, c) => n + Number(c.facturables), 0),
-      por_interesado: importe != null && interacciones.interes.pacientes ? importe / interacciones.interes.pacientes : null,
+      mensajes: celdasPrecio.reduce((n, c) => n + Number(c.cantidad), 0),
+      entregas: celdasPrecio.reduce((n, c) => n + (["entregados", "leidos"].includes(c.entrega) ? Number(c.cantidad) : 0), 0),
+      por_interesado: importe != null && interesadosTotales ? importe / interesadosTotales : null,
     };
     const agrupados = new Map();
     for (const b of datos.botones) {

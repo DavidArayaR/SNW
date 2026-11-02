@@ -35,14 +35,14 @@ class EstadisticasEnvioTests(unittest.TestCase):
         self.assertEqual([b["clics"] for b in resultado["botones"]], [0, 0])
         self.assertEqual(resultado["resumen"]["validos"], 0)
 
-    def test_costo_usa_entregas_confirmadas_y_tarifa_historica_sin_inventar_ceros(self):
+    def test_costo_usa_enviados_sin_error_y_tarifa_historica_sin_inventar_ceros(self):
         conn = MagicMock()
         cur = conn.__enter__.return_value.cursor.return_value.__enter__.return_value
         fecha = dt.datetime(2026, 10, 31, 10)
         cur.fetchone.return_value = {"id": 7, "plantilla_clave": "prueba", "plantilla_nombre": "Prueba",
             "total_pacientes": 2, "centro_codigo": "VS", "fecha_hora": fecha, "inicio_envio": fecha}
         celda = {"validos": True, "accion": "interes", "boton": "Me interesa", "pacientes": 2,
-                 "facturables": 2, "fecha": fecha.date(), "clave": "prueba", "estado_whatsapp": "read", "respondio": True}
+                 "facturables": 0, "fecha": fecha.date(), "clave": "prueba", "estado_whatsapp": "sent", "respondio": False}
         datos = {"resumen": {"validos": 2}, "botones": [], "decisiones": [celda],
                  "segmentos": [celda], "entregas_coste": []}
         for tarifas, importe, guardado in (([{"efectiva_desde": "2026-01-01", "marketing": 10, "moneda": "CLP"}], 20, None),
@@ -62,6 +62,8 @@ class EstadisticasEnvioTests(unittest.TestCase):
                 resultado = main.obtener_estadisticas_envio(7, sesion={"rol": "desarrollador"})
             self.assertEqual(resultado["costo"]["importe"], importe)
             self.assertEqual(resultado["segmentos"][0]["costo"], importe)
+            self.assertEqual(resultado["costo"]["mensajes"], 2)
+            self.assertEqual(resultado["costo"]["base"], "enviados_sin_errores")
             self.assertEqual(resultado["envio"]["inicio"], "31-10-2026 10:00")
 
     def test_porcentajes_sobre_enviados_sin_error_no_solo_clasificados(self):
