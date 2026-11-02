@@ -1,6 +1,7 @@
 """Lectura segura de los registros de errores desde Configuración."""
 
 import sys
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,6 +16,43 @@ import main
 
 
 class ConfigLogsTests(unittest.TestCase):
+    def test_borrado_por_lotes_primero_mas_antiguos_y_minimo_24_horas(self):
+        with tempfile.TemporaryDirectory() as temporal:
+            carpeta = Path(temporal)
+            ahora = 2000000000
+            nombres = ["errores-2026-10-20.log", "csv-remoto-2026-10-21.log",
+                       "errores-2026-10-22.log", "errores-2026-10-23.log"]
+            edades = [200000, 100000, 86400, 86399]
+            for nombre, edad in zip(nombres, edades):
+                ruta = carpeta / nombre
+                ruta.write_text("registro", encoding="utf-8")
+                os.utime(ruta, (ahora - edad, ahora - edad))
+            ajeno = carpeta / "otro.log"
+            ajeno.write_text("conservar", encoding="utf-8")
+            os.utime(ajeno, (0, 0))
+            with patch.object(main, "LOGS_DIR", carpeta), \
+                    patch.object(main.time, "time", return_value=ahora), \
+                    patch.object(main, "_LOGS_LOTE_BORRADO", 2):
+                self.assertEqual(main.borrar_logs_antiguos(sesion={}),
+                                 {"eliminados": 2, "pendientes": 1, "errores": 0})
+                self.assertFalse((carpeta / nombres[0]).exists())
+                self.assertFalse((carpeta / nombres[1]).exists())
+                self.assertTrue((carpeta / nombres[2]).exists())
+                self.assertEqual(main.borrar_logs_antiguos(sesion={})["eliminados"], 1)
+                self.assertEqual(main.borrar_logs_antiguos(sesion={})["eliminados"], 0)
+                self.assertTrue((carpeta / nombres[3]).exists())
+                self.assertTrue(ajeno.exists())
+
+    def test_borrado_no_crea_carpeta_y_no_borra_directorios(self):
+        with tempfile.TemporaryDirectory() as temporal:
+            carpeta = Path(temporal) / "logs"
+            with patch.object(main, "LOGS_DIR", carpeta):
+                self.assertEqual(main.borrar_logs_antiguos(sesion={})["eliminados"], 0)
+                self.assertFalse(carpeta.exists())
+                carpeta.mkdir()
+                (carpeta / "errores-2026-10-20.log").mkdir()
+                self.assertEqual(main.borrar_logs_antiguos(sesion={})["eliminados"], 0)
+
     def test_lista_y_lectura_de_archivos_diarios(self):
         with tempfile.TemporaryDirectory() as temporal:
             carpeta = Path(temporal) / "logs"
@@ -60,6 +98,7 @@ class ConfigLogsTests(unittest.TestCase):
     def test_api_no_expone_logs_sin_sesion(self):
         cliente = TestClient(main.app)
         self.assertIn(cliente.get("/api/configuracion/logs").status_code, (401, 403))
+        self.assertIn(cliente.delete("/api/configuracion/logs").status_code, (401, 403))
         self.assertIn(cliente.get("/api/configuracion/logs/errores-2026-10-23.log").status_code,
                       (401, 403))
 
@@ -68,6 +107,7 @@ class ConfigLogsTests(unittest.TestCase):
         main.app.dependency_overrides[main.sesion_actual] = lambda: {"rol": "administrador"}
         try:
             self.assertEqual(cliente.get("/api/configuracion/logs").status_code, 403)
+            self.assertEqual(cliente.delete("/api/configuracion/logs").status_code, 403)
             self.assertEqual(cliente.get(
                 "/api/configuracion/logs/errores-2026-10-23.log").status_code, 403)
         finally:

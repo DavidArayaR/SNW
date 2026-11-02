@@ -465,6 +465,44 @@ def solo_dev(sesion: dict = Depends(sesion_actual)) -> dict:
 _NOMBRE_LOG_ERROR = re.compile(
     r"(?:errores|csv-remoto)-(\d{4}-\d{2}-\d{2})(?:_(\d{2}-\d{2}-\d{2}-\d{6})-(\d+)(?:-(\d+))?)?\.log\Z")
 _MAX_LOG_VISTA_BYTES = 5 * 1024 * 1024
+_LOGS_LOTE_BORRADO = 100
+_LOGS_EDAD_MINIMA_SEGUNDOS = 24 * 60 * 60
+
+
+def borrar_logs_antiguos(sesion: dict = Depends(solo_dev)):
+    """Borra como máximo un lote, desde el más antiguo; protege logs recientes."""
+    corte = time.time() - _LOGS_EDAD_MINIMA_SEGUNDOS
+    candidatos = []
+    if not LOGS_DIR.is_dir():
+        return {"eliminados": 0, "pendientes": 0, "errores": 0}
+    raiz = LOGS_DIR.resolve()
+    for ruta in LOGS_DIR.iterdir():
+        if not _NOMBRE_LOG_ERROR.fullmatch(ruta.name) or ruta.is_symlink():
+            continue
+        try:
+            if ruta.resolve().parent == raiz and ruta.is_file():
+                modificado = ruta.stat().st_mtime
+                if modificado <= corte:
+                    candidatos.append((modificado, ruta.name, ruta))
+        except FileNotFoundError:
+            continue
+    candidatos.sort(key=lambda item: item[:2])
+    eliminados = errores = 0
+    for _, _, ruta in candidatos[:_LOGS_LOTE_BORRADO]:
+        try:
+            # Revalidar: otro proceso puede haber actualizado el archivo al listar.
+            if (ruta.is_symlink() or ruta.resolve().parent != raiz
+                    or not ruta.is_file() or ruta.stat().st_mtime > corte):
+                continue
+            ruta.unlink()
+            eliminados += 1
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            errores += 1
+            log_error("borrar registros antiguos", exc, solo_tipo=True)
+    return {"eliminados": eliminados,
+            "pendientes": max(0, len(candidatos) - eliminados), "errores": errores}
 
 
 def listar_logs_consola(sesion: dict = Depends(solo_dev)):

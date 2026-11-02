@@ -916,6 +916,11 @@ function render(secciones) {
         <select id="configLogArchivo" disabled><option value="">Cargando registros…</option></select>
         <button class="btn btn--ghost" type="button" id="configLogActualizar"><i class="fa-solid fa-rotate" aria-hidden="true"></i> Actualizar</button>
         <button class="btn btn--ghost" type="button" id="configLogCopiar" disabled><i class="fa-regular fa-copy" aria-hidden="true"></i> Copiar contenido</button>
+        <button class="btn btn--danger-ghost" type="button" id="configLogBorrar"><i class="fa-solid fa-trash" aria-hidden="true"></i> Borrar logs antiguos</button>
+      </div>
+      <div class="config-confirmar-eliminacion" id="configLogConfirmacion" hidden>
+        <p>Se borrarán hasta 100 logs, empezando por los más antiguos. Solo se eliminan archivos sin modificaciones en las últimas 24 horas. Esta acción no se puede deshacer.</p>
+        <div><button class="btn btn--ghost" type="button" id="configLogCancelar">Cancelar</button><button class="btn btn--danger" type="button" id="configLogConfirmar">Borrar lote</button></div>
       </div>
       <p class="config-logs__estado" id="configLogEstado" role="status" aria-live="polite"></p>
       <pre class="config-logs__contenido" id="configLogContenido" tabindex="0">Selecciona un archivo para ver su contenido.</pre>
@@ -923,9 +928,46 @@ function render(secciones) {
   $("#configLogArchivo").addEventListener("change", (evento) => cargarLog(evento.target.value));
   $("#configLogActualizar").addEventListener("click", cargarLogs);
   $("#configLogCopiar").addEventListener("click", copiarLog);
+  $("#configLogBorrar").addEventListener("click", () => {
+    $("#configLogConfirmacion").hidden = false;
+    $("#configLogCancelar").focus();
+  });
+  $("#configLogCancelar").addEventListener("click", () => {
+    $("#configLogConfirmacion").hidden = true;
+    $("#configLogBorrar").focus();
+  });
+  $("#configLogConfirmar").addEventListener("click", borrarLogsAntiguos);
   mostrarTabConfig();
   if (tabConfig === "logs") cargarLogs();
   marcarCambios();
+}
+
+async function borrarLogsAntiguos() {
+  const boton = $("#configLogConfirmar");
+  if (boton.disabled) return;
+  boton.disabled = true;
+  $("#configLogCancelar").disabled = true;
+  boton.textContent = "Borrando…";
+  try {
+    const respuesta = await fetch("api/configuracion/logs", {
+      method: "DELETE", headers: authHeaders(),
+    });
+    if (respuesta.status === 401) { window.snwSesionExpirada(); return; }
+    if (!respuesta.ok) throw new Error("No se pudieron borrar los registros.");
+    const datos = await respuesta.json();
+    ++peticionLog;
+    $("#configLogConfirmacion").hidden = true;
+    await cargarLogs();
+    $("#configLogEstado").textContent = `${datos.eliminados} logs eliminados. ` +
+      (datos.pendientes ? `${datos.pendientes} antiguos pendientes; puedes borrar otro lote. ` : "No quedan logs antiguos. ") +
+      (datos.errores ? `${datos.errores} archivos no pudieron borrarse.` : "Los logs de las últimas 24 horas se conservan.");
+  } catch (error) {
+    $("#configLogEstado").textContent = error.message;
+  } finally {
+    boton.disabled = false;
+    $("#configLogCancelar").disabled = false;
+    boton.textContent = "Borrar lote";
+  }
 }
 
 async function cargarLogs() {
