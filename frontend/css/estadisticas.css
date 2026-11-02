@@ -27,6 +27,17 @@
 .stats-campanas__resultados table { width: 100%; border-collapse: collapse; }
 .stats-campanas__resultados th, .stats-campanas__resultados td { padding: 12px; text-align: left; border-bottom: 1px solid var(--borde); }
 .stats-campanas__resultados th:last-child, .stats-campanas__resultados td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+.stats-campanas__tabla-botones, .stats-campanas__botones-ayuda { width: 100%; max-width: 760px; }
+.stats-campanas__resultados .stats-campanas__botones { min-width: 0; table-layout: fixed; }
+.stats-campanas__resultados .stats-campanas__botones th, .stats-campanas__resultados .stats-campanas__botones td { padding: 12px 10px; vertical-align: middle; white-space: normal; overflow-wrap: anywhere; line-height: 1.5; }
+.stats-campanas__botones th:first-child { width: 44%; }
+.stats-campanas__resultados .stats-campanas__botones th:not(:first-child), .stats-campanas__resultados .stats-campanas__botones td:not(:first-child) { text-align: center; font-variant-numeric: tabular-nums; }
+.stats-campanas__botones thead th { background: var(--panel-2); font-size: .82rem; }
+.stats-campanas__botones tbody td:not(:first-child) { font-weight: 600; }
+@media (max-width: 540px) {
+  .stats-campanas__resultados .stats-campanas__botones th, .stats-campanas__resultados .stats-campanas__botones td { padding: 10px 6px; font-size: .8rem; }
+  .stats-campanas__botones th:first-child { width: 38%; }
+}
 .stats-campanas__distribucion { display: flex; align-items: center; flex-wrap: wrap; gap: 28px; margin: 24px 0; }
 .stats-campanas__torta { width: min(240px,70vw); aspect-ratio: 1; border-radius: 50%; flex-shrink: 0; border: 1px solid var(--borde); }
 .stats-campanas__leyenda { display: grid; gap: 12px; }
