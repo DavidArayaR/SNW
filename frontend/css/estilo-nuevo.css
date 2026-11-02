@@ -1,51 +1,4 @@
-/* Adaptación del lenguaje visual de /nuevo/ para las páginas existentes.
-   No cambia anchos de página, columnas, alturas de tablas ni comportamiento. */
-:is(body[data-pagina="inicio"], body[data-pagina="historial"], body[data-seccion="administracion"], body.pagina-auth) {
-  --panel: #fff;
-  --panel-2: #f6faf8;
-  --surface-2: #f4f8f6;
-  --surface-3: #e8efec;
-  --hover: #eaf3ef;
-  --linea: #e6ede9;
-  --borde: #dde6e2;
-  --texto: #35423d;
-  --texto-suave: #6d7c75;
-  --verde: #3f9d88;
-  --verde-oscuro: #2f7d6b;
-  --brand-tint: #e4f1ec;
-  --brand-tint-bd: #c2dbd2;
-  --brand-tint-fg: #2f7d6b;
-  --btn-primary-bg: #34786a;
-  --btn-primary-fg: #fff;
-  --btn-ghost-fg: #35423d;
-  --btn-danger-bg: #bd4a4a;
-  --btn-danger-fg: #fff;
-  --sombra: 0 1px 2px rgb(30 50 42 / .06), 0 6px 18px rgb(30 50 42 / .05);
-  --ui-shadow: var(--sombra);
-}
-:root[data-tema="oscuro"] :is(body[data-pagina="inicio"], body[data-pagina="historial"], body[data-seccion="administracion"], body.pagina-auth) {
-  --panel: #1c2421;
-  --panel-2: #222b28;
-  --surface-2: #26302c;
-  --surface-3: #2d3834;
-  --hover: #2a3531;
-  --linea: #2e3a36;
-  --borde: #384540;
-  --texto: #e3ebe7;
-  --texto-suave: #9fb0a9;
-  --verde: #57c2a8;
-  --verde-oscuro: #7ad3bd;
-  --brand-tint: #22362f;
-  --brand-tint-bd: #34553f;
-  --brand-tint-fg: #8ad8c3;
-  --btn-primary-bg: #4bb89e;
-  --btn-primary-fg: #0e1c18;
-  --btn-ghost-fg: #e3ebe7;
-  --btn-danger-bg: #d98484;
-  --btn-danger-fg: #241010;
-  --sombra: 0 1px 2px rgb(0 0 0 / .3), 0 6px 18px rgb(0 0 0 / .28);
-  --ui-shadow: var(--sombra);
-}
+/* Una sola paleta para todas las páginas, definida en tema.css. */
 
 /* Tarjetas, cabeceras y superficies de datos. */
 :is(body[data-pagina="inicio"], body[data-pagina="historial"], body[data-seccion="administracion"]) .panel {
@@ -151,4 +104,168 @@ body.pagina-auth form > button[type="submit"]:hover:not(:focus-visible) { outlin
 
 @media (prefers-reduced-motion: reduce) {
   :is(body[data-pagina="inicio"], body[data-pagina="historial"], body[data-seccion="administracion"], body.pagina-auth) :is(.btn, .panel) { transition: none; }
+}
+
+/* UI Unslop: una superficie por tarea. El borde separa áreas de trabajo;
+   las líneas internas organizan datos y controles sin crear otra tarjeta. */
+:is(body[data-pagina="inicio"], body[data-pagina="historial"], body[data-seccion="administracion"]) .panel,
+.panel {
+  border: 1px solid var(--borde);
+  box-shadow: none;
+}
+.panel__head { border-bottom-color: var(--linea); }
+.panel__head h2 { color: var(--texto); letter-spacing: 0; }
+.panel--list { border-color: var(--card-accent, var(--borde)); }
+
+/* Las tablas son instrumentos de lectura, no un conjunto de etiquetas. */
+.tabla-wrap thead th,
+:is(body[data-pagina="inicio"], body[data-pagina="historial"], body[data-seccion="administracion"]) .tabla-wrap thead th,
+.stats-campanas__botones thead th {
+  font-size: .82rem;
+  font-weight: 650;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--texto-suave);
+}
+.tabla-wrap tbody tr:hover { background: var(--hover); }
+.tabla-wrap tbody td { font-variant-numeric: tabular-nums; }
+
+/* Estadísticas: el contenedor de pestañas ya delimita la vista. Cada sección
+   interior se reconoce por su título y una regla, sin marcos anidados. */
+body[data-pagina="estadisticas"] .stats-contenedor .stats-vista > .panel {
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--linea);
+  border-radius: 0;
+  box-shadow: none;
+}
+body[data-pagina="estadisticas"] .stats-contenedor .stats-vista > .panel:first-child {
+  border-top: 0;
+}
+body[data-pagina="estadisticas"] .stats-contenedor .stats-vista > .panel > .panel__head {
+  border-bottom: 0;
+  padding-bottom: 8px;
+}
+body[data-pagina="estadisticas"] .stats-campanas__detalle,
+body[data-pagina="estadisticas"] .stats-campanas__grafico {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+body[data-pagina="estadisticas"] .stats-campanas__filtros {
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--linea);
+  border-radius: 0;
+}
+body[data-pagina="estadisticas"] .stats-campanas__seleccion-icono {
+  background: transparent;
+  color: var(--brand-tint-fg);
+}
+body[data-pagina="estadisticas"] .stats-contexto__campo label {
+  text-transform: none;
+  letter-spacing: 0;
+}
+body[data-pagina="estadisticas"] .stats-campanas__numeros--clave {
+  gap: 0;
+}
+body[data-pagina="estadisticas"] .stats-campanas__numeros--clave .stats-campanas__numero,
+body[data-pagina="estadisticas"] .stats-campanas__numero--principal {
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--borde);
+  border-radius: 0;
+  padding: 16px 20px;
+}
+body[data-pagina="estadisticas"] .stats-campanas__numeros--clave .stats-campanas__numero:first-child {
+  border-left: 3px solid var(--verde);
+}
+
+/* Inicio: las cifras comparten una fila; las cuatro explicaciones públicas
+   son secciones de lectura. Los estados mantienen su color semántico. */
+body[data-pagina="inicio"] .hero,
+body[data-pagina="inicio"] .app-shell:not(.sin-sidebar) .hero {
+  background: #20594d;
+}
+body[data-pagina="inicio"] section.info {
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--borde);
+  border-radius: 0;
+  box-shadow: none;
+  padding-inline: 0;
+}
+body[data-pagina="inicio"] .dash-stat,
+:is(body[data-pagina="inicio"], body[data-pagina="historial"], body[data-seccion="administracion"]) .dash-stat {
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--borde);
+  border-radius: 0;
+  box-shadow: none;
+  padding: 6px 16px;
+}
+body[data-pagina="inicio"] .dash-stat:first-child { border-left: 3px solid var(--verde); }
+body[data-pagina="inicio"] .info-cards { gap: 12px 28px; }
+body[data-pagina="inicio"] .info-cards .info-card {
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--borde);
+  border-radius: 0;
+  box-shadow: none;
+  padding: 20px 0;
+}
+
+/* Configuración: una clínica o sección conserva su agrupación; los bloques
+   explicativos interiores usan una regla en vez de borde, tinte y sombra. */
+body[data-pagina="configuracion"] .config-seccion { box-shadow: none; }
+body[data-pagina="configuracion"] .config-api-docs,
+body[data-pagina="configuracion"] .config-patrones__exportar {
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--linea);
+  border-radius: 0;
+}
+
+/* Usuarios: cada cuenta es una unidad editable. Sus etiquetas conservan el
+   significado de rol/estado sin tipografía de cartel. */
+body[data-pagina="usuarios"] .usr-card { box-shadow: none; background: var(--panel); }
+body[data-pagina="usuarios"] .usr-tag,
+body[data-pagina="usuarios"] .usr-perms__grupo,
+body[data-pagina="usuarios"] .usr-card--envios h4 {
+  text-transform: none;
+  letter-spacing: 0;
+}
+body[data-pagina="pacientes"] :is(.estado-select, .respuesta-select) {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* Los selects solo elevan el contorno al recibir foco. */
+select:not(:focus):not(:focus-visible) { box-shadow: none; }
+
+/* Acceso: la tarea es completar el formulario. La marca permanece en el
+   nombre y en la acción principal; se retiran textura y efectos decorativos. */
+body.pagina-auth,
+:root[data-tema="oscuro"] body.pagina-auth {
+  background: var(--fondo);
+  grid-template-columns: minmax(0, 1fr);
+}
+body.pagina-auth .card {
+  min-width: 0;
+  max-width: min(440px, 100%);
+  margin-inline: auto;
+  border: 1px solid var(--borde);
+  box-shadow: none;
+}
+.pagina-login #btnEntrar.exito { animation: none; }
+
+@media (max-width: 760px) {
+  body[data-pagina="inicio"] .dash-stats,
+  body[data-pagina="estadisticas"] .stats-campanas__numeros--clave { gap: 12px; }
+  body[data-pagina="estadisticas"] .stats-campanas__numeros--clave .stats-campanas__numero,
+  body[data-pagina="inicio"] .dash-stat { border-left: 3px solid var(--borde); }
+  body[data-pagina="estadisticas"] .stats-campanas__numeros--clave .stats-campanas__numero:first-child,
+  body[data-pagina="inicio"] .dash-stat:first-child { border-left-color: var(--verde); }
 }
