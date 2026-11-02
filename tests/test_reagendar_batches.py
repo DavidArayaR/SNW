@@ -4,6 +4,7 @@ import unittest
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 import main
@@ -89,6 +90,24 @@ class BatchesReagendarTests(unittest.TestCase):
                 self.assertEqual(precio["precio_categoria"], "utility")
         self.assertEqual((final["total_pacientes"], final["enviados"], final["estado"]), (2, 2, "completado"))
 
+    def test_registrar_mismo_lote_es_idempotente_con_reserva_vigente(self):
+        cita = self.citas[0]
+        envio = self.registrar(cita)
+        self.envios.add(envio)
+        self.assertEqual(self.registrar(cita), envio)
+        # Un reintento manual obtiene un token nuevo, conservando lote/plantilla.
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute("UPDATE paciente_reagendar SET reserva_token='nuevo-token' WHERE id=%s", (cita["id"],))
+            conn.commit()
+        self.assertEqual(self.registrar({**cita, "reserva_token": "nuevo-token"}), envio)
+        with self.assertRaisesRegex(RuntimeError, "Reserva de cita perdida"):
+            self.registrar(cita)
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute("UPDATE paciente_reagendar SET estado_envio='ENVIADO' WHERE id=%s", (cita["id"],))
+            conn.commit()
+        with self.assertRaisesRegex(RuntimeError, "Reserva de cita perdida"):
+            self.registrar({**cita, "reserva_token": "nuevo-token"})
+
     def test_historicos_conservan_mensajes_y_redireccion_de_ids(self):
         antiguos = []
         with conectar() as conn, conn.cursor() as cur:
@@ -127,6 +146,35 @@ class BatchesReagendarTests(unittest.TestCase):
             conn.commit()
             conservado = batches.resumen(cur, canonico)
         self.assertEqual((conservado["total_pacientes"], conservado["enviados"]), (2, 2))
+
+
+class ReservaSinCambiosTests(unittest.TestCase):
+    def test_cero_filas_solo_se_acepta_con_reserva_y_destino_exactos(self):
+        for fila, valido in (({"envio_id": 123, "plantilla_clave": "test"}, True),
+                             (None, False),
+                             ({"envio_id": 456, "plantilla_clave": "test"}, False),
+                             ({"envio_id": 123, "plantilla_clave": "otra"}, False)):
+            with self.subTest(fila=fila):
+                conn = MagicMock()
+                cur = conn.__enter__.return_value.cursor.return_value.__enter__.return_value
+                cur.rowcount = 0
+                cur.fetchone.return_value = fila
+                with patch.object(reagendar, "conectar", return_value=conn), \
+                     patch.object(batches, "asegurar_grupo", return_value=123):
+                    if valido:
+                        self.assertEqual(reagendar.registrar_lote(
+                            {"id": 1, "lote_id": 2, "reserva_token": "vigente"},
+                            {"clave": "test"}, {"codigo": "VS"}), 123)
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, "Reserva de cita perdida"):
+                            reagendar.registrar_lote(
+                                {"id": 1, "lote_id": 2, "reserva_token": "vigente"},
+                                {"clave": "test"}, {"codigo": "VS"})
+                consulta, parametros = cur.execute.call_args.args
+                self.assertIn("FOR UPDATE", consulta)
+                self.assertIn("estado_envio='PROCESANDO'", consulta)
+                self.assertEqual(parametros, (1, "vigente"))
+                self.assertEqual(conn.__enter__.return_value.commit.call_count, int(valido))
 
 
 if __name__ == "__main__":

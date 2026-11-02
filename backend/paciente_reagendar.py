@@ -1054,7 +1054,17 @@ def registrar_lote(cita: dict, plantilla: dict, canal: dict) -> int:
             " WHERE id=%s AND reserva_token=%s AND estado_envio='PROCESANDO'",
             (lote_id, plantilla["clave"], cita["id"], cita["reserva_token"]))
         if cur.rowcount != 1:
-            raise RuntimeError("Reserva de cita perdida")
+            # MySQL puede informar cero filas cambiadas si un reintento ya
+            # tiene este lote y plantilla. Comprobar la reserva bajo bloqueo
+            # permite ese caso sin aceptar reservas vencidas o de otro worker.
+            cur.execute(
+                "SELECT envio_id, plantilla_clave FROM paciente_reagendar"
+                " WHERE id=%s AND reserva_token=%s AND estado_envio='PROCESANDO' FOR UPDATE",
+                (cita["id"], cita["reserva_token"]))
+            actual = cur.fetchone()
+            if (not actual or actual["envio_id"] != lote_id
+                    or actual["plantilla_clave"] != plantilla["clave"]):
+                raise RuntimeError("Reserva de cita perdida")
         conn.commit()
     return lote_id
 
