@@ -7303,10 +7303,11 @@ def _aceptados_job_ultimo_segundo(job: dict | None, ahora: float) -> int:
 
 
 def envios_en_progreso(sesion: dict = Depends(exigir("mensajeria"))):
-    """Tab «Envíos en progreso»: jobs manuales activos + programados
-    pendientes de ejecutar o ejecutándose, cada uno con su origen
-    (manual/programado), plantilla, quién envió, quién aprobó, base y avance.
-    Visibilidad: admin/dev/supervisor todo; usuario solo lo suyo y su area."""
+    """Jobs manuales, programados activos y lotes de reagendamiento iniciados.
+
+    Visibilidad: admin/dev/supervisor todo; usuario solo lo suyo y su área.
+    Reagendamientos: solo admin/dev, como la gestión de sus pacientes.
+    """
     ver_todo = _es_privilegiado(sesion) or sesion.get("rol") == "supervisor"
     yo = (sesion.get("usuario") or "").strip().lower()
     mias = set(sesion.get("area_ids") or [])
@@ -7394,6 +7395,25 @@ def envios_en_progreso(sesion: dict = Depends(exigir("mensajeria"))):
             "base": job.get("base", job.get("ambiente")) or "",
             "area": _area_nombre(job.get("area_id")), "programado_para": "",
         })
+    # Reagendamientos no utilizan JOBS: su avance vive en tablas compartidas.
+    # Mantener la misma visibilidad que la gestión de pacientes de reagendamiento.
+    if _es_privilegiado(sesion):
+        centros = catalogo_centros(incluir_inactivas=True)
+        for lote in reagendar_batches.en_progreso():
+            items.append({
+                "origen": "reagendamiento", "id": lote["id"], "job_id": "",
+                "centro_codigo": lote["centro_codigo"],
+                "centro": centros.get(lote["centro_codigo"], "Emisor histórico no identificado"),
+                "numero_emisor": lote["numero_emisor"],
+                "puede_cancelar": False, "puede_pausar": False,
+                "plantilla": lote["plantilla_nombre"] or "",
+                "estado": "en_proceso", "total": lote["total_pacientes"],
+                "enviados": lote["enviados"], "fallidos": lote["fallidos"],
+                "invalidos": lote["invalidos"],
+                "quien_envio": "", "quien_aprobo": "",
+                "base": f"Reagendamientos · Carga #{lote['lote_id']}",
+                "area": "", "programado_para": "",
+            })
     return items
 
 

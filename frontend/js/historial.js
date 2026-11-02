@@ -31,7 +31,7 @@ function telefonoEnmascarado(numero) {
   return `+569 **** *${digitos.slice(-3)}`;
 }
 
-/* ---------- Envíos en progreso (manual + programados activos) ---------- */
+/* ---------- Envíos en progreso (manual, programado y reagendamiento) ---------- */
 let firmaProgreso = null; // firma de la última foto (origen:id:estado) para detectar términos
 const ESTADO_PROG_LABEL = {
   en_proceso: "En proceso", pausado: "Pausado", pendiente: "Pendiente",
@@ -40,7 +40,7 @@ const ESTADO_PROG_LABEL = {
 };
 
 function progEnProgresoHtml(it) {
-  const hechos = (it.enviados || 0) + (it.fallidos || 0);
+  const hechos = (it.enviados || 0) + (it.fallidos || 0) + (it.invalidos || 0);
   const total = it.total || 0;
   const pct = total > 0 ? Math.min(100, Math.round((hechos / total) * 100)) : 0;
   const barra = total > 0
@@ -53,7 +53,7 @@ function progEnProgresoHtml(it) {
   const controlaPausa = it.job_id && it.puede_pausar && ["en_proceso", "pausado"].includes(it.estado);
   return `<div class="prog-item" data-prog-item="${it.origen}-${it.id ?? it.job_id}">` +
     `<div class="prog-item__cab">` +
-      `<span class="prog-origen prog-origen--${it.origen}">${it.origen === "manual" ? "Manual" : "Programado"}</span>` +
+      `<span class="prog-origen prog-origen--${it.origen}">${({ manual: "Manual", programado: "Programado", reagendamiento: "Reagendamiento" })[it.origen] || "Envío"}</span>` +
       `<span class="prog-estado prog-estado--${it.estado}">${ESTADO_PROG_LABEL[it.estado] || it.estado}</span>` +
       `<span>${escaparHtml(it.plantilla || "—")}</span></div>` +
     `<div class="prog-item__meta">` +
@@ -62,6 +62,9 @@ function progEnProgresoHtml(it) {
       (it.area ? ` · ${escaparHtml(it.area)}` : (it.base ? ` · ${escaparHtml(it.base)}` : "")) +
       (it.centro ? ` · ${escaparHtml(it.centro)} (${escaparHtml(it.numero_emisor || "—")})` : "") +
     `</div>` + barra +
+    (it.origen === "reagendamiento"
+      ? `<div class="prog-item__meta">Enviados: ${it.enviados || 0} · Errores: ${it.fallidos || 0} · Omitidos: ${it.invalidos || 0}</div>`
+      : "") +
     (it.job_id && ["en_proceso", "pausado"].includes(it.estado)
       ? `<div class="prog-item__ritmo">Ritmo real: <strong>${it.aceptados_ultimo_segundo || 0} mensajes/s</strong>` +
         `<span> (aceptados por Meta en los últimos 1 s)</span></div>`
@@ -116,7 +119,7 @@ async function cambiarPausaEnProgreso(btn) {
 }
 
 function firmaItemProgreso(it) {
-  return `${it.origen}:${it.id ?? it.job_id}:${it.estado}:${it.enviados || 0}:${it.fallidos || 0}:${it.total || 0}:${it.aceptados_ultimo_segundo || 0}`;
+  return `${it.origen}:${it.id ?? it.job_id}:${it.estado}:${it.enviados || 0}:${it.fallidos || 0}:${it.invalidos || 0}:${it.total || 0}:${it.aceptados_ultimo_segundo || 0}`;
 }
 
 function asegurarContenedorProgreso(lista) {

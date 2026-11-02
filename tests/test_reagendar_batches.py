@@ -108,6 +108,29 @@ class BatchesReagendarTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "Reserva de cita perdida"):
             self.registrar({**cita, "reserva_token": "nuevo-token"})
 
+    def test_progreso_agrupa_clinicas_y_actualiza_contadores_hasta_finalizar(self):
+        ids = [self.registrar(cita) for cita in self.citas]
+        self.envios.update(ids)
+        # Una carga programada aún no debe figurar como envío iniciado.
+        self.assertFalse(any(l["id"] in ids for l in batches.en_progreso()))
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute("UPDATE reagendar_lotes SET estado='EN_CURSO' WHERE id=%s", (self.lote,))
+            cur.execute("UPDATE paciente_reagendar SET estado_envio='ENVIADO' WHERE id=%s", (self.citas[0]["id"],))
+            conn.commit()
+        activos = {l["id"]: l for l in batches.en_progreso() if l["id"] in ids}
+        self.assertEqual(set(activos), set(ids))
+        self.assertEqual((activos[ids[0]]["total_pacientes"], activos[ids[0]]["enviados"]), (2, 1))
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute("UPDATE paciente_reagendar SET estado_envio='ERROR' WHERE id=%s", (self.citas[1]["id"],))
+            conn.commit()
+        # La clínica terminada desaparece aunque la otra continúe enviando.
+        activos = {l["id"] for l in batches.en_progreso() if l["id"] in ids}
+        self.assertEqual(activos, {ids[2]})
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute("UPDATE paciente_reagendar SET estado_envio='ERROR' WHERE lote_id=%s", (self.lote,))
+            conn.commit()
+        self.assertFalse(any(l["id"] in ids for l in batches.en_progreso()))
+
     def test_historicos_conservan_mensajes_y_redireccion_de_ids(self):
         antiguos = []
         with conectar() as conn, conn.cursor() as cur:
@@ -149,6 +172,28 @@ class BatchesReagendarTests(unittest.TestCase):
 
 
 class ReservaSinCambiosTests(unittest.TestCase):
+    def test_endpoint_progreso_respeta_visibilidad_y_no_ofrece_controles_de_job(self):
+        lote = {"id": 99, "lote_id": 7, "centro_codigo": "VS", "numero_emisor": "prueba",
+                "plantilla_nombre": "Control", "total_pacientes": 10, "enviados": 4,
+                "fallidos": 1, "invalidos": 2}
+        conn = MagicMock()
+        conn.__enter__.return_value.cursor.return_value.__enter__.return_value.fetchall.return_value = []
+        with patch.object(main, "conectar", return_value=conn), \
+             patch.object(main, "JOBS", {}), \
+             patch.object(main, "catalogo_centros", return_value={"VS": "Vida y Salud"}), \
+             patch.object(batches, "en_progreso", return_value=[lote]) as consultar:
+            for rol in ("usuario", "supervisor"):
+                self.assertEqual(main.envios_en_progreso({"rol": rol, "usuario": "prueba"}), [])
+            consultar.assert_not_called()
+            for rol in ("administrador", "desarrollador"):
+                items = main.envios_en_progreso({"rol": rol})
+                self.assertEqual(len(items), 1)
+                item = items[0]
+                self.assertEqual(item["origen"], "reagendamiento")
+                self.assertEqual(item["centro"], "Vida y Salud")
+                self.assertEqual((item["total"], item["enviados"], item["fallidos"], item["invalidos"]), (10, 4, 1, 2))
+                self.assertFalse(item["puede_cancelar"] or item["puede_pausar"] or item["job_id"])
+
     def test_cero_filas_solo_se_acepta_con_reserva_y_destino_exactos(self):
         for fila, valido in (({"envio_id": 123, "plantilla_clave": "test"}, True),
                              (None, False),

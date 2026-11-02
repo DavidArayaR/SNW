@@ -37,6 +37,26 @@ def guardar_resumen(cur, envio_id: int) -> None:
                                   datos["invalidos"], datos["estado"], envio_id))
 
 
+def en_progreso() -> list[dict]:
+    """Lotes iniciados con pacientes aún pendientes, compartidos entre procesos."""
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT e.id, e.plantilla_nombre, e.centro_codigo, e.numero_emisor, b.lote_id"
+            " FROM reagendar_batches b JOIN envios e ON e.id=b.envio_id"
+            " JOIN reagendar_lotes l ON l.id=b.lote_id"
+            " WHERE l.estado='EN_CURSO' AND EXISTS (SELECT 1 FROM paciente_reagendar r"
+            " WHERE r.lote_id=b.lote_id AND r.centro_codigo=b.centro_codigo"
+            " AND r.modo_prueba=0 AND r.paciente_telefono_normalizado IS NOT NULL"
+            " AND r.estado_envio IN ('PENDIENTE','REINTENTO','PROCESANDO'))"
+            " ORDER BY e.id")
+        lotes = list(cur.fetchall())
+        for lote in lotes:
+            # Los contadores de envios se consolidan al finalizar la carga;
+            # durante el envío se calculan desde los resultados de pacientes.
+            lote.update(resumen(cur, lote["id"]))
+    return [lote for lote in lotes if lote["estado"] == "en_proceso"]
+
+
 def asegurar_grupo(cur, lote_id: int, centro: str, plantilla: dict | None = None,
                    canal: dict | None = None) -> int:
     # El registro único serializa workers sin mantener bloqueos durante el POST.
