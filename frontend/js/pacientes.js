@@ -93,6 +93,7 @@ const chkTodos = $("#chkTodos");
 const contadorSel = $("#contadorSel");
 const toastEl = $("#toast");
 const selBasePac = $("#selBasePac");
+const tablaSelectorBases = $("#tablaSelectorBases");
 
 // Solo lectura para cuentas sin permiso de gestión (el usuario normal ve su
 // base pero no la edita: sin checks, sin edición inline, sin CSV ni borrado;
@@ -158,6 +159,24 @@ function qsBase() {
   return `ambiente=${basePacActual() === "prod" ? "produccion" : "desarrollo"}`;
 }
 
+function renderSelectorBasesPac() {
+  if (!tablaSelectorBases || !selBasePac) return;
+  const opciones = [...selBasePac.options].filter((opcion) => opcion.value);
+  if (!opciones.length) {
+    const mensaje = [...selBasePac.options].find((opcion) => opcion.disabled)?.textContent ||
+      "No hay bases de datos disponibles.";
+    tablaSelectorBases.innerHTML = `<tr><td class="base-selector__vacio">${escaparHtml(mensaje)}</td></tr>`;
+    return;
+  }
+  tablaSelectorBases.innerHTML = opciones.map((opcion) => {
+    const seleccionada = opcion.value === selBasePac.value;
+    return `<tr><td><button type="button" class="base-selector__opcion${seleccionada ? " seleccionada" : ""}"` +
+      ` data-base-value="${escaparHtml(opcion.value)}" aria-pressed="${seleccionada}"${selBasePac.disabled ? " disabled" : ""}>` +
+      `<span>${escaparHtml(opcion.textContent)}</span>` +
+      `<i class="fa-solid fa-check" aria-hidden="true"${seleccionada ? "" : " hidden"}></i></button></td></tr>`;
+  }).join("");
+}
+
 async function cargarBasesPac() {
   if (!selBasePac) return;
   try {
@@ -177,10 +196,10 @@ async function cargarBasesPac() {
   const anterior = localStorage.getItem("snw_base_pacientes_actual") || selBasePac.value || "";
   selBasePac.innerHTML =
     (window.snwEsPrivilegiado
-      ? `<option value="dev">Base de datos desarrollo (pacientes_dev)</option>` : "") +
+      ? `<option value="dev">pacientes_dev</option>` : "") +
     (PUEDE_GESTIONAR_PAC
-      ? `<option value="prod">Base de datos producción (pacientes_prod)</option>` : "") +
-    areas.map((e) => `<option value="esp:${e.id}">${escaparHtml(e.nombre_visible)} (${escaparHtml(e.nombre_tabla_base)})</option>`).join("") +
+      ? `<option value="prod">pacientes_prod</option>` : "") +
+    areas.map((e) => `<option value="esp:${e.id}">${escaparHtml(e.nombre_visible || e.nombre_tabla_base)}</option>`).join("") +
     (basesReservo.length
       ? `<optgroup label="Bases de Reservo">${basesReservo.map((base) =>
         `<option value="reservo:${Number(base.id)}">${escaparHtml(base.nombre)}</option>`
@@ -204,7 +223,10 @@ async function cargarBasesPac() {
     elegido = valores[0] || null;
     localStorage.removeItem("snw_esp_pacientes");
   }
-  if (elegido == null) return;
+  if (elegido == null) {
+    renderSelectorBasesPac();
+    return;
+  }
   selBasePac.value = elegido;
   localStorage.setItem("snw_base_pacientes_actual", elegido);
   if (elegido.startsWith("esp:")) {
@@ -224,6 +246,7 @@ async function cargarBasesPac() {
     ambienteAdmin = null; // lo define cargar() desde el entorno global
   }
   aplicarModoBase();
+  renderSelectorBasesPac();
 }
 
 // Borrar la tabla completa (DROP) es irreversible: solo administrador y
@@ -306,8 +329,17 @@ function aplicarModoBase() {
   if (tituloEl && tabla) tituloEl.textContent = `Pacientes · ${tabla}`;
 }
 
+if (tablaSelectorBases) tablaSelectorBases.addEventListener("click", (evento) => {
+  const boton = evento.target.closest("button[data-base-value]");
+  if (!boton || boton.disabled || !selBasePac) return;
+  if (selBasePac.value === boton.dataset.baseValue) return;
+  selBasePac.value = boton.dataset.baseValue;
+  selBasePac.dispatchEvent(new Event("change", { bubbles: true }));
+});
+
 if (selBasePac) selBasePac.addEventListener("change", async () => {
   const v = selBasePac.value;
+  renderSelectorBasesPac();
   localStorage.setItem("snw_base_pacientes_actual", v);
   if (v.startsWith("reservo:")) {
     localStorage.setItem("snw_lista_reservo_pacientes", v.slice("reservo:".length));
@@ -356,6 +388,7 @@ async function cargar(mostrarFeedback = false) {
               selBasePac.value = preferida;
               localStorage.setItem("snw_ambiente_admin", ambienteAdmin);
               aplicarModoBase();
+              renderSelectorBasesPac();
             }
           }
         }
@@ -1465,6 +1498,7 @@ if (btnSubirCsv) btnSubirCsv.addEventListener("click", async () => {
   btnSubirCsv.disabled = true;
   csvInput.disabled = true;
   if (selBasePac) selBasePac.disabled = true;
+  renderSelectorBasesPac();
   if (csvResultado) csvResultado.textContent = "Preparando el CSV para subirlo por partes…";
   try {
     for await (const bloque of window.snwCsvChunks.fragmentarCsv(archivo)) {
@@ -1530,6 +1564,7 @@ if (btnSubirCsv) btnSubirCsv.addEventListener("click", async () => {
     toast(err.message || "No se pudo cargar el archivo.", "error");
   } finally {
     if (selBasePac) selBasePac.disabled = baseEstabaDeshabilitada;
+    renderSelectorBasesPac();
     aplicarModoBase();
   }
 });

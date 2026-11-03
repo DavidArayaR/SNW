@@ -21,6 +21,57 @@
 .pacientes-tab-panel[hidden] { display: none; }
 .pacientes-tab-panel { min-width: 0; width: 100%; }
 #panelBaseDatos:not([hidden]) { display: grid; gap: 20px; }
+.base-selector {
+  min-width: 0;
+  margin: 0 18px;
+  padding: 14px;
+  border: 1px solid var(--borde);
+  border-radius: 14px;
+  background: var(--panel-2);
+}
+.base-selector__encabezado {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 12px;
+  margin-bottom: 10px;
+}
+.base-selector__encabezado h3 { margin: 0; color: var(--texto); font-size: .94rem; }
+.base-selector__encabezado span { color: var(--texto-suave); font-size: .8rem; }
+.base-selector__tabla-wrap {
+  max-height: 230px;
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+  background: var(--panel);
+}
+.base-selector__tabla { min-width: 0; }
+.base-selector__tabla thead th { position: sticky; top: 0; z-index: 1; padding: 9px 12px; background: var(--panel); }
+.base-selector__tabla tbody td { padding: 3px 5px; }
+.base-selector__tabla tbody tr { cursor: default; }
+.base-selector__opcion {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 11px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--texto);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color .15s ease, border-color .15s ease, color .15s ease;
+}
+.base-selector__opcion:hover:not(:disabled) { border-color: var(--borde); background: var(--hover); }
+.base-selector__opcion:focus-visible { outline: 2px solid var(--verde); outline-offset: 1px; }
+.base-selector__opcion.seleccionada { border-color: var(--brand-tint-bd); background: var(--brand-tint); color: var(--brand-tint-fg); }
+.base-selector__opcion.seleccionada i { color: var(--verde-oscuro); }
+.base-selector__opcion:disabled { opacity: .6; cursor: wait; }
+.base-selector__opcion[hidden] { display: none; }
+.base-selector__vacio { padding: 14px 12px !important; color: var(--texto-suave); }
 .pacientes-tab-panel:not([hidden]) { animation: pacientes-tab-entrada .24s ease-out both; }
 @keyframes pacientes-tab-entrada {
   from { opacity: 0; transform: translateX(var(--pacientes-entrada-x, 0px)); }
@@ -32,6 +83,7 @@
 }
 @media (max-width: 760px) {
   .app-topbar .pacientes-tabs { margin-left: 0; }
+  .base-selector { margin-inline: 12px; padding: 12px; }
 }
 
 .pacientes__aviso-pruebas { margin: 8px 18px 12px; }
