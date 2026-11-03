@@ -1,5 +1,6 @@
 """Configuración y selección de respuestas automáticas por clínica."""
 
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -10,6 +11,27 @@ import main
 
 
 class RespuestasSistemaTests(unittest.TestCase):
+    def test_patrones_guardan_tildes_y_se_comparan_sin_perder_tolerancia(self):
+        from intenciones_call_center import clasificar, patrones_configurados
+
+        clave = "call_center_patrones_consulta"
+        catalogo = {"CONSULTA_HORAS": ["¿Hay atención el próximo miércoles?", "Hora para mañana"]}
+        with patch.object(main, "catalogo_centros", return_value={}), \
+             patch.object(main, "config_set") as guardar, \
+             patch.object(main, "_config_valores", return_value={}), \
+             patch.object(main, "listar_canales", return_value=[]), \
+             patch.object(main, "config_get", return_value=""):
+            main.actualizar_configuracion_completa(
+                main.ConfigTodoIn(cambios={clave: json.dumps(catalogo, ensure_ascii=False)}),
+                sesion={"usuario": "dev"})
+        guardado = guardar.call_args.args[0][clave]
+        self.assertEqual(json.loads(guardado), catalogo)
+        self.assertIn("mañana", guardado)
+        self.assertIn("miércoles", guardado)
+        patrones = patrones_configurados(guardado)
+        self.assertIn("hay atencion el proximo miercoles", patrones["CONSULTA_HORAS"])
+        self.assertIn("CONSULTA_HORAS", clasificar("hay atencion el proximo miercoles", patrones).motivos)
+
     def test_cada_clinica_usa_su_texto_y_conserva_el_predeterminado(self):
         cfg = {"respuesta_sistema_SMPT_reagendar_derivacion": "Respuesta de SMPT"}
         self.assertEqual(main._respuesta_sistema("reagendar_derivacion", "SMPT", cfg),

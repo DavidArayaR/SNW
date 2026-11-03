@@ -5994,18 +5994,20 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
             if not v or "mensaje automático" not in v.casefold() or len(v) > 1000:
                 raise HTTPException(422, detail="El aviso debe incluir «mensaje automático» y tener menos de 1000 caracteres.")
         if clave == "call_center_patrones_consulta":
-            from intenciones_call_center import MOTIVOS, patrones_configurados
+            from intenciones_call_center import MOTIVOS
             try:
-                catalogo = json.loads(v or "{}")
+                catalogo_patrones = json.loads(v or "{}")
             except ValueError:
                 raise HTTPException(422, detail="Los patrones deben ser JSON válido.")
-            if not isinstance(catalogo, dict) or any(k not in MOTIVOS or not isinstance(frases, list)
+            if not isinstance(catalogo_patrones, dict) or any(k not in MOTIVOS or not isinstance(frases, list)
                                                     or len(frases) > 30 or any(not isinstance(f, str)
                                                     or not 4 <= len(f) <= 80 or re.search(r"\d|@", f)
                                                     for f in frases)
-                                                    for k, frases in catalogo.items()):
+                                                    for k, frases in catalogo_patrones.items()):
                 raise HTTPException(422, detail="Patrones inválidos: usa motivos conocidos y hasta 30 frases de 4 a 80 caracteres, sin datos personales.")
-            v = json.dumps(patrones_configurados(v), ensure_ascii=False)
+            # Conservar el texto original para editarlo; el clasificador
+            # normaliza una copia al comparar las respuestas recibidas.
+            v = json.dumps(catalogo_patrones, ensure_ascii=False)
         if clave in ("smtp_tls", "wa_rate_limit_activo", "anti_flip_flop_dev"):
             v = "true" if v.lower() in ("true", "1", "on", "si", "sí") else "false"
         if clave == "reagendar_envio_activo":
