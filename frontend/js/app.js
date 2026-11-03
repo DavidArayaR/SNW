@@ -69,7 +69,7 @@ function opcionesBasesReservo(codigoCentro) {
   const items = basesReservo.filter((base) => base.clinica_codigo === codigoCentro);
   if (!items.length) return "";
   return `<optgroup label="Bases de Reservo">` + items.map((base) =>
-    `<option value="reservo:${Number(base.id)}">${escaparHtml(base.nombre)} · ${escaparHtml(base.clinica_nombre || codigoCentro)} (${Number(base.total || 0)} pacientes)</option>`
+    `<option value="reservo:${Number(base.id)}">${escaparHtml(base.nombre)}</option>`
   ).join("") + `</optgroup>`;
 }
 
@@ -693,9 +693,8 @@ function refrescarAvisoSinArea() {
   if (inpArea) inpArea.disabled = sinAsignadas || bloquearPorAlcance;
 }
 
-// Selector único de base de datos de la card de envío: lista solo
-// las bases disponibles —desarrollo/producción (según restricción) y una
-// opción por área—. La elección de base siempre es explícita.
+// Cada opción representa una base de pacientes accesible; las bases de áreas
+// conservan su identificador de área para aplicar permisos en el servidor.
 // Valores: "desarrollo" | "produccion" | "esp:<id>".
 function baseSeleccionadaConf() {
   const sel = $("#selBaseConf");
@@ -731,20 +730,18 @@ function construirOpcionesBaseConf(forzarEspId) {
   const restringido = usuarioRestringidoADesarrollo() || (window.snwRol || "") === "usuario";
   let html = "";
   if (plantilla && esPlantillaProtegida(plantilla)) {
-    html = window.snwEsPrivilegiado ? `<option value="desarrollo">Desarrollo (pacientes_dev)</option>` : "";
+    html = window.snwEsPrivilegiado ? `<option value="desarrollo">pacientes_dev</option>` : "";
   } else if (forzarEspId != null) {
     const espForzada = misAreas.find((e) => e.id === forzarEspId);
-    const nombre = espForzada ? espForzada.nombre_visible : (nombreArea(forzarEspId) || "Área");
-    const tabla = espForzada ? espForzada.nombre_tabla_base : "";
-    html = `<option value="esp:${forzarEspId}"${usuarioRestringidoADesarrollo() ? " disabled" : ""}>${escaparHtml(nombre)}${tabla ? ` (${escaparHtml(tabla)})` : ""}${usuarioRestringidoADesarrollo() ? " · No disponible en Desarrollo" : ""}</option>`;
+    html = espForzada ? `<option value="esp:${forzarEspId}"${usuarioRestringidoADesarrollo() ? " disabled" : ""}>${escaparHtml(espForzada.nombre_tabla_base)}${usuarioRestringidoADesarrollo() ? " · No disponible en Desarrollo" : ""}</option>` : "";
   } else {
-    html = `<optgroup label="Bases">` +
-      (window.snwEsPrivilegiado ? `<option value="desarrollo">Desarrollo (pacientes_dev)</option>` : "") +
-      (restringido ? "" : `<option value="produccion">Producción (pacientes_prod)</option>`) +
+    html = `<optgroup label="Bases de datos">` +
+      (window.snwEsPrivilegiado ? `<option value="desarrollo">pacientes_dev</option>` : "") +
+      (restringido ? "" : `<option value="produccion">pacientes_prod</option>`) +
       `</optgroup>`;
     if (misAreas.length && !usuarioRestringidoADesarrollo()) {
-      html += `<optgroup label="Áreas">` +
-        misAreas.map((e) => `<option value="esp:${e.id}">${escaparHtml(e.nombre_visible)} (${escaparHtml(e.nombre_tabla_base)})</option>`).join("") +
+      html += `<optgroup label="Bases de datos de áreas">` +
+        misAreas.map((e) => `<option value="esp:${e.id}">${escaparHtml(e.nombre_tabla_base)}</option>`).join("") +
         `</optgroup>`;
     }
   }
@@ -1019,22 +1016,22 @@ function actualizarProgPlantilla() {
     const opcionInicial = `<option value="" selected disabled>— Seleccione base de datos —</option>`;
     if (esHelloWorld) {
       selBase.innerHTML = opcionInicial + (window.snwEsPrivilegiado
-        ? `<option value="desarrollo">Desarrollo (pacientes_dev)</option>` : "");
+        ? `<option value="desarrollo">pacientes_dev</option>` : "");
     } else if (p?.area_id != null) {
       const area = areas.find((item) => Number(item.id) === Number(p.area_id));
       selBase.innerHTML = opcionInicial + (area
-        ? `<option value="esp:${area.id}"${usuarioRestringidoADesarrollo() ? " disabled" : ""}>${escaparHtml(area.nombre_visible)} (${escaparHtml(area.nombre_tabla_base)})${usuarioRestringidoADesarrollo() ? " · No disponible en Desarrollo" : ""}</option>`
+        ? `<option value="esp:${area.id}"${usuarioRestringidoADesarrollo() ? " disabled" : ""}>${escaparHtml(area.nombre_tabla_base)}${usuarioRestringidoADesarrollo() ? " · No disponible en Desarrollo" : ""}</option>`
         : "");
     } else {
       selBase.innerHTML =
         opcionInicial +
         `<optgroup label="Bases de datos">` +
-          (window.snwEsPrivilegiado ? `<option value="desarrollo">Desarrollo (pacientes_dev)</option>` : "") +
-          (restringido ? "" : `<option value="produccion">Producción (pacientes_prod)</option>`) +
+          (window.snwEsPrivilegiado ? `<option value="desarrollo">pacientes_dev</option>` : "") +
+          (restringido ? "" : `<option value="produccion">pacientes_prod</option>`) +
         `</optgroup>` +
         (areas.length && !usuarioRestringidoADesarrollo()
-          ? `<optgroup label="Bases por área">` +
-              areas.map((area) => `<option value="esp:${area.id}">${escaparHtml(area.nombre_visible)} (${escaparHtml(area.nombre_tabla_base)})</option>`).join("") +
+          ? `<optgroup label="Bases de datos de áreas">` +
+              areas.map((area) => `<option value="esp:${area.id}">${escaparHtml(area.nombre_tabla_base)}</option>`).join("") +
             `</optgroup>`
           : "");
     }
@@ -2645,7 +2642,7 @@ function abrirModalConf(id = tplSelId) {
     const sel = $("#selBaseConf");
     if (sel) {
       sel.innerHTML = `<option value="" selected disabled>— Seleccione base de datos —</option>` +
-        (window.snwEsPrivilegiado ? `<option value="desarrollo">Desarrollo (pacientes_dev)</option>` : "");
+        (window.snwEsPrivilegiado ? `<option value="desarrollo">pacientes_dev</option>` : "");
       sel.value = "";
     }
   }
