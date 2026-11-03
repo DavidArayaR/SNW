@@ -300,6 +300,7 @@ def _migrar_permisos_acciones_legacy(permisos: str, rol: str) -> str:
 # ---------------------------------------------------------------------------
 CONFIG_DEFAULTS = {
     # App / envío
+    "reservo_tratamientos_cache_minutos": "30",
     "entorno": "desarrollo",
     "metodo_envio": "simulado",
     "numeros_prueba_dev": "",

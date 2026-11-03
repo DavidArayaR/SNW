@@ -5443,11 +5443,27 @@ def listar_tratamientos_reservo(body: ReservoBuscarTratamientosIn,
         raise HTTPException(409, detail="Configura el token API de esta clínica en Configuración → Integraciones.")
     cliente = None
     try:
-        cliente = reservo_pacientes.ClienteReservo(token)
-        tratamientos = cliente.listar_tratamientos(desde, hasta)
+        try:
+            tratamientos = reservo_pacientes.obtener_tratamientos_cache(
+                body.clinica_codigo, desde, hasta, token)
+        except Exception as exc:
+            log_error("leer caché de tratamientos Reservo", exc, solo_tipo=True)
+            tratamientos = None
+        origen = "caché"
+        if tratamientos is None:
+            origen = "Reservo"
+            cliente = reservo_pacientes.ClienteReservo(token)
+            tratamientos = cliente.listar_tratamientos(desde, hasta)
+            try:
+                minutos = max(1, min(1440, int(config.get("reservo_tratamientos_cache_minutos") or 30)))
+                reservo_pacientes.guardar_tratamientos_cache(
+                    body.clinica_codigo, desde, hasta, token, tratamientos, minutos)
+            except Exception as exc:
+                log_error("guardar caché de tratamientos Reservo", exc, solo_tipo=True)
         auditoria_registrar(sesion.get("usuario", ""), "reservo_tratamientos_consultados",
                             body.clinica_codigo,
-                            f"Rango {desde} a {hasta}; {len(tratamientos)} nombres de tratamiento; sin guardar pacientes")
+                            f"Rango {desde} a {hasta}; {len(tratamientos)} nombres de tratamiento;"
+                            f" origen {origen}; sin guardar pacientes")
         return {"items": tratamientos}
     except reservo_pacientes.ReservoError as exc:
         log_error(f"listar tratamientos Reservo {body.clinica_codigo}: {exc.categoria}")

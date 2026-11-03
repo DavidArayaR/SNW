@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import hashlib
 import json
 import re
 import time
@@ -35,6 +36,52 @@ class ReservoError(Exception):
         self.categoria = categoria
         self.status_code = status_code
         super().__init__(categoria)
+
+
+def _huella_token(token: str) -> str:
+    """Separa la caché al rotar credenciales sin almacenar el token."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def obtener_tratamientos_cache(codigo: str, desde: dt.date, hasta: dt.date,
+                               token: str) -> list[dict] | None:
+    from db import conectar
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT tratamientos_json FROM reservo_tratamientos_cache"
+            " WHERE clinica_codigo=%s AND fecha_desde=%s AND fecha_hasta=%s"
+            " AND token_hash=%s AND expira_en>UTC_TIMESTAMP()",
+            (codigo, desde, hasta, _huella_token(token)),
+        )
+        fila = cur.fetchone()
+    if fila is None:
+        return None
+    try:
+        items = json.loads(fila["tratamientos_json"])
+        if isinstance(items, list) and all(
+                isinstance(item, dict) and isinstance(item.get("uuid"), str)
+                and isinstance(item.get("nombre"), str) for item in items):
+            return items
+    except (TypeError, ValueError):
+        pass
+    return None
+
+
+def guardar_tratamientos_cache(codigo: str, desde: dt.date, hasta: dt.date,
+                               token: str, items: list[dict], minutos: int) -> None:
+    from db import conectar
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM reservo_tratamientos_cache WHERE expira_en<=UTC_TIMESTAMP()")
+        cur.execute(
+            "INSERT INTO reservo_tratamientos_cache"
+            " (clinica_codigo,fecha_desde,fecha_hasta,token_hash,tratamientos_json,expira_en)"
+            " VALUES (%s,%s,%s,%s,%s,DATE_ADD(UTC_TIMESTAMP(), INTERVAL %s MINUTE))"
+            " ON DUPLICATE KEY UPDATE tratamientos_json=VALUES(tratamientos_json),"
+            " expira_en=VALUES(expira_en)",
+            (codigo, desde, hasta, _huella_token(token),
+             json.dumps(items, ensure_ascii=False), minutos),
+        )
+        conn.commit()
 
 
 def validar_uuid(valor: str) -> str:
@@ -803,6 +850,16 @@ def _deshacer_sincronizacion_bloqueada(job_id: int) -> dict:
 
 def configurar_tablas(cur):
     """Migración idempotente llamada por `asegurar_tabla_config`."""
+    cur.execute(
+        "CREATE TABLE IF NOT EXISTS reservo_tratamientos_cache ("
+        " clinica_codigo VARCHAR(8) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,"
+        " fecha_desde DATE NOT NULL,fecha_hasta DATE NOT NULL,"
+        " token_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,"
+        " tratamientos_json LONGTEXT NOT NULL,expira_en DATETIME NOT NULL,"
+        " PRIMARY KEY (clinica_codigo,fecha_desde,fecha_hasta,token_hash),"
+        " KEY idx_reservo_tratamientos_expira (expira_en)"
+        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    )
     cur.execute(
         "CREATE TABLE IF NOT EXISTS reservo_pacientes ("
         " id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,"
