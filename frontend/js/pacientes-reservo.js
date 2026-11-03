@@ -320,7 +320,8 @@
       const accion = item.estado === "deshecho"
         ? `<small>${Number(item.pacientes_revertidos || 0)} pacientes quitados</small>`
         : `<div class="reservo-acciones">${["completado", "completado_con_advertencias"].includes(item.estado)
-          ? `<button type="button" class="btn btn--primary" data-guardar-base="${Number(item.id)}"><i class="fa-solid fa-database" aria-hidden="true"></i> Guardar como base</button>` : ""}${reintentarBoton}${deshacerBoton}</div>`;
+          ? `<button type="button" class="btn btn--primary" data-guardar-base="${Number(item.id)}"><i class="fa-solid fa-database" aria-hidden="true"></i> Guardar como base</button>` +
+            `<button type="button" class="btn btn--ghost" data-descargar-csv="${Number(item.id)}"><i class="fa-solid fa-download" aria-hidden="true"></i> Descargar CSV</button>` : ""}${reintentarBoton}${deshacerBoton}</div>`;
       return `<tr><td><strong>${escapar(item.clinica_nombre)}</strong><br><small>${periodo}</small></td>` +
         `<td>${escapar(item.tratamiento_nombre || "Tratamiento histórico")}</td>` +
         `<td><span class="reservo-estado ${estadoClase(item.estado)}">${estadoTexto(item.estado)}</span></td>` +
@@ -334,6 +335,34 @@
       boton.addEventListener("click", () => mostrarConfirmacion(boton)));
     ui.syncs.querySelectorAll("[data-guardar-base]").forEach((boton) =>
       boton.addEventListener("click", () => abrirModalGuardar(boton.dataset.guardarBase)));
+    ui.syncs.querySelectorAll("[data-descargar-csv]").forEach((boton) =>
+      boton.addEventListener("click", async () => {
+        const id = Number(boton.dataset.descargarCsv);
+        boton.disabled = true;
+        try {
+          const respuesta = await fetch(`api/reservo/sincronizaciones/${id}/pacientes.csv`, {
+            headers: headers(), cache: "no-store",
+          });
+          if (respuesta.status === 401) { window.snwSesionExpirada(); return; }
+          if (!respuesta.ok) {
+            const detalle = await respuesta.json().catch(() => ({}));
+            throw new Error(detalle.detail || "No se pudo descargar el CSV.");
+          }
+          const url = URL.createObjectURL(await respuesta.blob());
+          const enlace = document.createElement("a");
+          enlace.href = url;
+          enlace.download = `reservo-consulta-${id}.csv`;
+          document.body.appendChild(enlace);
+          enlace.click();
+          enlace.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 60000);
+          mostrarAviso("CSV descargado con los pacientes que tienen teléfono chileno válido.", "success");
+        } catch (error) {
+          mostrarAviso(error.message || "No se pudo descargar el CSV.", "error");
+        } finally {
+          boton.disabled = false;
+        }
+      }));
     return filas.some((item) => ["pendiente", "ejecutando"].includes(item.estado));
   }
 

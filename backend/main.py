@@ -5698,6 +5698,78 @@ def listar_pacientes_base_reservo(base_id: int, pagina: int = Query(1, ge=1),
         raise HTTPException(422, detail=str(exc)) from exc
 
 
+def descargar_sincronizacion_reservo_csv(job_id: int, sesion: dict = Depends(solo_admin)):
+    """Exporta la cohorte de una consulta, con columnas importables en SNW."""
+    try:
+        with conectar() as conn, conn.cursor() as cur:
+            job = reservo_pacientes._obtener_job_base(cur, job_id)
+            tratamientos, _ = reservo_pacientes._detalle_tratamientos(job)
+            if not tratamientos:
+                raise ValueError("La consulta no conserva los tratamientos seleccionados.")
+            cur.execute("SELECT 1 FROM reservo_sincronizacion_pacientes WHERE job_id=%s LIMIT 1", (job_id,))
+            if not cur.fetchone():
+                raise ValueError("La consulta no tiene pacientes asociados disponibles para exportar.")
+    except LookupError as exc:
+        raise HTTPException(404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, detail=str(exc)) from exc
+
+    uids = [item["uuid"] for item in tratamientos]
+    marcadores = ",".join("%s" for _ in uids)
+
+    def celda_segura(valor, longitud):
+        texto = str(valor or "").strip()
+        prefijo = "'" if texto.lstrip().startswith(("=", "+", "-", "@")) else ""
+        return prefijo + texto[:longitud - len(prefijo)]
+
+    def generar_csv():
+        from zoneinfo import ZoneInfo
+
+        yield "\ufeff"
+        buffer = _io.StringIO(newline="")
+        escritor = _csv.writer(buffer, lineterminator="\r\n")
+        escritor.writerow(["nombre", "apellido", "telefono", "tratamiento_ultima_atencion", "fecha_ultima_atencion"])
+        yield buffer.getvalue()
+        buffer.seek(0)
+        buffer.truncate(0)
+        with conectar() as conn, conn.cursor(pymysql.cursors.SSDictCursor) as cur:
+            cur.execute(
+                "SELECT p.paciente_nombre,p.paciente_apellido,p.paciente_telefono,p.fecha_ultima_atencion,"
+                "GROUP_CONCAT(DISTINCT t.tratamiento_nombre ORDER BY t.tratamiento_nombre SEPARATOR ', ') AS tratamiento "
+                "FROM reservo_sincronizacion_pacientes sp JOIN reservo_pacientes p ON p.id=sp.paciente_id "
+                "LEFT JOIN reservo_paciente_tratamientos t ON t.paciente_id=p.id "
+                f"AND t.tratamiento_uuid IN ({marcadores}) WHERE sp.job_id=%s "
+                "GROUP BY p.id,p.paciente_nombre,p.paciente_apellido,p.paciente_telefono,p.fecha_ultima_atencion ORDER BY p.id",
+                (*uids, job_id),
+            )
+            while True:
+                filas = cur.fetchmany(500)
+                if not filas:
+                    break
+                for fila in filas:
+                    telefono = normalizar_telefono(str(fila.get("paciente_telefono") or ""))
+                    if not telefono or not str(fila.get("paciente_nombre") or "").strip():
+                        continue
+                    fecha = fila.get("fecha_ultima_atencion")
+                    fecha_local = (fecha.replace(tzinfo=datetime.timezone.utc)
+                                   .astimezone(ZoneInfo("America/Santiago")).date().isoformat()
+                                   if fecha else "")
+                    escritor.writerow([celda_segura(fila.get("paciente_nombre"), 150),
+                        celda_segura(fila.get("paciente_apellido"), 150), telefono[1:],
+                        celda_segura(fila.get("tratamiento"), 500), fecha_local])
+                contenido = buffer.getvalue()
+                if contenido:
+                    yield contenido
+                buffer.seek(0)
+                buffer.truncate(0)
+
+    auditoria_registrar(sesion.get("usuario") or "", "reservo_consulta_csv_descargado", str(job_id))
+    return StreamingResponse(generar_csv(), media_type="text/csv; charset=utf-8", headers={
+        "Content-Disposition": f'attachment; filename="reservo-consulta-{int(job_id)}.csv"',
+        "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
+    })
+
+
 def listar_pacientes_reservo(
         clinica: str | None = Query(None, max_length=8),
         tratamiento: str | None = Query(None, max_length=200),
