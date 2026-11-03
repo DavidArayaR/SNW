@@ -136,6 +136,27 @@ class TestFiltrosReservo(unittest.TestCase):
 
 
 class TestClienteHttpReservo(unittest.TestCase):
+    def test_tratamientos_consulta_tramos_secuenciales_sin_duplicar(self):
+        periodos = []
+        tratamiento = "aabbccdd-1111-2222-3333-001122334455"
+
+        def responder(request):
+            periodos.append((request.url.params["fecha_inicial"],
+                             request.url.params["fecha_final"]))
+            return httpx.Response(200, json={"resultados": [{
+                "tratamientos": [{"uuid": tratamiento, "nombre": "Salud mental"}]
+            }], "pagina_siguiente": None})
+
+        cliente = rp.ClienteReservo("token-falso", transport=httpx.MockTransport(responder))
+        try:
+            resultado = cliente.listar_tratamientos(dt.date(2026, 1, 1), dt.date(2026, 1, 15))
+        finally:
+            cliente.close()
+        self.assertEqual(periodos, [("2026-01-01", "2026-01-07"),
+                                    ("2026-01-08", "2026-01-14"),
+                                    ("2026-01-15", "2026-01-15")])
+        self.assertEqual(resultado, [{"uuid": tratamiento, "nombre": "Salud mental"}])
+
     def test_recorrido_pagina_y_auth_token_sin_logica_de_pacientes(self):
         peticiones = []
 

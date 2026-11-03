@@ -25,6 +25,7 @@ API_BASE = "https://reservo.cl/APIpublica/v2/"
 MAX_PAGINAS = 10000
 TIMEOUT_SEGUNDOS = 20.0
 MAX_REINTENTOS = 2
+DIAS_TRAMO_TRATAMIENTOS = 7
 
 
 class ReservoError(Exception):
@@ -46,16 +47,18 @@ def validar_uuid(valor: str) -> str:
     return valor.lower()
 
 
-def dividir_periodo(desde: dt.date, hasta: dt.date) -> list[tuple[dt.date, dt.date]]:
-    """Divide un período inclusivo en bloques de no más de 31 días."""
+def dividir_periodo(desde: dt.date, hasta: dt.date, *, dias_por_tramo: int = 31) -> list[tuple[dt.date, dt.date]]:
+    """Divide un período inclusivo en bloques de hasta 31 días."""
     if not isinstance(desde, dt.date) or not isinstance(hasta, dt.date):
         raise ValueError("Las fechas no son válidas.")
     if desde > hasta:
         raise ValueError("La fecha inicial no puede ser posterior a la fecha final.")
+    if not 1 <= dias_por_tramo <= 31:
+        raise ValueError("El tramo debe tener entre 1 y 31 días.")
     bloques = []
     inicio = desde
     while inicio <= hasta:
-        fin = min(inicio + dt.timedelta(days=30), hasta)
+        fin = min(inicio + dt.timedelta(days=dias_por_tramo - 1), hasta)
         bloques.append((inicio, fin))
         inicio = fin + dt.timedelta(days=1)
     return bloques
@@ -281,8 +284,8 @@ class ClienteReservo:
             return datos
         raise ReservoError("No se pudo completar la consulta a Reservo.")
 
-    def iterar_citas(self, desde: dt.date, hasta: dt.date):
-        for inicio, fin in dividir_periodo(desde, hasta):
+    def iterar_citas(self, desde: dt.date, hasta: dt.date, *, dias_por_tramo: int = 31):
+        for inicio, fin in dividir_periodo(desde, hasta, dias_por_tramo=dias_por_tramo):
             pagina = 1
             visitadas = set()
             while pagina:
@@ -296,7 +299,8 @@ class ClienteReservo:
     def listar_tratamientos(self, desde: dt.date, hasta: dt.date) -> list[dict]:
         """Consulta citas y devuelve solo el catálogo de tratamientos observado."""
         encontrados = {}
-        for _inicio, _fin, _pagina, citas in self.iterar_citas(desde, hasta):
+        for _inicio, _fin, _pagina, citas in self.iterar_citas(
+                desde, hasta, dias_por_tramo=DIAS_TRAMO_TRATAMIENTOS):
             for cita in citas:
                 if not isinstance(cita, dict):
                     continue
