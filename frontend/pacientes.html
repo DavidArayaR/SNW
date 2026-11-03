@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="css/componentes.css?v=paginador-cinco1">
   <link rel="stylesheet" href="css/pacientes.css?v=selector-tabla1">
   <link rel="stylesheet" href="css/layout.css?v=navcolor1">
-  <link rel="stylesheet" href="css/admin.css?v=altura-bases1">
+  <link rel="stylesheet" href="css/admin.css?v=volver-bases1">
   <link rel="stylesheet" href="css/refinamiento.css?v=merge-frontend1">
   <link rel="stylesheet" href="css/estilo-nuevo.css?v=ui-unslop1">
   <script src="js/tema.js?v=scrollbar1"></script>
@@ -46,6 +46,7 @@
               <select id="selBasePac" aria-label="Base de datos" hidden tabindex="-1" aria-hidden="true">
                 <option value="" selected>Selecciona una base</option>
               </select>
+              <button id="btnVolverBases" class="btn btn--ghost" type="button" hidden>Volver a seleccionar base</button>
               <button id="btnToggleFiltros" class="btn btn--ghost" type="button" aria-expanded="true" hidden>
                 <i class="fa-solid fa-sliders"></i> <span>Ocultar filtros</span>
               </button>
@@ -53,7 +54,7 @@
             </div>
           </div>
 
-          <section class="base-selector" aria-labelledby="tituloSelectorBases">
+          <section class="base-selector" id="selectorBases" aria-labelledby="tituloSelectorBases">
             <div class="base-selector__encabezado">
               <h3 id="tituloSelectorBases">Bases de datos</h3>
               <span>Selecciona una para ver sus pacientes</span>
@@ -409,7 +410,7 @@
   <script src="js/layout.js?v=reservo-nav2"></script>
   <script src="js/pass-toggle.js"></script>
   <script src="js/csv-chunks.js?v=csv-codificacion1"></script>
-  <script src="js/pacientes.js?v=altura-bases1"></script>
+  <script src="js/pacientes.js?v=volver-bases1"></script>
   <script src="js/reagendar.js?v=paginacion1"></script>
   <script src="js/pacientes-tabs.js?v=aplazar-flotante1"></script>
   <script>

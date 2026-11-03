@@ -163,6 +163,8 @@ function qsBase() {
 
 function renderSelectorBasesPac() {
   if (!tablaSelectorBases || !selBasePac) return;
+  const volver = $("#btnVolverBases");
+  if (volver) volver.disabled = selBasePac.disabled;
   const clinica = filtroClinicaBases?.value || "todas";
   const opciones = [...selBasePac.options].filter((opcion) => {
     if (!opcion.value) return false;
@@ -261,6 +263,10 @@ async function cargarBasesPac() {
 
 function mostrarBaseSeleccionada(mostrar) {
   $("#tabPacientes")?.classList.toggle("sin-base", !mostrar);
+  const selector = $("#selectorBases");
+  const volver = $("#btnVolverBases");
+  if (selector) selector.hidden = mostrar;
+  if (volver) volver.hidden = !mostrar;
   for (const selector of ["#filtrosWrap", "#toolbarPacientes", "#tablaPacientesWrap", "#btnToggleFiltros"]) {
     const elemento = $(selector);
     if (elemento) elemento.hidden = !mostrar;
@@ -274,6 +280,35 @@ function mostrarBaseSeleccionada(mostrar) {
 }
 
 if (filtroClinicaBases) filtroClinicaBases.addEventListener("change", renderSelectorBasesPac);
+
+$("#btnVolverBases")?.addEventListener("click", () => {
+  if (!selBasePac || selBasePac.disabled) return;
+  solicitudPacientes++;
+  if (controlCargaPacientes) controlCargaPacientes.abort();
+  controlCargaPacientes = null;
+  mostrarCargaPacientes(false);
+  selBasePac.value = "";
+  baseElegidaSesion = false;
+  pacientes = [];
+  resumenPacientes = null;
+  baseResumenPacientes = null;
+  consultaPacientesAnterior = null;
+  totalPacientesFiltrados = 0;
+  filtroEstado = "todos";
+  filtroRespuesta = "todas";
+  filtroInteres = "todos";
+  filtro = "";
+  if (buscadorEl) buscadorEl.value = "";
+  seleccionados.clear();
+  seleccionadosDatos.clear();
+  todoMarcado = false;
+  paginaPac = 1;
+  const titulo = $("#tituloPacientes");
+  if (titulo) titulo.textContent = "Pacientes";
+  mostrarBaseSeleccionada(false);
+  renderSelectorBasesPac();
+  tablaSelectorBases?.querySelector("button")?.focus();
+});
 
 // Borrar la tabla completa (DROP) es irreversible: solo administrador y
 // desarrollador. El backend lo exige igual (Depends(solo_admin)).

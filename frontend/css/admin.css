@@ -165,6 +165,8 @@ body[data-seccion="administracion"] .stats {
 #tabPacientes #toolbarPacientes[hidden],
 #tabPacientes #tablaPacientesWrap[hidden],
 #tabPacientes #btnToggleFiltros[hidden],
+#tabPacientes #btnVolverBases[hidden],
+#tabPacientes #selectorBases[hidden],
 #tabPacientes .pacientes__aviso-pruebas[hidden],
 #cardGestionBase[hidden] { display: none; }
 #tabPacientes .base-selector__encabezado label { margin-left: auto; color: var(--texto-suave); font-size: .8rem; }
