@@ -59,12 +59,14 @@ class TestCacheTratamientos(unittest.TestCase):
 
     def test_cita_cache_conserva_solo_campos_necesarios(self):
         cita = {"estado": {"codigo": "A"},
+                "inicio": "2026-10-01T18:30:00Z",
                 "tratamientos": [self.ITEMS[0]],
                 "cliente": {"uuid": "cliente-1", "nombre": "Paciente", "apellido_paterno": "Prueba",
                             "telefono_1": "+56911111111", "mail": "no-guardar@ejemplo.cl",
                             "direccion": {"calle": "No guardar"}}}
         minimo = rp._cita_para_cache(cita, "A")
         self.assertEqual(minimo["cliente"]["telefono_1"], "+56911111111")
+        self.assertEqual(minimo["inicio"], "2026-10-01T18:30:00Z")
         self.assertNotIn("no-guardar@ejemplo.cl", str(minimo))
         self.assertNotIn("No guardar", str(minimo))
 
@@ -79,7 +81,9 @@ class TestCacheTratamientos(unittest.TestCase):
                                     '{"uuid":"ffeeddcc-1111-2222-3333-001122334455","nombre":"Control"}]',
                "creado_por": "admin"}
         citas = [
-            {"estado": {"codigo": "A"}, "tratamientos": self.ITEMS,
+            {"estado": {"codigo": "A"}, "inicio": "2026-10-01T18:30:00Z", "tratamientos": self.ITEMS,
+             "cliente": {"uuid": "cliente-1", "nombre": "Paciente", "telefono_1": "+56911111111"}},
+            {"estado": {"codigo": "A"}, "inicio": "2026-10-01T19:30:00Z", "tratamientos": self.ITEMS,
              "cliente": {"uuid": "cliente-1", "nombre": "Paciente", "telefono_1": "+56911111111"}},
             {"estado": {"codigo": "A"}, "tratamientos": [
                 {"uuid": "ffeeddcc-1111-2222-3333-001122334455", "nombre": "Control"}],
@@ -101,6 +105,7 @@ class TestCacheTratamientos(unittest.TestCase):
         cliente_http.assert_not_called()
         self.assertEqual([fila[0]["uuid"] for fila in guardar.call_args.args[2]],
                          ["cliente-1", "cliente-2"])
+        self.assertEqual(guardar.call_args.args[2][0][2], dt.datetime(2026, 10, 1, 19, 30))
 
     def test_tabla_filtra_por_consulta_iniciada(self):
         conexion = MagicMock()

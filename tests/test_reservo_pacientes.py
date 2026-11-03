@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 import httpx
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
@@ -12,6 +12,13 @@ import reservo_pacientes as rp
 
 
 class TestReservoPeriodos(unittest.TestCase):
+    def test_fecha_atencion_con_zona_se_guarda_en_utc(self):
+        self.assertEqual(
+            rp.fecha_atencion_utc({"inicio": "2026-10-01T15:30:00-03:00"}),
+            dt.datetime(2026, 10, 1, 18, 30),
+        )
+        self.assertIsNone(rp.fecha_atencion_utc({"inicio": "2026-10-01T15:30:00"}))
+
     def test_divide_rango_inclusivo_en_bloques_maximo_31_dias(self):
         bloques = rp.dividir_periodo(dt.date(2026, 1, 1), dt.date(2026, 2, 3))
         self.assertEqual(bloques, [
@@ -252,6 +259,20 @@ class _ConexionFalsa:
 
 
 class TestPersistenciaAtomica(unittest.TestCase):
+    def test_ultima_atencion_no_se_reemplaza_por_una_cita_anterior(self):
+        cursor = MagicMock()
+        cursor.fetchone.return_value = {"id": 44}
+        fecha = dt.datetime(2026, 10, 1, 18, 30)
+        rp._guardar_paciente_cursor(
+            cursor, "SMPT", {"uuid": "cliente-44", "nombre": "Paciente"},
+            [{"uuid": "aabbccdd-1111-2222-3333-001122334455", "nombre": "Control"}],
+            fecha,
+        )
+        actualizacion = next(call.args for call in cursor.execute.call_args_list
+                             if call.args[0].startswith("UPDATE reservo_pacientes"))
+        self.assertIn("fecha_ultima_atencion<%s", actualizacion[0])
+        self.assertEqual(actualizacion[1][-4:-1], (fecha, fecha, fecha))
+
     def test_pacientes_relaciones_y_progreso_se_confirman_en_una_transaccion(self):
         import db
 

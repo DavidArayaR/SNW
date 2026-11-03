@@ -28,6 +28,10 @@ durante el procesamiento. Si la caché
 vence, está incompleta o cambia la configuración, SNW consulta Reservo otra vez.
 Se pueden elegir varios tratamientos; la pantalla muestra los nombres, no los
 UUID. La tabla se filtra por la consulta recién iniciada y ofrece «Mostrar todos».
+La columna **Última atención** muestra la cita atendida más reciente encontrada
+para el paciente entre los tratamientos consultados, en hora de Chile. Los
+registros anteriores a esta columna muestran «—» hasta volver a consultarlos;
+la fecha de sincronización no se usa como fecha de atención.
 La sincronización guarda solo citas cuyo `estado.codigo` coincide con el
 código «Atendido» verificado para esa clínica y cuyos tratamientos fueron
 seleccionados. **Probar conexión** muestra estados y nombres observados; el

@@ -124,7 +124,9 @@
   function formatoFecha(valor) {
     if (!valor) return "—";
     const fecha = new Date(String(valor).replace(" ", "T") + (String(valor).includes("Z") ? "" : "Z"));
-    return Number.isNaN(fecha.getTime()) ? String(valor) : fecha.toLocaleString("es-CL", { dateStyle: "short", timeStyle: "short" });
+    return Number.isNaN(fecha.getTime()) ? String(valor) : fecha.toLocaleString("es-CL", {
+      dateStyle: "short", timeStyle: "short", timeZone: "America/Santiago",
+    });
   }
 
   function estadoClase(estado) {
@@ -291,7 +293,7 @@
   }
 
   async function cargarPacientes() {
-    ui.patients.innerHTML = '<tr><td colspan="7" class="reservo-vacio">Cargando pacientes…</td></tr>';
+    ui.patients.innerHTML = '<tr><td colspan="8" class="reservo-vacio">Cargando pacientes…</td></tr>';
     try {
       const data = await request(`api/reservo/pacientes?${parametrosPacientes()}`);
       pages = Math.max(1, Number(data.paginas || 1));
@@ -307,7 +309,7 @@
         const mensaje = selectedSyncId && ui.syncs.querySelector(".reservo-estado--proceso")
           ? "La consulta está en curso. Los pacientes aparecerán aquí conforme se procesen los tramos."
           : "No hay pacientes para estos filtros.";
-        ui.patients.innerHTML = `<tr><td colspan="7" class="reservo-vacio">${mensaje}</td></tr>`;
+        ui.patients.innerHTML = `<tr><td colspan="8" class="reservo-vacio">${mensaje}</td></tr>`;
         return;
       }
       ui.patients.innerHTML = data.items.map((item) =>
@@ -316,9 +318,10 @@
         `<td>${escapar(item.paciente_telefono || "—")}</td><td>${escapar(item.clinica_nombre)}</td>` +
         `<td><code>${escapar(item.cliente_uuid_parcial)}</code></td>` +
         `<td>${escapar(item.tratamientos_nombre || "—")}</td>` +
+        `<td>${escapar(formatoFecha(item.fecha_ultima_atencion))}</td>` +
         `<td>${escapar(formatoFecha(item.ultima_sincronizacion_en))}</td></tr>`).join("");
     } catch (error) {
-      ui.patients.innerHTML = `<tr><td colspan="7" class="reservo-vacio reservo-vacio--error">${escapar(error.message)}</td></tr>`;
+      ui.patients.innerHTML = `<tr><td colspan="8" class="reservo-vacio reservo-vacio--error">${escapar(error.message)}</td></tr>`;
     }
   }
 

@@ -28,6 +28,7 @@ MAX_PAGINAS = 10000
 TIMEOUT_SEGUNDOS = 20.0
 MAX_REINTENTOS = 2
 DIAS_TRAMO_TRATAMIENTOS = 7
+VERSION_CACHE_CITAS = "v2"
 
 
 class ReservoError(Exception):
@@ -41,7 +42,7 @@ class ReservoError(Exception):
 
 def _huella_token(token: str) -> str:
     """Separa la caché al rotar credenciales sin almacenar el token."""
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+    return hashlib.sha256(f"{VERSION_CACHE_CITAS}:{token}".encode("utf-8")).hexdigest()
 
 
 def obtener_tratamientos_cache(codigo: str, desde: dt.date, hasta: dt.date,
@@ -98,6 +99,9 @@ def _cita_para_cache(cita: object, estado_atendido: str) -> dict:
     estado = codigo_estado(cita)
     resultado = {"estado": {"codigo": estado}, "tratamientos": tratamientos_cita(cita)}
     if estado_atendido and estado == estado_atendido:
+        fecha = fecha_atencion_utc(cita)
+        if fecha:
+            resultado["inicio"] = fecha.isoformat() + "Z"
         cliente = cliente_valido(cita)
         if cliente:
             resultado["cliente"] = {
@@ -220,6 +224,20 @@ def codigo_estado(cita: dict) -> str:
     if not isinstance(estado, dict) or estado.get("codigo") is None:
         return ""
     return str(estado["codigo"]).strip()
+
+
+def fecha_atencion_utc(cita: dict) -> dt.datetime | None:
+    """Convierte `inicio` de Reservo a UTC; omite fechas sin zona horaria."""
+    valor = cita.get("inicio")
+    if not isinstance(valor, str) or len(valor) > 40:
+        return None
+    try:
+        fecha = dt.datetime.fromisoformat(valor.strip().replace("Z", "+00:00"))
+        if fecha.tzinfo is None:
+            return None
+        return fecha.astimezone(dt.timezone.utc).replace(tzinfo=None)
+    except (ValueError, OverflowError):
+        return None
 
 
 def uuid_tratamientos(cita: dict) -> set[str]:
@@ -642,7 +660,8 @@ def _claim_job() -> dict | None:
 
 
 def _guardar_paciente_cursor(cur, codigo: str, cliente: dict,
-                             tratamientos: list[dict]) -> tuple[str, int]:
+                             tratamientos: list[dict],
+                             fecha_atencion: dt.datetime | None = None) -> tuple[str, int]:
     uuid = normalizar_cliente_uuid(cliente["uuid"])
     nombre = texto_cliente(cliente, "nombre", 200)
     apellido = (texto_cliente(cliente, "apellido_paterno", 200)
@@ -657,17 +676,22 @@ def _guardar_paciente_cursor(cur, codigo: str, cliente: dict,
             "UPDATE reservo_pacientes SET paciente_nombre=COALESCE(%s,paciente_nombre),"
             " paciente_apellido=COALESCE(%s,paciente_apellido),"
             " paciente_telefono=COALESCE(%s,paciente_telefono),"
+            " fecha_ultima_atencion=CASE WHEN %s IS NOT NULL"
+            " AND (fecha_ultima_atencion IS NULL OR fecha_ultima_atencion<%s)"
+            " THEN %s ELSE fecha_ultima_atencion END,"
             " ultima_sincronizacion_en=UTC_TIMESTAMP(), actualizado_en=UTC_TIMESTAMP() WHERE id=%s",
-            (nombre, apellido, telefono, existente["id"]),
+            (nombre, apellido, telefono, fecha_atencion, fecha_atencion,
+             fecha_atencion, existente["id"]),
         )
         resultado = "actualizado"
         paciente_id = existente["id"]
     else:
         cur.execute(
             "INSERT INTO reservo_pacientes (clinica_codigo,cliente_uuid,paciente_nombre,"
-            "paciente_apellido,paciente_telefono,primera_sincronizacion_en,ultima_sincronizacion_en)"
-            " VALUES (%s,%s,%s,%s,%s,UTC_TIMESTAMP(),UTC_TIMESTAMP())",
-            (codigo, uuid, nombre, apellido, telefono),
+            "paciente_apellido,paciente_telefono,fecha_ultima_atencion,"
+            "primera_sincronizacion_en,ultima_sincronizacion_en)"
+            " VALUES (%s,%s,%s,%s,%s,%s,UTC_TIMESTAMP(),UTC_TIMESTAMP())",
+            (codigo, uuid, nombre, apellido, telefono, fecha_atencion),
         )
         paciente_id = cur.lastrowid
         resultado = "nuevo"
@@ -684,7 +708,7 @@ def _guardar_paciente_cursor(cur, codigo: str, cliente: dict,
 
 
 def _guardar_pagina(job_id: int, codigo: str,
-                    filas: list[tuple[dict, list[dict]]], progreso: dict) -> tuple[int, int]:
+                    filas: list[tuple], progreso: dict) -> tuple[int, int]:
     """Guarda pacientes/relaciones y contadores de la página en una transacción."""
     from db import conectar
 
@@ -694,8 +718,11 @@ def _guardar_pagina(job_id: int, codigo: str,
               "pacientes_duplicados")
     cambios = {campo: int(progreso[campo]) for campo in campos if campo in progreso}
     with conectar() as conn, conn.cursor() as cur:
-        for cliente, tratamientos in filas:
-            resultado, paciente_id = _guardar_paciente_cursor(cur, codigo, cliente, tratamientos)
+        for fila in filas:
+            cliente, tratamientos = fila[:2]
+            fecha_atencion = fila[2] if len(fila) > 2 else None
+            resultado, paciente_id = _guardar_paciente_cursor(
+                cur, codigo, cliente, tratamientos, fecha_atencion)
             cur.execute(
                 "INSERT INTO reservo_sincronizacion_pacientes (job_id,paciente_id,nuevo)"
                 " VALUES (%s,%s,%s) ON DUPLICATE KEY UPDATE"
@@ -776,10 +803,15 @@ def _procesar(job: dict) -> None:
                         else:
                             vistos.add(uuid_cliente)
                         fila = pacientes_pagina.setdefault(uuid_cliente, {"cliente": cliente_obj,
-                                                                          "tratamientos": {}})
+                                                                          "tratamientos": {},
+                                                                          "fecha_atencion": None})
+                        fecha = fecha_atencion_utc(cita)
+                        if fecha and (fila["fecha_atencion"] is None or fecha > fila["fecha_atencion"]):
+                            fila["fecha_atencion"] = fecha
                         for tratamiento in coincidentes:
                             fila["tratamientos"][tratamiento["uuid"]] = tratamiento
-                    filas_pagina = [(fila["cliente"], list(fila["tratamientos"].values()))
+                    filas_pagina = [(fila["cliente"], list(fila["tratamientos"].values()),
+                                    fila["fecha_atencion"])
                                     for fila in pacientes_pagina.values()]
                     nuevos_pagina, actualizados_pagina = _guardar_pagina(
                         job["id"], codigo, filas_pagina, {
@@ -1008,6 +1040,7 @@ def configurar_tablas(cur):
         " cliente_uuid VARCHAR(80) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,"
         " paciente_nombre VARCHAR(200) NULL,paciente_apellido VARCHAR(200) NULL,"
         " paciente_telefono VARCHAR(40) NULL,"
+        " fecha_ultima_atencion DATETIME NULL,"
         " primera_sincronizacion_en DATETIME NOT NULL,ultima_sincronizacion_en DATETIME NOT NULL,"
         " creado_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
         " actualizado_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
@@ -1016,6 +1049,11 @@ def configurar_tablas(cur):
         " KEY idx_reservo_paciente_nombre (paciente_nombre)"
         ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     )
+    cur.execute("SELECT COLUMN_NAME FROM information_schema.COLUMNS"
+                " WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='reservo_pacientes'")
+    columnas_pacientes = {fila["COLUMN_NAME"] for fila in cur.fetchall()}
+    if "fecha_ultima_atencion" not in columnas_pacientes:
+        cur.execute("ALTER TABLE reservo_pacientes ADD COLUMN fecha_ultima_atencion DATETIME NULL")
     cur.execute(
         "CREATE TABLE IF NOT EXISTS reservo_paciente_tratamientos ("
         " id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,paciente_id BIGINT UNSIGNED NOT NULL,"

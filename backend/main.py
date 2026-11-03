@@ -5619,7 +5619,7 @@ def listar_pacientes_reservo(
         cur.execute(
             "SELECT p.id,p.clinica_codigo,p.paciente_nombre,p.paciente_apellido,"
             "p.paciente_telefono,CONCAT('…',RIGHT(p.cliente_uuid,8)) AS cliente_uuid_parcial,"
-            "p.primera_sincronizacion_en,p.ultima_sincronizacion_en,"
+            "p.primera_sincronizacion_en,p.ultima_sincronizacion_en,p.fecha_ultima_atencion,"
             "(SELECT GROUP_CONCAT(DISTINCT t.tratamiento_nombre ORDER BY t.tratamiento_nombre SEPARATOR ', ')"
             " FROM reservo_paciente_tratamientos t WHERE t.paciente_id=p.id) AS tratamientos_nombre"
             " FROM reservo_pacientes p" + where +
@@ -5629,7 +5629,8 @@ def listar_pacientes_reservo(
         filas = list(cur.fetchall())
     for fila in filas:
         fila["clinica_nombre"] = RESERVO_CLINICAS.get(fila["clinica_codigo"], fila["clinica_codigo"])
-        for campo in ("primera_sincronizacion_en", "ultima_sincronizacion_en"):
+        for campo in ("primera_sincronizacion_en", "ultima_sincronizacion_en",
+                      "fecha_ultima_atencion"):
             if fila.get(campo):
                 fila[campo] = fila[campo].isoformat(sep=" ")
     return {"items": filas, "pagina": pagina, "por_pagina": por_pagina,
