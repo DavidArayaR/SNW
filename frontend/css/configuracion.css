@@ -469,6 +469,6 @@ body[data-pagina="configuracion"] #secciones {
 .config-reservo-test__resultado { min-height: 1.4rem; margin: .55rem 0 0; color: var(--texto-suave); overflow-wrap: anywhere; }
 .config-reservo-test__resultado--ok { color: var(--ok-fg); }
 .config-reservo-test__resultado--error { color: var(--danger-fg); }
-.config-reservo-token-estado { display: inline-flex; align-items: center; align-self: start; padding: .3rem .65rem; border: 1px solid currentColor; border-radius: 999px; font-size: .82rem; font-weight: 700; }
-.config-reservo-token-estado--ok { color: var(--ok-fg); background: color-mix(in srgb, var(--ok-fg) 10%, transparent); }
-.config-reservo-token-estado--faltante { color: var(--danger-fg); background: color-mix(in srgb, var(--danger-fg) 8%, transparent); }
+.config-reservo-token-estado { display: block; font-size: .82rem; font-weight: 700; }
+.config-reservo-token-estado--ok { color: var(--ok-fg); }
+.config-reservo-token-estado--faltante { color: var(--danger-fg); }
