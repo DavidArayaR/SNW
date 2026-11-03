@@ -5236,7 +5236,7 @@ for _codigo_reservo, _nombre_reservo in RESERVO_CLINICAS.items():
         "campos": [
             {"clave": clave_token_reservo(_codigo_reservo),
              "etiqueta": "Token API de Reservo", "tipo": "password",
-             "ayuda": "Se almacena en la tabla configuracion. Deja el campo vacío para conservar el valor guardado."},
+             "ayuda": "El indicador confirma que el token está guardado. Usa Probar conexión para comprobar que Reservo lo acepta. Deja el campo vacío para conservarlo."},
             {"clave": clave_estado_atendido_reservo(_codigo_reservo),
              "etiqueta": "Código de estado «Atendido»", "tipo": "text",
              "ayuda": "Pega el estado.codigo de una cita que hayas confirmado como atendida en Reservo. No uses códigos de pago ni supongas un valor."},
@@ -5324,6 +5324,12 @@ def _config_valores(cfg: dict | None = None) -> dict:
     return valores
 
 
+def _estado_tokens_reservo(cfg: dict | None = None) -> dict[str, bool]:
+    valores = cfg if cfg is not None else config_all()
+    return {codigo: bool(str(valores.get(clave_token_reservo(codigo)) or "").strip())
+            for codigo in RESERVO_CLINICAS}
+
+
 def descargar_corpus_csv(origen: str = Query("completo"),
                         sesion: dict = Depends(solo_dev)):
     from corpus_respuestas import preparar_csv
@@ -5353,6 +5359,7 @@ def obtener_configuracion_completa(sesion: dict = Depends(solo_dev)):
                      for codigo, nombre in catalogo.items())
     return {"secciones": secciones, "valores": _config_valores(cfg),
             "centros": listar_canales(cfg),
+            "reservo_tokens_configurados": _estado_tokens_reservo(cfg),
             "wa_token_configurado": bool(cfg.get("wa_token")),
             "groq_api_key_configurada": bool(config_get("groq_api_key")),
             "supresion": resumen_supresion()}
@@ -5957,6 +5964,7 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
     if cambios:
         config_set(cambios)
     return {"valores": _config_valores(), "centros": listar_canales(),
+            "reservo_tokens_configurados": _estado_tokens_reservo(),
             "wa_token_configurado": bool(config_get("wa_token")),
             "groq_api_key_configurada": bool(config_get("groq_api_key"))}
 

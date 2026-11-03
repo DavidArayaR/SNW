@@ -32,6 +32,7 @@ try {
 let centrosConfig = [];
 let plantillasReagendar = [];
 let tokenGlobalConfigurado = false;
+let tokensReservoConfigurados = {};
 let valores = {};          // valor guardado (servidor)
 let estadoSupresion = {};  // solo conteos; nunca teléfonos ni huellas
 let campos = {};           // clave -> { def, input }
@@ -511,6 +512,7 @@ async function cargar() {
       if (!Array.isArray(plantillasReagendar)) plantillasReagendar = [];
     } catch { plantillasReagendar = []; }
     tokenGlobalConfigurado = !!d.wa_token_configurado;
+    tokensReservoConfigurados = d.reservo_tokens_configurados || {};
     estadoSupresion = d.supresion || {};
     render(d.secciones || []);
     cargarEstadoDespacho();
@@ -871,6 +873,8 @@ function render(secciones) {
       }
 
       const val = valores[c.clave] ?? "";
+      const codigoTokenReservo = c.clave?.endsWith("_RESERVO_API_TOKEN")
+        ? c.clave.slice(0, -"_RESERVO_API_TOKEN".length) : null;
       const wrap = document.createElement("div");
       wrap.className = "field config-campo" +
         (c.clave === "call_center_patrones_consulta" ? " config-campo--patrones" : "") +
@@ -900,13 +904,16 @@ function render(secciones) {
         const placeholder = c.clave === "wa_token" && tokenGlobalConfigurado
           ? ' placeholder="Token guardado · escribe uno nuevo para reemplazarlo"'
           : c.clave?.endsWith("_RESERVO_API_TOKEN")
-            ? ' placeholder="Pega el token; vacío conserva el que ya esté guardado"' : "";
+            ? ' placeholder="Pega el token"' : "";
         control = `<input type="${t}" id="${id}" data-clave="${c.clave}" value="${escaparAtributo(val)}"${placeholder} autocomplete="off" spellcheck="false">`;
       }
 
       wrap.innerHTML =
         `<label${c.clave === "call_center_patrones_consulta" || CLAVES_REAGENDAR.includes(c.clave) ? "" : ` for="${id}"`}>${escaparHtml(c.etiqueta)} <span class="config-clave">${c.clave}</span></label>` +
         control +
+        (codigoTokenReservo
+          ? `<span class="config-reservo-token-estado ${tokensReservoConfigurados[codigoTokenReservo] ? "config-reservo-token-estado--ok" : "config-reservo-token-estado--faltante"}" data-reservo-token-estado="${escaparAtributo(codigoTokenReservo)}">${tokensReservoConfigurados[codigoTokenReservo] ? "Configurado correctamente" : "Sin configurar"}</span>`
+          : "") +
         (c.ayuda ? `<p class="field__hint">${escaparHtml(c.ayuda)}</p>` : "");
       grid.appendChild(wrap);
 
@@ -1146,6 +1153,13 @@ async function guardar() {
     valores = d.valores || valores;
     centrosConfig = d.centros || centrosConfig;
     tokenGlobalConfigurado = !!d.wa_token_configurado;
+    tokensReservoConfigurados = d.reservo_tokens_configurados || {};
+    cont.querySelectorAll("[data-reservo-token-estado]").forEach((indicador) => {
+      const guardado = !!tokensReservoConfigurados[indicador.dataset.reservoTokenEstado];
+      indicador.textContent = guardado ? "Configurado correctamente" : "Sin configurar";
+      indicador.classList.toggle("config-reservo-token-estado--ok", guardado);
+      indicador.classList.toggle("config-reservo-token-estado--faltante", !guardado);
+    });
     if (campos.wa_token) campos.wa_token.input.placeholder = tokenGlobalConfigurado
       ? "Token guardado · escribe uno nuevo para reemplazarlo" : "";
     for (const panel of cont.querySelectorAll(".config-seccion")) {

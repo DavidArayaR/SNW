@@ -30,12 +30,16 @@ class TestConfiguracionReservo(unittest.TestCase):
     def test_get_config_nunca_devuelve_tokens_reversibles(self):
         datos = self.configuracion()
         valores = main._config_valores(datos)
+        self.assertEqual(main._estado_tokens_reservo(datos),
+                         {codigo: True for codigo in RESERVO_CLINICAS})
         self.assertEqual(CLAVES_TOKEN, {clave_token(codigo) for codigo in RESERVO_CLINICAS})
         for clave in CLAVES_TOKEN:
             self.assertEqual(valores[clave], "")
             self.assertNotIn(datos[clave], valores.values())
+        datos[clave_token("MS")] = ""
+        self.assertFalse(main._estado_tokens_reservo(datos)["MS"])
 
-    def test_respuesta_completa_de_configuracion_no_incluye_tokens_ni_su_estado(self):
+    def test_respuesta_completa_expone_solo_estado_booleano_de_tokens(self):
         datos = self.configuracion()
         with patch.object(main, "config_all", return_value=datos), \
              patch.object(main, "config_get", return_value=""), \
@@ -46,6 +50,8 @@ class TestConfiguracionReservo(unittest.TestCase):
             self.assertEqual(respuesta["valores"][clave], "")
             self.assertNotIn(datos[clave], respuesta.values())
         self.assertNotIn("reservo_tokens_guardados", respuesta)
+        self.assertEqual(respuesta["reservo_tokens_configurados"],
+                         {codigo: True for codigo in RESERVO_CLINICAS})
 
     def test_campo_token_vacio_no_borra_credencial_guardada(self):
         datos = self.configuracion()
