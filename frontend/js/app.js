@@ -730,7 +730,9 @@ function construirOpcionesBaseConf(forzarEspId) {
   // En Desarrollo ningún rol puede escoger producción ni áreas para enviar.
   const restringido = usuarioRestringidoADesarrollo() || (window.snwRol || "") === "usuario";
   let html = "";
-  if (forzarEspId != null) {
+  if (plantilla && esPlantillaProtegida(plantilla)) {
+    html = window.snwEsPrivilegiado ? `<option value="desarrollo">Desarrollo (pacientes_dev)</option>` : "";
+  } else if (forzarEspId != null) {
     const espForzada = misAreas.find((e) => e.id === forzarEspId);
     const nombre = espForzada ? espForzada.nombre_visible : (nombreArea(forzarEspId) || "Área");
     const tabla = espForzada ? espForzada.nombre_tabla_base : "";
@@ -745,8 +747,8 @@ function construirOpcionesBaseConf(forzarEspId) {
         misAreas.map((e) => `<option value="esp:${e.id}">${escaparHtml(e.nombre_visible)} (${escaparHtml(e.nombre_tabla_base)})</option>`).join("") +
         `</optgroup>`;
     }
-    html += opcionesBasesReservo(plantilla?.centro_codigo);
   }
+  if (plantilla && !esPlantillaProtegida(plantilla)) html += opcionesBasesReservo(plantilla.centro_codigo);
   sel.innerHTML = `<option value="" selected disabled>— Seleccione base de datos —</option>` + html;
   sel.value = [...sel.options].some((opcion) => opcion.value === seleccionAnterior)
     ? seleccionAnterior : "";
@@ -1035,8 +1037,8 @@ function actualizarProgPlantilla() {
               areas.map((area) => `<option value="esp:${area.id}">${escaparHtml(area.nombre_visible)} (${escaparHtml(area.nombre_tabla_base)})</option>`).join("") +
             `</optgroup>`
           : "");
-      selBase.innerHTML += opcionesBasesReservo(p?.centro_codigo);
     }
+    if (p && !esHelloWorld) selBase.innerHTML += opcionesBasesReservo(p.centro_codigo);
     selBase.value = [...selBase.options].some((opcion) => opcion.value === seleccionAnterior)
       ? seleccionAnterior : "";
     selBase.dataset.plantillaId = plantillaId;
@@ -3152,7 +3154,7 @@ $("#btnConfirmarIniciarConf").addEventListener("click", async () => {
     const espIdLanzar = areaEnvioId();
     if (espIdLanzar != null) cuerpo.area_id = espIdLanzar;
     const listaReservoLanzar = idListaReservo(baseSeleccionadaConf());
-    if (listaReservoLanzar != null) cuerpo.reservo_lista_id = listaReservoLanzar;
+    if (listaReservoLanzar != null) cuerpo.lista_reservo_id = listaReservoLanzar;
     cuerpo.limite = limiteSeleccionado;
     const res = await fetch("api/notificaciones/enviar", {
       method: "POST",

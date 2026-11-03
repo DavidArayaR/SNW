@@ -7294,7 +7294,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         )
     # La plantilla asociada a una area solo se usa en esa area.
     tpl_esp = plantilla.get("area_id")
-    if tpl_esp is not None and body.area_id != tpl_esp:
+    if tpl_esp is not None and lista_reservo is None and body.area_id != tpl_esp:
         raise HTTPException(
             400,
             detail="Esta plantilla pertenece a otra área: no se puede usar en este envío.",
@@ -8261,7 +8261,8 @@ def _revivir_destinatarios_prog(tabla: str, amb: str, amb_q: str,
     return vivos, excluidos
 
 
-def _validar_plantilla_programable(plantilla: dict | None, area_id: int | None) -> dict:
+def _validar_plantilla_programable(plantilla: dict | None, area_id: int | None,
+                                   *, lista_reservo: bool = False) -> dict:
     """La plantilla debe existir, no ser especial, estar aprobada por Meta y
     con revisión interna aprobada; si es de un area, solo sirve en esa area."""
     if plantilla is None:
@@ -8284,7 +8285,7 @@ def _validar_plantilla_programable(plantilla: dict | None, area_id: int | None) 
     if _aprobacion_plantilla(plantilla) == "rechazada":
         raise HTTPException(400, detail="Esta plantilla fue rechazada en la revisión interna.")
     tpl_esp = plantilla.get("area_id")
-    if tpl_esp is not None and area_id != tpl_esp:
+    if tpl_esp is not None and not lista_reservo and area_id != tpl_esp:
         raise HTTPException(400, detail="Esta plantilla pertenece a otra área.")
     return plantilla
 
@@ -8497,7 +8498,7 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
 
     plantilla = _validar_plantilla_programable(
         next((p for p in leer_plantillas() if p["id"] == body.plantilla_id), None),
-        esp["id"] if esp else None)
+        esp["id"] if esp else None, lista_reservo=bool(lista_reservo))
     _exigir_emisor_de_plantilla(plantilla, emisor["codigo"])
     if lista_reservo and plantilla.get("centro_codigo") != lista_reservo["clinica_codigo"]:
         raise HTTPException(422, detail="La clínica de la plantilla y la lista Reservo no coincide.")
@@ -9010,7 +9011,16 @@ def _ejecutar_programado(f: dict) -> None:
 
     plantilla = next((p for p in leer_plantillas() if p["id"] == f.get("plantilla_id")), None)
     try:
-        _validar_plantilla_programable(plantilla, f.get("area_id"))
+        if f.get("reservo_lista_id"):
+            with conectar() as conn, conn.cursor() as cur:
+                cur.execute("SELECT clinica_codigo FROM reservo_bases_contacto WHERE id=%s",
+                            (f["reservo_lista_id"],))
+                lista_actual = cur.fetchone()
+            if not lista_actual or not plantilla or lista_actual["clinica_codigo"] != emisor["codigo"] \
+                    or plantilla.get("centro_codigo") != emisor["codigo"]:
+                raise HTTPException(422, detail="La clínica de la base, la plantilla y el emisor debe coincidir.")
+        _validar_plantilla_programable(plantilla, f.get("area_id"),
+                                      lista_reservo=bool(f.get("reservo_lista_id")))
     except HTTPException as e:
         _marcar_prog(f["id"], "error", e.detail)
         return

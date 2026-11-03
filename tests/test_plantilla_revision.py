@@ -68,6 +68,13 @@ class PresentacionPlantillaTests(unittest.TestCase):
         self.assertEqual(error.exception.status_code, 400)
         self.assertIn("CSV de reagendamiento", error.exception.detail)
 
+    def test_plantilla_de_area_admite_lista_reservo_sin_abrir_otras_areas(self):
+        plantilla = {**PLANTILLA, "area_id": 12}
+        with self.assertRaises(HTTPException):
+            main._validar_plantilla_programable(plantilla, None)
+        self.assertIs(main._validar_plantilla_programable(
+            plantilla, None, lista_reservo=True), plantilla)
+
     def test_variable_sin_ejemplo_y_desconocida(self):
         vista = presentar_plantilla({"texto": "Hola {nombre} {edad}"}, {"nombre": ""})
         self.assertTrue(any("Falta un ejemplo" in e for e in vista["errores"]))
