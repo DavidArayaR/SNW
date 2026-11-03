@@ -183,7 +183,7 @@ async function cargarBasesPac() {
     areas.map((e) => `<option value="esp:${e.id}">${escaparHtml(e.nombre_visible)} (${escaparHtml(e.nombre_tabla_base)})</option>`).join("") +
     (basesReservo.length
       ? `<optgroup label="Bases de Reservo">${basesReservo.map((base) =>
-        `<option value="reservo:${Number(base.id)}">${escaparHtml(base.nombre)} · ${escaparHtml(base.clinica_nombre)} · ${Number(base.total || 0).toLocaleString("es-CL")} pacientes</option>`
+        `<option value="reservo:${Number(base.id)}">${escaparHtml(base.nombre)}</option>`
       ).join("")}</optgroup>` : "") +
     (!PUEDE_GESTIONAR_PAC && !areas.length
       ? `<option value="" disabled>Sin bases asignadas: pide un área a un administrador</option>`
@@ -390,6 +390,7 @@ async function cargar(mostrarFeedback = false) {
       }
       const parametrosLista = new URLSearchParams({
         pagina: String(paginaPac), por_pagina: String(pageSizePac), q: filtro.trim().slice(0, 100),
+        estado: filtroEstado, respuesta: filtroRespuesta, interes: filtroInteres,
       });
       const cargarPaginaLista = async () => {
         if (tablaCargandoTexto) tablaCargandoTexto.textContent = `Cargando pacientes de la página ${paginaPac}…`;
@@ -658,18 +659,23 @@ function renderBaseReservo() {
   }
 
   const resumen = resumenPacientes || {};
-  const tarjetas = [
-    ["neutral", "fa-users", "Total", resumen.total],
-    ["ok", "fa-phone", "Teléfonos válidos", Math.max(0, Number(resumen.total || 0) - Number(resumen.telefonos_invalidos || 0))],
-    ["danger", "fa-triangle-exclamation", "Teléfonos inválidos", resumen.telefonos_invalidos],
-    ["ok", "fa-paper-plane", "Enviados", resumen.enviados],
-    ["danger", "fa-circle-exclamation", "Errores", resumen.errores],
-    ["danger", "fa-user-slash", "Bajas", resumen.bajas],
-  ];
-  statsEl.innerHTML = tarjetas.map(([tono, icono, etiqueta, valor]) =>
-    `<div class="stat-card stat-card--base-summary stat-card--${tono}"><span class="stat-card__icono"><i class="fa-solid ${icono}" aria-hidden="true"></i></span>` +
-    `<span class="stat-card__texto"><strong>${Number(valor || 0).toLocaleString("es-CL")}</strong><span>${etiqueta}</span></span></div>`
-  ).join("");
+  const esActivoEstado = (valor) => filtroRespuesta === "todas" && filtroInteres === "todos" && filtroEstado === valor;
+  const esActivoResp = (valor) => filtroEstado === "todos" && filtroInteres === "todos" && filtroRespuesta === valor;
+  const esActivoInteres = (valor) => filtroEstado === "todos" && filtroRespuesta === "todas" && filtroInteres === valor;
+  const statCard = (tono, icono, activo, attrs, etiqueta, numero) =>
+    `<button type="button" class="stat stat-card stat-card--${tono}${activo ? " activo" : ""}" ${attrs}>` +
+      `<span class="stat-card__icono"><i class="fa-solid ${icono}" aria-hidden="true"></i></span>` +
+      `<span class="stat-card__texto"><strong>${Number(numero || 0).toLocaleString("es-CL")}</strong><span>${etiqueta}</span></span>` +
+    `</button>`;
+  statsEl.innerHTML =
+    statCard("neutral", "fa-users", esActivoEstado("todos"), 'data-estado="todos"', "Total", resumen.total) +
+    statCard("warn", "fa-clock", esActivoEstado("pendiente"), 'data-estado="pendiente"', "Pendientes", resumen.pendientes) +
+    statCard("ok", "fa-paper-plane", esActivoEstado("enviado"), 'data-estado="enviado"', "Enviados", resumen.enviados) +
+    statCard("danger", "fa-triangle-exclamation", esActivoEstado("error"), 'data-estado="error"', "Errores", resumen.errores) +
+    statCard("neutral", "fa-comment-slash", esActivoResp("pendiente"), 'data-respuesta="pendiente"', "Sin resp.", resumen.sin_respuesta) +
+    statCard("ok", "fa-thumbs-up", esActivoInteres("interesado"), 'data-interes="interesado"', "Interesados", resumen.interesados) +
+    statCard("danger", "fa-user-slash", esActivoResp("baja"), 'data-respuesta="baja"', "Baja", resumen.bajas) +
+    statCard("info", "fa-thumbs-down", esActivoInteres("no_interesado"), 'data-interes="no_interesado"', "No le interesa", resumen.no_interesados);
 
   const checkHeader = chkTodos?.closest("th");
   if (checkHeader) checkHeader.hidden = true;

@@ -771,18 +771,41 @@ def listar_bases_contacto() -> list[dict]:
 
 
 def listar_pacientes_base_contacto(lista_id: int, pagina: int = 1,
-                                   por_pagina: int = 25, q: str = "") -> dict:
+                                   por_pagina: int = 25, q: str = "",
+                                   estado: str = "todos", respuesta: str = "todas",
+                                   interes: str = "todos") -> dict:
     pagina, por_pagina = max(1, int(pagina)), min(100, max(1, int(por_pagina)))
+    if estado not in ("todos", "pendiente", "enviado", "error") or \
+       respuesta not in ("todas", "pendiente", "respondio", "no_interesado", "baja") or \
+       interes not in ("todos", "interesado", "no_interesado"):
+        raise ValueError("Filtro de pacientes inválido.")
     termino = " ".join(str(q or "").split()).strip()[:100]
-    filtro = "lista_id=%s"
+    condiciones = ["lista_id=%s"]
     parametros: list = [int(lista_id)]
     if termino:
-        filtro += (
-            " AND (LOWER(CONCAT_WS(' ',COALESCE(nombre,''),COALESCE(apellido,''),"
+        condiciones.append(
+            "(LOWER(CONCAT_WS(' ',COALESCE(nombre,''),COALESCE(apellido,''),"
             "COALESCE(telefono,''),CONVERT(cliente_uuid USING utf8mb4)))"
             " COLLATE utf8mb4_unicode_ci LIKE %s)"
         )
         parametros.append(f"%{termino.casefold()}%")
+    if estado != "todos":
+        condiciones.append("COALESCE(NULLIF(estado,''),'pendiente')=%s")
+        parametros.append(estado)
+    respuesta_sql = (
+        "CASE WHEN whatsapp_opt_out=1 THEN 'baja' "
+        "WHEN no_interesado=1 THEN 'no_interesado' "
+        "WHEN interesado=1 THEN 'interesado' "
+        "WHEN respuesta_manual IS NOT NULL AND respuesta_manual<>'' THEN respuesta_manual "
+        "ELSE 'pendiente' END"
+    )
+    if respuesta != "todas":
+        condiciones.append(f"({respuesta_sql})=%s")
+        parametros.append(respuesta)
+    if interes != "todos":
+        condiciones.append("COALESCE(interesado,0)=1" if interes == "interesado"
+                           else "COALESCE(no_interesado,0)=1")
+    filtro = " AND ".join(condiciones)
     with _db() as conn, conn.cursor() as cur:
         cur.execute("SELECT id,nombre FROM reservo_bases_contacto WHERE id=%s", (int(lista_id),))
         base = cur.fetchone()
@@ -792,10 +815,11 @@ def listar_pacientes_base_contacto(lista_id: int, pagina: int = 1,
         total = int((cur.fetchone() or {}).get("total") or 0)
         cur.execute(
             "SELECT COUNT(*) AS total,"
-            "SUM(CASE WHEN telefono_valido=0 THEN 1 ELSE 0 END) AS telefonos_invalidos,"
+            "SUM(CASE WHEN COALESCE(NULLIF(estado,''),'pendiente')='pendiente' THEN 1 ELSE 0 END) AS pendientes,"
             "SUM(CASE WHEN estado='enviado' THEN 1 ELSE 0 END) AS enviados,"
             "SUM(CASE WHEN estado='error' THEN 1 ELSE 0 END) AS errores,"
-            "SUM(CASE WHEN whatsapp_opt_out=1 THEN 1 ELSE 0 END) AS bajas,"
+            f"SUM(CASE WHEN ({respuesta_sql})='pendiente' THEN 1 ELSE 0 END) AS sin_respuesta,"
+            f"SUM(CASE WHEN ({respuesta_sql})='baja' THEN 1 ELSE 0 END) AS bajas,"
             "SUM(CASE WHEN interesado=1 THEN 1 ELSE 0 END) AS interesados,"
             "SUM(CASE WHEN no_interesado=1 THEN 1 ELSE 0 END) AS no_interesados "
             "FROM reservo_lista_pacientes WHERE lista_id=%s", (int(lista_id),)

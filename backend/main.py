@@ -5685,11 +5685,17 @@ def guardar_base_reservo(job_id: int, body: ReservoBaseIn,
 def listar_pacientes_base_reservo(base_id: int, pagina: int = Query(1, ge=1),
                                   por_pagina: int = Query(25, ge=1, le=100),
                                   q: str = Query("", max_length=100),
+                                  estado: str = Query("todos"),
+                                  respuesta: str = Query("todas"),
+                                  interes: str = Query("todos"),
                                   sesion: dict = Depends(solo_admin)):
     try:
-        return reservo_pacientes.listar_pacientes_base_contacto(base_id, pagina, por_pagina, q)
+        return reservo_pacientes.listar_pacientes_base_contacto(
+            base_id, pagina, por_pagina, q, estado, respuesta, interes)
     except LookupError as exc:
         raise HTTPException(404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, detail=str(exc)) from exc
 
 
 def listar_pacientes_reservo(
