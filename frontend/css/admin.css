@@ -138,12 +138,25 @@ body[data-seccion="administracion"] .stats {
   min-height: 0;
   max-height: none;
 }
+#tabPacientes .base-selector {
+  flex: 0 0 auto;
+  margin: 14px 18px 0;
+}
+#tabPacientes .base-selector__tabla-wrap {
+  flex: none;
+  max-height: 160px;
+  overflow: auto;
+}
+#tabPacientes .base-selector__tabla tbody td { padding: 3px 5px; }
+#tabPacientes .base-selector__opcion i[hidden] { display: none; }
 
 @media (max-width: 760px) {
   /* En móvil el panel crece natural (el fijo de 80vh no dejaba ver la
      tabla) y solo la tabla scrollea, con su propio alto máximo. */
   #tabPacientes.panel { height: auto; max-height: none; overflow: visible; }
   #tabPacientes .tabla-wrap { flex: none; max-height: 60vh; }
+  #tabPacientes .base-selector { margin: 12px 12px 0; }
+  #tabPacientes .base-selector__tabla-wrap { max-height: 160px; }
   #tabPacientes .stats { gap: 8px; padding: 12px 12px 0; }
   #btnToggleFiltros { display: inline-flex; align-items: center; gap: 6px; }
   #tabPacientes .stat-card {
