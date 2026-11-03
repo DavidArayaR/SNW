@@ -149,6 +149,14 @@ body[data-seccion="administracion"] .stats {
 }
 #tabPacientes .base-selector__tabla tbody td { padding: 3px 5px; }
 #tabPacientes .base-selector__opcion i[hidden] { display: none; }
+#tabPacientes #filtrosWrap[hidden],
+#tabPacientes #toolbarPacientes[hidden],
+#tabPacientes #tablaPacientesWrap[hidden],
+#tabPacientes #btnToggleFiltros[hidden],
+#tabPacientes .pacientes__aviso-pruebas[hidden],
+#cardGestionBase[hidden] { display: none; }
+#tabPacientes .base-selector__encabezado label { margin-left: auto; color: var(--texto-suave); font-size: .8rem; }
+#tabPacientes #filtroClinicaBases { max-width: 100%; }
 
 @media (max-width: 760px) {
   /* En móvil el panel crece natural (el fijo de 80vh no dejaba ver la

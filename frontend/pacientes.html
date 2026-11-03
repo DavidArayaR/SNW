@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="css/componentes.css?v=paginador-cinco1">
   <link rel="stylesheet" href="css/pacientes.css?v=selector-tabla1">
   <link rel="stylesheet" href="css/layout.css?v=navcolor1">
-  <link rel="stylesheet" href="css/admin.css?v=selector-bases2">
+  <link rel="stylesheet" href="css/admin.css?v=filtro-clinica-bases1">
   <link rel="stylesheet" href="css/refinamiento.css?v=merge-frontend1">
   <link rel="stylesheet" href="css/estilo-nuevo.css?v=ui-unslop1">
   <script src="js/tema.js?v=scrollbar1"></script>
@@ -44,10 +44,9 @@
             <h2 id="tituloPacientes">Pacientes</h2>
             <div class="panel__actions">
               <select id="selBasePac" aria-label="Base de datos" hidden tabindex="-1" aria-hidden="true">
-                <option value="dev">Base de datos desarrollo (pacientes_dev)</option>
-                <option value="prod">Base de datos producción (pacientes_prod)</option>
+                <option value="" selected>Selecciona una base</option>
               </select>
-              <button id="btnToggleFiltros" class="btn btn--ghost" type="button" aria-expanded="true">
+              <button id="btnToggleFiltros" class="btn btn--ghost" type="button" aria-expanded="true" hidden>
                 <i class="fa-solid fa-sliders"></i> <span>Ocultar filtros</span>
               </button>
               <button id="btnActualizar" class="btn btn--ghost" type="button">Actualizar</button>
@@ -58,6 +57,8 @@
             <div class="base-selector__encabezado">
               <h3 id="tituloSelectorBases">Bases de datos</h3>
               <span>Selecciona una para ver sus pacientes</span>
+              <label for="filtroClinicaBases">Clínica</label>
+              <select id="filtroClinicaBases"><option value="todas">Todas las clínicas</option></select>
             </div>
             <div class="tabla-wrap base-selector__tabla-wrap">
               <table class="base-selector__tabla" aria-label="Bases de datos disponibles">
@@ -69,10 +70,10 @@
             </div>
           </section>
 
-          <div class="filtros-wrap" id="filtrosWrap">
+          <div class="filtros-wrap" id="filtrosWrap" hidden>
             <div class="stats" id="stats"></div>
           </div>
-          <div class="toolbar-pacientes">
+          <div class="toolbar-pacientes" id="toolbarPacientes" hidden>
             <input type="search" id="buscador" placeholder="Buscar por nombre, tel&eacute;fono o info..." maxlength="100" autocomplete="off">
             <span id="contadorSel" class="contador-sel"></span>
             <span class="pag-grupo">
@@ -118,9 +119,9 @@
               <button type="button" class="btn btn--danger-ghost" id="btnEliminarMasivo">Eliminar</button>
             </div>
 
-          <p class="field__hint pacientes__aviso-pruebas">Solo los números de prueba configurados para esta base permiten cambiar manualmente su estado o respuesta.</p>
+          <p class="field__hint pacientes__aviso-pruebas" hidden>Solo los números de prueba configurados para esta base permiten cambiar manualmente su estado o respuesta.</p>
 
-          <div class="tabla-wrap" id="tablaPacientesWrap">
+          <div class="tabla-wrap" id="tablaPacientesWrap" hidden>
             <div id="tablaCargando" class="tabla-cargando" role="status" aria-live="polite" hidden>
               <div class="tabla-cargando__contenido">
                 <span class="tabla-cargando__rueda" aria-hidden="true"></span>
@@ -160,7 +161,7 @@
           </form>
         </section>
 
-        <section class="panel" id="cardGestionBase">
+        <section class="panel" id="cardGestionBase" hidden>
           <div class="panel__head">
             <h2>Gestionar base de datos</h2>
           </div>
@@ -408,7 +409,7 @@
   <script src="js/layout.js?v=reservo-nav2"></script>
   <script src="js/pass-toggle.js"></script>
   <script src="js/csv-chunks.js?v=csv-codificacion1"></script>
-  <script src="js/pacientes.js?v=selector-tabla1"></script>
+  <script src="js/pacientes.js?v=filtro-clinica-bases1"></script>
   <script src="js/reagendar.js?v=paginacion1"></script>
   <script src="js/pacientes-tabs.js?v=aplazar-flotante1"></script>
   <script>

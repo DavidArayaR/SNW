@@ -94,6 +94,8 @@ const contadorSel = $("#contadorSel");
 const toastEl = $("#toast");
 const selBasePac = $("#selBasePac");
 const tablaSelectorBases = $("#tablaSelectorBases");
+const filtroClinicaBases = $("#filtroClinicaBases");
+let baseElegidaSesion = false;
 
 // Solo lectura para cuentas sin permiso de gestión (el usuario normal ve su
 // base pero no la edita: sin checks, sin edición inline, sin CSV ni borrado;
@@ -161,10 +163,18 @@ function qsBase() {
 
 function renderSelectorBasesPac() {
   if (!tablaSelectorBases || !selBasePac) return;
-  const opciones = [...selBasePac.options].filter((opcion) => opcion.value);
+  const clinica = filtroClinicaBases?.value || "todas";
+  const opciones = [...selBasePac.options].filter((opcion) => {
+    if (!opcion.value) return false;
+    const base = opcion.value.startsWith("reservo:")
+      ? basesReservo.find((item) => Number(item.id) === Number(opcion.value.slice(8))) : null;
+    const codigo = base?.clinica_codigo || "sin_clinica";
+    return clinica === "todas" || clinica === codigo;
+  });
   if (!opciones.length) {
-    const mensaje = [...selBasePac.options].find((opcion) => opcion.disabled)?.textContent ||
-      "No hay bases de datos disponibles.";
+    const mensaje = clinica !== "todas" ? "No hay bases para esta clínica." :
+      ([...selBasePac.options].find((opcion) => opcion.disabled && opcion.textContent.includes("Sin bases"))?.textContent ||
+      "No hay bases de datos disponibles.");
     tablaSelectorBases.innerHTML = `<tr><td class="base-selector__vacio">${escaparHtml(mensaje)}</td></tr>`;
     return;
   }
@@ -193,8 +203,19 @@ async function cargarBasesPac() {
     areas = [];
     basesReservo = [];
   }
-  const anterior = localStorage.getItem("snw_base_pacientes_actual") || selBasePac.value || "";
+  const anterior = baseElegidaSesion ? selBasePac.value : "";
+  if (filtroClinicaBases) {
+    const previo = filtroClinicaBases.value || "todas";
+    const clinicas = new Map(basesReservo.filter((base) => base.clinica_codigo)
+      .map((base) => [base.clinica_codigo, base.clinica_nombre || base.clinica_codigo]));
+    filtroClinicaBases.innerHTML = '<option value="todas">Todas las clínicas</option>' +
+      [...clinicas].sort((a, b) => a[1].localeCompare(b[1], "es"))
+        .map(([codigo, nombre]) => `<option value="${escaparHtml(codigo)}">${escaparHtml(nombre)}</option>`).join("") +
+      '<option value="sin_clinica">Sin clínica asignada</option>';
+    filtroClinicaBases.value = [...filtroClinicaBases.options].some((opcion) => opcion.value === previo) ? previo : "todas";
+  }
   selBasePac.innerHTML =
+    '<option value="">Selecciona una base</option>' +
     (window.snwEsPrivilegiado
       ? `<option value="dev">pacientes_dev</option>` : "") +
     (PUEDE_GESTIONAR_PAC
@@ -207,23 +228,12 @@ async function cargarBasesPac() {
     (!PUEDE_GESTIONAR_PAC && !areas.length
       ? `<option value="" disabled>Sin bases asignadas: pide un área a un administrador</option>`
       : "");
-  // Restaura la última usada si sigue disponible; si no, la primera.
   const valores = [...selBasePac.options].map((o) => o.value).filter(Boolean);
-  const guardadaEsp = localStorage.getItem("snw_esp_pacientes") || "";
-  let elegido = null;
-  if (anterior && valores.includes(anterior)) {
-    elegido = anterior;
-  } else if (guardadaEsp && valores.includes(`esp:${guardadaEsp}`)) {
-    elegido = `esp:${guardadaEsp}`;
-  } else if (PUEDE_GESTIONAR_PAC) {
-    const amb = ambienteAdmin === "produccion" ? "prod" : "dev";
-    elegido = valores.includes(amb) ? amb : valores[0];
-    localStorage.removeItem("snw_esp_pacientes");
-  } else {
-    elegido = valores[0] || null;
-    localStorage.removeItem("snw_esp_pacientes");
-  }
+  const elegido = anterior && valores.includes(anterior) ? anterior : null;
   if (elegido == null) {
+    selBasePac.value = "";
+    baseElegidaSesion = false;
+    mostrarBaseSeleccionada(false);
     renderSelectorBasesPac();
     return;
   }
@@ -248,6 +258,21 @@ async function cargarBasesPac() {
   aplicarModoBase();
   renderSelectorBasesPac();
 }
+
+function mostrarBaseSeleccionada(mostrar) {
+  for (const selector of ["#filtrosWrap", "#toolbarPacientes", "#tablaPacientesWrap", "#btnToggleFiltros"]) {
+    const elemento = $(selector);
+    if (elemento) elemento.hidden = !mostrar;
+  }
+  if (!mostrar) {
+    for (const selector of ["#cardGestionBase", "#cardPacientePrueba", ".pacientes__aviso-pruebas", "#toolbarMasivo"]) {
+      const elemento = $(selector);
+      if (elemento) elemento.hidden = true;
+    }
+  }
+}
+
+if (filtroClinicaBases) filtroClinicaBases.addEventListener("change", renderSelectorBasesPac);
 
 // Borrar la tabla completa (DROP) es irreversible: solo administrador y
 // desarrollador. El backend lo exige igual (Depends(solo_admin)).
@@ -339,6 +364,8 @@ if (tablaSelectorBases) tablaSelectorBases.addEventListener("click", (evento) =>
 
 if (selBasePac) selBasePac.addEventListener("change", async () => {
   const v = selBasePac.value;
+  baseElegidaSesion = !!v;
+  mostrarBaseSeleccionada(baseElegidaSesion);
   renderSelectorBasesPac();
   localStorage.setItem("snw_base_pacientes_actual", v);
   if (v.startsWith("reservo:")) {
@@ -368,6 +395,7 @@ function escaparHtml(texto) {
 }
 
 async function cargar(mostrarFeedback = false) {
+  if (!baseElegidaSesion || !selBasePac?.value) return;
   const solicitud = ++solicitudPacientes;
   if (controlCargaPacientes) controlCargaPacientes.abort();
   const control = new AbortController();
@@ -382,15 +410,6 @@ async function cargar(mostrarFeedback = false) {
           const c0 = await r0.json();
           if (solicitud !== solicitudPacientes) return;
           ambienteAdmin = c0.entorno;
-          if (selBasePac && espPacId() == null && idListaReservoActual() == null) {
-            const preferida = ambienteAdmin === "produccion" ? "prod" : "dev";
-            if ([...selBasePac.options].some((opcion) => opcion.value === preferida)) {
-              selBasePac.value = preferida;
-              localStorage.setItem("snw_ambiente_admin", ambienteAdmin);
-              aplicarModoBase();
-              renderSelectorBasesPac();
-            }
-          }
         }
       } catch {}
       _ambienteInicializado = true;
