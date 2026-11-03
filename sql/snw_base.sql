@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS pacientes_prod (
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS envios (
   id INT AUTO_INCREMENT PRIMARY KEY,
-  base_datos VARCHAR(50) DEFAULT NULL,
+  base_datos VARCHAR(150) DEFAULT NULL,
   plantilla_clave VARCHAR(50) DEFAULT NULL,
   plantilla_nombre VARCHAR(100) DEFAULT NULL,
   total_pacientes INT DEFAULT 0,
@@ -68,8 +68,10 @@ CREATE TABLE IF NOT EXISTS envios (
   estado ENUM('pendiente','en_proceso','completado','cancelado','rechazado','error') NOT NULL DEFAULT 'en_proceso',
   comentario VARCHAR(255) DEFAULT NULL,
   area_id INT DEFAULT NULL,
+  reservo_lista_id INT DEFAULT NULL,
   tabla_pacientes VARCHAR(64) DEFAULT NULL,
-  fecha_hora DATETIME DEFAULT CURRENT_TIMESTAMP
+  fecha_hora DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_envios_reservo_lista (reservo_lista_id)
 );
 
 CREATE TABLE IF NOT EXISTS log_envios (

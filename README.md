@@ -1451,3 +1451,60 @@ claro** de la sidebar, o con el botón flotante en la portada y el login (págin
   guarda solo lo cambiado con una barra flotante y avisa si sales con cambios sin guardar.
   La sección WhatsApp incluye un campo calculado de solo lectura con la **URL del webhook**
   (URL base + ruta), con botón de copiar y enlace al panel de Webhooks de Meta.
+
+### Guardar resultados de Reservo como una base para campañas
+
+Desde una sincronización terminada, **Guardar como base** crea una lista lógica
+con el nombre `{codigo_clinica}_{nombre_personalizado}_{mes}_{año}`. El mes y el
+año se calculan al guardar, en `America/Santiago`; el rango consultado se guarda
+por separado. Si el nombre ya existe, SNW crea una variante con sufijo `_2`,
+`_3`, etc., sin reemplazar contactos ni estados anteriores. Guardar la lista no
+consulta otra vez Reservo y nunca inicia un envío.
+
+Las listas usan dos tablas compartidas y fijas (`reservo_bases_contacto` y
+`reservo_lista_pacientes`); el nombre de la lista no se convierte en una tabla
+SQL. Cada lista conserva su clínica, sincronización, tratamientos, período y
+creador. La identidad se mantiene mediante el paciente canónico de Reservo
+(`clinica_codigo` + `cliente_uuid`), con una restricción única para evitar
+duplicados en la misma lista. Deshacer la sincronización de origen no elimina
+un paciente que ya pertenezca a una lista guardada.
+
+Las bases se seleccionan y revisan en **Base de datos → Pacientes**, junto a
+las bases de desarrollo, producción y áreas; ya no tienen una tabla separada en
+la pantalla de Reservo. Solo administradores y desarrolladores pueden
+consultarlas o usarlas. Reservo entrega pacientes ya filtrados y autorizados
+por el sistema de origen; SNW los incorpora sin pedir un ID o referencia manual.
+Al guardar, SNW copia solo los pacientes cuyo teléfono pasa la validación chilena
+de `backend/telefono.py`; la vista previa muestra cuántos se guardarán y cuántos
+quedarán fuera por falta de un teléfono válido. Las bajas y las supresiones
+permanentes siguen excluidas del envío.
+
+Las listas también aparecen en los selectores de envíos manuales y programados,
+filtradas por la clínica de la plantilla. Los envíos pasan por el motor,
+rate limiting, emisor, plantilla, historial y estadísticas existentes. Se
+conserva el identificador de lista en cada envío y programación para que el
+detalle de historial resuelva los contactos correctos. Los estados por campaña
+y los mensajes de Meta permanecen en las tablas compartidas de campañas e
+historial; el estado de la fila del contacto refleja el último resultado
+operativo.
+
+La integración usa la configuración de WhatsApp existente de la clínica
+asociada, incluido su WABA ID, Phone Number ID y token de acceso por clínica,
+según la decisión explícita del usuario. No se agregó una credencial global ni
+una variable nueva a `.env`. Una clínica sin canal configurado o sin relación
+confirmada no puede servir de respaldo para otra.
+
+Las tablas nuevas y la columna `reservo_lista_id` de campañas se crean o
+migran de forma idempotente al iniciar SNW mediante `asegurar_tabla_config()`.
+Rutas nuevas:
+
+- `GET /api/reservo/bases`
+- `POST /api/reservo/sincronizaciones/{job_id}/bases/previsualizar`
+- `POST /api/reservo/sincronizaciones/{job_id}/bases`
+- `GET /api/reservo/bases/{base_id}/pacientes`
+
+Pruebas unitarias de nombres, consulta paginada y formato de bases:
+
+```bash
+python -m unittest discover -s tests -p "test_reservo_bases.py"
+```

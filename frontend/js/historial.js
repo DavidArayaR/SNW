@@ -321,12 +321,21 @@ const ES_PRIV_HIST = !!window.snwEsPrivilegiado;
 async function cargarBasesHist() {
   if (!selBaseHist) return;
   let areas = [];
+  let listasReservo = [];
   try {
     const r = await fetch("api/areas/mias", { headers: authHeaders(), cache: "no-store" });
     if (r.ok) areas = await r.json();
   } catch {
     console.error("[historial.js cargarBasesHist()]");
     areas = [];
+  }
+  if (ES_PRIV_HIST) {
+    try {
+      const r = await fetch("api/reservo/bases", { headers: authHeaders(), cache: "no-store" });
+      if (r.ok) listasReservo = (await r.json()).items || [];
+    } catch {
+      console.error("[historial.js cargarBasesHist() Reservo]");
+    }
   }
   basesHist = [];
   if (ES_PRIV_HIST) {
@@ -342,6 +351,12 @@ async function cargarBasesHist() {
         nombre: `${a.nombre_visible} (${a.nombre_tabla_base})`,
       });
     }
+  }
+  for (const base of listasReservo) {
+    if (base.nombre) basesHist.push({
+      tabla: base.nombre,
+      nombre: `${base.nombre} · ${base.clinica_nombre || base.clinica_codigo} (${Number(base.total || 0)} pacientes)`,
+    });
   }
   const guardada = localStorage.getItem("snw_base_historial") || "todos";
   selBaseHist.innerHTML = `<option value="todos">Todas</option>` +

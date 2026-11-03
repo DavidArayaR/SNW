@@ -136,8 +136,17 @@
       </main>
     </div>
   </div>
+  <div class="reservo-modal" id="reservoModalBase" hidden>
+    <section class="reservo-modal__panel" role="dialog" aria-modal="true" aria-labelledby="reservoModalTitulo">
+      <div class="panel__head"><h2 id="reservoModalTitulo"><i class="fa-solid fa-database" aria-hidden="true"></i> Guardar como base de datos</h2><button class="btn btn--ghost" id="reservoModalCerrar" type="button" aria-label="Cerrar">×</button></div>
+      <label class="field reservo-modal__nombre"><span>Nombre personalizado</span><input id="reservoNombrePersonalizado" type="text" maxlength="100" placeholder="pacientes_tratamiento" autocomplete="off"></label>
+      <div class="reservo-preview" id="reservoPreviewBase" aria-live="polite">Escribe un nombre para preparar la vista previa.</div>
+      <p class="field__hint">Guardar la base no inicia un envío. Después podrás seleccionarla en Base de datos → Pacientes.</p>
+      <div class="reservo-modal__acciones"><button class="btn btn--ghost" id="reservoModalCancelar" type="button">Cancelar</button><button class="btn btn--primary" id="reservoModalGuardar" type="button" disabled><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Guardar base</button></div>
+    </section>
+  </div>
   <script src="js/layout.js?v=reservo-nav2"></script>
-  <script src="js/pacientes-reservo.js?v=reservo-modulo11"></script>
+  <script src="js/pacientes-reservo.js?v=reservo-bases3"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>

@@ -16,6 +16,8 @@
     selectedCount: $("#reservoSeleccionados"), selectAll: $("#reservoSeleccionarTodos"),
     clearSelection: $("#reservoLimpiarSeleccion"),
     syncs: $("#reservoSincronizaciones"), patients: $("#reservoPacientes"), total: $("#reservoTotal"),
+    modal: $("#reservoModalBase"), modalName: $("#reservoNombrePersonalizado"),
+    modalPreview: $("#reservoPreviewBase"), modalSave: $("#reservoModalGuardar"),
     currentQuery: $("#reservoFiltroConsulta"), showAll: $("#reservoMostrarTodos"),
     clinicFilter: $("#filtroReservoClinica"), treatmentFilter: $("#filtroReservoTratamiento"),
     fromFilter: $("#filtroReservoDesde"), toFilter: $("#filtroReservoHasta"), search: $("#filtroReservoBuscar"),
@@ -30,6 +32,9 @@
   let confirmacionActiva = null;
   let treatmentsByUuid = new Map();
   let loadingTreatments = false;
+  let guardarJobId = null;
+  let previewTimer = null;
+  let previewVersion = 0;
 
   async function request(url, options = {}) {
     const response = await fetch(url, { ...options, headers: headers(options.headers || {}), cache: "no-store" });
@@ -230,6 +235,70 @@
     }
   }
 
+  async function prepararVistaPreviaBase() {
+    const version = ++previewVersion;
+    const nombre = ui.modalName.value.trim();
+    ui.modalSave.disabled = true;
+    if (!guardarJobId || !nombre) {
+      ui.modalPreview.textContent = "Escribe un nombre para preparar la vista previa.";
+      return;
+    }
+    ui.modalPreview.innerHTML = '<span class="reservo-cargando-punto" aria-hidden="true"></span> Preparando vista previa…';
+    try {
+      const data = await request(`api/reservo/sincronizaciones/${guardarJobId}/bases/previsualizar`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nombre_personalizado: nombre }),
+      });
+      if (version !== previewVersion) return;
+      ui.modalPreview.innerHTML =
+        `<strong class="reservo-preview__nombre">${escapar(data.nombre)}</strong>` +
+        `<dl><div><dt>Clínica</dt><dd>${escapar(data.clinica_nombre)} (${escapar(data.clinica_codigo)})</dd></div>` +
+        `<div><dt>Tratamiento</dt><dd>${escapar(data.tratamiento_nombre)}</dd></div>` +
+        `<div><dt>Período consultado</dt><dd>${escapar(data.fecha_desde)} – ${escapar(data.fecha_hasta)}</dd></div>` +
+        `<div><dt>Pacientes en la consulta</dt><dd>${Number(data.total).toLocaleString("es-CL")}</dd></div>` +
+        `<div><dt>Pacientes que se guardarán (teléfono chileno válido)</dt><dd>${Number(data.telefonos_validos).toLocaleString("es-CL")}</dd></div>` +
+        `<div><dt>Sin teléfono</dt><dd>${Number(data.sin_telefono).toLocaleString("es-CL")}</dd></div>` +
+        `<div><dt>Teléfono no válido para Chile</dt><dd>${Number(data.telefonos_invalidos).toLocaleString("es-CL")}</dd></div></dl>`;
+      ui.modalSave.disabled = !Number(data.telefonos_validos);
+    } catch (error) {
+      if (version !== previewVersion) return;
+      ui.modalPreview.innerHTML = `<span class="reservo-vacio--error">${escapar(error.message)}</span>`;
+    }
+  }
+
+  function abrirModalGuardar(jobId) {
+    guardarJobId = Number(jobId);
+    ui.modal.hidden = false;
+    ui.modalName.value = "pacientes_tratamiento";
+    ui.modalPreview.textContent = "Escribe un nombre para preparar la vista previa.";
+    ui.modalSave.disabled = true;
+    prepararVistaPreviaBase();
+    ui.modalName.focus();
+  }
+
+  function cerrarModalGuardar() {
+    ui.modal.hidden = true;
+    guardarJobId = null;
+    previewVersion++;
+  }
+
+  async function guardarBaseReservo() {
+    if (!guardarJobId || !ui.modalName.value.trim()) return;
+    ui.modalSave.disabled = true;
+    try {
+      const creada = await request(`api/reservo/sincronizaciones/${guardarJobId}/bases`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nombre_personalizado: ui.modalName.value.trim() }),
+      });
+      cerrarModalGuardar();
+      const omitidos = Number(creada.telefonos_excluidos || 0);
+      mostrarAviso(`Base «${creada.nombre}»: ${Number(creada.total).toLocaleString("es-CL")} pacientes guardados; ${omitidos.toLocaleString("es-CL")} omitidos por teléfono inválido o ausente. Ya puedes seleccionarla en Base de datos → Pacientes.`, "success");
+    } catch (error) {
+      ui.modalPreview.innerHTML = `<span class="reservo-vacio--error">${escapar(error.message)}</span>`;
+      ui.modalSave.disabled = false;
+    }
+  }
+
   async function cargarSincronizaciones() {
     const data = await request("api/reservo/sincronizaciones?limite=50");
     cerrarConfirmacion(false);
@@ -250,7 +319,8 @@
         ? `<button type="button" class="btn btn--danger-ghost" data-deshacer="${Number(item.id)}"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Deshacer búsqueda</button>` : "";
       const accion = item.estado === "deshecho"
         ? `<small>${Number(item.pacientes_revertidos || 0)} pacientes quitados</small>`
-        : `<div class="reservo-acciones">${reintentarBoton}${deshacerBoton}</div>`;
+        : `<div class="reservo-acciones">${["completado", "completado_con_advertencias"].includes(item.estado)
+          ? `<button type="button" class="btn btn--primary" data-guardar-base="${Number(item.id)}"><i class="fa-solid fa-database" aria-hidden="true"></i> Guardar como base</button>` : ""}${reintentarBoton}${deshacerBoton}</div>`;
       return `<tr><td><strong>${escapar(item.clinica_nombre)}</strong><br><small>${periodo}</small></td>` +
         `<td>${escapar(item.tratamiento_nombre || "Tratamiento histórico")}</td>` +
         `<td><span class="reservo-estado ${estadoClase(item.estado)}">${estadoTexto(item.estado)}</span></td>` +
@@ -262,6 +332,8 @@
       boton.addEventListener("click", () => reintentar(boton.dataset.reintentar, boton)));
     ui.syncs.querySelectorAll("[data-deshacer]").forEach((boton) =>
       boton.addEventListener("click", () => mostrarConfirmacion(boton)));
+    ui.syncs.querySelectorAll("[data-guardar-base]").forEach((boton) =>
+      boton.addEventListener("click", () => abrirModalGuardar(boton.dataset.guardarBase)));
     return filas.some((item) => ["pendiente", "ejecutando"].includes(item.estado));
   }
 
@@ -406,7 +478,19 @@
     const destino = Number.parseInt(ui.page.value, 10);
     if (Number.isFinite(destino)) { page = Math.min(pages, Math.max(1, destino)); cargarPacientes(); }
   });
-
+  ui.modalName.addEventListener("input", () => {
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(prepararVistaPreviaBase, 300);
+  });
+  ui.modalSave.addEventListener("click", guardarBaseReservo);
+  $("#reservoModalCerrar").addEventListener("click", cerrarModalGuardar);
+  $("#reservoModalCancelar").addEventListener("click", cerrarModalGuardar);
+  ui.modal.addEventListener("click", (evento) => {
+    if (evento.target === ui.modal) cerrarModalGuardar();
+  });
+  document.addEventListener("keydown", (evento) => {
+    if (evento.key === "Escape" && !ui.modal.hidden) cerrarModalGuardar();
+  });
   (async function iniciar() {
     try {
       await cargarConfiguracion();

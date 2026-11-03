@@ -56,6 +56,7 @@ class EnvioIn(BaseModel):
     limite: int | None = None
     area_id: int | None = None
     centro: str | None = None
+    lista_reservo_id: int | None = None
 
 
 class ConfigIn(BaseModel):

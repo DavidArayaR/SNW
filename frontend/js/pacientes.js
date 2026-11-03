@@ -14,6 +14,7 @@ let resumenPacientes = null;
 let baseResumenPacientes = null;
 let consultaPacientesAnterior = null;
 let areas = [];
+let basesReservo = [];
 let filtro = "";
 let filtroEstado = "todos";
 let filtroRespuesta = "todas";
@@ -124,6 +125,13 @@ function basePacActual() {
   return (selBasePac && selBasePac.value) || "dev";
 }
 
+function idListaReservoActual() {
+  const valor = basePacActual();
+  if (!valor.startsWith("reservo:")) return null;
+  const id = Number(valor.slice("reservo:".length));
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
 function espPacId() {
   const v = basePacActual();
   if (!v.startsWith("esp:")) return null;
@@ -132,6 +140,10 @@ function espPacId() {
 }
 
 function tablaPacActual() {
+  const listaId = idListaReservoActual();
+  if (listaId != null) {
+    return basesReservo.find((base) => Number(base.id) === listaId)?.nombre || "Base Reservo";
+  }
   const esp = espPacId();
   if (esp != null) {
     const e = areas.find((x) => x.id === esp);
@@ -149,19 +161,30 @@ function qsBase() {
 async function cargarBasesPac() {
   if (!selBasePac) return;
   try {
-    const r = await fetch("api/areas/mias", { headers: authHeaders(), cache: "no-store" });
-    if (!r.ok) throw new Error();
-    areas = await r.json();
+    const tareas = [fetch("api/areas/mias", { headers: authHeaders(), cache: "no-store" })];
+    if (window.snwEsPrivilegiado) {
+      tareas.push(fetch("api/reservo/bases", { headers: authHeaders(), cache: "no-store" }));
+    }
+    const respuestas = await Promise.all(tareas);
+    if (!respuestas[0].ok) throw new Error();
+    areas = await respuestas[0].json();
+    basesReservo = respuestas[1]?.ok ? ((await respuestas[1].json()).items || []) : [];
   } catch {
     console.error("[pacientes.js cargarBasesPac()]");
     areas = [];
+    basesReservo = [];
   }
+  const anterior = localStorage.getItem("snw_base_pacientes_actual") || selBasePac.value || "";
   selBasePac.innerHTML =
     (window.snwEsPrivilegiado
       ? `<option value="dev">Base de datos desarrollo (pacientes_dev)</option>` : "") +
     (PUEDE_GESTIONAR_PAC
       ? `<option value="prod">Base de datos producción (pacientes_prod)</option>` : "") +
     areas.map((e) => `<option value="esp:${e.id}">${escaparHtml(e.nombre_visible)} (${escaparHtml(e.nombre_tabla_base)})</option>`).join("") +
+    (basesReservo.length
+      ? `<optgroup label="Bases de Reservo">${basesReservo.map((base) =>
+        `<option value="reservo:${Number(base.id)}">${escaparHtml(base.nombre)} · ${escaparHtml(base.clinica_nombre)} · ${Number(base.total || 0).toLocaleString("es-CL")} pacientes</option>`
+      ).join("")}</optgroup>` : "") +
     (!PUEDE_GESTIONAR_PAC && !areas.length
       ? `<option value="" disabled>Sin bases asignadas: pide un área a un administrador</option>`
       : "");
@@ -169,7 +192,9 @@ async function cargarBasesPac() {
   const valores = [...selBasePac.options].map((o) => o.value).filter(Boolean);
   const guardadaEsp = localStorage.getItem("snw_esp_pacientes") || "";
   let elegido = null;
-  if (guardadaEsp && valores.includes(`esp:${guardadaEsp}`)) {
+  if (anterior && valores.includes(anterior)) {
+    elegido = anterior;
+  } else if (guardadaEsp && valores.includes(`esp:${guardadaEsp}`)) {
     elegido = `esp:${guardadaEsp}`;
   } else if (PUEDE_GESTIONAR_PAC) {
     const amb = ambienteAdmin === "produccion" ? "prod" : "dev";
@@ -181,12 +206,21 @@ async function cargarBasesPac() {
   }
   if (elegido == null) return;
   selBasePac.value = elegido;
+  localStorage.setItem("snw_base_pacientes_actual", elegido);
   if (elegido.startsWith("esp:")) {
     localStorage.setItem("snw_esp_pacientes", elegido.slice(4));
+    localStorage.removeItem("snw_lista_reservo_pacientes");
+  } else if (elegido.startsWith("reservo:")) {
+    localStorage.setItem("snw_lista_reservo_pacientes", elegido.slice("reservo:".length));
+    localStorage.removeItem("snw_esp_pacientes");
   } else if (localStorage.getItem("snw_ambiente_admin")) {
+    localStorage.removeItem("snw_lista_reservo_pacientes");
+    localStorage.removeItem("snw_esp_pacientes");
     ambienteAdmin = elegido === "prod" ? "produccion" : "desarrollo";
     localStorage.setItem("snw_ambiente_admin", ambienteAdmin);
   } else {
+    localStorage.removeItem("snw_lista_reservo_pacientes");
+    localStorage.removeItem("snw_esp_pacientes");
     ambienteAdmin = null; // lo define cargar() desde el entorno global
   }
   aplicarModoBase();
@@ -213,15 +247,33 @@ function areaActual() {
 // una tabla general (dev/prod) no hay carga ni borrado, y con un área se
 // habilita lo que corresponda según el rol.
 function aplicarModoBase() {
+  const listaId = idListaReservoActual();
+  const esListaReservo = listaId != null;
   const esp = espPacId();
   const tabla = tablaPacActual();
   const area = areaActual();
   const esArea = !!area;
   const esDesarrollo = basePacActual() === "dev" && !!window.snwEsPrivilegiado;
   const cardPacientePrueba = $("#cardPacientePrueba");
-  if (cardPacientePrueba) cardPacientePrueba.hidden = !esDesarrollo;
+  if (cardPacientePrueba) cardPacientePrueba.hidden = esListaReservo || !esDesarrollo;
   const colAutorizacion = $("#colAutorizacionPrueba");
-  if (colAutorizacion) colAutorizacion.hidden = !esDesarrollo;
+  if (colAutorizacion) colAutorizacion.hidden = esListaReservo || !esDesarrollo;
+  const cabeceraCheck = chkTodos?.closest("th");
+  if (cabeceraCheck) cabeceraCheck.hidden = esListaReservo || !PUEDE_GESTIONAR_PAC;
+  if (chkTodos) { chkTodos.checked = false; chkTodos.disabled = esListaReservo; }
+  const ayudaReservo = $("#ayudaBaseReservo");
+  if (ayudaReservo) {
+    const baseLista = basesReservo.find((base) => Number(base.id) === listaId);
+    ayudaReservo.hidden = !esListaReservo;
+    ayudaReservo.textContent = baseLista
+      ? `${Number(baseLista.total || 0).toLocaleString("es-CL")} pacientes · ${baseLista.clinica_nombre} · ${baseLista.tratamiento_nombre || "Tratamiento histórico"}. La base se administra aquí y puede seleccionarse para enviar desde su clínica.`
+      : "Base de pacientes obtenida desde Reservo.";
+  }
+  const tarjetaGestion = $("#cardGestionBase");
+  if (tarjetaGestion) tarjetaGestion.hidden = esListaReservo;
+  const avisoPruebas = $(".pacientes__aviso-pruebas");
+  if (avisoPruebas) avisoPruebas.hidden = esListaReservo;
+  if (toolbarMasivo) toolbarMasivo.hidden = esListaReservo || seleccionados.size === 0;
 
   const avisoSinEsp = $("#gestionSinEsp");
   if (avisoSinEsp) avisoSinEsp.hidden = areas.length > 0 || PUEDE_GESTIONAR_PAC;
@@ -236,7 +288,7 @@ function aplicarModoBase() {
   const inpCsv = $("#csvArchivo");
   const lblCsv = $("#lblArchivoGestion");
   // Sin áreas no hay nada que gestionar; con tabla general tampoco.
-  const puedeOperar = esArea && puedeCargarArea;
+  const puedeOperar = !esListaReservo && esArea && puedeCargarArea;
   if (btnSubir) btnSubir.disabled = !puedeOperar || !inpCsv?.files?.length ||
     !!$("#csvMapeo")?.hidden || !!$("#csvMapError")?.textContent;
   if (btnVaciar) {
@@ -264,9 +316,15 @@ function aplicarModoBase() {
 
 if (selBasePac) selBasePac.addEventListener("change", async () => {
   const v = selBasePac.value;
-  if (v.startsWith("esp:")) {
+  localStorage.setItem("snw_base_pacientes_actual", v);
+  if (v.startsWith("reservo:")) {
+    localStorage.setItem("snw_lista_reservo_pacientes", v.slice("reservo:".length));
+    localStorage.removeItem("snw_esp_pacientes");
+  } else if (v.startsWith("esp:")) {
+    localStorage.removeItem("snw_lista_reservo_pacientes");
     localStorage.setItem("snw_esp_pacientes", v.slice(4));
   } else {
+    localStorage.removeItem("snw_lista_reservo_pacientes");
     localStorage.removeItem("snw_esp_pacientes");
     ambienteAdmin = v === "prod" ? "produccion" : "desarrollo";
     localStorage.setItem("snw_ambiente_admin", ambienteAdmin);
@@ -300,7 +358,7 @@ async function cargar(mostrarFeedback = false) {
           const c0 = await r0.json();
           if (solicitud !== solicitudPacientes) return;
           ambienteAdmin = c0.entorno;
-          if (selBasePac && espPacId() == null) {
+          if (selBasePac && espPacId() == null && idListaReservoActual() == null) {
             const preferida = ambienteAdmin === "produccion" ? "prod" : "dev";
             if ([...selBasePac.options].some((opcion) => opcion.value === preferida)) {
               selBasePac.value = preferida;
@@ -319,6 +377,51 @@ async function cargar(mostrarFeedback = false) {
       resumenPacientes = null;
       consultaPacientesAnterior = null;
       render();
+      return;
+    }
+    const listaReservoId = idListaReservoActual();
+    if (listaReservoId != null) {
+      const clave = `reservo:${listaReservoId}|${filtro.trim().slice(0, 100)}`;
+      if (baseResumenPacientes !== `reservo:${listaReservoId}`) {
+        resumenPacientes = null;
+        baseResumenPacientes = `reservo:${listaReservoId}`;
+        totalPacientesFiltrados = 0;
+        consultaPacientesAnterior = null;
+      }
+      const parametrosLista = new URLSearchParams({
+        pagina: String(paginaPac), por_pagina: String(pageSizePac), q: filtro.trim().slice(0, 100),
+      });
+      const cargarPaginaLista = async () => {
+        if (tablaCargandoTexto) tablaCargandoTexto.textContent = `Cargando pacientes de la página ${paginaPac}…`;
+        const respuesta = await fetch(`api/reservo/bases/${listaReservoId}/pacientes?${parametrosLista}`, {
+          headers: authHeaders(), cache: "no-store", signal: control.signal,
+        });
+        if (respuesta.status === 401) { window.snwSesionExpirada(); return null; }
+        if (respuesta.status === 403) throw new Error("No tienes acceso a esta base de Reservo.");
+        if (!respuesta.ok) throw new Error("No se pudieron obtener los pacientes de esta base.");
+        return respuesta.json();
+      };
+      let bloqueLista = await cargarPaginaLista();
+      if (solicitud !== solicitudPacientes || !bloqueLista) return;
+      totalPacientesFiltrados = Number(bloqueLista.total) || 0;
+      if (paginaPac > Math.max(1, Number(bloqueLista.paginas) || 1)) {
+        paginaPac = Math.max(1, Number(bloqueLista.paginas) || 1);
+        parametrosLista.set("pagina", String(paginaPac));
+        bloqueLista = await cargarPaginaLista();
+        if (solicitud !== solicitudPacientes || !bloqueLista) return;
+        totalPacientesFiltrados = Number(bloqueLista.total) || 0;
+      }
+      resumenPacientes = bloqueLista.resumen || {};
+      pacientes = (bloqueLista.items || []).map((p) => ({
+        ...p,
+        apellido: p.apellido || "",
+        estado: p.estado || "pendiente",
+        actualizado: p.fecha_actualizacion || "—",
+      }));
+      consultaPacientesAnterior = clave;
+      aplicarModoBase();
+      render();
+      if (mostrarFeedback) toast("Pacientes actualizados correctamente.");
       return;
     }
     const baseQs = qsBase();
@@ -387,6 +490,10 @@ async function cargar(mostrarFeedback = false) {
 }
 
 function render() {
+  if (idListaReservoActual() != null) {
+    renderBaseReservo();
+    return;
+  }
   const visibles = filtradosPac();
   const enPagina = itemsPaginaPac(visibles);
 
@@ -517,6 +624,63 @@ function render() {
     statCard("info", "fa-thumbs-down", esActivoInteres("no_interesado"), 'data-interes="no_interesado"', "No le interesa", conteoNoInteresados);
 
   refrescarSeleccion(enPagina);
+}
+
+function renderBaseReservo() {
+  const listaId = idListaReservoActual();
+  const totalPaginas = totalPaginasPac(totalPacientesFiltrados);
+  if (paginaPac > totalPaginas) paginaPac = totalPaginas;
+  tbodyEl.innerHTML = "";
+  seleccionados.clear();
+  seleccionadosDatos.clear();
+  todoMarcado = false;
+  if (chkTodos) chkTodos.checked = false;
+  if (toolbarMasivo) toolbarMasivo.hidden = true;
+
+  const respuestaLabels = { pendiente: "Sin respuesta", respondio: "Respondió", interesado: "Interesado", no_interesado: "No interesado", baja: "Se dio de baja" };
+  for (const p of pacientes) {
+    const nombreCompleto = [p.nombre, p.apellido].filter(Boolean).join(" ");
+    const respuesta = p.respuesta || "pendiente";
+    const estado = p.estado || "pendiente";
+    const telefonoTitulo = p.telefono_valido ? "" : " title=\"Teléfono no válido para enviar\"";
+    const fila = document.createElement("tr");
+    fila.classList.toggle("es-baja", !!p.whatsapp_opt_out || respuesta === "baja");
+    fila.innerHTML = `<td class="campo-id" title="UUID de paciente en Reservo">${escaparHtml(p.cliente_uuid || p.id)}</td>` +
+      `<td class="campo-nombre">${escaparHtml(nombreCompleto || "—")}</td>` +
+      `<td class="campo-tel"${telefonoTitulo}>${escaparHtml(p.telefono || "—")}</td>` +
+      `<td class="campo-tratamiento" title="${escaparHtml(p.tratamiento_ultima_atencion || "")}">${escaparHtml(p.tratamiento_ultima_atencion || "—")}</td>` +
+      `<td class="campo-fecha-atencion">${escaparHtml(String(p.fecha_ultima_atencion || "—").slice(0, 10))}</td>` +
+      `<td class="campo-estado"><span class="estado-badge estado-${escaparHtml(estado)}">${escaparHtml(estado)}</span></td>` +
+      `<td class="campo-error campo-error--vacio">—</td>` +
+      `<td class="campo-respuesta"><span class="respuesta-badge respuesta-${escaparHtml(respuesta)}">${escaparHtml(respuestaLabels[respuesta] || respuesta)}</span></td>` +
+      `<td class="campo-fecha">${escaparHtml(p.actualizado || "—")}</td>`;
+    tbodyEl.appendChild(fila);
+  }
+
+  const resumen = resumenPacientes || {};
+  const tarjetas = [
+    ["neutral", "fa-users", "Total", resumen.total],
+    ["ok", "fa-phone", "Teléfonos válidos", Math.max(0, Number(resumen.total || 0) - Number(resumen.telefonos_invalidos || 0))],
+    ["danger", "fa-triangle-exclamation", "Teléfonos inválidos", resumen.telefonos_invalidos],
+    ["ok", "fa-paper-plane", "Enviados", resumen.enviados],
+    ["danger", "fa-circle-exclamation", "Errores", resumen.errores],
+    ["danger", "fa-user-slash", "Bajas", resumen.bajas],
+  ];
+  statsEl.innerHTML = tarjetas.map(([tono, icono, etiqueta, valor]) =>
+    `<div class="stat-card stat-card--base-summary stat-card--${tono}"><span class="stat-card__icono"><i class="fa-solid ${icono}" aria-hidden="true"></i></span>` +
+    `<span class="stat-card__texto"><strong>${Number(valor || 0).toLocaleString("es-CL")}</strong><span>${etiqueta}</span></span></div>`
+  ).join("");
+
+  const checkHeader = chkTodos?.closest("th");
+  if (checkHeader) checkHeader.hidden = true;
+  if (vacioEl) {
+    vacioEl.hidden = pacientes.length > 0 || !!(tablaCargando && !tablaCargando.hidden);
+    vacioEl.textContent = filtro.trim() ? "No hay pacientes que coincidan con la búsqueda." : "Esta base todavía no tiene pacientes.";
+  }
+  pintarPaginadorPac(totalPacientesFiltrados);
+  const base = basesReservo.find((item) => Number(item.id) === listaId);
+  const titulo = $("#tituloPacientes");
+  if (titulo) titulo.textContent = `Pacientes · ${base?.nombre || "Base Reservo"}`;
 }
 
 function refrescarSeleccion(visibles = null) {
@@ -757,7 +921,10 @@ statsEl.addEventListener("click", (e) => {
   cargar();
 });
 
-window.snwConCooldown($("#btnActualizar"), () => cargar(true));
+window.snwConCooldown($("#btnActualizar"), async () => {
+  await cargarBasesPac();
+  await cargar(true);
+});
 
 // --- Paginación: extremos, pasos, salto directo y tamaño (10–100) -----------
 const pagPrimPac = $("#pagPrimPac");

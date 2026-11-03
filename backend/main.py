@@ -1538,9 +1538,26 @@ def _filtro_log_paciente(tabla: str, ambiente: str, alias: str) -> str:
         return ""
     if tabla in ("pacientes_dev", "pacientes_prod"):
         return f" AND COALESCE({alias}.tabla_pacientes, '') IN ('', '{tabla}')"
+    if tabla == reservo_pacientes.TABLA_LISTA_RESERVO:
+        return f" AND {alias}.tabla_pacientes = '{tabla}'"
     if not servicio_areas.tabla_valida(tabla):
         raise ValueError("Tabla de pacientes inválida")
     return f" AND {alias}.tabla_pacientes = '{tabla}'"
+
+
+def _base_reservo_por_nombre(nombre: str | None) -> dict | None:
+    """Resuelve un nombre lógico de Reservo sin tratarlo como tabla SQL."""
+    valor = str(nombre or "").strip()
+    if not re.match(r"^(?:SMPT|MS|MVYS)_", valor, flags=re.IGNORECASE):
+        return None
+    try:
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute("SELECT id,nombre,clinica_codigo FROM reservo_bases_contacto WHERE nombre=%s",
+                        (valor,))
+            return cur.fetchone()
+    except Exception as exc:
+        log_error("resolver base lógica Reservo", exc, solo_tipo=True)
+        return None
 
 
 def expr_respuesta_efectiva(alias: str = "p", tiene_opt_out: bool = True,
@@ -5430,6 +5447,10 @@ class ReservoProbarIn(BaseModel):
     fecha: str | None = Field(None, min_length=10, max_length=10)
 
 
+class ReservoBaseIn(BaseModel):
+    nombre_personalizado: str = Field(..., min_length=1, max_length=100)
+
+
 def _fecha_reservo(valor: str) -> datetime.date:
     try:
         fecha = datetime.date.fromisoformat(valor)
@@ -5622,6 +5643,53 @@ def deshacer_sincronizacion_reservo(job_id: int, sesion: dict = Depends(solo_adm
     auditoria_registrar(sesion.get("usuario", ""), "reservo_sincronizacion_deshecha",
                         str(job_id), f"{resultado['pacientes_eliminados']} pacientes exclusivos eliminados")
     return resultado
+
+
+def listar_bases_reservo(sesion: dict = Depends(solo_admin)):
+    return {"items": reservo_pacientes.listar_bases_contacto()}
+
+
+def previsualizar_base_reservo(job_id: int, body: ReservoBaseIn,
+                               sesion: dict = Depends(solo_admin)):
+    try:
+        return reservo_pacientes.previsualizar_base_contactos(job_id, body.nombre_personalizado)
+    except LookupError as exc:
+        raise HTTPException(404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, detail=str(exc)) from exc
+    except Exception as exc:
+        log_error("previsualizar base de contactos Reservo", exc, solo_tipo=True)
+        raise HTTPException(503, detail="No se pudo preparar la vista previa.") from exc
+
+
+def guardar_base_reservo(job_id: int, body: ReservoBaseIn,
+                         sesion: dict = Depends(solo_admin)):
+    try:
+        base = reservo_pacientes.guardar_base_contactos(
+            job_id, body.nombre_personalizado, sesion.get("usuario", ""))
+    except LookupError as exc:
+        raise HTTPException(404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, detail=str(exc)) from exc
+    except Exception as exc:
+        log_error("guardar base de contactos Reservo", exc, solo_tipo=True)
+        raise HTTPException(503, detail="No se pudo guardar la base de contactos.") from exc
+    auditoria_registrar(sesion.get("usuario", ""), "reservo_base_creada", str(base["id"]),
+                        f"{base['nombre']}; clínica {base['clinica_codigo']}; "
+                        f"{base['total']} pacientes; autorizados en el origen Reservo")
+    return base
+
+
+def listar_pacientes_base_reservo(base_id: int, pagina: int = Query(1, ge=1),
+                                  por_pagina: int = Query(25, ge=1, le=100),
+                                  q: str = Query("", max_length=100),
+                                  sesion: dict = Depends(solo_admin)):
+    try:
+        return reservo_pacientes.listar_pacientes_base_contacto(base_id, pagina, por_pagina, q)
+    except LookupError as exc:
+        raise HTTPException(404, detail=str(exc)) from exc
 
 
 def listar_pacientes_reservo(
@@ -6621,7 +6689,8 @@ def registrar_historial(paciente_id, nombre, telefono, clave_plantilla, mensaje,
 
 def crear_envio_batch(base_datos, plantilla_clave, plantilla_nombre, total, ambiente, usuario: str = "",
                       area_id=None, tabla_pacientes=None, programado_id=None,
-                      emisor: dict | None = None, estado: str = "en_proceso") -> int | None:
+                      emisor: dict | None = None, estado: str = "en_proceso",
+                      reservo_lista_id: int | None = None) -> int | None:
     try:
         with conectar(ambiente) as conn, conn.cursor() as cur:
             cols = columnas_tabla("envios", ambiente)
@@ -6632,6 +6701,9 @@ def crear_envio_batch(base_datos, plantilla_clave, plantilla_nombre, total, ambi
             if "programado_id" in cols:
                 extra_col += ", programado_id"
                 extra_val += (programado_id,)
+            if "reservo_lista_id" in cols:
+                extra_col += ", reservo_lista_id"
+                extra_val += (reservo_lista_id,)
             for columna, valor in (("centro_codigo", (emisor or {}).get("codigo")),
                                    ("wa_phone_id", (emisor or {}).get("phoneNumberId")),
                                    ("numero_emisor", (emisor or {}).get("phoneNumber"))):
@@ -6745,7 +6817,8 @@ def _paciente_habilitado_antes_de_enviar(paciente_id: int, telefono: str,
     """Revalida una cohorte congelada justo antes del envío (baja o borrado)."""
     try:
         with conectar(ambiente) as conn, conn.cursor() as cur:
-            cur.execute(f"SELECT telefono, whatsapp_opt_out FROM {tabla} WHERE id = %s", (paciente_id,))
+            cur.execute(f"SELECT telefono, whatsapp_opt_out FROM {tabla} WHERE id = %s",
+                        (paciente_id,))
             fila = cur.fetchone()
         return bool(fila and not fila.get("whatsapp_opt_out")
                     and normalizar_telefono(fila.get("telefono") or "") == normalizar_telefono(telefono))
@@ -7116,10 +7189,33 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
     if not tiene_permiso(sesion, "envio_manual"):
         raise HTTPException(403, detail="No tienes permiso para crear envíos manuales.")
     emisor = _exigir_centro_envio(body.centro)
-    try:
-        amb = entorno_valido(body.ambiente)
-    except ValueError:
-        raise HTTPException(400, detail=f"Entorno inválido: '{body.ambiente}'")
+    lista_id = int(body.lista_reservo_id) if body.lista_reservo_id is not None else None
+    lista_reservo = None
+    if lista_id is not None:
+        if not _es_privilegiado(sesion):
+            raise HTTPException(403, detail="Las bases de Reservo son exclusivas de administradores y desarrolladores.")
+        if body.area_id is not None:
+            raise HTTPException(422, detail="No se puede combinar una base de Reservo con un área.")
+        amb = "produccion"
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute("SELECT id,nombre,clinica_codigo FROM reservo_bases_contacto WHERE id=%s",
+                        (lista_id,))
+            lista_reservo = cur.fetchone()
+        if not lista_reservo:
+            raise HTTPException(404, detail="La base de Reservo no existe.")
+        if emisor["codigo"] != lista_reservo["clinica_codigo"]:
+            raise HTTPException(422, detail="La base de Reservo solo puede enviarse desde el número de su clínica.")
+        t_esp = reservo_pacientes.TABLA_LISTA_RESERVO
+        esp = None
+        base_job = lista_reservo["nombre"]
+    else:
+        try:
+            amb = entorno_valido(body.ambiente)
+        except ValueError:
+            raise HTTPException(400, detail=f"Entorno inválido: '{body.ambiente}'")
+        t_esp = None
+        esp = None
+        base_job = None
     _exigir_base_desarrollo(sesion, amb, body.area_id)
 
     # Desarrollo es un candado global para todos los roles: no se permite
@@ -7134,19 +7230,17 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
 
     # El usuario normal solo envía a pacientes de su area o a la base
     # de desarrollo; nunca a producción legacy.
-    if sesion.get("rol") == "usuario" and body.area_id is None and amb != "desarrollo":
+    if lista_id is None and sesion.get("rol") == "usuario" and body.area_id is None and amb != "desarrollo":
         raise HTTPException(
             403, detail="Solo puedes enviar a pacientes de tu área o a la base de desarrollo.")
 
     # Envío a area (Fase 2): tabla única pacientes_<slug>, con
     # autorización estricta (403 si no está asignada). Las reglas de
     # elegibilidad son las de producción (solo pendientes, sin opt-out).
-    esp = None
-    t_esp = None
-    if body.area_id is not None:
+    if lista_id is None and body.area_id is not None:
         esp = _exigir_area(sesion, body.area_id)
         t_esp = esp["nombre_tabla_base"]
-    base_job = t_esp or amb
+    base_job = base_job or t_esp or amb
 
     # Un solo envío a la vez POR BASE: si ya hay uno en curso en esa misma base
     # (iniciado por este u otro usuario), se rechaza de inmediato con el detalle
@@ -7218,7 +7312,15 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
             # Se traen TODOS los seleccionados (incluidos los de baja) para poder
             # informar al usuario por qué se descartó cada uno.
             placeholders = ", ".join("%s" for _ in body.pacientes)
-            cur.execute(base_select + f" WHERE p.id IN ({placeholders})", tuple(body.pacientes))
+            where_lista = "p.lista_id = %s AND " if lista_id is not None else ""
+            args_lista = (lista_id,) if lista_id is not None else ()
+            cur.execute(base_select + f" WHERE {where_lista}p.id IN ({placeholders})",
+                        (*args_lista, *body.pacientes))
+        elif lista_id is not None:
+            # Reservo entrega pacientes ya filtrados por autorización; los
+            # teléfonos inválidos se mantienen visibles, pero no son elegibles.
+            cur.execute(base_select + " WHERE p.lista_id=%s AND p.telefono_valido=1 ORDER BY p.id",
+                        (lista_id,))
         else:
             if amb_q == "desarrollo":
                 # En desarrollo se puede reenviar sin importar el estado del paciente;
@@ -7332,18 +7434,20 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         # del intento en el historial (0 enviados, N inválidos).
         envio_id = None
         if rechazados:
-            envio_id = crear_envio_batch(t_esp or nombre_base(amb), plantilla["clave"],
+            envio_id = crear_envio_batch((lista_reservo or {}).get("nombre") or t_esp or nombre_base(amb), plantilla["clave"],
                                          plantilla["nombre"], len(rechazados), amb,
                                          usuario=sesion.get("usuario", ""),
                                          area_id=(esp["id"] if esp else None),
                                          tabla_pacientes=t_esp,
                                          programado_id=sesion.get("programado_id"), emisor=emisor,
-                                         estado="error")
+                                         estado="error", reservo_lista_id=lista_id)
             if envio_id:
                 actualizar_envio_batch(envio_id, amb, invalidos=len(rechazados))
                 for r in rechazados:
+                    estado_rechazo = ("error" if "autorización" in (r.get("motivo") or "").lower()
+                                      else "numero_invalido")
                     registrar_historial(r.get("id"), r.get("nombre"), r.get("telefono"),
-                                        plantilla["clave"], "", "numero_invalido",
+                                        plantilla["clave"], "", estado_rechazo,
                                         r.get("motivo"), ambiente=amb, envio_id=envio_id,
                                         area_id=(esp["id"] if esp else None),
                                         tabla_pacientes=t_esp)
@@ -7355,11 +7459,12 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
     # crear envíos manuales directos (admin/dev lo tienen implícito).
     if _envio_requiere_confirmacion(sesion, "manual", amb):
         token = uuid.uuid4().hex
-        envio_id = crear_envio_batch(t_esp or nombre_base(amb), plantilla["clave"], plantilla["nombre"],
+        envio_id = crear_envio_batch((lista_reservo or {}).get("nombre") or t_esp or nombre_base(amb), plantilla["clave"], plantilla["nombre"],
                                      len(destinatarios) + len(rechazados), amb,
                                      usuario=sesion.get("usuario", ""),
                                      area_id=(esp["id"] if esp else None),
-                                     tabla_pacientes=t_esp, emisor=emisor, estado="pendiente")
+                                     tabla_pacientes=t_esp, emisor=emisor, estado="pendiente",
+                                     reservo_lista_id=lista_id)
         PENDIENTES[token] = {
             "emisor": emisor,
             "ambiente": amb,
@@ -7382,8 +7487,10 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         if envio_id:
             actualizar_envio_batch(envio_id, amb, invalidos=len(rechazados))
             for r in rechazados:
+                estado_rechazo = ("error" if "autorización" in (r.get("motivo") or "").lower()
+                                  else "numero_invalido")
                 registrar_historial(r.get("id"), r.get("nombre"), r.get("telefono"),
-                                    plantilla["clave"], "", "numero_invalido",
+                                    plantilla["clave"], "", estado_rechazo,
                                     r.get("motivo"), ambiente=amb, envio_id=envio_id,
                                     area_id=(esp["id"] if esp else None),
                                     tabla_pacientes=t_esp)
@@ -7413,17 +7520,20 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
                 "aviso_limite_mensajeria": aviso_limite,
                 "confirm_url": f"{url_base()}/api/notificaciones/confirmar/{token}"}
 
-    envio_id = crear_envio_batch(t_esp or nombre_base(amb), plantilla["clave"], plantilla["nombre"],
+    envio_id = crear_envio_batch((lista_reservo or {}).get("nombre") or t_esp or nombre_base(amb), plantilla["clave"], plantilla["nombre"],
                                  len(destinatarios) + len(rechazados), amb,
                                  usuario=sesion.get("usuario", ""),
                                  area_id=(esp["id"] if esp else None),
                                  tabla_pacientes=t_esp,
-                                 programado_id=sesion.get("programado_id"), emisor=emisor)
+                                 programado_id=sesion.get("programado_id"), emisor=emisor,
+                                 reservo_lista_id=lista_id)
     if envio_id:
         actualizar_envio_batch(envio_id, amb, invalidos=len(rechazados))
         for r in rechazados:
+            estado_rechazo = ("error" if "autorización" in (r.get("motivo") or "").lower()
+                              else "numero_invalido")
             registrar_historial(r.get("id"), r.get("nombre"), r.get("telefono"),
-                                plantilla["clave"], "", "numero_invalido",
+                                plantilla["clave"], "", estado_rechazo,
                                 r.get("motivo"), ambiente=amb, envio_id=envio_id,
                                 area_id=(esp["id"] if esp else None),
                                 tabla_pacientes=t_esp)
@@ -7630,25 +7740,37 @@ class DestinosIn(BaseModel):
     fecha: str | None = None
     prevision_programado: bool = False
     centro: str | None = None
+    reservo_lista_id: int | None = None
 
 
-def _contar_elegibles_tabla(t: str, amb_q: str, amb: str) -> tuple[int, int]:
+def _contar_elegibles_tabla(t: str, amb_q: str, amb: str,
+                            reservo_lista_id: int | None = None) -> tuple[int, int]:
     """(total, elegibles) de una tabla. Producción requiere estado pendiente;
     desarrollo permite reenviar sin importar estado, siempre entre números de prueba."""
     with conectar(amb) as conn, conn.cursor() as cur:
-        cur.execute(f"SELECT COUNT(*) AS total FROM {t}")
+        lista_reservo = t == reservo_pacientes.TABLA_LISTA_RESERVO
+        if lista_reservo and reservo_lista_id is None:
+            raise ValueError("Falta identificar la lista de contactos Reservo.")
+        where_lista = " WHERE lista_id=%s" if lista_reservo else ""
+        args_lista = (reservo_lista_id,) if lista_reservo else ()
+        cur.execute(f"SELECT COUNT(*) AS total FROM {t}" + where_lista, args_lista)
         total = int((cur.fetchone() or {}).get("total") or 0)
         conds = []
         es_desarrollo = entorno_valido(amb) == "desarrollo"
-        if not es_desarrollo and columna_existe(t, "estado", amb_q):
+        if lista_reservo:
+            conds.append("telefono_valido=1")
+        elif not es_desarrollo and columna_existe(t, "estado", amb_q):
             conds.append("estado = 'pendiente'")
         if columna_existe(t, "whatsapp_opt_out", amb_q):
             conds.append("whatsapp_opt_out = 0")
         if columna_existe(t, "respuesta", amb_q):
             conds.append("(respuesta IS NULL OR respuesta <> 'baja')")
+        if lista_reservo:
+            conds.insert(0, "lista_id=%s")
         cur.execute(
             f"SELECT telefono FROM {t}"
-            + (" WHERE " + " AND ".join(conds) if conds else "")
+            + (" WHERE " + " AND ".join(conds) if conds else ""),
+            ((reservo_lista_id,) if lista_reservo else ()),
         )
         telefonos = [r.get("telefono") or "" for r in cur.fetchall()]
         if es_desarrollo:
@@ -7660,10 +7782,25 @@ def _contar_elegibles_tabla(t: str, amb_q: str, amb: str) -> tuple[int, int]:
 
 
 def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensajeria"))):
-    try:
-        amb = entorno_valido(body.ambiente)
-    except ValueError:
-        raise HTTPException(400, detail=f"Entorno inválido: '{body.ambiente}'")
+    lista_id = int(body.reservo_lista_id) if body.reservo_lista_id is not None else None
+    lista_reservo = None
+    if lista_id is not None:
+        if not _es_privilegiado(sesion):
+            raise HTTPException(403, detail="Las bases de Reservo son exclusivas de administradores y desarrolladores.")
+        if body.area_id is not None:
+            raise HTTPException(422, detail="No se puede combinar una base de Reservo con un área.")
+        amb = "produccion"
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute("SELECT id,nombre,clinica_codigo FROM reservo_bases_contacto WHERE id=%s",
+                        (lista_id,))
+            lista_reservo = cur.fetchone()
+        if not lista_reservo:
+            raise HTTPException(404, detail="La base de Reservo no existe.")
+    else:
+        try:
+            amb = entorno_valido(body.ambiente)
+        except ValueError:
+            raise HTTPException(400, detail=f"Entorno inválido: '{body.ambiente}'")
     _exigir_base_desarrollo(sesion, amb, body.area_id)
     plantilla_preview = None
     if body.plantilla_id is not None:
@@ -7672,17 +7809,26 @@ def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensaj
         if plantilla_preview is None:
             raise HTTPException(404, detail="Plantilla no encontrada")
         _exigir_emisor_de_plantilla(plantilla_preview, body.centro)
+        if lista_reservo and body.centro != lista_reservo["clinica_codigo"]:
+            raise HTTPException(422, detail="La lista solo puede enviarse desde el número de su clínica.")
 
     esp = None
-    if body.area_id is not None:
+    if lista_reservo:
+        esp = None
+        t = reservo_pacientes.TABLA_LISTA_RESERVO
+        amb_q = "produccion"
+    elif body.area_id is not None:
         esp = _exigir_area(sesion, body.area_id)
-    t = (esp["nombre_tabla_base"] if esp else tabla_pacientes(amb))
-    amb_q = "produccion" if esp else amb
-    total, elegibles = _contar_elegibles_tabla(t, amb_q, amb)
+        t = esp["nombre_tabla_base"]
+        amb_q = "produccion"
+    else:
+        t = tabla_pacientes(amb)
+        amb_q = amb
+    total, elegibles = _contar_elegibles_tabla(t, amb_q, amb, lista_id)
     # Los que ya están tomados por un programado activo no se pueden preelegir
     # de nuevo: son los que quedan libres para este envío/horario.
     try:
-        reservados = _contar_reservados_prog(t, amb, amb_q)
+        reservados = _contar_reservados_prog(t, amb, amb_q, lista_id)
     except Exception as e:
         log_error("contar_reservados_prog", e)
         reservados = 0
@@ -7717,7 +7863,9 @@ def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensaj
         "pendientes": elegibles,
         "reservados": reservados,
         "libres": libres,
-        "base_datos": t if esp else nombre_base(amb),
+        "base_datos": ((lista_reservo or {}).get("nombre") if lista_reservo
+                       else t if esp else nombre_base(amb)),
+        "reservo_lista_id": lista_id,
         "area_id": (esp["id"] if esp else None),
         "costo": costo,
         "limite_mensajeria": info_limite,
@@ -7946,6 +8094,7 @@ class ProgCrearIn(BaseModel):
     programado_para: str  # "YYYY-MM-DDTHH:MM" (hora del servidor)
     limite: int
     centro: str | None = None
+    reservo_lista_id: int | None = None
 
 
 # --- Destinatarios preelegidos de cada programado ---------------------------
@@ -7959,15 +8108,17 @@ class ProgCrearIn(BaseModel):
 _ESTADOS_PROG_RESERVAN = ("pendiente", "aprobado", "enviando")
 
 
-def _contar_reservados_prog(t: str, amb: str, amb_q: str) -> int:
+def _contar_reservados_prog(t: str, amb: str, amb_q: str,
+                            reservo_lista_id: int | None = None) -> int:
     """Pacientes de la base que ya están tomados por otro programado activo."""
     with conectar(amb) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT DISTINCT pd.paciente_id, pd.telefono FROM programado_destinatarios pd"
             " JOIN envios_programados ep ON ep.id = pd.prog_id"
             " WHERE ep.tabla = %s AND ep.ambiente = %s AND ep.estado IN"
-            " ('pendiente', 'aprobado', 'enviando')",
-            (t, amb_q),
+            " ('pendiente', 'aprobado', 'enviando')"
+            + (" AND ep.reservo_lista_id=%s" if reservo_lista_id is not None else ""),
+            ((t, amb_q, reservo_lista_id) if reservo_lista_id is not None else (t, amb_q)),
         )
         filas = cur.fetchall()
     if amb_q == "desarrollo":
@@ -7977,7 +8128,8 @@ def _contar_reservados_prog(t: str, amb: str, amb_q: str) -> int:
     return len({int(f["paciente_id"]) for f in filas})
 
 
-def _preelegir_pacientes_prog(t: str, amb: str, amb_q: str, n: int, cur=None) -> list[dict]:
+def _preelegir_pacientes_prog(t: str, amb: str, amb_q: str, n: int, cur=None,
+                              reservo_lista_id: int | None = None) -> list[dict]:
     """Primeros N pacientes libres: sin opt-out ni baja y no preelegidos por
     otro programado activo. En desarrollo se permite cualquier estado; en
     producción solo pendientes. Orden estable por id.
@@ -7988,8 +8140,13 @@ def _preelegir_pacientes_prog(t: str, amb: str, amb_q: str, n: int, cur=None) ->
     if n <= 0:
         return []
     solo_pruebas = entorno_valido(amb) == "desarrollo"
+    lista_reservo = t == reservo_pacientes.TABLA_LISTA_RESERVO
     cond = []
-    if not solo_pruebas and columna_existe(t, "estado", amb_q):
+    if lista_reservo:
+        if reservo_lista_id is None:
+            raise ValueError("Falta identificar la lista Reservo del envío programado.")
+        cond.extend(("p.lista_id = %(lista_id)s", "p.telefono_valido = 1"))
+    elif not solo_pruebas and columna_existe(t, "estado", amb_q):
         cond.append("p.estado = 'pendiente'")
     if columna_existe(t, "whatsapp_opt_out", amb_q):
         cond.append("p.whatsapp_opt_out = 0")
@@ -8000,13 +8157,16 @@ def _preelegir_pacientes_prog(t: str, amb: str, amb_q: str, n: int, cur=None) ->
         "p.id NOT IN (SELECT pd.paciente_id FROM programado_destinatarios pd"
         " JOIN envios_programados ep ON ep.id = pd.prog_id"
         " WHERE ep.tabla = %(t)s AND ep.ambiente = %(amb)s AND ep.estado IN"
-        " ('pendiente', 'aprobado', 'enviando'))"
+        " ('pendiente', 'aprobado', 'enviando')"
+        + (" AND ep.reservo_lista_id = %(lista_id)s" if lista_reservo else "") + ")"
     )
     where = (" WHERE " + " AND ".join(cond)) if cond else ""
     sql = (f"SELECT p.id, p.nombre, p.apellido, p.telefono FROM {t} p{where}"
            " ORDER BY p.id" + ("" if solo_pruebas else " LIMIT %(n)s")
            + (" FOR UPDATE" if cur else ""))
     params = {"t": t, "amb": amb_q}
+    if lista_reservo:
+        params["lista_id"] = int(reservo_lista_id)
     if not solo_pruebas:
         params["n"] = n
     if cur:
@@ -8045,23 +8205,33 @@ def _liberar_destinatarios_prog(prog_id: int) -> None:
 
 
 def _revivir_destinatarios_prog(tabla: str, amb: str, amb_q: str,
-                                 ids: list[int]) -> tuple[list[dict], list[dict]]:
+                                 ids: list[int], reservo_lista_id: int | None = None) -> tuple[list[dict], list[dict]]:
     """Revalida lista congelada: producción exige que sigan pendientes;
     desarrollo permite cualquier estado. En ambos casos excluye bajas/opt-out."""
     if not ids:
         return [], []
     cols = ["p.id", "p.nombre", "p.apellido", "p.telefono"]
+    lista_reservo = tabla == reservo_pacientes.TABLA_LISTA_RESERVO
+    if lista_reservo:
+        cols.append("p.telefono_valido")
     if columna_existe(tabla, "whatsapp_opt_out", amb_q):
         cols.append("p.whatsapp_opt_out")
     if columna_existe(tabla, "respuesta", amb_q):
         cols.append("p.respuesta")
     cond = [f"p.id IN ({', '.join('%s' for _ in ids)})"]
-    if entorno_valido(amb) != "desarrollo" and columna_existe(tabla, "estado", amb_q):
+    args = list(ids)
+    if lista_reservo:
+        if reservo_lista_id is None:
+            return [], [{"id": pid, "nombre": "", "motivo": "No se pudo identificar la base Reservo"}
+                        for pid in ids]
+        cond.append("p.lista_id=%s")
+        args.append(int(reservo_lista_id))
+    elif entorno_valido(amb) != "desarrollo" and columna_existe(tabla, "estado", amb_q):
         cond.append("p.estado = 'pendiente'")
     with conectar(amb) as conn, conn.cursor() as cur:
         cur.execute(
             f"SELECT {', '.join(cols)} FROM {tabla} p WHERE " + " AND ".join(cond),
-            tuple(ids),
+            tuple(args),
         )
         filas = cur.fetchall()
     por_id = {r["id"]: r for r in filas}
@@ -8074,6 +8244,10 @@ def _revivir_destinatarios_prog(tabla: str, amb: str, amb_q: str,
             excluidos.append({"id": pid, "nombre": " ".join(
                 x for x in [r.get("nombre"), r.get("apellido")] if x),
                 "motivo": "Se dio de baja antes del envío"})
+        elif lista_reservo and not r.get("telefono_valido"):
+            excluidos.append({"id": pid, "nombre": " ".join(
+                x for x in [r.get("nombre"), r.get("apellido")] if x),
+                "motivo": "Teléfono no válido"})
         else:
             vivos.append({"id": pid, "nombre": " ".join(
                 x for x in [r.get("nombre"), r.get("apellido")] if x),
@@ -8139,11 +8313,14 @@ def _prog_a_respuesta(f: dict, sesion: dict, preelegidos: int | None = None) -> 
                                      elegibles=preelegidos)
     return {
         "id": f["id"], "area_id": f.get("area_id"),
+        "reservo_lista_id": f.get("reservo_lista_id"),
+        "base_nombre": f.get("reservo_base_nombre") or f.get("tabla") or "",
         "centro_codigo": f.get("centro_codigo"),
         "centro": catalogo_centros(incluir_inactivas=True).get(f.get("centro_codigo"), "Emisor histórico no identificado"),
         "numero_emisor": f.get("numero_emisor"),
         "area": (esp.get("nombre_visible") if esp else ""),
-        "tabla": f.get("tabla") or "", "ambiente": f.get("ambiente") or "produccion",
+        "tabla": f.get("reservo_base_nombre") or f.get("tabla") or "",
+        "ambiente": f.get("ambiente") or "produccion",
         "plantilla_id": f.get("plantilla_id"), "plantilla": f.get("plantilla_nombre") or "",
         "limite": f.get("limite"), "preelegidos": preelegidos,
         "programado_para": f["programado_para"].strftime("%d-%m-%Y %H:%M") if f.get("programado_para") else "",
@@ -8170,7 +8347,8 @@ def _prog_costo_estimado(f: dict, plantilla_nombre: str = "",
             return None
         if elegibles is None:
             amb_q = "produccion" if f.get("area_id") is not None else amb
-            _, elegibles = _contar_elegibles_tabla(tabla, amb_q, amb)
+            _, elegibles = _contar_elegibles_tabla(
+                tabla, amb_q, amb, f.get("reservo_lista_id"))
             # Programados antiguos sin lista preelegida: no estimar el costo
             # sobre toda la base cuando se configuró una cantidad menor.
             if f.get("limite") is not None:
@@ -8225,8 +8403,24 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
     if limite < 1:
         raise HTTPException(422, detail="La cantidad debe ser de 1 paciente o más.")
 
+    lista_id = int(body.reservo_lista_id) if body.reservo_lista_id is not None else None
+    lista_reservo = None
     esp = None
-    if body.area_id is not None:
+    if lista_id is not None:
+        if not _es_privilegiado(sesion):
+            raise HTTPException(403, detail="Las bases de Reservo son exclusivas de administradores y desarrolladores.")
+        if body.area_id is not None:
+            raise HTTPException(422, detail="No se puede combinar una base de Reservo con un área.")
+        amb, tabla = "produccion", reservo_pacientes.TABLA_LISTA_RESERVO
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute("SELECT id,nombre,clinica_codigo FROM reservo_bases_contacto WHERE id=%s",
+                        (lista_id,))
+            lista_reservo = cur.fetchone()
+        if not lista_reservo:
+            raise HTTPException(404, detail="La base de Reservo no existe.")
+        if emisor["codigo"] != lista_reservo["clinica_codigo"]:
+            raise HTTPException(422, detail="La lista solo puede enviarse desde el número de su clínica.")
+    elif body.area_id is not None:
         esp = _exigir_area(sesion, body.area_id)  # 404/403 (usuario: solo sus areas)
         amb, tabla = "produccion", esp["nombre_tabla_base"]
     else:
@@ -8250,14 +8444,15 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
     # Tope real: elegibles libres (en desarrollo incluye todos los estados),
     # sin repetir destinatarios ya reservados ni superar el cupo de Meta.
     amb_q = "produccion" if esp is not None else amb
-    _, elegibles = _contar_elegibles_tabla(tabla, amb_q, amb)
+    _, elegibles = _contar_elegibles_tabla(tabla, amb_q, amb, lista_id)
     try:
-        reservados = _contar_reservados_prog(tabla, amb, amb_q)
+        reservados = _contar_reservados_prog(tabla, amb, amb_q, lista_id)
     except Exception as e:
         log_error("contar_reservados_prog", e)
         reservados = 0
     libres = max(0, elegibles - reservados)
     etiqueta_elegibles = ("pacientes de prueba elegibles" if amb == "desarrollo"
+                          else "pacientes con teléfono válido" if lista_reservo
                           else "pacientes pendientes")
     info_limite = None
     if amb == "produccion" and config_get("metodo_envio", "").strip() == "api_oficial":
@@ -8274,6 +8469,8 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
             if elegibles <= 0:
                 mensaje = ("No hay pacientes de prueba elegibles en esta base para programar."
                            if amb == "desarrollo"
+                           else "No hay pacientes con teléfono válido en esta base de Reservo."
+                           if lista_reservo
                            else "No hay pacientes pendientes en esta base para programar.")
                 raise HTTPException(422, detail=mensaje)
             raise HTTPException(422, detail=(
@@ -8296,6 +8493,8 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
         next((p for p in leer_plantillas() if p["id"] == body.plantilla_id), None),
         esp["id"] if esp else None)
     _exigir_emisor_de_plantilla(plantilla, emisor["codigo"])
+    if lista_reservo and plantilla.get("centro_codigo") != lista_reservo["clinica_codigo"]:
+        raise HTTPException(422, detail="La clínica de la plantilla y la lista Reservo no coincide.")
     # La muestra de Meta (hello_world) solo se puede probar en desarrollo.
     if _es_plantilla_protegida(plantilla) and (esp is not None or amb != "desarrollo"):
         raise HTTPException(
@@ -8332,7 +8531,8 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
             f"se complete."))
 
     with conectar() as conn, conn.cursor() as cur:
-        preelegidos = _preelegir_pacientes_prog(tabla, amb, amb_q, n_preelegir, cur=cur)
+        preelegidos = _preelegir_pacientes_prog(
+            tabla, amb, amb_q, n_preelegir, cur=cur, reservo_lista_id=lista_id)
         if not preelegidos:
             conn.rollback()
             raise HTTPException(422, detail=(
@@ -8340,11 +8540,11 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
                 f"preelegidos por otros envíos programados activos. Cancela alguno o espera a que "
                 f"se complete."))
         cur.execute(
-            "INSERT INTO envios_programados (area_id, tabla, ambiente, plantilla_id, plantilla_nombre,"
+            "INSERT INTO envios_programados (area_id, reservo_lista_id, tabla, ambiente, plantilla_id, plantilla_nombre,"
             " limite, programado_para, estado, creador, creador_nombre, decidido_por, token,"
             " centro_codigo, wa_phone_id, numero_emisor)"
-            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-            (esp["id"] if esp else None, tabla, amb, plantilla["id"], plantilla.get("nombre") or "",
+            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            (esp["id"] if esp else None, lista_id, tabla, amb, plantilla["id"], plantilla.get("nombre") or "",
              limite, cuando.strftime("%Y-%m-%d %H:%M"), estado, creador,
              (sesion.get("nombre") or "Usuario"), (creador if directo else ""), token,
              emisor["codigo"], emisor["phoneNumberId"], emisor["phoneNumber"]),
@@ -8453,7 +8653,9 @@ def listar_programados(sesion: dict = Depends(exigir("mensajeria"))):
     # envío lejano en el futuro tapa los nuevos).
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT * FROM envios_programados ORDER BY creado DESC, id DESC LIMIT 200"
+            "SELECT p.*,b.nombre AS reservo_base_nombre FROM envios_programados p"
+            " LEFT JOIN reservo_bases_contacto b ON b.id=p.reservo_lista_id"
+            " ORDER BY p.creado DESC,p.id DESC LIMIT 200"
         )
         filas = cur.fetchall()
     # Admin/dev lo ven todo; el supervisor también (decide en sus areas,
@@ -8514,7 +8716,9 @@ def resumen_programados(sesion: dict = Depends(exigir("mensajeria"))):
 
 def _traer_programado(prog_id: int) -> dict:
     with conectar() as conn, conn.cursor() as cur:
-        cur.execute("SELECT * FROM envios_programados WHERE id = %s", (int(prog_id),))
+        cur.execute("SELECT p.*,b.nombre AS reservo_base_nombre FROM envios_programados p"
+                    " LEFT JOIN reservo_bases_contacto b ON b.id=p.reservo_lista_id"
+                    " WHERE p.id = %s", (int(prog_id),))
         f = cur.fetchone()
     if not f:
         raise HTTPException(404, detail="Envío programado no encontrado.")
@@ -8817,7 +9021,8 @@ def _ejecutar_programado(f: dict) -> None:
         _avisar_creador_prog(f, motivo)
         return
     vivos, excluidos = _revivir_destinatarios_prog(
-        f.get("tabla") or nombre_base(amb_prog), amb_prog, amb_q, [p["id"] for p in cohorte])
+        f.get("tabla") or nombre_base(amb_prog), amb_prog, amb_q,
+        [p["id"] for p in cohorte], f.get("reservo_lista_id"))
     if not vivos:
         motivo = (f"Los {len(cohorte)} destinatarios preelegidos ya no se pueden contactar "
                   f"({len(excluidos)} dados de baja). No se envió nada. Reprograma el envío.")
@@ -8832,6 +9037,7 @@ def _ejecutar_programado(f: dict) -> None:
         limite=len(vivos),
         pacientes=[p["id"] for p in vivos],
         centro=emisor["codigo"],
+        lista_reservo_id=f.get("reservo_lista_id"),
     )
     sesion_sistema = {
         "usuario": f.get("creador") or "sistema",
@@ -9124,6 +9330,7 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
            f" {prog_col}, {prog_fecha}, centro_codigo, numero_emisor, fecha_hora FROM envios")
     condiciones: list[str] = ["NOT EXISTS (SELECT 1 FROM reagendar_envios_agrupados ag WHERE ag.envio_id=envios.id)"]
     args: list = []
+    base_reservo = _base_reservo_por_nombre(tabla) if tabla else None
     if centro != "todos":
         condiciones.append("centro_codigo = %s")
         args.append(centro)
@@ -9141,12 +9348,15 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
     # legacy dev/prod solo admin/dev; tablas de área, quien tenga el área
     # (el historial de un área eliminada lo ven solo admin/dev).
     if tabla:
-        if not servicio_areas.tabla_valida(tabla):
-            raise HTTPException(422, detail="Base de datos inválida.")
-        if tabla in ("pacientes_dev", "pacientes_prod"):
+        if base_reservo:
             if not _es_privilegiado(sesion):
                 raise HTTPException(403, detail="No tienes acceso a esta base de datos.")
-        else:
+        elif not servicio_areas.tabla_valida(tabla):
+            raise HTTPException(422, detail="Base de datos inválida.")
+        elif tabla in ("pacientes_dev", "pacientes_prod"):
+            if not _es_privilegiado(sesion):
+                raise HTTPException(403, detail="No tienes acceso a esta base de datos.")
+        elif not base_reservo:
             esp_tabla = servicio_areas.area_por_tabla(tabla)
             if esp_tabla is None:
                 if not _es_privilegiado(sesion):
@@ -9216,7 +9426,10 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
         for g in programados:
             if not _prog_visible(sesion, g):
                 continue
-            if tabla and (g.get("tabla") or "") != tabla:
+            if base_reservo:
+                if int(g.get("reservo_lista_id") or 0) != int(base_reservo["id"]):
+                    continue
+            elif tabla and (g.get("tabla") or "") != tabla:
                 continue
             if not tabla and ambiente != "todos" and (g.get("ambiente") or "produccion") != ambiente:
                 continue
@@ -9319,13 +9532,17 @@ def _fuentes_historial_pagina(sesion: dict, ambiente: str, area_id: int | None,
         raise HTTPException(422, detail="Centro emisor inválido.")
     if not tabla and ambiente == "desarrollo":
         _exigir_base_desarrollo(sesion, ambiente)
+    base_reservo = _base_reservo_por_nombre(tabla) if tabla else None
     if tabla:
-        if not servicio_areas.tabla_valida(tabla):
-            raise HTTPException(422, detail="Base de datos inválida.")
-        if tabla in ("pacientes_dev", "pacientes_prod"):
+        if base_reservo:
             if not _es_privilegiado(sesion):
                 raise HTTPException(403, detail="No tienes acceso a esta base de datos.")
-        else:
+        elif not servicio_areas.tabla_valida(tabla):
+            raise HTTPException(422, detail="Base de datos inválida.")
+        elif tabla in ("pacientes_dev", "pacientes_prod"):
+            if not _es_privilegiado(sesion):
+                raise HTTPException(403, detail="No tienes acceso a esta base de datos.")
+        elif not base_reservo:
             esp = servicio_areas.area_por_tabla(tabla)
             if esp is None:
                 if not _es_privilegiado(sesion):
@@ -9390,7 +9607,10 @@ def _fuentes_historial_pagina(sesion: dict, ambiente: str, area_id: int | None,
             args_p.append(centro)
         if "programado_id" in cols_env:
             cond_p.append("NOT EXISTS (SELECT 1 FROM envios e WHERE e.programado_id = p.id)")
-        if tabla:
+        if base_reservo:
+            cond_p.append("p.reservo_lista_id = %s")
+            args_p.append(int(base_reservo["id"]))
+        elif tabla:
             cond_p.append("p.tabla = %s")
             args_p.append(tabla)
         elif ambiente != "todos":
@@ -9636,6 +9856,8 @@ def detalle_historial(envio_id: str, ambiente: str = Query("produccion"),
             sel.append("area_id")
         if "tabla_pacientes" in cols_env:
             sel.append("tabla_pacientes")
+        if "reservo_lista_id" in cols_env:
+            sel.append("reservo_lista_id")
         with conectar(ambiente) as conn, conn.cursor() as cur:
             cur.execute(f"SELECT {', '.join(sel)} FROM envios WHERE id = %s", (envio_id,))
             _e = cur.fetchone() or {}
@@ -9651,7 +9873,9 @@ def detalle_historial(envio_id: str, ambiente: str = Query("produccion"),
         raise HTTPException(403, detail="No tienes acceso a este envío.")
     if _e.get("base_datos") == "paciente_reagendar":
         return _detalle_historial_reagendar(reagendar_batches.resolver_envio(envio_id), sesion)
-    if tabla_env and servicio_areas.tabla_valida(tabla_env) \
+    if tabla_env == reservo_pacientes.TABLA_LISTA_RESERVO and _e.get("reservo_lista_id"):
+        t = reservo_pacientes.TABLA_LISTA_RESERVO
+    elif tabla_env and servicio_areas.tabla_valida(tabla_env) \
             and servicio_areas.tabla_fisica_existe(tabla_env):
         t = tabla_env
     else:
@@ -9744,7 +9968,8 @@ def enviar_callcenter_manual(envio_id: int, registro_id: int, body: CallCenterMa
         raise HTTPException(404, detail="Registro no encontrado en este envío.")
     with conectar(ambiente) as conn, conn.cursor() as cur:
         cur.execute("SELECT l.paciente_id, l.numero_telefono, l.wa_phone_id,"
-                    " COALESCE(l.tabla_pacientes, e.tabla_pacientes, e.base_datos) AS tabla"
+                    " COALESCE(l.tabla_pacientes, e.tabla_pacientes, e.base_datos) AS tabla,"
+                    " e.reservo_lista_id"
                     " FROM log_envios l JOIN envios e ON e.id=l.envio_id"
                     " WHERE l.id=%s AND l.envio_id=%s", (registro_id, envio_id))
         origen = cur.fetchone()
@@ -9753,9 +9978,16 @@ def enviar_callcenter_manual(envio_id: int, registro_id: int, body: CallCenterMa
         tabla = origen["tabla"]
         if tabla in ("produccion", "desarrollo", nombre_base(ambiente)):
             tabla = tabla_pacientes(ambiente)
-        if not servicio_areas.tabla_valida(tabla) or not servicio_areas.tabla_fisica_existe(tabla):
-            raise HTTPException(409, detail="La base de este paciente no está disponible.")
-        cur.execute(f"SELECT * FROM {tabla} WHERE id=%s", (origen["paciente_id"],))
+        if tabla == reservo_pacientes.TABLA_LISTA_RESERVO:
+            lista_id = origen.get("reservo_lista_id")
+            if not lista_id:
+                raise HTTPException(409, detail="No se pudo identificar la lista Reservo de este envío.")
+            cur.execute(f"SELECT * FROM {tabla} WHERE id=%s AND lista_id=%s",
+                        (origen["paciente_id"], lista_id))
+        else:
+            if not servicio_areas.tabla_valida(tabla) or not servicio_areas.tabla_fisica_existe(tabla):
+                raise HTTPException(409, detail="La base de este paciente no está disponible.")
+            cur.execute(f"SELECT * FROM {tabla} WHERE id=%s", (origen["paciente_id"],))
         paciente = cur.fetchone()
         if not paciente or paciente.get("whatsapp_opt_out"):
             raise HTTPException(409, detail="El paciente no está disponible o se dio de baja.")
@@ -9806,19 +10038,30 @@ def marcar_fallidos_pendientes(envio_id: int, body: FallidosPendientesIn,
     marcadores = ", ".join("%s" for _ in ids)
     actualizados = omitidos = 0
     with conectar() as conn, conn.cursor() as cur:
-        cur.execute("SELECT id, base_datos, tabla_pacientes FROM envios WHERE id = %s", (envio_id,))
+        cur.execute("SELECT id, base_datos, tabla_pacientes, reservo_lista_id"
+                    " FROM envios WHERE id = %s", (envio_id,))
         envio = cur.fetchone()
         if not envio:
             raise HTTPException(404, detail="Envío no encontrado.")
         tabla = envio.get("tabla_pacientes") or envio.get("base_datos")
-        if not servicio_areas.tabla_valida(tabla) or not servicio_areas.tabla_fisica_existe(tabla):
+        es_lista_reservo = (tabla == reservo_pacientes.TABLA_LISTA_RESERVO
+                            and envio.get("reservo_lista_id"))
+        if es_lista_reservo:
+            cur.execute("SELECT id FROM reservo_bases_contacto WHERE id=%s",
+                        (envio["reservo_lista_id"],))
+            if not cur.fetchone():
+                raise HTTPException(409, detail="La base de Reservo de este envío ya no está disponible.")
+        elif not servicio_areas.tabla_valida(tabla) or not servicio_areas.tabla_fisica_existe(tabla):
             raise HTTPException(409, detail="La base de pacientes de este envío no está disponible.")
         if not columna_existe(tabla, "estado") or not columna_existe(tabla, "whatsapp_opt_out"):
             raise HTTPException(409, detail="Esta base no permite cambiar el estado de los pacientes.")
+        filtro_lista = (" AND EXISTS (SELECT 1 FROM reservo_lista_pacientes rp"
+                        " WHERE rp.id = log_envios.paciente_id AND rp.lista_id = %s)"
+                        if es_lista_reservo else "")
         cur.execute(
             "SELECT id, paciente_id, numero_telefono, estado_envio, estado_whatsapp, tabla_pacientes"
-            f" FROM log_envios WHERE envio_id = %s AND id IN ({marcadores}) ORDER BY id FOR UPDATE",
-            (envio_id, *ids),
+            f" FROM log_envios WHERE envio_id = %s AND id IN ({marcadores}){filtro_lista} ORDER BY id FOR UPDATE",
+            ((envio_id, *ids, envio["reservo_lista_id"]) if es_lista_reservo else (envio_id, *ids)),
         )
         registros = cur.fetchall() or []
         if len(registros) != len(ids):
@@ -9989,7 +10232,7 @@ def _pacientes_por_interes(ambiente: str, tabla: str | None = None,
 # por separado para no mezclar datos de prueba con métricas de producción.
 _SOLO_PROD = (
     "envio_id IN (SELECT id FROM envios WHERE base_datos <> 'pacientes_dev'"
-    " AND (base_datos = 'pacientes_prod' OR area_id IS NOT NULL))"
+    " AND (base_datos = 'pacientes_prod' OR area_id IS NOT NULL OR reservo_lista_id IS NOT NULL))"
 )
 _SOLO_DEV = (
     "envio_id IN (SELECT id FROM envios WHERE base_datos = 'pacientes_dev'"

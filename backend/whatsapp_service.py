@@ -1766,7 +1766,7 @@ class WhatsAppService:
 
     @staticmethod
     def _tablas_pac() -> tuple:
-        """Tablas legacy (dev + prod) más las de areas registradas."""
+        """Tablas legacy, áreas y listas lógicas de Reservo."""
         base = (tabla_pacientes("desarrollo"), tabla_pacientes("produccion"))
         try:
             extra = tuple(r["nombre_tabla_base"]
@@ -1774,7 +1774,7 @@ class WhatsAppService:
         except Exception as e:
             log_error("_tablas_pac: areas", e)
             extra = ()
-        return base + extra
+        return base + extra + ("reservo_lista_pacientes",)
 
     @staticmethod
     def _cond_tabla(tabla: str, alias: str = "") -> tuple[str, tuple]:
@@ -1792,16 +1792,18 @@ class WhatsAppService:
         hallados = []
         for t in self._tablas_pac():
             try:
+                limite = "" if t == "reservo_lista_pacientes" else " LIMIT 1"
                 cur.execute(
-                    f"SELECT id, nombre, telefono, whatsapp_opt_out FROM {t} WHERE {match} LIMIT 1",
+                    f"SELECT id, nombre, telefono, whatsapp_opt_out FROM {t} WHERE {match}{limite}",
                     (telefono,),
                 )
             except Exception:
                 continue  # tabla aún no creada o sin la columna
-            row = cur.fetchone()
-            if row:
-                row["tabla"] = t
-                hallados.append(row)
+            filas = cur.fetchall() if t == "reservo_lista_pacientes" else [cur.fetchone()]
+            for row in filas:
+                if row:
+                    row["tabla"] = t
+                    hallados.append(row)
         return hallados
 
     def _estaba_opt_out(self, telefono: str) -> bool:

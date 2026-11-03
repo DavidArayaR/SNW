@@ -56,6 +56,56 @@ const $ = (sel) => document.querySelector(sel);
 
 let centrosEmisores = [];
 let cuentasPlantillas = [];
+let basesReservo = [];
+let basesReservoCarga = null;
+
+function idListaReservo(valor) {
+  const coincidencia = String(valor || "").match(/^reservo:(\d+)$/);
+  return coincidencia ? Number(coincidencia[1]) : null;
+}
+
+function opcionesBasesReservo(codigoCentro) {
+  if (!window.snwEsPrivilegiado || entornoGlobal !== "produccion" || !codigoCentro) return "";
+  const items = basesReservo.filter((base) => base.clinica_codigo === codigoCentro);
+  if (!items.length) return "";
+  return `<optgroup label="Bases de Reservo">` + items.map((base) =>
+    `<option value="reservo:${Number(base.id)}">${escaparHtml(base.nombre)} · ${escaparHtml(base.clinica_nombre || codigoCentro)} (${Number(base.total || 0)} pacientes)</option>`
+  ).join("") + `</optgroup>`;
+}
+
+async function cargarBasesReservo() {
+  if (!window.snwEsPrivilegiado) return [];
+  if (!basesReservoCarga) {
+    basesReservoCarga = fetch("api/reservo/bases", { headers: authHeaders(), cache: "no-store" })
+      .then(async (res) => {
+        if (res.status === 401) { window.snwSesionExpirada(); return []; }
+        if (!res.ok) throw new Error("No se pudieron cargar las bases de Reservo.");
+        const data = await res.json();
+        basesReservo = Array.isArray(data.items) ? data.items : [];
+        return basesReservo;
+      })
+      .catch((error) => {
+        console.error("[app.js cargarBasesReservo()]", error);
+        basesReservoCarga = null;
+        return [];
+      });
+  }
+  return basesReservoCarga;
+}
+
+function actualizarSelectoresBasesReservo() {
+  if (confPlantillaId) {
+    const plantilla = plantillas.find((p) => p.id === confPlantillaId);
+    if (plantilla) construirOpcionesBaseConf(plantilla.area_id ?? null);
+  }
+  if (tplSelId) actualizarProgPlantilla();
+}
+
+const cargaInicialBasesReservo = cargarBasesReservo().then(() => {
+  actualizarSelectoresBasesReservo();
+  return basesReservo;
+});
+
 function centroElegido(id) {
   return centrosEmisores.find((c) => c.codigo === $(id)?.value && c.configured) || null;
 }
@@ -666,7 +716,8 @@ function areaEnvioId() {
 function ambienteEnvioConf() {
   // Las áreas son tablas únicas (sin entorno): se envían como
   // producción (con confirmación del supervisor salvo permiso directo).
-  return modoAreaConf() ? "produccion" : baseSeleccionadaConf();
+  return modoAreaConf() || idListaReservo(baseSeleccionadaConf()) != null
+    ? "produccion" : baseSeleccionadaConf();
 }
 
 // Reconstruye las opciones del select. Con `forzarEspId` (plantilla de una
@@ -674,6 +725,8 @@ function ambienteEnvioConf() {
 function construirOpcionesBaseConf(forzarEspId) {
   const sel = $("#selBaseConf");
   if (!sel) return;
+  const seleccionAnterior = sel.value;
+  const plantilla = plantillas.find((p) => p.id === confPlantillaId);
   // En Desarrollo ningún rol puede escoger producción ni áreas para enviar.
   const restringido = usuarioRestringidoADesarrollo() || (window.snwRol || "") === "usuario";
   let html = "";
@@ -692,9 +745,11 @@ function construirOpcionesBaseConf(forzarEspId) {
         misAreas.map((e) => `<option value="esp:${e.id}">${escaparHtml(e.nombre_visible)} (${escaparHtml(e.nombre_tabla_base)})</option>`).join("") +
         `</optgroup>`;
     }
+    html += opcionesBasesReservo(plantilla?.centro_codigo);
   }
   sel.innerHTML = `<option value="" selected disabled>— Seleccione base de datos —</option>` + html;
-  sel.value = "";
+  sel.value = [...sel.options].some((opcion) => opcion.value === seleccionAnterior)
+    ? seleccionAnterior : "";
 }
 
 async function cargar() {
@@ -980,6 +1035,7 @@ function actualizarProgPlantilla() {
               areas.map((area) => `<option value="esp:${area.id}">${escaparHtml(area.nombre_visible)} (${escaparHtml(area.nombre_tabla_base)})</option>`).join("") +
             `</optgroup>`
           : "");
+      selBase.innerHTML += opcionesBasesReservo(p?.centro_codigo);
     }
     selBase.value = [...selBase.options].some((opcion) => opcion.value === seleccionAnterior)
       ? seleccionAnterior : "";
@@ -2508,6 +2564,7 @@ fetch("api/configuracion", { headers: authHeaders(), cache: "no-store" })
       localStorage.setItem("snw_ambiente", ambienteConf);
       actualizarBadgeMensajeria();
     }
+    actualizarSelectoresBasesReservo();
   })
   .catch(() => {});
 
@@ -2536,6 +2593,7 @@ if (!localStorage.getItem("snw_ambiente_admin") && !localStorage.getItem("snw_am
         localStorage.setItem("snw_ambiente", ambienteConf);
         actualizarBadgeMensajeria();
       }
+      actualizarSelectoresBasesReservo();
     })
     .catch(() => {});
 }
@@ -2647,7 +2705,10 @@ $("#btnEnviarActual").addEventListener("click", () => {
 const selBaseConfEl = $("#selBaseConf");
 if (selBaseConfEl) selBaseConfEl.addEventListener("change", () => {
   const v = selBaseConfEl.value;
-  if (v.startsWith("esp:")) {
+  if (idListaReservo(v) != null) {
+    // Las listas Reservo siempre son producción y no modifican la base global
+    // elegida por el usuario para el resto de Mensajería.
+  } else if (v.startsWith("esp:")) {
     localStorage.setItem("snw_modo_conf", "area");
     localStorage.setItem("snw_esp_mensajeria", v.slice(4));
   } else {
@@ -2691,7 +2752,8 @@ function refrescarAvisoAdminConf() {
   }
   const puedeProd = window.snwPuede && window.snwPuede("envio_manual_directo");
   const modoEsp = modoAreaConf();
-  const destinoProd = baseSeleccionadaConf() === "produccion" || modoEsp;
+  const destinoProd = baseSeleccionadaConf() === "produccion" || modoEsp ||
+    idListaReservo(baseSeleccionadaConf()) != null;
   const esAdminProduccion = puedeProd && destinoProd;
   const requiereConf = !puedeProd && destinoProd;
   box.hidden = !(esAdminProduccion || requiereConf);
@@ -2889,6 +2951,8 @@ async function actualizarResumenConf() {
     const cuerpoEnvio = { plantilla_id: confPlantillaId, ambiente: ambienteEnvioConf() };
     cuerpoEnvio.centro = $("#selCentroConf")?.value || null;
     if (espId != null) cuerpoEnvio.area_id = espId;
+    const listaReservoId = idListaReservo(baseSeleccionadaConf());
+    if (listaReservoId != null) cuerpoEnvio.reservo_lista_id = listaReservoId;
     const res = await fetch("api/notificaciones/destinatarios", {
       method: "POST",
       headers: authHeaders({ "Content-Type": "application/json" }),
@@ -2899,7 +2963,7 @@ async function actualizarResumenConf() {
     const data = await res.json();
     if (consulta !== consultaManualConf) return;
     const lim = data.limite_mensajeria || null;
-    const esProd = baseSeleccionadaConf() === "produccion" || espId != null;
+    const esProd = baseSeleccionadaConf() === "produccion" || espId != null || listaReservoId != null;
     const limAplicable = esProd ? lim : null;
     const pendientes = Number(data.pendientes) || 0;
     dd.textContent = `Disponibles en esta base: ${new Intl.NumberFormat("es-CL").format(pendientes)} pacientes.`;
@@ -3087,6 +3151,8 @@ $("#btnConfirmarIniciarConf").addEventListener("click", async () => {
     const cuerpo = { plantilla_id: confPlantillaId, ambiente: ambienteEnvioConf(), centro: centro.codigo };
     const espIdLanzar = areaEnvioId();
     if (espIdLanzar != null) cuerpo.area_id = espIdLanzar;
+    const listaReservoLanzar = idListaReservo(baseSeleccionadaConf());
+    if (listaReservoLanzar != null) cuerpo.reservo_lista_id = listaReservoLanzar;
     cuerpo.limite = limiteSeleccionado;
     const res = await fetch("api/notificaciones/enviar", {
       method: "POST",
@@ -3701,8 +3767,9 @@ async function cargarCupoProg(forzar = false) {
   const selBase = $("#selProgBase");
   if (!selBase) return;
   const base = selBase.value || "";
+  const listaReservoId = idListaReservo(base);
   const areaId = base.startsWith("esp:") ? Number(base.slice(4)) : "";
-  const ambiente = areaId ? "produccion" : base;
+  const ambiente = areaId || listaReservoId != null ? "produccion" : base;
   const fecha = $("#inpProgFecha")?.value.slice(0, 10) || "";
   const key = `${base}|${fecha}|${tplSelId || ""}|${$("#selProgCentro")?.value || ""}`;
   if (!forzar && key === progCupoKey) { aplicarCupoProg(); return; }
@@ -3716,6 +3783,7 @@ async function cargarCupoProg(forzar = false) {
     const cuerpo = { ambiente, prevision_programado: true };
     cuerpo.centro = $("#selProgCentro")?.value || null;
     if (areaId) cuerpo.area_id = areaId;
+    if (listaReservoId != null) cuerpo.reservo_lista_id = listaReservoId;
     if (fecha) cuerpo.fecha = fecha;
     if (tplSelId) cuerpo.plantilla_id = tplSelId;
     const res = await fetch("api/notificaciones/destinatarios", {
@@ -4265,8 +4333,9 @@ async function programarEnvio() {
   const inpF = $("#inpProgFecha");
   const inpL = $("#inpProgLimite");
   const base = selBase && selBase.value ? selBase.value : "";
+  const listaReservoId = idListaReservo(base);
   const areaId = base.startsWith("esp:") ? Number(base.slice(4)) : null;
-  const ambiente = areaId != null ? "produccion" : base;
+  const ambiente = areaId != null || listaReservoId != null ? "produccion" : base;
   const tpl = (plantillas || []).find((x) => x.id === tplSelId);
   if (!base) { toast("Elige la base de datos.", "error"); return; }
   const centro = centroElegido("#selProgCentro");
@@ -4291,7 +4360,9 @@ async function programarEnvio() {
     const res = await fetch("api/notificaciones/programados", {
       method: "POST",
       headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ ambiente, ...(areaId != null ? { area_id: areaId } : {}), plantilla_id: tpl.id, centro: centro.codigo, programado_para: inpF.value, limite }),
+      body: JSON.stringify({ ambiente, ...(areaId != null ? { area_id: areaId } : {}),
+        ...(listaReservoId != null ? { reservo_lista_id: listaReservoId } : {}),
+        plantilla_id: tpl.id, centro: centro.codigo, programado_para: inpF.value, limite }),
     });
     const data = await res.json().catch(() => ({}));
     if (res.status === 401) { window.snwSesionExpirada(); return; }

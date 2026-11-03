@@ -14,6 +14,7 @@ import re
 import time
 import unicodedata
 from urllib.parse import parse_qs, urlparse
+from zoneinfo import ZoneInfo
 
 import httpx
 import pymysql
@@ -29,6 +30,77 @@ TIMEOUT_SEGUNDOS = 20.0
 MAX_REINTENTOS = 2
 DIAS_TRAMO_TRATAMIENTOS = 7
 VERSION_CACHE_CITAS = "v2"
+TABLA_LISTA_RESERVO = "reservo_lista_pacientes"
+_MESES_ES = ("enero", "febrero", "marzo", "abril", "mayo", "junio",
+             "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre")
+
+
+def generar_nombre_base(codigo: str, nombre_personalizado: str,
+                        ahora: dt.datetime | None = None) -> dict[str, str]:
+    """Normaliza el nombre lógico de una lista y calcula su sufijo chileno."""
+    codigo = str(codigo or "").strip().upper()
+    if codigo not in RESERVO_CLINICAS:
+        raise ValueError("La clínica Reservo no es válida.")
+    original = " ".join(str(nombre_personalizado or "").split()).strip()
+    if not original:
+        raise ValueError("Escribe un nombre para la base de datos.")
+    nombre = unicodedata.normalize("NFKD", original.casefold())
+    nombre = "".join(c for c in nombre if not unicodedata.combining(c))
+    nombre = re.sub(r"[^a-z0-9]+", "_", nombre).strip("_")
+    nombre = re.sub(r"_{2,}", "_", nombre)
+    nombre = re.sub(rf"^{re.escape(codigo.casefold())}_+", "", nombre)
+    nombre = re.sub(
+        r"_(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)_\d{4}$",
+        "", nombre,
+    ).rstrip("_")
+    if not nombre:
+        raise ValueError("El nombre personalizado debe contener letras o números.")
+    ahora = ahora or dt.datetime.now(ZoneInfo("America/Santiago"))
+    if ahora.tzinfo is None:
+        ahora = ahora.replace(tzinfo=ZoneInfo("America/Santiago"))
+    ahora = ahora.astimezone(ZoneInfo("America/Santiago"))
+    mes = _MESES_ES[ahora.month - 1]
+    sufijo = f"_{mes}_{ahora.year}"
+    prefijo = f"{codigo}_"
+    # La columna del nombre editable admite 100 caracteres. Limitar también
+    # por el nombre completo evita que una lista válida falle al persistirse.
+    max_personalizado = min(100, 150 - len(prefijo) - len(sufijo))
+    nombre = nombre[:max_personalizado].strip("_")
+    if not nombre:
+        raise ValueError("El nombre personalizado es demasiado largo.")
+    return {"nombre_personalizado": nombre, "mes": mes, "anio": str(ahora.year),
+            "nombre": f"{prefijo}{nombre}{sufijo}"}
+
+
+def _valores_pacientes_lista(lista_id: int, pacientes: list[dict]) -> list[tuple]:
+    """Copia solo pacientes con móvil chileno aceptado por telefono.py."""
+    from telefono import normalizar_telefono
+
+    valores = []
+    for paciente in pacientes:
+        telefono = normalizar_telefono(str(paciente.get("paciente_telefono") or ""))
+        if not telefono:
+            continue
+        valores.append((int(lista_id), paciente["id"], paciente["cliente_uuid"],
+            paciente.get("paciente_nombre"), paciente.get("paciente_apellido"), telefono, 1,
+            paciente.get("tratamiento_nombre"), paciente.get("fecha_ultima_atencion")))
+    return valores
+
+
+def _detalle_tratamientos(job: dict) -> tuple[list[dict], str]:
+    try:
+        items = json.loads(job.get("tratamientos_json") or "[]")
+    except (TypeError, ValueError):
+        items = []
+    if not isinstance(items, list):
+        items = []
+    items = [{"uuid": str(item.get("uuid") or ""),
+              "nombre": str(item.get("nombre") or "").strip()}
+             for item in items if isinstance(item, dict) and item.get("uuid")]
+    if not items and job.get("tratamiento_uuid"):
+        items = [{"uuid": str(job["tratamiento_uuid"]), "nombre": ""}]
+    texto = ", ".join(dict.fromkeys(x["nombre"] for x in items if x["nombre"]))
+    return items, texto
 
 
 class ReservoError(Exception):
@@ -559,6 +631,198 @@ def _db():
     return conectar()
 
 
+def _obtener_job_base(cur, job_id: int, *, bloquear: bool = False) -> dict:
+    cur.execute(
+        "SELECT id,clinica_codigo,tratamiento_uuid,tratamientos_json,fecha_desde,fecha_hasta,"
+        "estado,creado_por FROM reservo_sincronizaciones WHERE id=%s"
+        + (" FOR UPDATE" if bloquear else ""), (int(job_id),),
+    )
+    job = cur.fetchone()
+    if not job:
+        raise LookupError("No se encontró la sincronización de Reservo.")
+    if job["estado"] not in ("completado", "completado_con_advertencias"):
+        raise ValueError("Solo puedes guardar una sincronización terminada correctamente.")
+    if job["clinica_codigo"] not in RESERVO_CLINICAS:
+        raise ValueError("La sincronización no tiene una clínica válida.")
+    return job
+
+
+def previsualizar_base_contactos(job_id: int, nombre_personalizado: str,
+                                 ahora: dt.datetime | None = None) -> dict:
+    """Resumen de la cohorte ya sincronizada; no vuelve a consultar Reservo."""
+    from telefono import normalizar_telefono
+
+    with _db() as conn, conn.cursor() as cur:
+        job = _obtener_job_base(cur, job_id)
+        nombre = generar_nombre_base(job["clinica_codigo"], nombre_personalizado, ahora)
+        cur.execute(
+            "SELECT p.paciente_telefono FROM reservo_sincronizacion_pacientes sp"
+            " JOIN reservo_pacientes p ON p.id=sp.paciente_id"
+            " WHERE sp.job_id=%s", (int(job_id),),
+        )
+        telefonos = [str(row.get("paciente_telefono") or "").strip() for row in cur.fetchall()]
+    validos = sum(bool(normalizar_telefono(tel)) for tel in telefonos)
+    tratamientos, tratamiento_texto = _detalle_tratamientos(job)
+    return {
+        **nombre,
+        "clinica_codigo": job["clinica_codigo"],
+        "clinica_nombre": RESERVO_CLINICAS[job["clinica_codigo"]],
+        "tratamientos": tratamientos,
+        "tratamiento_nombre": tratamiento_texto or "Tratamiento histórico",
+        "fecha_desde": str(job["fecha_desde"]),
+        "fecha_hasta": str(job["fecha_hasta"]),
+        "total": len(telefonos),
+        "telefonos_validos": validos,
+        "sin_telefono": sum(not tel for tel in telefonos),
+        "telefonos_invalidos": sum(bool(tel) and not normalizar_telefono(tel) for tel in telefonos),
+    }
+
+
+def guardar_base_contactos(job_id: int, nombre_personalizado: str, creado_por: str,
+                           ahora: dt.datetime | None = None) -> dict:
+    """Guarda una lista lógica y su cohorte en tablas fijas, sin tabla dinámica."""
+    lock_name = "snw-reservo-listas"
+    with _db() as conn, conn.cursor() as cur:
+        cur.execute("SELECT GET_LOCK(%s, 0) AS adquirido", (lock_name,))
+        if not (cur.fetchone() or {}).get("adquirido"):
+            raise RuntimeError("Hay otra lista de Reservo guardándose. Inténtalo nuevamente.")
+        try:
+            job = _obtener_job_base(cur, job_id, bloquear=True)
+            nombre = generar_nombre_base(job["clinica_codigo"], nombre_personalizado, ahora)
+            tratamientos, _ = _detalle_tratamientos(job)
+            if not tratamientos:
+                raise ValueError("La sincronización no conserva los tratamientos seleccionados.")
+            uids = [item["uuid"] for item in tratamientos]
+            placeholders = ",".join("%s" for _ in uids)
+            cur.execute(
+                "SELECT p.id,p.cliente_uuid,p.paciente_nombre,p.paciente_apellido,"
+                "p.paciente_telefono,p.fecha_ultima_atencion,"
+                "GROUP_CONCAT(DISTINCT t.tratamiento_nombre ORDER BY t.tratamiento_nombre SEPARATOR ', ')"
+                " AS tratamiento_nombre FROM reservo_sincronizacion_pacientes sp"
+                " JOIN reservo_pacientes p ON p.id=sp.paciente_id"
+                " LEFT JOIN reservo_paciente_tratamientos t ON t.paciente_id=p.id"
+                f" AND t.tratamiento_uuid IN ({placeholders})"
+                " WHERE sp.job_id=%s GROUP BY p.id,p.cliente_uuid,p.paciente_nombre,"
+                "p.paciente_apellido,p.paciente_telefono,p.fecha_ultima_atencion ORDER BY p.id",
+                (*uids, int(job_id)),
+            )
+            pacientes = cur.fetchall()
+            if not pacientes:
+                raise ValueError("La sincronización no contiene pacientes para guardar.")
+            base = nombre["nombre"]
+            secuencia = 1
+            while True:
+                cur.execute("SELECT id FROM reservo_bases_contacto WHERE nombre=%s", (base,))
+                if not cur.fetchone():
+                    break
+                secuencia += 1
+                sufijo = f"_{secuencia}"
+                base = nombre["nombre"][:150-len(sufijo)].rstrip("_") + sufijo
+            cur.execute(
+                "INSERT INTO reservo_bases_contacto"
+                " (nombre_personalizado,nombre,clinica_codigo,origen,sync_job_id,tratamientos_json,"
+                "fecha_desde,fecha_hasta,mes,anio,creado_por)"
+                " VALUES (%s,%s,%s,'RESERVO',%s,%s,%s,%s,%s,%s,%s)",
+                (nombre["nombre_personalizado"], base, job["clinica_codigo"], int(job_id),
+                 json.dumps(tratamientos, ensure_ascii=False), job["fecha_desde"], job["fecha_hasta"],
+                 nombre["mes"], int(nombre["anio"]), (creado_por or "")[:150]),
+            )
+            lista_id = int(cur.lastrowid)
+            valores = _valores_pacientes_lista(lista_id, pacientes)
+            if not valores:
+                raise ValueError("La consulta no contiene pacientes con teléfono chileno válido.")
+            for inicio in range(0, len(valores), 1000):
+                cur.executemany(
+                    "INSERT INTO reservo_lista_pacientes"
+                    " (lista_id,paciente_id,cliente_uuid,nombre,apellido,telefono,telefono_valido,"
+                    "tratamiento_ultima_atencion,fecha_ultima_atencion,estado,consentimiento_verificado)"
+                    " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'pendiente',1)",
+                    valores[inicio:inicio+1000],
+                )
+            conn.commit()
+            return {"id": lista_id, "nombre": base, "nombre_personalizado": nombre["nombre_personalizado"],
+                    "clinica_codigo": job["clinica_codigo"],
+                    "clinica_nombre": RESERVO_CLINICAS[job["clinica_codigo"]],
+                    "total": len(valores),
+                    "telefonos_validos": len(valores),
+                    "telefonos_excluidos": len(pacientes) - len(valores)}
+        finally:
+            cur.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
+
+
+def listar_bases_contacto() -> list[dict]:
+    with _db() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT b.id,b.nombre,b.nombre_personalizado,b.clinica_codigo,b.origen,"
+            "b.sync_job_id,b.tratamientos_json,b.fecha_desde,b.fecha_hasta,b.creado_por,b.creado_en,"
+            "COUNT(p.id) AS total,"
+            "SUM(CASE WHEN p.telefono_valido=1 THEN 1 ELSE 0 END) AS telefonos_validos,"
+            "SUM(CASE WHEN p.telefono_valido=0 THEN 1 ELSE 0 END) AS telefonos_invalidos "
+            "FROM reservo_bases_contacto b LEFT JOIN reservo_lista_pacientes p ON p.lista_id=b.id "
+            "GROUP BY b.id ORDER BY b.creado_en DESC,b.id DESC"
+        )
+        items = cur.fetchall()
+    for item in items:
+        tratamientos, nombres = _detalle_tratamientos({"tratamientos_json": item.pop("tratamientos_json")})
+        item["tratamientos"] = tratamientos
+        item["tratamiento_nombre"] = nombres or "Tratamiento histórico"
+        item["clinica_nombre"] = RESERVO_CLINICAS.get(item["clinica_codigo"], item["clinica_codigo"])
+    return items
+
+
+def listar_pacientes_base_contacto(lista_id: int, pagina: int = 1,
+                                   por_pagina: int = 25, q: str = "") -> dict:
+    pagina, por_pagina = max(1, int(pagina)), min(100, max(1, int(por_pagina)))
+    termino = " ".join(str(q or "").split()).strip()[:100]
+    filtro = "lista_id=%s"
+    parametros: list = [int(lista_id)]
+    if termino:
+        filtro += (
+            " AND (LOWER(CONCAT_WS(' ',COALESCE(nombre,''),COALESCE(apellido,''),"
+            "COALESCE(telefono,''),CONVERT(cliente_uuid USING utf8mb4)))"
+            " COLLATE utf8mb4_unicode_ci LIKE %s)"
+        )
+        parametros.append(f"%{termino.casefold()}%")
+    with _db() as conn, conn.cursor() as cur:
+        cur.execute("SELECT id,nombre FROM reservo_bases_contacto WHERE id=%s", (int(lista_id),))
+        base = cur.fetchone()
+        if not base:
+            raise LookupError("No se encontró la base de Reservo.")
+        cur.execute(f"SELECT COUNT(*) AS total FROM reservo_lista_pacientes WHERE {filtro}", parametros)
+        total = int((cur.fetchone() or {}).get("total") or 0)
+        cur.execute(
+            "SELECT COUNT(*) AS total,"
+            "SUM(CASE WHEN telefono_valido=0 THEN 1 ELSE 0 END) AS telefonos_invalidos,"
+            "SUM(CASE WHEN estado='enviado' THEN 1 ELSE 0 END) AS enviados,"
+            "SUM(CASE WHEN estado='error' THEN 1 ELSE 0 END) AS errores,"
+            "SUM(CASE WHEN whatsapp_opt_out=1 THEN 1 ELSE 0 END) AS bajas,"
+            "SUM(CASE WHEN interesado=1 THEN 1 ELSE 0 END) AS interesados,"
+            "SUM(CASE WHEN no_interesado=1 THEN 1 ELSE 0 END) AS no_interesados "
+            "FROM reservo_lista_pacientes WHERE lista_id=%s", (int(lista_id),)
+        )
+        resumen = cur.fetchone() or {}
+        cur.execute(
+            "SELECT id,cliente_uuid,nombre,apellido,telefono,telefono_valido,"
+            "tratamiento_ultima_atencion,fecha_ultima_atencion,estado,whatsapp_opt_out,"
+            "respuesta_manual,interesado,no_interesado,fecha_actualizacion "
+            f"FROM reservo_lista_pacientes WHERE {filtro} ORDER BY id LIMIT %s OFFSET %s",
+            (*parametros, por_pagina, (pagina-1)*por_pagina),
+        )
+        filas = cur.fetchall()
+    for fila in filas:
+        if fila.get("whatsapp_opt_out"):
+            fila["respuesta"] = "baja"
+        elif fila.get("no_interesado"):
+            fila["respuesta"] = "no_interesado"
+        elif fila.get("interesado"):
+            fila["respuesta"] = "interesado"
+        else:
+            fila["respuesta"] = fila.get("respuesta_manual") or "pendiente"
+    return {"base": base, "items": filas, "total": total, "pagina": pagina,
+            "por_pagina": por_pagina, "paginas": max(1, (total + por_pagina - 1)//por_pagina),
+            "resumen": {clave: int(valor or 0) for clave, valor in resumen.items()}}
+
+
 def crear_sincronizacion(codigo: str, desde: dt.date, hasta: dt.date,
                           usuario: str, config: dict, tratamientos: list[dict]) -> dict:
     preparada = preparar_sincronizacion(codigo, desde, hasta, config)
@@ -977,7 +1241,8 @@ def _limpiar_pacientes_de_busquedas_deshachas(cur, codigo: str) -> int:
         " OR vigente.terminado_en>=p.primera_sincronizacion_en))"
         " AND NOT EXISTS (SELECT 1 FROM reservo_sincronizacion_pacientes referencia"
         " JOIN reservo_sincronizaciones vigente ON vigente.id=referencia.job_id"
-        " WHERE referencia.paciente_id=p.id AND vigente.estado<>'deshecho')",
+        " WHERE referencia.paciente_id=p.id AND vigente.estado<>'deshecho')"
+        " AND NOT EXISTS (SELECT 1 FROM reservo_lista_pacientes lp WHERE lp.paciente_id=p.id)",
         (codigo,),
     )
     return cur.rowcount
@@ -1019,7 +1284,9 @@ def _deshacer_sincronizacion_bloqueada(job_id: int) -> dict:
                 " ON actual.paciente_id=p.id AND actual.job_id=%s AND actual.nuevo=1"
                 " LEFT JOIN reservo_sincronizacion_pacientes otra"
                 " ON otra.paciente_id=p.id AND otra.job_id<>%s"
-                " WHERE otra.paciente_id IS NULL", (job_id, job_id),
+                " WHERE otra.paciente_id IS NULL"
+                " AND NOT EXISTS (SELECT 1 FROM reservo_lista_pacientes lp"
+                " WHERE lp.paciente_id=p.id)", (job_id, job_id),
             )
         elif job["iniciado_en"] and job["terminado_en"]:
             # Trabajos anteriores al registro de procedencia: las fechas solo
@@ -1038,7 +1305,9 @@ def _deshacer_sincronizacion_bloqueada(job_id: int) -> dict:
                 " WHERE p.clinica_codigo=%s"
                 " AND p.primera_sincronizacion_en BETWEEN %s AND %s"
                 " AND p.ultima_sincronizacion_en BETWEEN %s AND %s"
-                " AND otra.paciente_id IS NULL",
+                " AND otra.paciente_id IS NULL"
+                " AND NOT EXISTS (SELECT 1 FROM reservo_lista_pacientes lp"
+                " WHERE lp.paciente_id=p.id)",
                 (job["clinica_codigo"], job["iniciado_en"], job["terminado_en"],
                  job["iniciado_en"], job["terminado_en"]),
             )
@@ -1167,15 +1436,61 @@ def configurar_tablas(cur):
         " REFERENCES reservo_pacientes(id) ON DELETE CASCADE"
         ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     )
+    cur.execute(
+        "CREATE TABLE IF NOT EXISTS reservo_bases_contacto ("
+        " id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,"
+        " nombre_personalizado VARCHAR(100) NOT NULL,nombre VARCHAR(150) NOT NULL,"
+        " clinica_codigo VARCHAR(8) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,"
+        " origen VARCHAR(20) NOT NULL DEFAULT 'RESERVO',sync_job_id BIGINT UNSIGNED NOT NULL,"
+        " tratamientos_json LONGTEXT NOT NULL,fecha_desde DATE NOT NULL,fecha_hasta DATE NOT NULL,"
+        " mes VARCHAR(12) NOT NULL,anio SMALLINT UNSIGNED NOT NULL,"
+        " creado_por VARCHAR(150) NOT NULL,creado_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+        " UNIQUE KEY uq_reservo_base_nombre (nombre),"
+        " UNIQUE KEY uq_reservo_base_origen_nombre (sync_job_id,nombre),"
+        " KEY idx_reservo_base_clinica (clinica_codigo,creado_en),"
+        " CONSTRAINT fk_reservo_base_sync FOREIGN KEY (sync_job_id)"
+        " REFERENCES reservo_sincronizaciones(id) ON DELETE RESTRICT"
+        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    )
+    cur.execute(
+        "CREATE TABLE IF NOT EXISTS reservo_lista_pacientes ("
+        " id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,lista_id INT NOT NULL,"
+        " paciente_id BIGINT UNSIGNED NOT NULL,cliente_uuid VARCHAR(80)"
+        " CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,"
+        " nombre VARCHAR(200) NULL,apellido VARCHAR(200) NULL,telefono VARCHAR(40) NULL,"
+        " telefono_valido TINYINT(1) NOT NULL DEFAULT 0,"
+        " tratamiento_ultima_atencion TEXT NULL,fecha_ultima_atencion DATETIME NULL,"
+        " estado VARCHAR(32) NOT NULL DEFAULT 'pendiente',"
+        " whatsapp_opt_out TINYINT(1) NOT NULL DEFAULT 0,opt_out_explicito TINYINT(1) NOT NULL DEFAULT 0,"
+        " respuesta_manual VARCHAR(32) NULL,interesado TINYINT(1) NOT NULL DEFAULT 0,"
+        " no_interesado TINYINT(1) NOT NULL DEFAULT 0,interes_plantilla_clave VARCHAR(50) NULL,"
+        " interes_fecha DATETIME NULL,consentimiento_verificado TINYINT(1) NOT NULL DEFAULT 1,"
+        " consentimiento_referencia VARCHAR(200) NULL,fecha_actualizacion DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"
+        " ON UPDATE CURRENT_TIMESTAMP,"
+        " UNIQUE KEY uq_reservo_lista_paciente (lista_id,paciente_id),"
+        " KEY idx_reservo_lista_telefono (telefono),"
+        " KEY idx_reservo_lista_elegibles (lista_id,consentimiento_verificado,estado),"
+        " CONSTRAINT fk_reservo_lista_base FOREIGN KEY (lista_id)"
+        " REFERENCES reservo_bases_contacto(id) ON DELETE CASCADE,"
+        " CONSTRAINT fk_reservo_lista_paciente FOREIGN KEY (paciente_id)"
+        " REFERENCES reservo_pacientes(id) ON DELETE CASCADE"
+        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    )
+    # El proceso Reservo que alimenta estas listas ya filtra y registra la
+    # autorización. Las filas previas a ese acuerdo se habilitan al migrar.
+    cur.execute("UPDATE reservo_lista_pacientes SET consentimiento_verificado=1,"
+                " consentimiento_referencia=NULL WHERE consentimiento_verificado<>1 "
+                "OR consentimiento_referencia IS NOT NULL")
 
 
 def tablas_disponibles() -> bool:
     """Evita arrancar el worker si el esquema no quedó instalado."""
     from db import conectar
     requeridas = ("reservo_pacientes", "reservo_paciente_tratamientos",
-                 "reservo_sincronizaciones", "reservo_sincronizacion_pacientes")
+                 "reservo_sincronizaciones", "reservo_sincronizacion_pacientes",
+                 "reservo_bases_contacto", "reservo_lista_pacientes")
     with conectar() as conn, conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) AS cantidad FROM information_schema.TABLES"
-                    " WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN (%s,%s,%s,%s)", requeridas)
+                    " WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN (%s,%s,%s,%s,%s,%s)", requeridas)
         return int((cur.fetchone() or {}).get("cantidad") or 0) == len(requeridas)
 

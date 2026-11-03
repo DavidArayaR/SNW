@@ -76,6 +76,13 @@ body[data-seccion="administracion"] .stats {
   transition: background-color .15s ease, border-color .15s ease,
     transform .1s ease, box-shadow .15s ease;
 }
+.stat-card--base-summary {
+  display: flex;
+  border-right: 1px solid var(--borde);
+  border-left: 1px solid var(--borde);
+  background: var(--surface-2);
+  cursor: default;
+}
 /* Hover (no activo): además del fondo, un leve despegue y sombra para
    que se lea como botón clickeable. */
 .stat-card:hover {

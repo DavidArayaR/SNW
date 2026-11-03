@@ -554,6 +554,35 @@ def _limpiar_datos(cur, telefono: str) -> tuple[int, int]:
         afectados += len(ids)
         tablas_afectadas += 1
 
+    # Las listas de Reservo guardan una ficha operativa por lista. Se incluyen
+    # sus IDs para seudonimizar el historial antes de borrar la ficha canónica;
+    # la FK elimina todas las copias de contacto al borrar el origen.
+    try:
+        cur.execute("SELECT lp.id,lp.nombre,lp.apellido,lp.telefono"
+                    " FROM reservo_lista_pacientes lp"
+                    " WHERE lp.telefono=%s", (telefono,))
+        filas_reservo = cur.fetchall()
+        if filas_reservo:
+            tabla_reservo = "reservo_lista_pacientes"
+            ids_reservo = [fila["id"] for fila in filas_reservo]
+            ids_por_tabla[tabla_reservo] = ids_reservo
+            for fila in filas_reservo:
+                nombre_por_id[(tabla_reservo, fila["id"])] = _nombre_reducido(
+                    fila.get("nombre") or "", fila.get("apellido") or "")
+        cur.execute("SELECT id,paciente_telefono FROM reservo_pacientes")
+        ids_origen = [fila["id"] for fila in cur.fetchall()
+                      if normalizar_telefono(fila.get("paciente_telefono") or "") == telefono]
+        if ids_origen:
+            ph_origen = ",".join(["%s"] * len(ids_origen))
+            cur.execute(f"DELETE FROM reservo_pacientes WHERE id IN ({ph_origen})",
+                        tuple(ids_origen))
+            afectados += len(ids_origen)
+            tablas_afectadas += 1
+    except pymysql.err.OperationalError as exc:
+        # Durante una actualización antigua puede que aún no exista el esquema.
+        if not exc.args or exc.args[0] not in (1054, 1146):
+            raise
+
     # Las cohortes congeladas, logs de call center y avisos también guardan PII.
     cur.execute(
         "SELECT pd.prog_id, pd.paciente_id, pd.telefono, ep.tabla"

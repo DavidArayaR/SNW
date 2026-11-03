@@ -1080,6 +1080,7 @@ def asegurar_tabla_config() -> None:
                 "CREATE TABLE IF NOT EXISTS envios_programados ("
                 "  id INT AUTO_INCREMENT PRIMARY KEY,"
                 "  area_id INT NULL,"
+                "  reservo_lista_id INT NULL,"
                 "  tabla VARCHAR(64) NOT NULL,"
                 "  ambiente VARCHAR(12) NOT NULL DEFAULT 'produccion',"
                 "  plantilla_id INT NOT NULL,"
@@ -1096,9 +1097,22 @@ def asegurar_tabla_config() -> None:
                 "  job_id VARCHAR(16) NULL,"
                 "  INDEX idx_prog_estado_fecha (estado, programado_para),"
                 "  INDEX idx_prog_creador (creador),"
-                "  INDEX idx_prog_token (token)"
+                "  INDEX idx_prog_token (token),"
+                "  INDEX idx_prog_reservo_lista (reservo_lista_id)"
                 ") CHARACTER SET utf8mb4"
             )
+            cur.execute(
+                "SELECT COUNT(*) AS n FROM information_schema.COLUMNS"
+                " WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='envios_programados'"
+                " AND COLUMN_NAME='reservo_lista_id'"
+            )
+            if not (cur.fetchone() or {}).get("n"):
+                cur.execute("ALTER TABLE envios_programados ADD COLUMN reservo_lista_id INT NULL AFTER area_id")
+            cur.execute("SELECT COUNT(*) AS n FROM information_schema.STATISTICS"
+                        " WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='envios_programados'"
+                        " AND INDEX_NAME='idx_prog_reservo_lista'")
+            if not (cur.fetchone() or {}).get("n"):
+                cur.execute("ALTER TABLE envios_programados ADD INDEX idx_prog_reservo_lista (reservo_lista_id)")
             # Pacientes preelegidos por cada programado: la lista se congela al
             # crearlo, para que el envío salga a ese grupo y no a quien aparezca
             # pendiente después. Un paciente no puede quedar en dos programados
@@ -1296,6 +1310,8 @@ def asegurar_tabla_config() -> None:
                 "     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'envios' AND COLUMN_NAME = 'usuario') AS tiene_usr,"
                 "  (SELECT COUNT(*) FROM information_schema.COLUMNS"
                 "     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'envios' AND COLUMN_NAME = 'programado_id') AS tiene_prog"
+                ", (SELECT COUNT(*) FROM information_schema.COLUMNS"
+                "     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'envios' AND COLUMN_NAME = 'reservo_lista_id') AS tiene_reservo"
             )
             e = cur.fetchone() or {}
             if e.get("tabla"):
@@ -1319,6 +1335,18 @@ def asegurar_tabla_config() -> None:
                 if not e.get("tiene_prog"):
                     cur.execute("ALTER TABLE envios ADD COLUMN programado_id INT NULL")
                     cur.execute("ALTER TABLE envios ADD INDEX idx_envios_programado (programado_id)")
+                if not e.get("tiene_reservo"):
+                    cur.execute("ALTER TABLE envios ADD COLUMN reservo_lista_id INT NULL")
+                cur.execute("SELECT COUNT(*) AS n FROM information_schema.STATISTICS"
+                            " WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='envios'"
+                            " AND INDEX_NAME='idx_envios_reservo_lista'")
+                if not (cur.fetchone() or {}).get("n"):
+                    cur.execute("ALTER TABLE envios ADD INDEX idx_envios_reservo_lista (reservo_lista_id)")
+                cur.execute("SELECT CHARACTER_MAXIMUM_LENGTH AS longitud FROM information_schema.COLUMNS"
+                            " WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='envios' AND COLUMN_NAME='base_datos'")
+                longitud_base = (cur.fetchone() or {}).get("longitud")
+                if longitud_base is not None and int(longitud_base) < 150:
+                    cur.execute("ALTER TABLE envios MODIFY COLUMN base_datos VARCHAR(150) NULL")
                 cur.execute("SELECT COUNT(*) AS n FROM information_schema.TABLES"
                             " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'log_envios'")
                 if (cur.fetchone() or {}).get("n"):

@@ -110,6 +110,32 @@
 .reservo-paginacion > select, .reservo-paginacion input { width: auto; min-width: 4.2rem; }
 .reservo-paginacion .pag-grupo { display: inline-flex; align-items: center; gap: .35rem; }
 .reservo-paginacion .pag-grupo input { width: 4.5rem; text-align: center; }
+.reservo-panel[hidden] { display: none; }
+.reservo-acciones { flex-direction: column; align-items: stretch; }
+.reservo-acciones .btn { justify-content: center; }
+.reservo-modal[hidden] { display: none; }
+.reservo-modal {
+  position: fixed; inset: 0; z-index: 1300; display: grid; place-items: center;
+  padding: 1.25rem; background: rgb(0 0 0 / .48); backdrop-filter: blur(8px);
+  animation: reservo-modal-fade .16s ease-out both;
+}
+.reservo-modal__panel {
+  width: min(620px, 100%); max-height: min(88vh, 800px); overflow: auto;
+  border: 1px solid var(--borde); border-radius: var(--radio-card, 1rem);
+  background: var(--panel); color: var(--texto); box-shadow: 0 24px 80px rgb(0 0 0 / .28);
+}
+.reservo-modal__panel > .panel__head { padding: 1.1rem 1.3rem; border-bottom: 1px solid var(--borde); }
+.reservo-modal__panel > .panel__head h2 { margin: 0; font-size: 1.08rem; }
+.reservo-modal__nombre { display: grid; gap: .45rem; margin: 1.2rem 1.3rem; }
+.reservo-preview { margin: 0 1.3rem; padding: 1rem; border: 1px solid var(--borde); border-radius: .8rem; background: var(--panel-2); color: var(--texto-suave); }
+.reservo-preview__nombre { display: block; margin-bottom: .8rem; color: var(--texto); font-size: 1rem; overflow-wrap: anywhere; }
+.reservo-preview dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .7rem 1rem; margin: 0; }
+.reservo-preview dl > div { min-width: 0; }
+.reservo-preview dt { color: var(--texto-suave); font-size: .78rem; }
+.reservo-preview dd { margin: .12rem 0 0; color: var(--texto); font-weight: 650; overflow-wrap: anywhere; }
+.reservo-modal__acciones { display: flex; justify-content: flex-end; gap: .65rem; padding: 1rem 1.3rem 1.3rem; border-top: 1px solid var(--borde); }
+.reservo-cargando-punto { display: inline-block; width: .8rem; height: .8rem; margin-right: .35rem; border: 2px solid var(--borde); border-top-color: var(--verde-oscuro); border-radius: 50%; vertical-align: -.1rem; animation: reservo-girar .75s linear infinite; }
+@keyframes reservo-modal-fade { from { opacity: 0; } to { opacity: 1; } }
 @media (max-width: 900px) {
   .reservo-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .reservo-filtros { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -125,4 +151,7 @@
   .reservo-form__accion--final { flex-direction: column; align-items: stretch; }
   .reservo-form__accion--final .reservo-form__paso { width: 100%; }
   .reservo-paginacion { justify-content: center; }
+  .reservo-preview dl { grid-template-columns: minmax(0, 1fr); }
+  .reservo-modal__acciones { flex-direction: column-reverse; }
+  .reservo-modal__acciones .btn { width: 100%; justify-content: center; }
 }
