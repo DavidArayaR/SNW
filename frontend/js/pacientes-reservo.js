@@ -121,11 +121,11 @@
     actualizarClinica();
   }
 
-  function formatoFecha(valor) {
+  function formatoFecha(valor, soloFecha = false) {
     if (!valor) return "—";
     const fecha = new Date(String(valor).replace(" ", "T") + (String(valor).includes("Z") ? "" : "Z"));
     return Number.isNaN(fecha.getTime()) ? String(valor) : fecha.toLocaleString("es-CL", {
-      dateStyle: "short", timeStyle: "short", timeZone: "America/Santiago",
+      dateStyle: "short", ...(soloFecha ? {} : { timeStyle: "short" }), timeZone: "America/Santiago",
     });
   }
 
@@ -318,7 +318,7 @@
         `<td>${escapar(item.paciente_telefono || "—")}</td><td>${escapar(item.clinica_nombre)}</td>` +
         `<td><code>${escapar(item.cliente_uuid_parcial)}</code></td>` +
         `<td>${escapar(item.tratamientos_nombre || "—")}</td>` +
-        `<td>${escapar(formatoFecha(item.fecha_ultima_atencion))}</td>` +
+        `<td>${escapar(formatoFecha(item.fecha_ultima_atencion, true))}</td>` +
         `<td>${escapar(formatoFecha(item.ultima_sincronizacion_en))}</td></tr>`).join("");
     } catch (error) {
       ui.patients.innerHTML = `<tr><td colspan="8" class="reservo-vacio reservo-vacio--error">${escapar(error.message)}</td></tr>`;
