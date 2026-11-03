@@ -260,6 +260,7 @@ async function cargarBasesPac() {
 }
 
 function mostrarBaseSeleccionada(mostrar) {
+  $("#tabPacientes")?.classList.toggle("sin-base", !mostrar);
   for (const selector of ["#filtrosWrap", "#toolbarPacientes", "#tablaPacientesWrap", "#btnToggleFiltros"]) {
     const elemento = $(selector);
     if (elemento) elemento.hidden = !mostrar;
