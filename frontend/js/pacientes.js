@@ -261,14 +261,6 @@ function aplicarModoBase() {
   const cabeceraCheck = chkTodos?.closest("th");
   if (cabeceraCheck) cabeceraCheck.hidden = esListaReservo || !PUEDE_GESTIONAR_PAC;
   if (chkTodos) { chkTodos.checked = false; chkTodos.disabled = esListaReservo; }
-  const ayudaReservo = $("#ayudaBaseReservo");
-  if (ayudaReservo) {
-    const baseLista = basesReservo.find((base) => Number(base.id) === listaId);
-    ayudaReservo.hidden = !esListaReservo;
-    ayudaReservo.textContent = baseLista
-      ? `${Number(baseLista.total || 0).toLocaleString("es-CL")} pacientes · ${baseLista.clinica_nombre} · ${baseLista.tratamiento_nombre || "Tratamiento histórico"}. La base se administra aquí y puede seleccionarse para enviar desde su clínica.`
-      : "Base de pacientes obtenida desde Reservo.";
-  }
   const tarjetaGestion = $("#cardGestionBase");
   if (tarjetaGestion) tarjetaGestion.hidden = esListaReservo;
   const avisoPruebas = $(".pacientes__aviso-pruebas");
