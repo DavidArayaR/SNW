@@ -367,7 +367,8 @@ def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None,
     programado = None if modo_prueba else programacion_carga(fecha, ventana, recibido)
     insertados = recuperados = duplicados = ya_enviados = elegibles = 0
     motivos_omitidos: dict[str, int] = {}
-    from supresion import huella_telefono
+    from supresion import bloquear_huella_baja, limpiar_cerrojos_baja_inactivos, huella_telefono
+    huellas_baja_inactivas: list[str] = []
     with conectar() as conn, conn.cursor() as cur:
         lote_id = None
         if not modo_prueba:
@@ -379,6 +380,25 @@ def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None,
         for registro in registros:
             registro["modo_prueba"] = int(modo_prueba)
             telefono = registro["paciente_telefono_normalizado"]
+            huella_activa = False
+            if telefono:
+                huella, huella_activa = bloquear_huella_baja(cur, telefono)
+                if not huella_activa:
+                    huellas_baja_inactivas.append(huella)
+                cur.execute("SELECT estado FROM supresion_telefonos"
+                            " WHERE huella=%s FOR UPDATE", (huella,))
+                supresion = cur.fetchone()
+                if supresion and supresion.get("estado") != "exento":
+                    errores.append({"row": registro["_row"], "code": "paciente_eliminado"})
+                    continue
+                cur.execute("SELECT 1 FROM whatsapp_avisos_unicos"
+                            " WHERE telefono=%s AND tipo='eliminacion_simulada' LIMIT 1",
+                            (telefono,))
+                eliminacion_simulada = cur.fetchone() is not None
+                if huella_activa or eliminacion_simulada:
+                    motivos_omitidos["PACIENTE_DE_BAJA"] = (
+                        motivos_omitidos.get("PACIENTE_DE_BAJA", 0) + 1)
+                    continue
             cur.execute("SELECT id, lote_id, fecha, ventana, clinica_nombre, modo_prueba,"
                         " estado_envio, ultimo_error_codigo,"
                         " paciente_telefono_normalizado, whatsapp_opt_out, intentos_envio,"
@@ -448,7 +468,9 @@ def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None,
                             " WHERE paciente_telefono_normalizado=%s AND whatsapp_opt_out=1"
                             " LIMIT 1", (telefono,))
                 if cur.fetchone():
-                    registro["ultimo_error_codigo"] = "PACIENTE_DE_BAJA"
+                    motivos_omitidos["PACIENTE_DE_BAJA"] = (
+                        motivos_omitidos.get("PACIENTE_DE_BAJA", 0) + 1)
+                    continue
                 cur.execute("SELECT d.estado, r.estado_envio AS envio_estado"
                             " FROM reagendar_destinatarios d"
                             " LEFT JOIN paciente_reagendar r ON r.id=d.cita_id"
@@ -521,6 +543,7 @@ def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None,
                 " creados=%s, rechazados=%s, repetidos=%s, recibidos=%s WHERE id=%s",
                 (estado, programado if vigente else None, insertados + recuperados, len(errores),
                  duplicados, recibidas, lote_id))
+        limpiar_cerrojos_baja_inactivos(cur, huellas_baja_inactivas)
         conn.commit()
     return {"success": True, "testMode": modo_prueba,
             "summary": {"received": recibidas, "inserted": insertados, "recovered": recuperados,
@@ -921,6 +944,8 @@ def registrar_respuesta_reagendar(telefono: str, phone_id: str, mensaje_id: str,
     """
     if not mensaje_id or not phone_id or not telefono:
         return None
+    from supresion import (activar_huella_baja, bloquear_huella_baja,
+                           limpiar_cerrojos_baja_inactivos, retirar_huella_baja)
     with conectar() as conn, conn.cursor() as cur:
         cita = None
         if referencia_id:
@@ -973,6 +998,18 @@ def registrar_respuesta_reagendar(telefono: str, phone_id: str, mensaje_id: str,
                 " ORDER BY id DESC LIMIT 1", (telefono, phone_id))
             cita = cur.fetchone()
             if cita:
+                huella, activa = bloquear_huella_baja(cur, telefono)
+                cur.execute("SELECT estado FROM supresion_telefonos"
+                            " WHERE huella=%s FOR UPDATE", (huella,))
+                supresion = cur.fetchone()
+                if supresion and supresion.get("estado") != "exento":
+                    if not activa:
+                        limpiar_cerrojos_baja_inactivos(cur, (huella,))
+                    return None
+                if activa:
+                    retirar_huella_baja(cur, huella)
+                else:
+                    limpiar_cerrojos_baja_inactivos(cur, (huella,))
                 cur.execute("UPDATE paciente_reagendar SET whatsapp_opt_out=0"
                             " WHERE paciente_telefono_normalizado=%s", (telefono,))
                 conn.commit()
@@ -1011,20 +1048,36 @@ def registrar_respuesta_reagendar(telefono: str, phone_id: str, mensaje_id: str,
             " actualizado_en=VALUES(actualizado_en), ultimo_mensaje_id=VALUES(ultimo_mensaje_id)",
             (cita["id"], estado, mensaje_id[:255]))
         if accion == "BAJA":
+            huella, activa = bloquear_huella_baja(cur, telefono)
+            huellas_temporales = [] if activa else [huella]
+            cur.execute("SELECT estado FROM supresion_telefonos"
+                        " WHERE huella=%s FOR UPDATE", (huella,))
+            supresion = cur.fetchone()
+            if supresion and supresion.get("estado") != "exento":
+                limpiar_cerrojos_baja_inactivos(cur, huellas_temporales)
+                return None
+            activar_huella_baja(cur, huella)
             cur.execute("UPDATE paciente_reagendar SET whatsapp_opt_out=1"
                         " WHERE paciente_telefono_normalizado=%s", (telefono,))
+        else:
+            huellas_temporales = []
         if cita.get("log_envio_id"):
             cur.execute("UPDATE log_envios SET respuesta=%s WHERE id=%s"
                         " AND wa_phone_id=%s AND numero_telefono=%s",
                         ("baja" if accion == "BAJA" else "respondio",
                          cita["log_envio_id"], phone_id, telefono))
+        limpiar_cerrojos_baja_inactivos(cur, huellas_temporales)
         conn.commit()
     return {"accion": accion, "cita": cita, "texto": texto, "mensaje_id": mensaje_id,
             "mensaje_preparado": preparado}
 
 
-def marcar_opt_out_reagendar(telefono: str, valor: bool) -> None:
+def marcar_opt_out_reagendar(telefono: str, valor: bool, cur=None) -> None:
     """Replica la preferencia global del webhook en citas importadas."""
+    if cur is not None:
+        cur.execute("UPDATE paciente_reagendar SET whatsapp_opt_out=%s"
+                    " WHERE paciente_telefono_normalizado=%s", (int(valor), telefono))
+        return
     with conectar() as conn, conn.cursor() as cur:
         cur.execute("UPDATE paciente_reagendar SET whatsapp_opt_out=%s"
                     " WHERE paciente_telefono_normalizado=%s", (int(valor), telefono))

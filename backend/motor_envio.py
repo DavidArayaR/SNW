@@ -2,7 +2,7 @@ from db import log_error
 import httpx
 
 from whatsapp_service import WhatsAppService, ResultadoEnvioIncierto, EnvioInterrumpido
-from supresion import esta_suprimido
+from supresion import esta_bloqueado_para_envio, esta_suprimido  # compatibilidad con integraciones existentes
 
 
 class FalloInfraestructuraDespacho(Exception):
@@ -15,9 +15,10 @@ class MotorSimulado:
     def disponible(self) -> bool:
         return True
 
-    def enviar(self, telefono: str, mensaje: str, plantilla: dict | None = None, variables: dict | None = None):
-        if esta_suprimido(telefono):
-            return False, None, "Número suprimido por solicitud del paciente"
+    def enviar(self, telefono: str, mensaje: str, plantilla: dict | None = None,
+               variables: dict | None = None, *, permitir_aviso_baja: bool = False):
+        if esta_bloqueado_para_envio(telefono, permitir_aviso_baja=permitir_aviso_baja):
+            return False, None, "Paciente excluido por su preferencia de contacto"
         cta = (plantilla or {}).get("cta") if isinstance(plantilla, dict) else None
         # El URL puede llevar una consulta del paciente prellenada; jamás
         # imprimir mensaje, teléfono ni URL en la consola de simulación.
@@ -35,7 +36,8 @@ class MotorApiOficial:
     def disponible(self) -> bool:
         return self.servicio.configurada()
 
-    def enviar(self, telefono: str, mensaje: str, plantilla: dict | None = None, variables: dict | None = None):
+    def enviar(self, telefono: str, mensaje: str, plantilla: dict | None = None,
+               variables: dict | None = None, *, permitir_aviso_baja: bool = False):
         """Envía vía API oficial. Devuelve (ok, message_id, error).
 
         Si la plantilla lleva 'whatsapp_template' configurado se envía como
@@ -44,10 +46,11 @@ class MotorApiOficial:
         import asyncio
 
         try:
-            if esta_suprimido(telefono):
-                return False, None, "Número suprimido por solicitud del paciente"
+            if esta_bloqueado_para_envio(telefono, permitir_aviso_baja=permitir_aviso_baja):
+                return False, None, "Paciente excluido por su preferencia de contacto"
             ok, message_id, error, _ = asyncio.run(
-                self.servicio.enviar(telefono, mensaje, plantilla=plantilla, variables=variables)
+                self.servicio.enviar(telefono, mensaje, plantilla=plantilla, variables=variables,
+                                     permitir_aviso_baja=permitir_aviso_baja)
             )
         except EnvioInterrumpido:
             raise

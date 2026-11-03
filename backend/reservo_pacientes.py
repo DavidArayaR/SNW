@@ -138,7 +138,29 @@ def guardar_pagina_citas_cache(codigo: str, desde: dt.date, hasta: dt.date,
                                estado_atendido: str) -> None:
     from db import conectar
     minimo = [_cita_para_cache(cita, estado_atendido) for cita in citas]
+    from supresion import (bloquear_huella_baja, limpiar_cerrojos_baja_inactivos)
+    huellas_temporales: list[str] = []
     with conectar() as conn, conn.cursor() as cur:
+        for cita in minimo:
+            cliente = cita.get("cliente") if isinstance(cita, dict) else None
+            telefono = (cliente or {}).get("telefono_1") if isinstance(cliente, dict) else None
+            if not telefono:
+                continue
+            huella, baja = bloquear_huella_baja(cur, telefono)
+            if not baja:
+                huellas_temporales.append(huella)
+            cur.execute("SELECT estado FROM supresion_telefonos WHERE huella=%s FOR UPDATE",
+                        (huella,))
+            supresion = cur.fetchone()
+            cur.execute("SELECT 1 FROM whatsapp_avisos_unicos"
+                        " WHERE telefono=%s AND tipo='eliminacion_simulada' LIMIT 1",
+                        (telefono,))
+            eliminacion_simulada = cur.fetchone() is not None
+            if (baja or eliminacion_simulada
+                    or (supresion and supresion.get("estado") != "exento")):
+                # Conserva el dato de cita/tratamiento, pero no cachea PII del
+                # paciente que está de baja o tiene una eliminación pendiente.
+                cita["cliente"] = None
         cur.execute(
             "INSERT INTO reservo_citas_cache"
             " (clinica_codigo,fecha_desde,fecha_hasta,token_hash,numero,tramo_desde,tramo_hasta,pagina,citas_json,expira_en)"
@@ -146,6 +168,7 @@ def guardar_pagina_citas_cache(codigo: str, desde: dt.date, hasta: dt.date,
             (codigo, desde, hasta, _huella_token(token), numero, tramo_desde,
              tramo_hasta, pagina, json.dumps(minimo, ensure_ascii=False)),
         )
+        limpiar_cerrojos_baja_inactivos(cur, huellas_temporales)
         conn.commit()
 
 
@@ -661,13 +684,32 @@ def _claim_job() -> dict | None:
 
 def _guardar_paciente_cursor(cur, codigo: str, cliente: dict,
                              tratamientos: list[dict],
-                             fecha_atencion: dt.datetime | None = None) -> tuple[str, int]:
+                             fecha_atencion: dt.datetime | None = None,
+                             huellas_baja_inactivas: list[str] | None = None) -> tuple[str, int]:
     uuid = normalizar_cliente_uuid(cliente["uuid"])
     nombre = texto_cliente(cliente, "nombre", 200)
     apellido = (texto_cliente(cliente, "apellido_paterno", 200)
                 or texto_cliente(cliente, "apellidos", 200)
                 or texto_cliente(cliente, "apellido", 200))
     telefono = telefono_cliente(cliente)
+    if telefono:
+        from supresion import bloquear_huella_baja
+
+        huella, baja = bloquear_huella_baja(cur, telefono)
+        if not baja and huellas_baja_inactivas is not None:
+            huellas_baja_inactivas.append(huella)
+        cur.execute("SELECT estado FROM supresion_telefonos WHERE huella=%s FOR UPDATE",
+                    (huella,))
+        supresion = cur.fetchone()
+        if baja:
+            return "omitido_baja", 0
+        cur.execute("SELECT 1 FROM whatsapp_avisos_unicos"
+                    " WHERE telefono=%s AND tipo='eliminacion_simulada' LIMIT 1",
+                    (telefono,))
+        if cur.fetchone():
+            return "omitido_baja", 0
+        if supresion and supresion.get("estado") != "exento":
+            return "omitido_eliminado", 0
     cur.execute("SELECT id FROM reservo_pacientes WHERE clinica_codigo=%s AND cliente_uuid=%s FOR UPDATE",
                 (codigo, uuid))
     existente = cur.fetchone()
@@ -712,7 +754,8 @@ def _guardar_pagina(job_id: int, codigo: str,
     """Guarda pacientes/relaciones y contadores de la página en una transacción."""
     from db import conectar
 
-    nuevos = actualizados = 0
+    nuevos = actualizados = omitidos = 0
+    huellas_baja_inactivas: list[str] = []
     campos = ("paginas_consultadas", "citas_recibidas", "citas_atendidas",
               "citas_tratamiento", "pacientes_unicos", "pacientes_descartados",
               "pacientes_duplicados")
@@ -722,7 +765,11 @@ def _guardar_pagina(job_id: int, codigo: str,
             cliente, tratamientos = fila[:2]
             fecha_atencion = fila[2] if len(fila) > 2 else None
             resultado, paciente_id = _guardar_paciente_cursor(
-                cur, codigo, cliente, tratamientos, fecha_atencion)
+                cur, codigo, cliente, tratamientos, fecha_atencion,
+                huellas_baja_inactivas)
+            if not paciente_id:
+                omitidos += 1
+                continue
             cur.execute(
                 "INSERT INTO reservo_sincronizacion_pacientes (job_id,paciente_id,nuevo)"
                 " VALUES (%s,%s,%s) ON DUPLICATE KEY UPDATE"
@@ -733,6 +780,10 @@ def _guardar_pagina(job_id: int, codigo: str,
                 nuevos += 1
             else:
                 actualizados += 1
+        if omitidos:
+            cambios["pacientes_descartados"] = (
+                int(cambios.get("pacientes_descartados", 0)) + omitidos)
+        progreso["pacientes_baja_omitidos"] = omitidos
         asignaciones = [f"{campo}=%s" for campo in cambios]
         parametros = list(cambios.values())
         asignaciones.extend(("pacientes_nuevos=pacientes_nuevos+%s",
@@ -741,6 +792,8 @@ def _guardar_pagina(job_id: int, codigo: str,
         parametros.extend((nuevos, actualizados, job_id))
         cur.execute("UPDATE reservo_sincronizaciones SET " + ",".join(asignaciones) +
                     " WHERE id=%s", parametros)
+        from supresion import limpiar_cerrojos_baja_inactivos
+        limpiar_cerrojos_baja_inactivos(cur, huellas_baja_inactivas)
         conn.commit()
     return nuevos, actualizados
 
@@ -813,8 +866,7 @@ def _procesar(job: dict) -> None:
                     filas_pagina = [(fila["cliente"], list(fila["tratamientos"].values()),
                                     fila["fecha_atencion"])
                                     for fila in pacientes_pagina.values()]
-                    nuevos_pagina, actualizados_pagina = _guardar_pagina(
-                        job["id"], codigo, filas_pagina, {
+                    progreso_pagina = {
                             "paginas_consultadas": paginas,
                             "citas_recibidas": recibidas,
                             "citas_atendidas": atendidas,
@@ -822,9 +874,12 @@ def _procesar(job: dict) -> None:
                             "pacientes_unicos": len(vistos),
                             "pacientes_descartados": descartados,
                             "pacientes_duplicados": duplicados,
-                        })
+                        }
+                    nuevos_pagina, actualizados_pagina = _guardar_pagina(
+                        job["id"], codigo, filas_pagina, progreso_pagina)
                     nuevos += nuevos_pagina
                     actualizados += actualizados_pagina
+                    descartados += progreso_pagina.get("pacientes_baja_omitidos", 0)
                 if usar_cache and not paginas_bloque:
                     raise ReservoError("La caché de citas quedó incompleta; vuelve a consultar los tratamientos.")
                 _actualizar_progreso(job["id"], periodos_completados=indice_bloque)

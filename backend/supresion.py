@@ -13,12 +13,16 @@ import secrets
 import threading
 from functools import lru_cache
 
+import pymysql
+
 import httpx
 
 from db import BASE_DIR, conectar, config_get, log_error
 from telefono import normalizar_telefono
 
 RUTA_CLAVE = BASE_DIR / ".env.supresion"
+TABLA_HUELLAS_BAJA = "pacientes_baja_huellas"
+MIGRACION_HUELLAS_BAJA = "opt_out_hmac_v1"
 
 
 def asegurar_tabla_supresion() -> None:
@@ -33,7 +37,7 @@ def asegurar_tabla_supresion() -> None:
             " pacientes_eliminados INT NOT NULL DEFAULT 0,"
             " creado DATETIME DEFAULT CURRENT_TIMESTAMP,"
             " completado DATETIME NULL"
-            ") CHARACTER SET utf8mb4"
+            ") ENGINE=InnoDB CHARACTER SET utf8mb4"
         )
         cur.execute(
             "SELECT COLUMN_TYPE FROM information_schema.COLUMNS"
@@ -46,6 +50,46 @@ def asegurar_tabla_supresion() -> None:
                 "ALTER TABLE supresion_telefonos MODIFY COLUMN estado"
                 " ENUM('pendiente','procesando','completo','exento') NOT NULL DEFAULT 'pendiente'"
             )
+        cur.execute(
+            "SELECT ENGINE FROM information_schema.TABLES"
+            " WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='supresion_telefonos'"
+        )
+        motor = (cur.fetchone() or {}).get("ENGINE")
+        if motor and motor.lower() != "innodb":
+            cur.execute("ALTER TABLE supresion_telefonos ENGINE=InnoDB")
+        cur.execute(
+            "CREATE TABLE IF NOT EXISTS pacientes_baja_huellas ("
+            " huella CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,"
+            " activo TINYINT(1) NOT NULL DEFAULT 0,"
+            " origen ENUM('paciente','manual','migracion') NOT NULL DEFAULT 'paciente',"
+            " creado DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+            " actualizado DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"
+            " ON UPDATE CURRENT_TIMESTAMP"
+            ") ENGINE=InnoDB"
+        )
+        cur.execute(
+            "SELECT COLUMN_NAME FROM information_schema.COLUMNS"
+            " WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='pacientes_baja_huellas'"
+            " AND COLUMN_NAME='origen'"
+        )
+        if not cur.fetchone():
+            cur.execute(
+                "ALTER TABLE pacientes_baja_huellas ADD COLUMN origen"
+                " ENUM('paciente','manual','migracion') NOT NULL DEFAULT 'paciente'"
+                " AFTER activo"
+            )
+        cur.execute(
+            "CREATE TABLE IF NOT EXISTS snw_migraciones_datos ("
+            " codigo VARCHAR(80) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,"
+            " completada TINYINT(1) NOT NULL DEFAULT 0,"
+            " actualizado DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"
+            " ON UPDATE CURRENT_TIMESTAMP"
+            ") ENGINE=InnoDB"
+        )
+        cur.execute(
+            "INSERT IGNORE INTO snw_migraciones_datos (codigo, completada)"
+            " VALUES (%s, 0)", (MIGRACION_HUELLAS_BAJA,)
+        )
         conn.commit()
 
 
@@ -56,8 +100,18 @@ def _clave_hmac() -> bytes:
     except FileNotFoundError:
         # Nunca generar silenciosamente otra clave si ya existen huellas.
         with conectar() as conn, conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) AS n FROM supresion_telefonos")
-            if (cur.fetchone() or {}).get("n"):
+            cur.execute(
+                "SELECT TABLE_NAME FROM information_schema.TABLES"
+                " WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN"
+                " ('supresion_telefonos','pacientes_baja_huellas')"
+            )
+            tablas = {r["TABLE_NAME"] for r in cur.fetchall()}
+            existentes = 0
+            for tabla in tablas:
+                if tabla in ("supresion_telefonos", "pacientes_baja_huellas"):
+                    cur.execute(f"SELECT COUNT(*) AS n FROM {tabla}")
+                    existentes += int((cur.fetchone() or {}).get("n") or 0)
+            if existentes:
                 raise RuntimeError("Falta .env.supresion: restaurar la clave original")
         nueva = secrets.token_hex(32)
         try:
@@ -78,6 +132,236 @@ def huella_telefono(telefono: str) -> str:
     if not tel:
         raise ValueError("Teléfono inválido para supresión")
     return hmac.new(_clave_hmac(), tel.encode("ascii"), hashlib.sha256).hexdigest()
+
+
+def bloquear_huella_baja(cur, telefono: str) -> tuple[str, bool]:
+    """Bloquea en InnoDB el ciclo de baja/importación para un teléfono.
+
+    Se inserta una fila inactiva como cerrojo temporal. El llamador debe
+    conservar la transacción hasta terminar y borrar las filas inactivas antes
+    del commit. Las filas activas son exclusivamente huellas de bajas vigentes.
+    """
+    huella = huella_telefono(telefono)
+    cur.execute(
+        "INSERT IGNORE INTO pacientes_baja_huellas (huella, activo) VALUES (%s, 0)",
+        (huella,),
+    )
+    cur.execute("SELECT activo FROM pacientes_baja_huellas WHERE huella=%s FOR UPDATE",
+                (huella,))
+    fila = cur.fetchone()
+    # Un cursor de prueba puede no modelar el SELECT posterior al INSERT;
+    # MySQL real siempre devuelve la fila que acaba de reservarse.
+    return huella, bool((fila or {}).get("activo"))
+
+
+def activar_huella_baja(cur, huella: str, *, origen: str = "paciente") -> None:
+    if origen not in ("paciente", "manual", "migracion"):
+        origen = "paciente"
+    cur.execute(
+        "INSERT INTO pacientes_baja_huellas (huella,activo,origen) VALUES (%s,1,%s)"
+        " ON DUPLICATE KEY UPDATE origen=CASE"
+        " WHEN VALUES(origen)='paciente' THEN 'paciente'"
+        " WHEN activo=0 THEN VALUES(origen) ELSE origen END,activo=1",
+        (huella, origen),
+    )
+
+
+def retirar_huella_baja(cur, huella: str) -> None:
+    """Retira solo la huella de baja temporal; no modifica la tabla de supresión."""
+    cur.execute("DELETE FROM pacientes_baja_huellas WHERE huella=%s", (huella,))
+
+
+def limpiar_cerrojos_baja_inactivos(cur, huellas) -> None:
+    unicas = list(dict.fromkeys(huellas or ()))
+    for inicio in range(0, len(unicas), 500):
+        lote = unicas[inicio:inicio + 500]
+        if not lote:
+            continue
+        marcadores = ",".join("%s" for _ in lote)
+        cur.execute(
+            "DELETE FROM pacientes_baja_huellas WHERE activo=0"
+            f" AND huella IN ({marcadores})", tuple(lote),
+        )
+
+
+def huella_baja_activa_cur(cur, telefono: str, *, bloquear: bool = False) -> bool:
+    if bloquear:
+        huella, activa = bloquear_huella_baja(cur, telefono)
+        if not activa:
+            limpiar_cerrojos_baja_inactivos(cur, (huella,))
+        return activa
+    cur.execute("SELECT 1 FROM pacientes_baja_huellas WHERE huella=%s AND activo=1",
+                (huella_telefono(telefono),))
+    return cur.fetchone() is not None
+
+
+def _migracion_huellas_completa_cur(cur) -> bool:
+    try:
+        cur.execute("SELECT completada FROM snw_migraciones_datos WHERE codigo=%s",
+                    (MIGRACION_HUELLAS_BAJA,))
+    except pymysql.err.OperationalError as exc:
+        if exc.args and exc.args[0] == 1146:
+            return False
+        raise
+    fila = cur.fetchone()
+    return bool(fila and fila.get("completada"))
+
+
+def _baja_legacy_activa_cur(cur, telefono: str) -> bool:
+    """Respaldo durante el backfill: consulta opt-outs antiguos aún no migrados."""
+    import servicio_areas
+
+    expresion = ("REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(telefono, '+', ''), ' ', ''),"
+                 " '-', ''), '(', ''), ')', ''), '.', '')")
+    for tabla in servicio_areas.tablas_de_pacientes():
+        if not servicio_areas.tabla_valida(tabla):
+            continue
+        try:
+            cur.execute(f"SELECT 1 FROM {tabla} WHERE whatsapp_opt_out=1 AND "
+                        f"CAST({expresion} AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_bin="
+                        "CAST(%s AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_bin LIMIT 1",
+                        (normalizar_telefono(telefono),))
+        except pymysql.err.OperationalError as exc:
+            if exc.args and exc.args[0] in (1054, 1146):
+                continue
+            raise
+        if cur.fetchone():
+            return True
+    try:
+        cur.execute("SELECT 1 FROM paciente_reagendar"
+                    " WHERE whatsapp_opt_out=1 AND"
+                    " CAST(paciente_telefono_normalizado AS CHAR CHARACTER SET utf8mb4)"
+                    " COLLATE utf8mb4_bin=CAST(%s AS CHAR CHARACTER SET utf8mb4)"
+                    " COLLATE utf8mb4_bin LIMIT 1",
+                    (normalizar_telefono(telefono),))
+    except pymysql.err.OperationalError as exc:
+        if not exc.args or exc.args[0] != 1146:
+            raise
+    else:
+        if cur.fetchone():
+            return True
+    return False
+
+
+def esta_de_baja(telefono: str) -> bool:
+    """Consulta la huella HMAC de una baja vigente, aunque ya no haya ficha."""
+    if not normalizar_telefono(telefono):
+        return False
+    try:
+        with conectar() as conn, conn.cursor() as cur:
+            if huella_baja_activa_cur(cur, telefono):
+                return True
+            return (not _migracion_huellas_completa_cur(cur)
+                    and _baja_legacy_activa_cur(cur, telefono))
+    except Exception as exc:
+        # Si no se puede validar la lista de bajas, no se autoriza un envío.
+        log_error("consultar huella de baja", exc, solo_tipo=True)
+        return True
+
+
+def esta_bloqueado_para_envio(telefono: str, *, permitir_aviso_baja: bool = False) -> bool:
+    if not normalizar_telefono(telefono):
+        return False
+    try:
+        huella = huella_telefono(telefono)
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM supresion_telefonos"
+                        " WHERE huella=%s AND estado <> 'exento'", (huella,))
+            if cur.fetchone():
+                return True
+            if not permitir_aviso_baja:
+                cur.execute("SELECT 1 FROM pacientes_baja_huellas"
+                            " WHERE huella=%s AND activo=1", (huella,))
+                if cur.fetchone():
+                    return True
+            cur.execute("SELECT 1 FROM whatsapp_avisos_unicos"
+                        " WHERE telefono=%s AND tipo='eliminacion_simulada' LIMIT 1",
+                        (normalizar_telefono(telefono),))
+            if cur.fetchone():
+                return True
+            return (not permitir_aviso_baja
+                    and not _migracion_huellas_completa_cur(cur)
+                    and _baja_legacy_activa_cur(cur, telefono))
+    except Exception as exc:
+        log_error("validar preferencia antes del envío", exc, solo_tipo=True)
+        return True
+
+
+def migrar_huellas_baja_existentes() -> int:
+    """Migra una sola vez las bajas presentes en las tablas antes de esta versión.
+
+    El marcador InnoDB serializa instancias concurrentes. Cada fila fuente se
+    vuelve a leer con bloqueo después de reservar su HMAC, evitando restaurar
+    una baja que se haya retractado durante la migración.
+    """
+    asegurar_tabla_supresion()
+    import servicio_areas
+
+    migradas = 0
+    temporales: set[str] = set()
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("SELECT completada FROM snw_migraciones_datos"
+                    " WHERE codigo=%s FOR UPDATE", (MIGRACION_HUELLAS_BAJA,))
+        estado = cur.fetchone()
+        if estado and estado.get("completada"):
+            conn.commit()
+            return 0
+
+        tablas = [t for t in servicio_areas.tablas_de_pacientes()
+                  if servicio_areas.tabla_valida(t)]
+        fuentes = [(tabla, "telefono") for tabla in tablas]
+        fuentes.append(("paciente_reagendar", "paciente_telefono_normalizado"))
+
+        with conectar() as fuente_conn:
+            for tabla, columna_telefono in fuentes:
+                try:
+                    with fuente_conn.cursor(pymysql.cursors.SSDictCursor) as fuente:
+                        fuente.execute(
+                            f"SELECT id, {columna_telefono} AS telefono FROM {tabla}"
+                            " WHERE whatsapp_opt_out=1 AND "
+                            f"{columna_telefono} IS NOT NULL"
+                        )
+                        while True:
+                            lote = fuente.fetchmany(500)
+                            if not lote:
+                                break
+                            for fila in lote:
+                                telefono = normalizar_telefono(fila.get("telefono") or "")
+                                if not telefono:
+                                    continue
+                                huella, activa = bloquear_huella_baja(cur, telefono)
+                                if not activa:
+                                    temporales.add(huella)
+                                # Bloqueo actual de la fuente; una retractación
+                                # que ganó antes de este cerrojo ya dejó el valor en 0.
+                                cur.execute(
+                                    f"SELECT whatsapp_opt_out FROM {tabla} WHERE id=%s FOR UPDATE",
+                                    (fila["id"],),
+                                )
+                                actual = cur.fetchone()
+                                if not actual or not actual.get("whatsapp_opt_out"):
+                                    continue
+                                cur.execute(
+                                    "SELECT estado FROM supresion_telefonos"
+                                    " WHERE huella=%s FOR UPDATE", (huella,),
+                                )
+                                permanente = cur.fetchone()
+                                if permanente and permanente.get("estado") != "exento":
+                                    continue
+                                activar_huella_baja(cur, huella, origen="migracion")
+                                temporales.discard(huella)
+                                migradas += int(not activa)
+                except pymysql.err.OperationalError as exc:
+                    # Una instalación antigua puede no tener aún alguna tabla
+                    # o columna opcional; otros errores sí cancelan el backfill.
+                    if exc.args and exc.args[0] in (1054, 1146):
+                        continue
+                    raise
+        limpiar_cerrojos_baja_inactivos(cur, temporales)
+        cur.execute("UPDATE snw_migraciones_datos SET completada=1 WHERE codigo=%s",
+                    (MIGRACION_HUELLAS_BAJA,))
+        conn.commit()
+    return migradas
 
 
 def esta_suprimido(telefono: str) -> bool:
@@ -133,6 +417,7 @@ def solicitar_eliminacion(telefono: str) -> str:
     from whatsapp_channels import emisor_webhook_actual
     phone_id_origen = (emisor_webhook_actual() or {}).get("phoneNumberId")
     with conectar() as conn, conn.cursor() as cur:
+        huella_bloqueo, _ = bloquear_huella_baja(cur, tel)
         cur.execute(
             "INSERT INTO supresion_telefonos (huella, telefono_pendiente, wa_phone_id)"
             " VALUES (%s, %s, %s)"
@@ -143,6 +428,9 @@ def solicitar_eliminacion(telefono: str) -> str:
         )
         cur.execute("SELECT estado FROM supresion_telefonos WHERE huella = %s", (huella,))
         exento = (cur.fetchone() or {}).get("estado") == "exento"
+        # Las eliminaciones permanentes conservan su huella propia en
+        # supresion_telefonos; no dejan una baja temporal duplicada.
+        retirar_huella_baja(cur, huella_bloqueo)
         conn.commit()
     if exento:
         return huella

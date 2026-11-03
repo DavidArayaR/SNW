@@ -74,7 +74,8 @@ from whatsapp_webhook import router as whatsapp_router
 from supresion import (asegurar_tabla_supresion, reintentar_pendientes,
                       esta_suprimido, es_exento, es_numero_prueba,
                       eliminacion_simulada_activa, oferta_eliminacion_enviada,
-                      resumen_supresion)
+                      resumen_supresion, esta_de_baja,
+                      migrar_huellas_baja_existentes)
 from config_service import config_correo as _config_correo, enviar_correo as _enviar_correo, armar_mensaje as _armar_mensaje, leer_config, url_base
 from schemas import (
     ActivarCuentaIn, ClavePropiaIn, ConfigIn, ConfigTodoIn,
@@ -1714,6 +1715,45 @@ def _exigir_numero_prueba_editable(telefono: str | None, permitidos: set[str]) -
         raise HTTPException(403, detail="Solo se pueden editar el estado y la respuesta de números de prueba configurados para esta base.")
 
 
+def _actualizar_huella_baja_manual(cur, telefono: str, respuesta: str,
+                                   ambiente: str) -> None:
+    """Mantiene la huella en ajustes manuales de números de prueba.
+
+    Un cambio manual puede retirar solo una baja creada manualmente; una baja
+    recibida del paciente se libera únicamente cuando vuelve a escribir.
+    """
+    from supresion import (activar_huella_baja, bloquear_huella_baja,
+                           limpiar_cerrojos_baja_inactivos, retirar_huella_baja)
+
+    numero = normalizar_telefono(telefono or "")
+    if not numero:
+        return
+    huella, activa = bloquear_huella_baja(cur, numero)
+    temporales = [] if activa else [huella]
+    cur.execute("SELECT estado FROM supresion_telefonos WHERE huella=%s FOR UPDATE",
+                (huella,))
+    permanente = cur.fetchone()
+    if respuesta == "baja":
+        if not permanente or permanente.get("estado") == "exento":
+            activar_huella_baja(cur, huella, origen="manual")
+            temporales.clear()
+    elif activa:
+        cur.execute("SELECT origen FROM pacientes_baja_huellas"
+                    " WHERE huella=%s AND activo=1 FOR UPDATE", (huella,))
+        origen = (cur.fetchone() or {}).get("origen")
+        if origen == "manual":
+            indice = servicio_areas.indice_pacientes_por_telefono(
+                cur, ambiente, telefonos_objetivo={numero})
+            tiene_baja_explicita = any(
+                servicio_areas._baja_con_candado(cur, tabla, ids, ambiente)
+                for tabla, ids in indice.get(numero, {}).items()
+            )
+            if not tiene_baja_explicita:
+                retirar_huella_baja(cur, huella)
+                temporales.clear()
+    limpiar_cerrojos_baja_inactivos(cur, temporales)
+
+
 def _propagar_baja_manual_a_pruebas(cur, telefono: str, tabla_origen: str,
                                     ambiente: str, indice: dict | None = None) -> dict:
     """Propaga un ajuste manual solo a otras copias donde el número también
@@ -2060,6 +2100,10 @@ def actualizar_respuesta_pacientes(body: RespuestaPacientesBulkIn, ambiente: str
         for fila in filas:
             _exigir_numero_prueba_editable(fila.get("telefono"), numeros_editables)
 
+        for telefono in sorted({normalizar_telefono(r.get("telefono") or "")
+                                for r in filas} - {None}):
+            _actualizar_huella_baja_manual(cur, telefono, body.respuesta, ambiente)
+
         bloqueados: set[int] = set()
         if body.respuesta != "baja":
             bloqueados = _pacientes_baja_bloqueada(cur, t, ambiente, encontrados)
@@ -2173,6 +2217,9 @@ def actualizar_respuesta_paciente(paciente_id: int, body: RespuestaIn,
         if not paciente:
             raise HTTPException(404, detail="Paciente no encontrado")
         _exigir_numero_prueba_editable(paciente.get("telefono"), numeros_editables)
+
+        _actualizar_huella_baja_manual(cur, paciente.get("telefono"),
+                                       body.respuesta, ambiente)
 
         if body.respuesta != "baja" and _pacientes_baja_bloqueada(cur, t, ambiente, [paciente_id]):
             raise HTTPException(
@@ -3431,8 +3478,9 @@ def _enviar_mensaje_directo(telefono_evento: str, texto: str, clave_log: str,
                 return False
             canal = obtener_canal(cfg, (emisor or {}).get("phoneNumberId"))
             try:
-                resultado = (canal.enviar(tel, texto, plantilla=plantilla) if plantilla
-                             else canal.enviar(tel, texto))
+                opciones_envio = {"permitir_aviso_baja": clave_log == "baja_aviso"}
+                resultado = (canal.enviar(tel, texto, plantilla=plantilla, **opciones_envio) if plantilla
+                             else canal.enviar(tel, texto, **opciones_envio))
             except Exception as e:
                 log_error(f"_enviar_mensaje_directo(pac={pac.get('id')}, {amb})", e)
                 resultado = (False, None, f"Error inesperado: {e}")
@@ -8913,6 +8961,9 @@ async def _procesar_cita_reagendar(cita: dict, plantillas_por_centro: dict) -> N
         if await asyncio.to_thread(esta_suprimido, telefono):
             paciente_reagendar.marcar_fallo(cita, "PACIENTE_ELIMINADO")
             return
+        if await asyncio.to_thread(esta_de_baja, telefono):
+            paciente_reagendar.marcar_fallo(cita, "PACIENTE_DE_BAJA")
+            return
         with conectar() as conn, conn.cursor() as cur:
             cur.execute("SELECT 1 FROM paciente_reagendar"
                         " WHERE paciente_telefono_normalizado=%s AND whatsapp_opt_out=1 LIMIT 1",
@@ -8931,6 +8982,9 @@ async def _procesar_cita_reagendar(cita: dict, plantillas_por_centro: dict) -> N
         # Revalidar bajas inmediatamente antes del POST a Meta.
         if await asyncio.to_thread(esta_suprimido, telefono):
             paciente_reagendar.marcar_fallo(cita, "PACIENTE_ELIMINADO")
+            return
+        if await asyncio.to_thread(esta_de_baja, telefono):
+            paciente_reagendar.marcar_fallo(cita, "PACIENTE_DE_BAJA")
             return
         with conectar() as conn, conn.cursor() as cur:
             cur.execute("SELECT 1 FROM paciente_reagendar"
@@ -9025,6 +9079,10 @@ async def _loop_reagendar() -> None:
 @app.on_event("startup")
 async def _arrancar_scheduler_programados() -> None:
     instalar_registro_errores()
+    # El backfill debe terminar antes de habilitar los workers de envío y
+    # sincronización de Reservo; varias instancias se coordinan en MySQL.
+    await asyncio.to_thread(asegurar_tabla_supresion)
+    await asyncio.to_thread(migrar_huellas_baja_existentes)
     asyncio.create_task(_loop_programados())
     asyncio.create_task(_loop_supresion())
     asyncio.create_task(_loop_reagendar())

@@ -32,8 +32,12 @@ from intenciones_call_center import clasificar, normalizar as normalizar_intenci
 from plantilla_media import obtener_media, ruta_media
 from plantilla_revision import (botones_para_meta, presentar_plantilla,
                                variables_del_cuerpo, version_opciones)
-from supresion import (esta_suprimido, es_exento, es_numero_prueba, solicitar_eliminacion,
-                      oferta_eliminacion_enviada)
+from supresion import (activar_huella_baja, bloquear_huella_baja,
+                      limpiar_cerrojos_baja_inactivos, retirar_huella_baja,
+                      esta_suprimido, esta_de_baja, esta_bloqueado_para_envio,
+                      es_exento, es_numero_prueba,
+                      solicitar_eliminacion, oferta_eliminacion_enviada,
+                      eliminacion_simulada_activa)
 import servicio_areas
 from wa_rate_limit import (
     gobernador, es_error_throttle, clasificar_error, reintentos_throttle, TOPE_ESPERA_S,
@@ -1121,7 +1125,8 @@ class WhatsAppService:
                 if clave in self.COMODINES]
 
     async def enviar(self, telefono: str, mensaje: str, plantilla: dict | None = None,
-                     variables: dict | None = None, es_prueba: bool = False) -> tuple:
+                     variables: dict | None = None, es_prueba: bool = False,
+                     permitir_aviso_baja: bool = False) -> tuple:
         """Envía un mensaje. Devuelve (ok, message_id, error, estado).
 
         Si la plantilla en el sistema tiene un template Meta configurado
@@ -1129,8 +1134,8 @@ class WhatsAppService:
         valores reales del paciente; en caso contrario, texto libre.
         """
         self.ultimo_estado_meta = None
-        if esta_suprimido(telefono):
-            return False, None, "Número suprimido por solicitud del paciente", "failed"
+        if esta_bloqueado_para_envio(telefono, permitir_aviso_baja=permitir_aviso_baja):
+            return False, None, "Paciente excluido por su preferencia de contacto", "failed"
         autorizado, problema = await self._validar_canal_antes_envio()
         if not autorizado:
             return False, None, problema, "failed"
@@ -1191,8 +1196,8 @@ class WhatsAppService:
         else:
             payload_, _ = self.construir_payload_texto(telefono, mensaje)
 
-        if esta_suprimido(telefono):
-            return False, None, "Número suprimido por solicitud del paciente", "failed"
+        if esta_bloqueado_para_envio(telefono, permitir_aviso_baja=permitir_aviso_baja):
+            return False, None, "Paciente excluido por su preferencia de contacto", "failed"
         try:
             data = await self.cliente.enviar(payload_)
         except ErrorWhatsApp as e:
@@ -1438,6 +1443,12 @@ class WhatsAppService:
                 except Exception as exc:
                     log_error("al_respuesta_reagendar", exc)
             if reagendar == "gestionado":
+                if fue_baja:
+                    # El flujo de reagendamiento ya registró su interacción;
+                    # sincroniza también la huella global y las otras bases.
+                    self._registrar_baja(telefono, aviso=False)
+                    hubo_baja = True
+                    acciones.append("baja_global")
                 info = self._registrar_respuesta(telefono, cuerpo, mensaje.get("timestamp"),
                                                  mensaje_id=mensaje.get("id"),
                                                  referencia_meta_id=(mensaje.get("context") or {}).get("id"))
@@ -1795,6 +1806,8 @@ class WhatsAppService:
 
     def _estaba_opt_out(self, telefono: str) -> bool:
         try:
+            if esta_de_baja(telefono) or eliminacion_simulada_activa(telefono):
+                return True
             with conectar() as conn, conn.cursor() as cur:
                 pacientes = self._pacientes_con_tel(cur, telefono)
                 if any(p.get("whatsapp_opt_out") for p in pacientes):
@@ -1805,7 +1818,8 @@ class WhatsAppService:
                 return bool(cur.fetchone())
         except Exception as e:
             log_error(f"_estaba_opt_out({telefono})", e)
-            return False
+            # Un fallo al leer las preferencias no debe reactivar ni contactar.
+            return True
 
     def _ultima_plantilla_ofertada(self, cur, paciente_id, tabla=None) -> str | None:
         """Clave de la última plantilla normal (no de sistema) que se le envió
@@ -1941,16 +1955,27 @@ class WhatsAppService:
         match = _TEL_MATCH.format(col="telefono")
         try:
             from paciente_reagendar import marcar_opt_out_reagendar
-            marcar_opt_out_reagendar(telefono, True)
             with conectar() as conn, conn.cursor() as cur:
-                pacientes = self._pacientes_con_tel(cur, telefono)
-                if not pacientes:
+                huella, huella_activa = bloquear_huella_baja(cur, telefono)
+                huellas_temporales = [] if huella_activa else [huella]
+                cur.execute("SELECT estado FROM supresion_telefonos"
+                            " WHERE huella=%s FOR UPDATE", (huella,))
+                supresion = cur.fetchone()
+                if supresion and supresion.get("estado") != "exento":
+                    limpiar_cerrojos_baja_inactivos(cur, huellas_temporales)
+                    conn.commit()
                     return
+                marcar_opt_out_reagendar(telefono, True, cur=cur)
+                pacientes = self._pacientes_con_tel(cur, telefono)
                 # Si ya estaba de baja, esto es un webhook repetido (Meta
                 # garantiza entrega "al menos una vez", no exactamente una) o
                 # una baja repetida — no es una baja nueva, así que por defecto
                 # no se reenvía el aviso de despedida.
-                ya_de_baja = all(p.get("whatsapp_opt_out") for p in pacientes)
+                ya_de_baja = huella_activa or bool(pacientes) and all(
+                    p.get("whatsapp_opt_out") for p in pacientes)
+                if not simulada:
+                    activar_huella_baja(cur, huella)
+                    huellas_temporales.clear()
                 if simulada:
                     # Marcador reversible, sin crear huella de supresión real.
                     # Evita que un aviso de baja encolado salga después de ELIMINAR.
@@ -1984,6 +2009,7 @@ class WhatsAppService:
                     cur.execute("DELETE FROM whatsapp_avisos_unicos"
                                 " WHERE telefono = %s AND tipo = 'reintegro'", (telefono,))
                 cur.execute("DELETE FROM campania_consultas WHERE telefono = %s", (telefono,))
+                limpiar_cerrojos_baja_inactivos(cur, huellas_temporales)
                 conn.commit()
         except Exception as e:
             log_error(f"_registrar_baja({telefono})", e)
@@ -2007,15 +2033,31 @@ class WhatsAppService:
         match = _TEL_MATCH.format(col="telefono")
         try:
             from paciente_reagendar import marcar_opt_out_reagendar
-            marcar_opt_out_reagendar(telefono, False)
             with conectar() as conn, conn.cursor() as cur:
-                pacientes = self._pacientes_con_tel(cur, telefono)
-                if not pacientes:
+                huella, huella_activa = bloquear_huella_baja(cur, telefono)
+                huellas_temporales = [] if huella_activa else [huella]
+                cur.execute("SELECT estado FROM supresion_telefonos"
+                            " WHERE huella=%s FOR UPDATE", (huella,))
+                supresion = cur.fetchone()
+                if supresion and supresion.get("estado") != "exento":
+                    limpiar_cerrojos_baja_inactivos(cur, huellas_temporales)
+                    conn.commit()
                     return
+                marcar_opt_out_reagendar(telefono, False, cur=cur)
+                pacientes = self._pacientes_con_tel(cur, telefono)
                 # Igual que en _registrar_baja: si nadie estaba de baja, esto
                 # es un webhook repetido o un segundo mensaje del mismo
                 # paciente — no hay nada que reactivar ni aviso que reenviar.
-                nadie_de_baja = not any(p.get("whatsapp_opt_out") for p in pacientes)
+                nadie_de_baja = not huella_activa and not any(
+                    p.get("whatsapp_opt_out") for p in pacientes)
+                cur.execute("SELECT 1 FROM whatsapp_avisos_unicos"
+                            " WHERE telefono=%s AND tipo='eliminacion_simulada' LIMIT 1",
+                            (telefono,))
+                simulacion_activa = cur.fetchone() is not None
+                nadie_de_baja = nadie_de_baja and not simulacion_activa
+                # Solo se retira la baja reversible. La supresión permanente
+                # vive separada y se validó arriba antes de tocarla.
+                retirar_huella_baja(cur, huella)
                 for p in pacientes:
                     cur.execute(f"UPDATE {p['tabla']} SET whatsapp_opt_out = 0 WHERE {match}", (telefono,))
                     try:
@@ -2041,6 +2083,7 @@ class WhatsAppService:
                                 " WHERE telefono = %s AND tipo IN"
                                 " ('baja_prueba', 'eliminacion_simulada')", (telefono,))
                 cur.execute("DELETE FROM campania_consultas WHERE telefono = %s", (telefono,))
+                limpiar_cerrojos_baja_inactivos(cur, huellas_temporales)
                 conn.commit()
         except Exception as e:
             log_error(f"_registrar_retractacion({telefono})", e)
@@ -2064,10 +2107,27 @@ class WhatsAppService:
         para volver a poder mandarle plantillas al cabo de una semana."""
         match = _TEL_MATCH.format(col="telefono")
         try:
+            from paciente_reagendar import marcar_opt_out_reagendar
             with conectar() as conn, conn.cursor() as cur:
+                huella, huella_activa = bloquear_huella_baja(cur, telefono)
+                huellas_temporales = [] if huella_activa else [huella]
+                cur.execute("SELECT estado FROM supresion_telefonos"
+                            " WHERE huella=%s FOR UPDATE", (huella,))
+                supresion = cur.fetchone()
+                if supresion and supresion.get("estado") != "exento":
+                    limpiar_cerrojos_baja_inactivos(cur, huellas_temporales)
+                    conn.commit()
+                    return
+                marcar_opt_out_reagendar(telefono, False, cur=cur)
                 pacientes = self._pacientes_con_tel(cur, telefono)
                 if not pacientes:
+                    if huella_activa:
+                        retirar_huella_baja(cur, huella)
+                    limpiar_cerrojos_baja_inactivos(cur, huellas_temporales)
+                    conn.commit()
                     return
+                if huella_activa:
+                    retirar_huella_baja(cur, huella)
                 for p in pacientes:
                     clave_oferta = self._ultima_plantilla_ofertada(cur, p["id"], p["tabla"])
                     venia_de_baja = bool(p.get("whatsapp_opt_out"))
@@ -2113,6 +2173,7 @@ class WhatsAppService:
                      esp0["id"] if esp0 else None, p0["tabla"] if esp0 else None),
                 )
                 cur.execute("DELETE FROM campania_consultas WHERE telefono = %s", (telefono,))
+                limpiar_cerrojos_baja_inactivos(cur, huellas_temporales)
                 conn.commit()
         except Exception as e:
             log_error(f"_registrar_interes({telefono})", e)

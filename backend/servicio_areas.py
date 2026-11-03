@@ -852,7 +852,8 @@ def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int,
         if (telefono := normalizar_telefono(_limpiar_celda_csv(fila.get(elegidas["telefono"]))))
     }
 
-    from supresion import huella_telefono
+    from supresion import (activar_huella_baja, bloquear_huella_baja,
+                           limpiar_cerrojos_baja_inactivos, huella_telefono)
 
     with conectar() as conn, conn.cursor() as cur:
         cur.execute("SELECT huella FROM supresion_telefonos WHERE estado <> 'exento'")
@@ -868,10 +869,12 @@ def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int,
         propagados = 0
         omitidos = 0
         omitidos_eliminados = 0
+        omitidos_baja = 0
         errores: list[dict] = []
         bases: dict[str, int] = {}
         vistos_archivo: set[str] = set()
         accesos_pendientes: list[tuple[str, int, int]] = []
+        huellas_baja_inactivas: list[str] = []
         for nro, fila in filas_csv:
             nombre = normalizar_texto(_limpiar_celda_csv(fila.get(elegidas["nombre"])))
             apellido = normalizar_texto(_limpiar_celda_csv(fila.get(elegidas["apellido"]))) if elegidas.get("apellido") else ""
@@ -888,13 +891,6 @@ def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int,
                                 "motivo": f"Formato de teléfono inválido: '{telefono_crudo}'"})
                 continue
             huella = huella_telefono(telefono)
-            # Lectura actual y bloqueo InnoDB: si ELIMINAR concurre con el
-            # CSV, una de las dos transacciones espera y gana la supresión.
-            if huella not in huellas_bloqueadas:
-                cur.execute("SELECT 1 FROM supresion_telefonos"
-                            " WHERE huella = %s AND estado <> 'exento' FOR UPDATE", (huella,))
-                if cur.fetchone():
-                    huellas_bloqueadas.add(huella)
             if huella in huellas_bloqueadas:
                 omitidos_eliminados += 1
                 continue
@@ -937,6 +933,26 @@ def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int,
                 duplicados += 1
                 continue
 
+            # El cerrojo por huella serializa esta fila frente a una baja o
+            # reincorporación concurrente, incluso si ya no queda ficha.
+            huella_baja, baja_registrada = bloquear_huella_baja(cur, telefono)
+            if not baja_registrada:
+                huellas_baja_inactivas.append(huella_baja)
+            # El mismo orden de bloqueo se usa en bajas, supresiones e
+            # importaciones: primero la huella y luego la marca permanente.
+            cur.execute("SELECT 1 FROM supresion_telefonos"
+                        " WHERE huella=%s AND estado <> 'exento' FOR UPDATE", (huella,))
+            if cur.fetchone():
+                omitidos_eliminados += 1
+                continue
+            cur.execute("SELECT 1 FROM whatsapp_avisos_unicos"
+                        " WHERE telefono=%s AND tipo='eliminacion_simulada' LIMIT 1",
+                        (telefono,))
+            eliminacion_simulada = cur.fetchone() is not None
+            if baja_registrada or eliminacion_simulada:
+                omitidos_baja += 1
+                continue
+
             ids_objetivo = existentes.get(telefono, [])
             # Si otra copia ya está de baja, esa copia es la fuente de verdad:
             # una baja manual se replica sin candado y una baja explícita se
@@ -956,6 +972,13 @@ def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int,
                 if candado_ids and respuesta != "baja":
                     omitidos += candado_ids
                 respuesta_aplicar = "baja"
+                # Compatibilidad con bajas manuales o históricas que aún no
+                # tengan una huella activa: desde ahora también quedan vetadas
+                # para cargas posteriores.
+                activar_huella_baja(cur, huella_baja)
+                huellas_baja_inactivas.remove(huella_baja)
+                omitidos_baja += 1
+                continue
 
             if ids_objetivo:
                 cambios_atencion = []
@@ -974,10 +997,20 @@ def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int,
                 cambio_estado = aplicar_en_tabla(cur, tabla, ids_objetivo,
                                                  respuesta_aplicar, estado,
                                                  candado=candado_aplicar)
+                if respuesta_aplicar == "baja":
+                    activar_huella_baja(cur, huella_baja)
+                    huellas_baja_inactivas.remove(huella_baja)
                 if cambios_atencion or cambio_estado:
                     actualizados += len(ids_objetivo)
                 duplicados += 1
             else:
+                if respuesta == "baja":
+                    # No se crea una ficha nueva para un paciente que ya llega
+                    # marcado de baja desde el CSV.
+                    activar_huella_baja(cur, huella_baja)
+                    huellas_baja_inactivas.remove(huella_baja)
+                    omitidos_baja += 1
+                    continue
                 cur.execute(
                     f"INSERT INTO {tabla} (nombre, apellido, telefono, estado,"
                     " whatsapp_opt_out, interesado, opt_out_explicito,"
@@ -1012,6 +1045,7 @@ def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int,
             )
             for inicio in range(0, len(accesos_pendientes), 500):
                 cur.executemany(sentencia_accesos, accesos_pendientes[inicio:inicio + 500])
+        limpiar_cerrojos_baja_inactivos(cur, huellas_baja_inactivas)
         conn.commit()
 
     detalle = [{"tabla": t, "nombre": nombre_de_tabla(t), "actualizados": n}
@@ -1020,6 +1054,7 @@ def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int,
             "duplicados": duplicados, "actualizados": actualizados,
             "propagados": propagados, "omitidos_candado": omitidos,
             "omitidos_eliminados": omitidos_eliminados,
+            "omitidos_baja": omitidos_baja,
             "bases": detalle,
             "rechazados": len(errores), "errores": errores}
 
