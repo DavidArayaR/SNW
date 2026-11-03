@@ -18,16 +18,24 @@ necesario. El módulo no llama a WhatsApp, CRM o reagendamientos.
 
 En **Pacientes Reservo**, el usuario elige clínica y fechas y pulsa
 **Consultar tratamientos**. SNW obtiene las páginas de citas de ese rango y
-devuelve solo los nombres de los tratamientos y sus UUID internos, sin datos de
-pacientes. Se pueden elegir varios; la pantalla muestra los nombres, no los
-UUID. La sincronización guarda solo citas cuyo `estado.codigo` coincide con el
+devuelve al navegador solo los nombres de los tratamientos y sus UUID internos.
+Por 30 minutos conserva en la base de datos una versión mínima de las citas para
+que **Iniciar consulta** use esas páginas sin volver a descargarlas. Solo se
+conservan los datos de paciente necesarios en citas con estado «Atendido»
+verificado; se excluyen correo, dirección y otros datos de la cita. Si empieza
+un trabajo, sus páginas se mantienen hasta un día para que no desaparezcan
+durante el procesamiento. Si la caché
+vence, está incompleta o cambia la configuración, SNW consulta Reservo otra vez.
+Se pueden elegir varios tratamientos; la pantalla muestra los nombres, no los
+UUID. La tabla se filtra por la consulta recién iniciada y ofrece «Mostrar todos».
+La sincronización guarda solo citas cuyo `estado.codigo` coincide con el
 código «Atendido» verificado para esa clínica y cuyos tratamientos fueron
 seleccionados. **Probar conexión** muestra estados y nombres observados; el
 administrador confirma el código real en Configuración → Integraciones. Una
 cita confirmada o pagada no se interpreta como atendida.
 
 Las consultas usan `fecha_inicial`, `fecha_final` y `pagina`; el rango se parte
-en tramos inclusivos de hasta 31 días y se sigue `pagina_siguiente` hasta
+en tramos inclusivos de hasta 7 días y se sigue `pagina_siguiente` hasta
 completar `resultados`. La conexión usa `Authorization: Token <token>`. Los
 errores de una página intermedia dejan el trabajo como error, conservan los
 resultados ya guardados y permiten reintentar el rango completo de forma
@@ -50,9 +58,7 @@ La persistencia aislada usa `reservo_pacientes`,
 extraen `cliente.nombre`, `cliente.apellido_paterno` y `cliente.telefono_1`; el
 UUID de cliente y los UUID de tratamientos se conservan internamente solo para
 deduplicar y relacionar registros. Las tablas muestran los nombres de los
-tratamientos. No se guarda correo, historial médico, diagnósticos ni datos de
-la cita cuya estructura de fecha aún no está confirmada en la referencia
-interactiva.
+tratamientos. No se guarda correo, historial médico ni diagnósticos.
 
 El acceso a la configuración es de desarrollador; la consulta, sincronización y
 visualización de datos requiere administrador o desarrollador. La lectura de

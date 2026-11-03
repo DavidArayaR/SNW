@@ -16,6 +16,7 @@
     selectedCount: $("#reservoSeleccionados"), selectAll: $("#reservoSeleccionarTodos"),
     clearSelection: $("#reservoLimpiarSeleccion"),
     syncs: $("#reservoSincronizaciones"), patients: $("#reservoPacientes"), total: $("#reservoTotal"),
+    currentQuery: $("#reservoFiltroConsulta"), showAll: $("#reservoMostrarTodos"),
     clinicFilter: $("#filtroReservoClinica"), treatmentFilter: $("#filtroReservoTratamiento"),
     fromFilter: $("#filtroReservoDesde"), toFilter: $("#filtroReservoHasta"), search: $("#filtroReservoBuscar"),
     pageSize: $("#reservoPorPagina"), page: $("#reservoPaginaIr"), pageInfo: $("#reservoPaginaInfo"),
@@ -23,6 +24,7 @@
   let clinics = [];
   let page = 1;
   let pages = 1;
+  let selectedSyncId = null;
   let pollTimer = null;
   let searchTimer = null;
   let confirmacionActiva = null;
@@ -279,6 +281,7 @@
 
   function parametrosPacientes() {
     const params = new URLSearchParams({ pagina: String(page), por_pagina: ui.pageSize.value });
+    if (selectedSyncId) params.set("sincronizacion_id", String(selectedSyncId));
     if (ui.clinicFilter.value) params.set("clinica", ui.clinicFilter.value);
     if (ui.treatmentFilter.value.trim()) params.set("tratamiento", ui.treatmentFilter.value.trim());
     if (ui.fromFilter.value) params.set("desde", ui.fromFilter.value);
@@ -301,7 +304,10 @@
       ["reservoPrimera", "reservoAnterior"].forEach((id) => { $(`#${id}`).disabled = page <= 1; });
       ["reservoSiguiente", "reservoUltima"].forEach((id) => { $(`#${id}`).disabled = page >= pages; });
       if (!(data.items || []).length) {
-        ui.patients.innerHTML = '<tr><td colspan="7" class="reservo-vacio">No hay pacientes para estos filtros.</td></tr>';
+        const mensaje = selectedSyncId && ui.syncs.querySelector(".reservo-estado--proceso")
+          ? "La consulta está en curso. Los pacientes aparecerán aquí conforme se procesen los tramos."
+          : "No hay pacientes para estos filtros.";
+        ui.patients.innerHTML = `<tr><td colspan="7" class="reservo-vacio">${mensaje}</td></tr>`;
         return;
       }
       ui.patients.innerHTML = data.items.map((item) =>
@@ -350,19 +356,34 @@
     evento.preventDefault();
     ui.start.disabled = true;
     try {
-      await request("api/reservo/sincronizaciones", {
+      const trabajo = await request("api/reservo/sincronizaciones", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ clinica_codigo: ui.clinic.value, fecha_desde: ui.from.value,
           fecha_hasta: ui.to.value, tratamientos: tratamientosSeleccionados() }),
       });
-      mostrarAviso("Consulta iniciada. El progreso se actualizará aquí; no se enviará ningún WhatsApp.", "success");
+      selectedSyncId = Number(trabajo.id) || null;
+      ui.currentQuery.hidden = !selectedSyncId;
+      ui.clinicFilter.value = "";
+      ui.treatmentFilter.value = "";
+      ui.fromFilter.value = "";
+      ui.toFilter.value = "";
+      ui.search.value = "";
+      page = 1;
       await cargarSincronizaciones();
+      await cargarPacientes();
+      mostrarAviso("Consulta iniciada. El progreso se actualizará aquí; no se enviará ningún WhatsApp.", "success");
       iniciarSondeo();
     } catch (error) {
       mostrarAviso(error.message, "error");
     } finally {
       actualizarClinica();
     }
+  });
+  ui.showAll.addEventListener("click", () => {
+    selectedSyncId = null;
+    ui.currentQuery.hidden = true;
+    page = 1;
+    cargarPacientes();
   });
   $("#btnActualizarReservo").addEventListener("click", async () => {
     try { await Promise.all([cargarConfiguracion(), cargarSincronizaciones(), cargarPacientes()]); }

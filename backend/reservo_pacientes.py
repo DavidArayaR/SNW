@@ -16,6 +16,7 @@ import unicodedata
 from urllib.parse import parse_qs, urlparse
 
 import httpx
+import pymysql
 
 from reservo_catalogo import (
     RESERVO_CLINICAS, clave_estado_atendido, clave_estado_verificado,
@@ -68,20 +69,123 @@ def obtener_tratamientos_cache(codigo: str, desde: dt.date, hasta: dt.date,
 
 
 def guardar_tratamientos_cache(codigo: str, desde: dt.date, hasta: dt.date,
-                               token: str, items: list[dict], minutos: int) -> None:
+                               token: str, items: list[dict], minutos: int,
+                               paginas: int = 0, estado_atendido: str = "") -> None:
     from db import conectar
     with conectar() as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM reservo_tratamientos_cache WHERE expira_en<=UTC_TIMESTAMP()")
         cur.execute(
             "INSERT INTO reservo_tratamientos_cache"
-            " (clinica_codigo,fecha_desde,fecha_hasta,token_hash,tratamientos_json,expira_en)"
-            " VALUES (%s,%s,%s,%s,%s,DATE_ADD(UTC_TIMESTAMP(), INTERVAL %s MINUTE))"
+            " (clinica_codigo,fecha_desde,fecha_hasta,token_hash,tratamientos_json,expira_en,paginas,estado_atendido)"
+            " VALUES (%s,%s,%s,%s,%s,DATE_ADD(UTC_TIMESTAMP(), INTERVAL %s MINUTE),%s,%s)"
             " ON DUPLICATE KEY UPDATE tratamientos_json=VALUES(tratamientos_json),"
-            " expira_en=VALUES(expira_en)",
+            " expira_en=VALUES(expira_en),paginas=VALUES(paginas),estado_atendido=VALUES(estado_atendido)",
             (codigo, desde, hasta, _huella_token(token),
-             json.dumps(items, ensure_ascii=False), minutos),
+             json.dumps(items, ensure_ascii=False), minutos, paginas, estado_atendido),
+        )
+        if paginas:
+            cur.execute(
+                "UPDATE reservo_citas_cache SET expira_en=DATE_ADD(UTC_TIMESTAMP(), INTERVAL %s MINUTE)"
+                " WHERE clinica_codigo=%s AND fecha_desde=%s AND fecha_hasta=%s AND token_hash=%s",
+                (minutos, codigo, desde, hasta, _huella_token(token)),
+            )
+        conn.commit()
+
+
+def _cita_para_cache(cita: object, estado_atendido: str) -> dict:
+    if not isinstance(cita, dict):
+        return {}
+    estado = codigo_estado(cita)
+    resultado = {"estado": {"codigo": estado}, "tratamientos": tratamientos_cita(cita)}
+    if estado_atendido and estado == estado_atendido:
+        cliente = cliente_valido(cita)
+        if cliente:
+            resultado["cliente"] = {
+                "uuid": cliente["uuid"],
+                "nombre": texto_cliente(cliente, "nombre", 200),
+                "apellido_paterno": (texto_cliente(cliente, "apellido_paterno", 200)
+                                     or texto_cliente(cliente, "apellidos", 200)
+                                     or texto_cliente(cliente, "apellido", 200)),
+                "telefono_1": telefono_cliente(cliente),
+            }
+    return resultado
+
+
+def preparar_cache_citas(codigo: str, desde: dt.date, hasta: dt.date, token: str) -> bool:
+    from db import conectar
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("SELECT id FROM reservo_sincronizaciones WHERE clinica_codigo=%s"
+                    " AND fecha_desde=%s AND fecha_hasta=%s"
+                    " AND estado IN ('pendiente','ejecutando') LIMIT 1",
+                    (codigo, desde, hasta))
+        if cur.fetchone():
+            return False
+        cur.execute("DELETE FROM reservo_citas_cache WHERE expira_en<=UTC_TIMESTAMP()")
+        cur.execute("DELETE FROM reservo_citas_cache WHERE clinica_codigo=%s"
+                    " AND fecha_desde=%s AND fecha_hasta=%s AND token_hash=%s",
+                    (codigo, desde, hasta, _huella_token(token)))
+        conn.commit()
+    return True
+
+
+def guardar_pagina_citas_cache(codigo: str, desde: dt.date, hasta: dt.date,
+                               token: str, numero: int, tramo_desde: dt.date,
+                               tramo_hasta: dt.date, pagina: int, citas: list,
+                               estado_atendido: str) -> None:
+    from db import conectar
+    minimo = [_cita_para_cache(cita, estado_atendido) for cita in citas]
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO reservo_citas_cache"
+            " (clinica_codigo,fecha_desde,fecha_hasta,token_hash,numero,tramo_desde,tramo_hasta,pagina,citas_json,expira_en)"
+            " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY))",
+            (codigo, desde, hasta, _huella_token(token), numero, tramo_desde,
+             tramo_hasta, pagina, json.dumps(minimo, ensure_ascii=False)),
         )
         conn.commit()
+
+
+def paginas_citas_cache(codigo: str, desde: dt.date, hasta: dt.date,
+                        token: str, estado_atendido: str, *, reservar: bool = False) -> int:
+    from db import conectar
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT c.paginas,COUNT(p.numero) AS disponibles"
+            " FROM reservo_tratamientos_cache c LEFT JOIN reservo_citas_cache p"
+            " ON p.clinica_codigo=c.clinica_codigo AND p.fecha_desde=c.fecha_desde"
+            " AND p.fecha_hasta=c.fecha_hasta AND p.token_hash=c.token_hash"
+            " AND p.expira_en>UTC_TIMESTAMP()"
+            " WHERE c.clinica_codigo=%s AND c.fecha_desde=%s AND c.fecha_hasta=%s"
+            " AND c.token_hash=%s AND c.estado_atendido=%s"
+            " AND c.expira_en>UTC_TIMESTAMP() GROUP BY c.paginas",
+            (codigo, desde, hasta, _huella_token(token), estado_atendido),
+        )
+        fila = cur.fetchone()
+        if fila and int(fila["paginas"] or 0) > 0 and int(fila["disponibles"]) == int(fila["paginas"]):
+            if reservar:
+                cur.execute("UPDATE reservo_citas_cache SET expira_en=DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY)"
+                            " WHERE clinica_codigo=%s AND fecha_desde=%s AND fecha_hasta=%s"
+                            " AND token_hash=%s AND expira_en>UTC_TIMESTAMP()",
+                            (codigo, desde, hasta, _huella_token(token)))
+                conn.commit()
+            return int(fila["paginas"])
+    return 0
+
+
+def iterar_citas_cache(codigo: str, desde: dt.date, hasta: dt.date, token: str,
+                      tramo_desde: dt.date, tramo_hasta: dt.date):
+    from db import conectar
+    with conectar() as conn, conn.cursor(pymysql.cursors.SSDictCursor) as cur:
+        cur.execute(
+            "SELECT tramo_desde,tramo_hasta,pagina,citas_json FROM reservo_citas_cache"
+            " WHERE clinica_codigo=%s AND fecha_desde=%s AND fecha_hasta=%s"
+            " AND token_hash=%s AND tramo_desde=%s AND tramo_hasta=%s"
+            " AND expira_en>UTC_TIMESTAMP() ORDER BY numero",
+            (codigo, desde, hasta, _huella_token(token), tramo_desde, tramo_hasta),
+        )
+        for fila in cur:
+            yield (fila["tramo_desde"], fila["tramo_hasta"], fila["pagina"],
+                   json.loads(fila["citas_json"]))
 
 
 def validar_uuid(valor: str) -> str:
@@ -343,11 +447,13 @@ class ClienteReservo:
                 yield inicio, fin, pagina, datos["resultados"]
                 pagina = self._pagina_siguiente(datos.get("pagina_siguiente"), pagina)
 
-    def listar_tratamientos(self, desde: dt.date, hasta: dt.date) -> list[dict]:
+    def listar_tratamientos(self, desde: dt.date, hasta: dt.date, *, al_recibir_pagina=None) -> list[dict]:
         """Consulta citas y devuelve solo el catálogo de tratamientos observado."""
         encontrados = {}
         for _inicio, _fin, _pagina, citas in self.iterar_citas(
                 desde, hasta, dias_por_tramo=DIAS_TRAMO_TRATAMIENTOS):
+            if al_recibir_pagina:
+                al_recibir_pagina(_inicio, _fin, _pagina, citas)
             for cita in citas:
                 if not isinstance(cita, dict):
                     continue
@@ -386,7 +492,7 @@ def preparar_sincronizacion(codigo: str, desde: dt.date, hasta: dt.date,
     estado_code = str(config.get(clave_estado_atendido(codigo)) or "").strip()
     if not estado_code or str(config.get(clave_estado_verificado(codigo)) or "").lower() not in ("true", "1", "si", "sí"):
         raise ValueError("Antes de sincronizar, verifica el código «Atendido» en una cita real y confírmalo en Configuración → Integraciones.")
-    bloques = dividir_periodo(desde, hasta)
+    bloques = dividir_periodo(desde, hasta, dias_por_tramo=DIAS_TRAMO_TRATAMIENTOS)
     return {"clinica_codigo": codigo, "clinica_nombre": RESERVO_CLINICAS[codigo],
             "token": token, "estado_atendido_codigo": estado_code, "bloques": bloques}
 
@@ -627,13 +733,24 @@ def _procesar(job: dict) -> None:
             raise ReservoError("La sincronización no conserva tratamientos válidos.")
         paginas = recibidas = atendidas = coincidencias = nuevos = actualizados = descartados = duplicados = 0
         vistos = set()
-        client = ClienteReservo(preparada["token"])
+        try:
+            usar_cache = bool(paginas_citas_cache(
+                codigo, job["fecha_desde"], job["fecha_hasta"], preparada["token"],
+                estado_atendido, reservar=True))
+        except Exception as exc:
+            log_error("leer páginas de citas Reservo", exc, solo_tipo=True)
+            usar_cache = False
+        client = None if usar_cache else ClienteReservo(preparada["token"])
         try:
             bloques = preparada["bloques"]
             _actualizar_progreso(job["id"], iniciado_en=dt.datetime.utcnow())
             for indice_bloque, (desde, hasta) in enumerate(bloques, start=1):
                 paginas_bloque = set()
-                for _inicio, _fin, pagina, citas in client.iterar_citas(desde, hasta):
+                citas_del_bloque = (
+                    iterar_citas_cache(codigo, job["fecha_desde"], job["fecha_hasta"],
+                                      preparada["token"], desde, hasta)
+                    if usar_cache else client.iterar_citas(desde, hasta))
+                for _inicio, _fin, pagina, citas in citas_del_bloque:
                     if pagina in paginas_bloque:
                         raise ReservoError("Reservo repitió una página durante la sincronización.")
                     paginas_bloque.add(pagina)
@@ -676,9 +793,12 @@ def _procesar(job: dict) -> None:
                         })
                     nuevos += nuevos_pagina
                     actualizados += actualizados_pagina
+                if usar_cache and not paginas_bloque:
+                    raise ReservoError("La caché de citas quedó incompleta; vuelve a consultar los tratamientos.")
                 _actualizar_progreso(job["id"], periodos_completados=indice_bloque)
         finally:
-            client.close()
+            if client:
+                client.close()
         _actualizar_progreso(job["id"], estado="completado_con_advertencias" if descartados else "completado",
                              terminado_en=dt.datetime.utcnow(), errores=descartados,
                              pacientes_descartados=descartados)
@@ -856,8 +976,29 @@ def configurar_tablas(cur):
         " fecha_desde DATE NOT NULL,fecha_hasta DATE NOT NULL,"
         " token_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,"
         " tratamientos_json LONGTEXT NOT NULL,expira_en DATETIME NOT NULL,"
+        " paginas INT UNSIGNED NOT NULL DEFAULT 0,estado_atendido VARCHAR(80) NOT NULL DEFAULT '',"
         " PRIMARY KEY (clinica_codigo,fecha_desde,fecha_hasta,token_hash),"
         " KEY idx_reservo_tratamientos_expira (expira_en)"
+        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    )
+    cur.execute("SELECT COLUMN_NAME FROM information_schema.COLUMNS"
+                " WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='reservo_tratamientos_cache'")
+    columnas_cache = {fila["COLUMN_NAME"] for fila in cur.fetchall()}
+    if "paginas" not in columnas_cache:
+        cur.execute("ALTER TABLE reservo_tratamientos_cache ADD COLUMN paginas"
+                    " INT UNSIGNED NOT NULL DEFAULT 0")
+    if "estado_atendido" not in columnas_cache:
+        cur.execute("ALTER TABLE reservo_tratamientos_cache ADD COLUMN estado_atendido"
+                    " VARCHAR(80) NOT NULL DEFAULT ''")
+    cur.execute(
+        "CREATE TABLE IF NOT EXISTS reservo_citas_cache ("
+        " clinica_codigo VARCHAR(8) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,"
+        " fecha_desde DATE NOT NULL,fecha_hasta DATE NOT NULL,"
+        " token_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,"
+        " numero INT UNSIGNED NOT NULL,tramo_desde DATE NOT NULL,tramo_hasta DATE NOT NULL,"
+        " pagina INT UNSIGNED NOT NULL,citas_json LONGTEXT NOT NULL,expira_en DATETIME NOT NULL,"
+        " KEY idx_reservo_citas_cache_expira (expira_en),"
+        " PRIMARY KEY (clinica_codigo,fecha_desde,fecha_hasta,token_hash,numero)"
         ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     )
     cur.execute(

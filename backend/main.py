@@ -5443,9 +5443,15 @@ def listar_tratamientos_reservo(body: ReservoBuscarTratamientosIn,
         raise HTTPException(409, detail="Configura el token API de esta clínica en Configuración → Integraciones.")
     cliente = None
     try:
+        estado_atendido = (str(config.get(clave_estado_atendido_reservo(body.clinica_codigo)) or "").strip()
+                            if str(config.get(clave_estado_verificado_reservo(body.clinica_codigo)) or "").lower()
+                            in ("true", "1", "si", "sí") else "")
         try:
             tratamientos = reservo_pacientes.obtener_tratamientos_cache(
                 body.clinica_codigo, desde, hasta, token)
+            if tratamientos is not None and not reservo_pacientes.paginas_citas_cache(
+                    body.clinica_codigo, desde, hasta, token, estado_atendido):
+                tratamientos = None
         except Exception as exc:
             log_error("leer caché de tratamientos Reservo", exc, solo_tipo=True)
             tratamientos = None
@@ -5453,13 +5459,36 @@ def listar_tratamientos_reservo(body: ReservoBuscarTratamientosIn,
         if tratamientos is None:
             origen = "Reservo"
             cliente = reservo_pacientes.ClienteReservo(token)
-            tratamientos = cliente.listar_tratamientos(desde, hasta)
+            cache_disponible = True
             try:
-                minutos = max(1, min(1440, int(config.get("reservo_tratamientos_cache_minutos") or 30)))
-                reservo_pacientes.guardar_tratamientos_cache(
-                    body.clinica_codigo, desde, hasta, token, tratamientos, minutos)
+                cache_disponible = reservo_pacientes.preparar_cache_citas(
+                    body.clinica_codigo, desde, hasta, token)
             except Exception as exc:
-                log_error("guardar caché de tratamientos Reservo", exc, solo_tipo=True)
+                log_error("preparar caché de citas Reservo", exc, solo_tipo=True)
+                cache_disponible = False
+            paginas = 0
+
+            def conservar_pagina(tramo_desde, tramo_hasta, pagina, citas):
+                nonlocal paginas, cache_disponible
+                paginas += 1
+                if cache_disponible:
+                    try:
+                        reservo_pacientes.guardar_pagina_citas_cache(
+                            body.clinica_codigo, desde, hasta, token, paginas,
+                            tramo_desde, tramo_hasta, pagina, citas, estado_atendido)
+                    except Exception as exc:
+                        log_error("guardar página de citas Reservo", exc, solo_tipo=True)
+                        cache_disponible = False
+
+            tratamientos = cliente.listar_tratamientos(desde, hasta, al_recibir_pagina=conservar_pagina)
+            if cache_disponible:
+                try:
+                    minutos = max(1, min(1440, int(config.get("reservo_tratamientos_cache_minutos") or 30)))
+                    reservo_pacientes.guardar_tratamientos_cache(
+                        body.clinica_codigo, desde, hasta, token, tratamientos, minutos,
+                        paginas, estado_atendido)
+                except Exception as exc:
+                    log_error("guardar caché de tratamientos Reservo", exc, solo_tipo=True)
         auditoria_registrar(sesion.get("usuario", ""), "reservo_tratamientos_consultados",
                             body.clinica_codigo,
                             f"Rango {desde} a {hasta}; {len(tratamientos)} nombres de tratamiento;"
@@ -5543,6 +5572,7 @@ def deshacer_sincronizacion_reservo(job_id: int, sesion: dict = Depends(solo_adm
 def listar_pacientes_reservo(
         clinica: str | None = Query(None, max_length=8),
         tratamiento: str | None = Query(None, max_length=200),
+        sincronizacion_id: int | None = Query(None, ge=1),
         desde: str | None = Query(None, min_length=10, max_length=10),
         hasta: str | None = Query(None, min_length=10, max_length=10),
         q: str | None = Query(None, max_length=100),
@@ -5566,6 +5596,10 @@ def listar_pacientes_reservo(
         condiciones.append("EXISTS (SELECT 1 FROM reservo_paciente_tratamientos t"
                            " WHERE t.paciente_id=p.id AND t.tratamiento_nombre LIKE %s)")
         parametros.append(f"%{tratamiento}%")
+    if sincronizacion_id:
+        condiciones.append("EXISTS (SELECT 1 FROM reservo_sincronizacion_pacientes s"
+                           " WHERE s.paciente_id=p.id AND s.job_id=%s)")
+        parametros.append(sincronizacion_id)
     if desde:
         condiciones.append("DATE(p.ultima_sincronizacion_en)>=%s")
         parametros.append(desde)

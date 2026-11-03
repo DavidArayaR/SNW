@@ -100,6 +100,8 @@
 .reservo-vacio { padding: 1.5rem !important; color: var(--texto-suave); text-align: center; }
 .reservo-vacio--error { color: var(--danger-fg); }
 .reservo-total { color: var(--texto-suave); font-weight: 700; }
+.reservo-filtro-actual { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: 1rem 1.5rem 0; padding: .75rem 1rem; border: 1px solid var(--borde); border-radius: .75rem; background: var(--panel-2); color: var(--texto); }
+.reservo-filtro-actual[hidden] { display: none; }
 .reservo-filtros { display: grid; grid-template-columns: repeat(4, minmax(140px, 1fr)); gap: 1rem 1.25rem; padding: 1.5rem; align-items: end; }
 .reservo-filtros .field { display: grid; gap: .5rem; margin: 0; }
 .reservo-filtros .field > span { font-weight: 650; }

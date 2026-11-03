@@ -14,7 +14,7 @@
   <link rel="stylesheet" href="css/admin.css?v=tokens1">
   <link rel="stylesheet" href="css/refinamiento.css?v=merge-frontend1">
   <link rel="stylesheet" href="css/estilo-nuevo.css?v=ui-unslop1">
-  <link rel="stylesheet" href="css/pacientes-reservo.css?v=modulo-reservo8">
+  <link rel="stylesheet" href="css/pacientes-reservo.css?v=modulo-reservo9">
   <script src="js/tema.js?v=scrollbar1"></script>
 </head>
 <body data-pagina="pacientes_reservo" data-seccion="administracion">
@@ -101,6 +101,10 @@
             <h2><i class="fa-solid fa-user-group" aria-hidden="true"></i> Pacientes obtenidos</h2>
             <span class="reservo-total" id="reservoTotal">0 pacientes</span>
           </div>
+          <div class="reservo-filtro-actual" id="reservoFiltroConsulta" hidden>
+            <span>Mostrando pacientes de la consulta recién iniciada y sus tratamientos seleccionados.</span>
+            <button class="btn btn--ghost" id="reservoMostrarTodos" type="button">Mostrar todos</button>
+          </div>
           <div class="reservo-filtros">
             <label class="field"><span>Clínica</span><select id="filtroReservoClinica"><option value="">Todas</option></select></label>
             <label class="field"><span>Tratamiento</span><input id="filtroReservoTratamiento" type="search" maxlength="200" placeholder="Nombre del tratamiento"></label>
@@ -133,7 +137,7 @@
     </div>
   </div>
   <script src="js/layout.js?v=reservo-nav2"></script>
-  <script src="js/pacientes-reservo.js?v=reservo-modulo8"></script>
+  <script src="js/pacientes-reservo.js?v=reservo-modulo9"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>
