@@ -745,6 +745,7 @@ function construirOpcionesBaseConf(forzarEspId) {
         `</optgroup>`;
     }
   }
+  if ($("#checkBasesClinicaConf")?.checked) html = "";
   if (plantilla && !esPlantillaProtegida(plantilla)) html += opcionesBasesReservo(plantilla.centro_codigo);
   sel.innerHTML = `<option value="" selected disabled>— Seleccione base de datos —</option>` + html;
   sel.value = [...sel.options].some((opcion) => opcion.value === seleccionAnterior)
@@ -1035,6 +1036,7 @@ function actualizarProgPlantilla() {
             `</optgroup>`
           : "");
     }
+    if ($("#checkBasesClinicaProg")?.checked) selBase.innerHTML = opcionInicial;
     if (p && !esHelloWorld) selBase.innerHTML += opcionesBasesReservo(p.centro_codigo);
     selBase.value = [...selBase.options].some((opcion) => opcion.value === seleccionAnterior)
       ? seleccionAnterior : "";
@@ -1075,6 +1077,7 @@ function actualizarPasosProg() {
     if (el) el.classList.toggle("prog-paso--listo", !!listo);
   }
   if (selA) selA.disabled = !paso1;
+  if ($("#checkBasesClinicaProg")) $("#checkBasesClinicaProg").disabled = !paso1 || progCreando;
   $("#selProgCentro").disabled = true;
   if (inpF) inpF.disabled = !pasoCentro;
   const btnDia = document.getElementById("btnProgDia");
@@ -2525,7 +2528,7 @@ let consultaManualConf = 0;
 
 // Solo se bloquean los controles de envío de la card: el resto (tabs, lista,
 // programar, otras bases) sigue usable para lanzar otro envío en paralelo.
-const CONTROLES_ENVIO_CONF = ["btnLanzarConf", "selBaseConf", "selCentroConf", "selLimiteModoConf", "limiteRangeConf", "limiteNumConf"];
+const CONTROLES_ENVIO_CONF = ["btnLanzarConf", "selBaseConf", "checkBasesClinicaConf", "selCentroConf", "selLimiteModoConf", "limiteRangeConf", "limiteNumConf"];
 function setBloqueoEnvioConf(bloquear) {
   envioEnCursoConf = bloquear;
   actualizarBotonPausaConf();
@@ -2637,15 +2640,6 @@ function abrirModalConf(id = tplSelId) {
   // Si la plantilla es de un área, el select ofrece solo esa base;
   // en todos los casos el usuario debe elegirla explícitamente.
   construirOpcionesBaseConf(p?.area_id ?? null);
-  if (esPlantillaProtegida(p)) {
-    // Hello World es solo una muestra: únicamente desarrollo.
-    const sel = $("#selBaseConf");
-    if (sel) {
-      sel.innerHTML = `<option value="" selected disabled>— Seleccione base de datos —</option>` +
-        (window.snwEsPrivilegiado ? `<option value="desarrollo">pacientes_dev</option>` : "");
-      sel.value = "";
-    }
-  }
   refrescarAvisoDevConf();
   refrescarAvisoAdminConf();
   actualizarResumenConf();
@@ -2720,6 +2714,14 @@ if (selBaseConfEl) selBaseConfEl.addEventListener("change", () => {
   refrescarAvisoDevConf();
   refrescarAvisoAdminConf();
   actualizarResumenConf();
+});
+
+$("#checkBasesClinicaConf")?.addEventListener("change", () => {
+  const anterior = selBaseConfEl?.value || "";
+  const plantilla = plantillas.find((p) => p.id === confPlantillaId);
+  construirOpcionesBaseConf(plantilla?.area_id ?? null);
+  if ((selBaseConfEl?.value || "") !== anterior) actualizarResumenConf();
+  actualizarPasosManual();
 });
 
 function refrescarAvisoDevConf() {
@@ -2800,6 +2802,7 @@ function actualizarPasosManual() {
   }
   const selBase = $("#selBaseConf");
   if (selBase) selBase.disabled = !listo1 || envioEnCursoConf;
+  if ($("#checkBasesClinicaConf")) $("#checkBasesClinicaConf").disabled = !listo1 || envioEnCursoConf;
   $("#selCentroConf").disabled = true;
   $("#selLimiteModoConf").disabled = !puedeElegirLimite || envioEnCursoConf;
   $("#limiteRangeConf").disabled = !puedeElegirLimite || modo !== "porcentaje" || envioEnCursoConf;
@@ -4039,6 +4042,11 @@ const selProgBaseEl = $("#selProgBase");
 if (selProgBaseEl) selProgBaseEl.addEventListener("change", () => {
   cargarCupoProg();
   actualizarPasosProg();
+});
+$("#checkBasesClinicaProg")?.addEventListener("change", () => {
+  const anterior = selProgBaseEl?.value || "";
+  actualizarProgPlantilla();
+  if ((selProgBaseEl?.value || "") !== anterior) cargarCupoProg();
 });
 const inpProgFechaEl = $("#inpProgFecha");
 if (inpProgFechaEl) inpProgFechaEl.addEventListener("input", () => {

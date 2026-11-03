@@ -14,7 +14,7 @@
   <link rel="stylesheet" href="css/calendario.css?v=base1">
   <link rel="stylesheet" href="css/calendario-programados.css?v=programados2">
   <link rel="stylesheet" href="css/refinamiento.css?v=merge-frontend1">
-  <link rel="stylesheet" href="css/mensajeria-nuevo.css?v=filtro-clinica1">
+  <link rel="stylesheet" href="css/mensajeria-nuevo.css?v=filtro-bases-clinica1">
   <link rel="stylesheet" href="css/estilo-nuevo.css?v=ui-unslop1">
   <script src="js/tema.js?v=scrollbar1"></script>
 </head>
@@ -279,6 +279,8 @@
               <div class="field">
                 <label for="selBaseConf">Base de datos</label>
                 <select id="selBaseConf"></select>
+                <label class="base-clinica-check" for="checkBasesClinicaConf"><input type="checkbox" id="checkBasesClinicaConf"><span>Mostrar solo bases de esta clínica</span></label>
+                <p class="field__hint base-clinica-ayuda">El filtro oculta las bases que no tienen clínica asignada.</p>
                 <p class="prog-disponibles-base" id="confDestinatarios">Contando pacientes...</p>
               </div>
             </div>
@@ -381,6 +383,8 @@
             <div class="field">
               <label for="selProgBase">Base de datos</label>
               <select id="selProgBase" disabled></select>
+              <label class="base-clinica-check" for="checkBasesClinicaProg"><input type="checkbox" id="checkBasesClinicaProg"><span>Mostrar solo bases de esta clínica</span></label>
+              <p class="field__hint base-clinica-ayuda">El filtro oculta las bases que no tienen clínica asignada.</p>
               <p class="prog-disponibles-base" id="progDisponiblesBase" hidden></p>
             </div>
           </div>
@@ -610,7 +614,7 @@
   <script src="js/layout.js?v=reservo-nav2"></script>
   <script src="js/pass-toggle.js"></script>
   <script src="js/plantilla-ia.js?v=sin-confirmacion1"></script>
-  <script src="js/app.js?v=selector-bases-mensajeria1"></script>
+  <script src="js/app.js?v=filtro-bases-clinica1"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>

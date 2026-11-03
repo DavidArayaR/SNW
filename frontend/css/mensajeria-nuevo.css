@@ -233,4 +233,18 @@ body[data-pagina="mensajeria"] .encabezado__opcion input[type="checkbox"] {
 }
 body[data-pagina="mensajeria"] .encabezado__opcion input:disabled,
 body[data-pagina="mensajeria"] .encabezado__opcion input:disabled + span { cursor: not-allowed; opacity: .65; }
+body[data-pagina="mensajeria"] .prog-paso .field > label.base-clinica-check {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 12px 0 3px;
+  cursor: pointer;
+}
+body[data-pagina="mensajeria"] .base-clinica-check input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--verde);
+}
+body[data-pagina="mensajeria"] .base-clinica-ayuda { margin: 0 0 8px; }
 body[data-pagina="mensajeria"] .encabezado__contenido[hidden] { display: none; }
