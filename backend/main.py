@@ -4405,10 +4405,17 @@ def _resolver_botones_crm(botones, centro):
     return resultado
 
 
-def _validar_botones_obligatorios(botones):
-    """Las plantillas editables usan la misma secuencia de tres acciones."""
-    valido = (isinstance(botones, list) and len(botones) == 3
-              and botones[0].get("tipo") == "url" and bool(botones[0].get("crm_mensaje"))
+def _validar_botones_obligatorios(botones, texto=""):
+    """Campañas y reagendamientos comparten las dos últimas acciones."""
+    reagendar = bool({"nombre_paciente", "nombre_doc"}.intersection(variables_del_cuerpo(texto)))
+    if isinstance(botones, list) and botones and isinstance(botones[0], dict):
+        reagendar = reagendar or botones[0].get("accion") == "reagendar"
+    primero = (isinstance(botones, list) and len(botones) == 3
+                and isinstance(botones[0], dict) and
+                ((botones[0].get("tipo") == "respuesta" and botones[0].get("accion") == "reagendar")
+                 if reagendar else
+                 (botones[0].get("tipo") == "url" and bool(botones[0].get("crm_mensaje")))))
+    valido = (primero and all(isinstance(b, dict) for b in botones)
               and botones[1].get("tipo") == "respuesta"
               and botones[1].get("accion") == "desinteres"
               and botones[1].get("texto") == "No me interesa"
@@ -4416,8 +4423,9 @@ def _validar_botones_obligatorios(botones):
               and botones[2].get("accion") == "baja"
               and botones[2].get("texto") == "Dar de baja")
     if not valido:
-        raise HTTPException(400, detail=("La plantilla debe tener estos tres botones en orden: "
-                            "Abrir chat del CRM, No me interesa y Dar de baja."))
+        primero_nombre = "Sí, quiero reagendar" if reagendar else "Abrir chat del CRM"
+        raise HTTPException(400, detail=(f"La plantilla debe tener estos tres botones en orden: "
+                            f"{primero_nombre}, No me interesa y Dar de baja."))
 
 
 def _exigir_revision_valida(plantilla: dict, ejemplos: dict | None = None) -> dict:
@@ -4461,7 +4469,7 @@ def previsualizar_plantilla(body: PlantillaPreviaIn,
     vista = presentar_plantilla(borrador, body.ejemplos)
     if not actual or not _es_plantilla_protegida(actual):
         try:
-            _validar_botones_obligatorios(vista["botones"])
+            _validar_botones_obligatorios(vista["botones"], borrador["texto"])
         except HTTPException as exc:
             vista["errores"].append(exc.detail)
     if not actual:
@@ -4620,7 +4628,7 @@ def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(exigir("plantillas
                                      "encabezado_texto": encabezado_texto,
                                      "pie_texto": pie_texto, "botones": _resolver_botones_crm(body.botones, body.centro)}, body.ejemplos)
 
-    _validar_botones_obligatorios(vista["botones"])
+    _validar_botones_obligatorios(vista["botones"], body.texto)
     plantillas = leer_plantillas()
     clave = slug(body.clave or body.nombre)
 
@@ -4755,7 +4763,7 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
             if "botones" in body.model_fields_set:
                 revision_borrador["botones"] = body.botones
             vista = _exigir_revision_valida(revision_borrador, body.ejemplos)
-            _validar_botones_obligatorios(vista["botones"])
+            _validar_botones_obligatorios(vista["botones"], body.texto)
             if _aprobacion_plantilla(p) != "aprobada":
                 # Pendiente/rechazada: aún no existe en Meta. Si la edita su
                 # creador y estaba rechazada, vuelve a pendiente (pide revisión

@@ -254,7 +254,7 @@ function botonesDelEditor() {
     if (tipo === "baja") return { tipo: "respuesta", texto: "Dar de baja", accion: "baja" };
     if (tipo === "interes") return { tipo: "respuesta", texto: "Me interesa", accion: "interes" };
     if (tipo === "nointeres") return { tipo: "respuesta", texto: "No me interesa", accion: "desinteres" };
-    if (tipo === "reagendar") return { tipo: "respuesta", texto: "Si quiero reagendar", accion: "reagendar" };
+    if (tipo === "reagendar") return { tipo: "respuesta", texto: fila.querySelector(".tpl-boton__texto").value.trim(), accion: "reagendar" };
     const boton = { tipo, texto: fila.querySelector(".tpl-boton__texto").value.trim() };
     if (tipo === "respuesta") {
       boton.accion = fila.querySelector(".tpl-boton__accion").value;
@@ -337,7 +337,7 @@ function agregarFilaBoton(datos = {}) {
     tipo.add(opcionExistente);
   }
   tipo.value = datos.tipo === "crm" || datos.crm_mensaje ? "crm" : datos.accion === "baja" || datos.tipo === "baja" ? "baja" :
-    (datos.tipo === "reagendar" || (datos.tipo === "respuesta" && datos.accion === "reagendar" && datos.texto === "Si quiero reagendar")
+    (datos.tipo === "reagendar" || (datos.tipo === "respuesta" && datos.accion === "reagendar" && ["Si quiero reagendar", "Sí, quiero reagendar"].includes(datos.texto))
       ? "reagendar" :
     (datos.tipo === "interes" || (datos.tipo === "respuesta" && datos.accion === "interes" && datos.texto === "Me interesa")
       ? "interes" : (datos.tipo === "nointeres" ||
@@ -351,7 +351,8 @@ function agregarFilaBoton(datos = {}) {
   for (const opcion of datos.opciones || []) agregarOpcionLista(panelOpciones, opcion);
   const sincronizarTipo = () => {
     if (["baja", "interes", "nointeres", "reagendar"].includes(tipo.value)) {
-      texto.value = { baja: "Dar de baja", interes: "Me interesa", nointeres: "No me interesa", reagendar: "Si quiero reagendar" }[tipo.value];
+      if (tipo.value !== "reagendar" || !["Si quiero reagendar", "Sí, quiero reagendar"].includes(texto.value))
+        texto.value = { baja: "Dar de baja", interes: "Me interesa", nointeres: "No me interesa", reagendar: "Sí, quiero reagendar" }[tipo.value];
       accion.value = { baja: "baja", interes: "interes", nointeres: "desinteres", reagendar: "reagendar" }[tipo.value];
     }
     texto.readOnly = ["baja", "interes", "nointeres", "reagendar"].includes(tipo.value);
@@ -373,7 +374,7 @@ function agregarFilaBoton(datos = {}) {
       telefono: "El paciente podrá llamar al número indicado.",
       interes: "Se mostrará «Me interesa» y la respuesta se marcará como interés.",
       nointeres: "Se mostrará «No me interesa» y la respuesta se marcará como desinterés.",
-      reagendar: "Se mostrará «Si quiero reagendar» y se preparará el mensaje para el CRM de la clínica cuando responda a un reagendamiento.",
+      reagendar: "Se mostrará «Sí, quiero reagendar» y se preparará el mensaje para el CRM de la clínica cuando responda a un reagendamiento.",
       baja: "Se mostrará «Dar de baja» y se solicitará la baja del paciente.",
     })[tipo.value] || "";
     tipo.dataset.tipoAnterior = tipo.value;
@@ -457,7 +458,9 @@ function establecerBotones(botones) {
 $("#btnRestablecerBotones")?.addEventListener("click", () => {
   const actual = botonesDelEditor();
   const crm = actual.find((b) => b.tipo === "crm");
-  establecerBotones([crm || BOTONES_INICIALES[0], BOTONES_INICIALES[1], BOTONES_INICIALES[2]]);
+  const reagendar = actual.find((b) => b.accion === "reagendar") ||
+    (/\{(?:nombre_paciente|nombre_doc)\}/.test(inpMensaje.value) ? { tipo: "reagendar", texto: "Sí, quiero reagendar", accion: "reagendar" } : null);
+  establecerBotones([reagendar || crm || BOTONES_INICIALES[0], BOTONES_INICIALES[1], BOTONES_INICIALES[2]]);
   refrescarEditor();
 });
 
@@ -4558,9 +4561,9 @@ Promise.all([cargaInicialCentrosEmisores, cargaInicialPlantillas]).then(() => {
   modoNueva();
   inpCentroPlantilla.value = codigo;
   inpNombre.value = `Reagendamiento ${centro.nombre}`;
-  inpMensaje.value = "¡Hola, {nombre_paciente}! 😊\n\nEsperamos que se encuentre bien. Queremos saber cómo le fue en su atención reciente con {nombre_doc} y si le indicaron un nuevo control.\n\nSi desea que le ayudemos a coordinar su próxima cita, pulse «Si quiero reagendar». Le enviaremos un botón para abrir el chat de atención de su clínica con un mensaje preparado para que lo envíe allí. 💚\n\nSi por ahora no necesita agendar, puede elegir «No me interesa». Si no desea recibir más notificaciones, elija «Dar de baja».";
+  inpMensaje.value = "¡Hola, {nombre_paciente}! 😊\n\nEsperamos que se encuentre bien. Queremos saber cómo le fue en su atención reciente con {nombre_doc} y si le indicaron un nuevo control.\n\nSi desea que le ayudemos a coordinar su próxima cita, pulse «Sí, quiero reagendar». Le enviaremos un botón para abrir el chat de atención de su clínica con un mensaje preparado para que lo envíe allí. 💚\n\nSi por ahora no necesita agendar, puede elegir «No me interesa». Si no desea recibir más notificaciones, elija «Dar de baja».";
   establecerBotones([
-    { tipo: "respuesta", texto: "Si quiero reagendar", accion: "reagendar" },
+    { tipo: "respuesta", texto: "Sí, quiero reagendar", accion: "reagendar" },
     { tipo: "respuesta", texto: "No me interesa", accion: "desinteres" },
     { tipo: "respuesta", texto: "Dar de baja", accion: "baja" },
   ]);

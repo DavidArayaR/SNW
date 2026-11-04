@@ -39,6 +39,28 @@ class BotonCrmPlantillaTest(unittest.TestCase):
             with self.assertRaises(HTTPException):
                 main._validar_botones_obligatorios(botones)
 
+    def test_botones_reagendamiento_conservan_mensaje_preparado(self):
+        from paciente_reagendar import es_aceptacion_reagendar, mensaje_preparado_reagendar
+        botones = [
+            {'tipo': 'respuesta', 'texto': 'Sí, quiero reagendar', 'accion': 'reagendar'},
+            {'tipo': 'respuesta', 'texto': 'No me interesa', 'accion': 'desinteres'},
+            {'tipo': 'respuesta', 'texto': 'Dar de baja', 'accion': 'baja'},
+        ]
+        vista = presentar_plantilla({'texto': 'Hola {nombre_paciente} con {nombre_doc}', 'botones': botones})
+        self.assertFalse(vista['errores'])
+        main._validar_botones_obligatorios(vista['botones'], 'Hola {nombre_paciente}')
+        self.assertTrue(es_aceptacion_reagendar(botones[0]['texto']))
+        self.assertEqual(mensaje_preparado_reagendar({'paciente_nombre': 'Ana Pérez',
+            'doctor_nombre': 'Dra. Soto', 'clinica_nombre': 'Clínica'}),
+            'Sí me gustaría agendar, mi nombre es Ana Pérez, con el médico: Dra. Soto, clínica: Clínica')
+
+    def test_reagendamiento_con_datos_no_acepta_boton_crm_fijo(self):
+        crm = self.resolver({'tipo': 'crm', 'texto': 'Me interesa', 'crm_mensaje': 'Hola'})
+        no = {'tipo': 'respuesta', 'texto': 'No me interesa', 'accion': 'desinteres'}
+        baja = {'tipo': 'respuesta', 'texto': 'Dar de baja', 'accion': 'baja'}
+        with self.assertRaises(HTTPException):
+            main._validar_botones_obligatorios([crm, no, baja], 'Hola {nombre_paciente}')
+
     def test_rechaza_numero_invalido_y_variables(self):
         boton = {'tipo': 'crm', 'texto': 'Abrir', 'crm_mensaje': 'Hola'}
         with self.assertRaises(HTTPException):
