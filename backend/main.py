@@ -4197,6 +4197,11 @@ def sincronizar_plantillas_meta(body: SincronizarPlantillasIn,
             if botones_meta is not None:
                 for boton_meta in botones_meta:
                     for boton_local in p.get("botones") or []:
+                        if (boton_meta.get("tipo") == "url" and boton_local.get("crm_reagendar")
+                                and boton_meta.get("url") == boton_local.get("url")
+                                and boton_meta.get("texto") == boton_local.get("texto")):
+                            boton_meta["crm_reagendar"] = True
+                            break
                         if (boton_meta.get("tipo") == "url" and boton_local.get("crm_mensaje")
                                 and boton_meta.get("url") == boton_local.get("url")
                                 and boton_meta.get("texto") == boton_local.get("texto")):
@@ -4383,8 +4388,19 @@ def _resolver_botones_crm(botones, centro):
         return None
     resultado = []
     for boton in botones:
-        if not isinstance(boton, dict) or boton.get("tipo") != "crm":
+        if isinstance(boton, dict) and boton.get("tipo") == "url" and boton.get("crm_reagendar"):
+            boton = {"tipo": "reagendar_url", "texto": boton.get("texto")}
+        if not isinstance(boton, dict) or boton.get("tipo") not in ("crm", "reagendar_url"):
             resultado.append(boton)
+            continue
+        if boton.get("tipo") == "reagendar_url":
+            if not centro or centro not in catalogo_centros():
+                raise HTTPException(400, detail="Selecciona la clínica para el botón de reagendamiento.")
+            numero = re.sub(r"\D", "", config_get(f"{centro}_CRM_PHONE_NUMBER") or "")
+            if not re.fullmatch(r"[1-9]\d{7,14}", numero):
+                raise HTTPException(400, detail="Configura un número CRM válido para esta clínica.")
+            resultado.append({"tipo": "url", "texto": boton.get("texto") or "Sí, quiero reagendar",
+                              "url": f"https://wa.me/{numero}?text={{{{1}}}}", "crm_reagendar": True})
             continue
         mensaje = boton.get("crm_mensaje")
         if not isinstance(mensaje, str) or not mensaje.strip() or len(mensaje.strip()) > 500:
@@ -4409,10 +4425,10 @@ def _validar_botones_obligatorios(botones, texto=""):
     """Campañas y reagendamientos comparten las dos últimas acciones."""
     reagendar = bool({"nombre_paciente", "nombre_doc"}.intersection(variables_del_cuerpo(texto)))
     if isinstance(botones, list) and botones and isinstance(botones[0], dict):
-        reagendar = reagendar or botones[0].get("accion") == "reagendar"
+        reagendar = reagendar or bool(botones[0].get("crm_reagendar"))
     primero = (isinstance(botones, list) and len(botones) == 3
                 and isinstance(botones[0], dict) and
-                ((botones[0].get("tipo") == "respuesta" and botones[0].get("accion") == "reagendar")
+                ((botones[0].get("tipo") == "url" and botones[0].get("crm_reagendar") is True)
                  if reagendar else
                  (botones[0].get("tipo") == "url" and bool(botones[0].get("crm_mensaje")))))
     valido = (primero and all(isinstance(b, dict) for b in botones)
@@ -4487,7 +4503,7 @@ def previsualizar_plantilla(body: PlantillaPreviaIn,
                    encabezado_texto != (actual.get("encabezado_texto") or "") or
                    pie_texto != (actual.get("pie_texto") or "") or
                    ("botones" in body.model_fields_set and
-                    presentar_plantilla({**actual, "botones": body.botones})["botones"] !=
+                    presentar_plantilla({**actual, "botones": borrador["botones"]})["botones"] !=
                     presentar_plantilla(actual)["botones"])):
         vista["avisos"].append("Estos cambios requieren guardar y esperar una nueva revisión de Meta.")
     vista["puede_enviar_prueba"] = bool(actual and not vista["errores"]
@@ -4554,9 +4570,20 @@ def enviar_prueba_plantilla(plantilla_id: int, body: PruebaPlantillaIn,
             )
         _pruebas_plantilla_en_curso.add(llave)
     try:
+        variables_prueba = dict(vista["ejemplos"])
+        if any(b.get("crm_reagendar") for b in vista.get("botones", [])):
+            try:
+                variables_prueba["crm_reagendar"] = paciente_reagendar.mensaje_preparado_reagendar({
+                    "paciente_nombre": variables_prueba.get("nombre_paciente") or
+                                       " ".join(filter(None, (variables_prueba.get("nombre"), variables_prueba.get("apellido")))),
+                    "doctor_nombre": variables_prueba.get("nombre_doc"),
+                    "clinica_nombre": emisor.get("nombre") or centro_plantilla,
+                })
+            except ValueError as exc:
+                raise HTTPException(400, detail="Indica un médico de ejemplo para probar el reagendamiento.") from exc
         ok, message_id, error, _ = asyncio.run(servicio_wa.enviar(
             telefono, vista["cuerpo"], plantilla=plantilla,
-            variables=vista["ejemplos"], es_prueba=True))
+            variables=variables_prueba, es_prueba=True))
         if not ok:
             log_error(f"Prueba de plantilla {plantilla_id}: Meta no aceptó el envío")
             raise HTTPException(502, detail=error or "Meta no aceptó el mensaje de prueba.")
@@ -9417,7 +9444,7 @@ async def _procesar_cita_reagendar(cita: dict, plantillas_por_centro: dict) -> N
         precio = _precio_reagendamiento(plantilla)
         ok, message_id, _error, resultado = await servicio.enviar(
             telefono, vista["cuerpo"], plantilla=plantilla,
-            variables=vista["ejemplos"])
+            variables={**vista["ejemplos"], "crm_reagendar": paciente_reagendar.mensaje_preparado_reagendar(cita)})
         if ok:
             paciente_reagendar.marcar_enviado(cita, canal, plantilla, vista["cuerpo"], message_id,
                                              precio=precio)
@@ -11716,7 +11743,8 @@ async def enviar_prueba_reagendamiento(cita_id: int, sesion: dict = Depends(solo
         if not es_numero_prueba(telefono) or esta_suprimido(telefono) or esta_de_baja(telefono):
             raise HTTPException(409, detail="El número ya no está habilitado para la prueba.")
         ok, message_id, error, _ = await servicio.enviar(
-            telefono, vista['cuerpo'], plantilla=plantilla, variables=vista['ejemplos'], es_prueba=True)
+            telefono, vista['cuerpo'], plantilla=plantilla,
+            variables={**vista['ejemplos'], 'crm_reagendar': paciente_reagendar.mensaje_preparado_reagendar(cita)}, es_prueba=True)
         if not ok or not message_id:
             raise HTTPException(502, detail=error or "Meta no aceptó la prueba.")
         with _pruebas_plantilla_lock:

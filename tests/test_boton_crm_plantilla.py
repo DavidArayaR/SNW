@@ -2,8 +2,8 @@
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch
-from urllib.parse import parse_qs, urlparse
+from unittest.mock import AsyncMock, patch
+from urllib.parse import parse_qs, urlparse, unquote
 from fastapi import HTTPException
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'backend'))
@@ -42,7 +42,7 @@ class BotonCrmPlantillaTest(unittest.TestCase):
     def test_botones_reagendamiento_conservan_mensaje_preparado(self):
         from paciente_reagendar import es_aceptacion_reagendar, mensaje_preparado_reagendar
         botones = [
-            {'tipo': 'respuesta', 'texto': 'Sí, quiero reagendar', 'accion': 'reagendar'},
+            self.resolver({'tipo': 'reagendar_url', 'texto': 'Sí, quiero reagendar'}),
             {'tipo': 'respuesta', 'texto': 'No me interesa', 'accion': 'desinteres'},
             {'tipo': 'respuesta', 'texto': 'Dar de baja', 'accion': 'baja'},
         ]
@@ -50,6 +50,10 @@ class BotonCrmPlantillaTest(unittest.TestCase):
         self.assertFalse(vista['errores'])
         main._validar_botones_obligatorios(vista['botones'], 'Hola {nombre_paciente}')
         self.assertTrue(es_aceptacion_reagendar(botones[0]['texto']))
+        meta = botones_para_meta(vista['botones'])[0]
+        self.assertEqual(meta['type'], 'URL')
+        self.assertTrue(meta['url'].endswith('?text={{1}}'))
+        self.assertTrue(meta['example'][0].startswith('https://wa.me/56912345678?text='))
         self.assertEqual(mensaje_preparado_reagendar({'paciente_nombre': 'Ana Pérez',
             'doctor_nombre': 'Dra. Soto', 'clinica_nombre': 'Clínica'}),
             'Sí me gustaría agendar, mi nombre es Ana Pérez, con el médico: Dra. Soto, clínica: Clínica')
@@ -67,6 +71,31 @@ class BotonCrmPlantillaTest(unittest.TestCase):
             self.resolver(boton, '')
         with self.assertRaises(HTTPException):
             self.resolver({**boton, 'crm_mensaje': 'Hola {nombre}'})
+
+
+class ReagendamientoUrlTest(unittest.IsolatedAsyncioTestCase):
+    async def test_envio_incluye_mensaje_codificado_en_boton_url(self):
+        from whatsapp_service import WhatsAppService, WhatsAppApiClient
+        boton = {'tipo': 'url', 'texto': 'Sí, quiero reagendar',
+                 'url': 'https://wa.me/56912345678?text={{1}}', 'crm_reagendar': True}
+        plantilla = {'id': 7, 'texto': 'Hola {nombre_paciente} con {nombre_doc}',
+                     'whatsapp_template': 'reagendar', 'whatsapp_template_lang': 'es',
+                     'botones': [boton, {'tipo': 'respuesta', 'texto': 'No me interesa', 'accion': 'desinteres'},
+                                 {'tipo': 'respuesta', 'texto': 'Dar de baja', 'accion': 'baja'}]}
+        mensaje = 'Sí me gustaría agendar, mi nombre es Ana Pérez, con el médico: Dra. Soto, clínica: Clínica'
+        variables = {'nombre_paciente': 'Ana Pérez', 'nombre_doc': 'Dra. Soto', 'crm_reagendar': mensaje}
+        servicio = WhatsAppService()
+        with patch('whatsapp_service.esta_suprimido', return_value=False), \
+             patch.object(servicio, '_validar_canal_antes_envio', new_callable=AsyncMock, return_value=(True, None)), \
+             patch.object(servicio, '_plantilla_aprobada_en_waba', new_callable=AsyncMock, return_value=True), \
+             patch.object(WhatsAppApiClient, 'enviar', new_callable=AsyncMock,
+                          return_value={'messages': [{'id': 'wamid.test'}]}) as enviar:
+            ok, _, _, _ = await servicio.enviar('+56912345678', 'Hola', plantilla, variables=variables)
+        self.assertTrue(ok)
+        componentes = enviar.call_args.args[0]['template']['components']
+        url_button = next(c for c in componentes if c.get('sub_type') == 'url')
+        self.assertEqual(url_button['index'], '0')
+        self.assertEqual(unquote(url_button['parameters'][0]['text']), mensaje)
 
 
 if __name__ == '__main__':

@@ -190,7 +190,9 @@ def presentar_plantilla(plantilla: dict, ejemplos: dict | None = None) -> dict:
         if tipo == "url":
             total_url += 1
             url = (boton.get("url") or "").strip()
-            if "{{" in url or "}}" in url:
+            if ("{{" in url or "}}" in url) and not (
+                    boton.get("crm_reagendar") is True
+                    and re.fullmatch(r"https://wa\.me/[1-9]\d{7,14}\?text=\{\{1\}\}", url)):
                 errores.append(f"El enlace dinámico del botón «{etiqueta}» necesita parámetros no configurados.")
             elif not _url_valida(url):
                 errores.append(f"El enlace del botón «{etiqueta}» no es válido.")
@@ -204,7 +206,8 @@ def presentar_plantilla(plantilla: dict, ejemplos: dict | None = None) -> dict:
                                      "telefono": (boton.get("telefono") or "").strip() if tipo == "telefono" else None,
                                      "accion": accion if tipo == "respuesta" else None,
                                      "opciones": opciones if accion == "opciones" and tipo == "respuesta" else None,
-                                     **({"crm_mensaje": boton["crm_mensaje"]} if tipo == "url" and isinstance(boton.get("crm_mensaje"), str) else {})})
+                                     **({"crm_mensaje": boton["crm_mensaje"]} if tipo == "url" and isinstance(boton.get("crm_mensaje"), str) else {}),
+                                     **({"crm_reagendar": True} if tipo == "url" and boton.get("crm_reagendar") is True else {})})
     if total_url > 2 or total_telefono > 1:
         errores.append("Se permiten como máximo 2 enlaces y 1 botón de llamada.")
     if sum(b["accion"] == "opciones" for b in botones_normalizados) > 1:
@@ -269,6 +272,10 @@ def botones_para_meta(botones: list[dict]) -> list[dict]:
         item = {"type": meta, "text": boton["texto"]}
         if tipo == "url":
             item["url"] = boton["url"]
+            if boton.get("crm_reagendar"):
+                from urllib.parse import quote
+                ejemplo = "Sí me gustaría agendar, mi nombre es Ana Pérez, con el médico: Dra. Soto, clínica: Clínica"
+                item["example"] = [boton["url"].replace("{{1}}", quote(ejemplo, safe=""))]
         elif tipo == "telefono":
             item["phone_number"] = boton["telefono"]
         resultado.append(item)
