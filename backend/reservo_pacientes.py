@@ -249,8 +249,23 @@ def guardar_pagina_citas_cache(codigo: str, desde: dt.date, hasta: dt.date,
             (codigo, desde, hasta, _huella_token(token), numero, tramo_desde,
              tramo_hasta, pagina, json.dumps(minimo, ensure_ascii=False)),
         )
-        limpiar_cerrojos_baja_inactivos(cur, huellas_temporales)
         conn.commit()
+        # La página de caché ya quedó persistida. La limpieza de cerrojos es
+        # secundaria y se ejecuta en otra transacción para que un deadlock al
+        # borrar filas inactivas no revierta la página recién guardada.
+        if huellas_temporales:
+            try:
+                limpiar_cerrojos_baja_inactivos(cur, huellas_temporales)
+                conn.commit()
+            except pymysql.err.OperationalError as exc:
+                conn.rollback()
+                if not exc.args or exc.args[0] != 1213:
+                    raise
+                print(
+                    "[WARN] Reservo: la página de caché se guardó; se aplazó la "
+                    "limpieza de cerrojos de baja por un deadlock de MySQL (1213).",
+                    flush=True,
+                )
 
 
 def paginas_citas_cache(codigo: str, desde: dt.date, hasta: dt.date,
