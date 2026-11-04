@@ -8107,7 +8107,7 @@ def confirmar_envio(token: str, background_tasks: BackgroundTasks):
 
 
 def _condicion_espera_plantilla(alias: str = "p") -> str:
-    """Excluye envíos aceptados de la misma clínica en las 24 h anteriores."""
+    """Excluye envíos recientes de la misma clínica, salvo a números de prueba."""
     telefono = f"REPLACE(REPLACE(REPLACE(REPLACE(REPLACE({alias}.telefono, ' ', ''), '-', ''), '(', ''), ')', ''), '+', '')"
     normalizado = (f"CASE WHEN LENGTH({telefono})=11 AND LEFT({telefono},3)='569' THEN CONCAT('+',{telefono}) "
                    f"WHEN LENGTH({telefono})=10 AND LEFT({telefono},2)='56' THEN CONCAT('+569',SUBSTRING({telefono},3)) "
@@ -8115,20 +8115,27 @@ def _condicion_espera_plantilla(alias: str = "p") -> str:
                    f"WHEN LENGTH({telefono})=8 AND LEFT({telefono},1)='9' THEN CONCAT('+569',{telefono}) ELSE '' END")
     # Mantener la columna indexada intacta; la colación explícita evita conflictos
     # entre tablas creadas con distintas configuraciones de MySQL.
-    return ("NOT EXISTS (SELECT 1 FROM log_envios le WHERE le.numero_telefono = "
+    return ("(FIND_IN_SET("
+            f"CONVERT(({normalizado}) USING utf8mb4) COLLATE utf8mb4_unicode_ci, "
+            "CONVERT(%(espera_numeros_prueba)s USING utf8mb4) COLLATE utf8mb4_unicode_ci"
+            ") > 0 OR NOT EXISTS (SELECT 1 FROM log_envios le WHERE le.numero_telefono = "
             f"CONVERT(({normalizado}) USING utf8mb4) COLLATE utf8mb4_unicode_ci "
             "AND le.envio_id IS NOT NULL AND le.estado_envio='enviado' "
             "AND le.whatsapp_message_id IS NOT NULL AND COALESCE(le.estado_whatsapp,'') <> 'failed' "
             "AND (le.centro_codigo=%(espera_centro)s OR "
             "(le.wa_phone_id=%(espera_phone)s AND %(espera_phone)s <> '')) "
             "AND le.fecha_hora > DATE_SUB(%(espera_fecha)s, INTERVAL 24 HOUR) "
-            "AND le.fecha_hora <= %(espera_fecha)s)")
+            "AND le.fecha_hora <= %(espera_fecha)s))")
 
 
 def _parametros_espera(emisor: dict | None, fecha=None) -> dict:
     return {"espera_centro": (emisor or {}).get("codigo") or "",
             "espera_phone": (emisor or {}).get("phoneNumberId") or "",
-            "espera_fecha": fecha or datetime.datetime.now()}
+            "espera_fecha": fecha or datetime.datetime.now(),
+            "espera_numeros_prueba": ",".join(sorted(
+                _numeros_prueba_editables("desarrollo") |
+                _numeros_prueba_editables("produccion")
+            ))}
 
 
 class DestinosIn(BaseModel):
