@@ -562,6 +562,43 @@
           motivo.textContent = r.motivo_no_reintentar || "Revisa el error antes de reenviar.";
           acciones.appendChild(motivo);
         }
+        if (r.puede_enviar_prueba) {
+          const prueba = document.createElement("button");
+          prueba.type = "button";
+          prueba.className = "btn btn--ghost";
+          prueba.textContent = "Enviar prueba";
+          prueba.title = "Enviar la plantilla de esta clínica a este número de prueba";
+          const estadoPrueba = document.createElement("small");
+          estadoPrueba.className = "reagendar__estado-prueba";
+          estadoPrueba.setAttribute("role", "status");
+          estadoPrueba.setAttribute("aria-live", "polite");
+          prueba.addEventListener("click", async () => {
+            if (prueba.disabled) return;
+            prueba.disabled = true;
+            prueba.textContent = "Enviando…";
+            estadoPrueba.textContent = "Enviando la prueba; espera la respuesta de Meta.";
+            estadoPrueba.classList.remove("reagendar__estado-prueba--error");
+            const avisoDemora = setTimeout(() => {
+              estadoPrueba.textContent = "La prueba sigue procesándose. Espera antes de volver a enviarla.";
+            }, 15000);
+            try {
+              const res = await fetch(`api/v1/paciente-reagendar/${r.id}/enviar-prueba`,
+                { method: "POST", headers: auth() });
+              const datos = await res.json().catch(() => ({}));
+              if (res.status === 401) { window.snwSesionExpirada(); return; }
+              if (!res.ok) throw new Error(typeof datos.detail === "string" ? datos.detail : "No se pudo enviar la prueba.");
+              estadoPrueba.textContent = datos.mensaje || "Meta aceptó la prueba; la entrega aún debe confirmarse.";
+            } catch (error) {
+              estadoPrueba.classList.add("reagendar__estado-prueba--error");
+              estadoPrueba.textContent = error.message || "No se pudo contactar al servidor. Revisa WhatsApp antes de reintentar.";
+            } finally {
+              clearTimeout(avisoDemora);
+              prueba.disabled = false;
+              prueba.textContent = "Enviar prueba";
+            }
+          });
+          acciones.append(prueba, estadoPrueba);
+        }
         const eliminar = document.createElement("button");
         eliminar.type = "button";
         eliminar.className = "btn btn--danger-ghost";

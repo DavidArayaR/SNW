@@ -331,3 +331,6 @@ tr.es-baja .col-check input[type=checkbox] { cursor: not-allowed; }
   font-size: .72rem;
   color: var(--texto-suave);
 }
+.reagendar__estado-prueba { display: block; max-width: 240px; margin-top: 6px; color: var(--texto-suave); line-height: 1.35; }
+.reagendar__estado-prueba:empty { display: none; }
+.reagendar__estado-prueba--error { color: var(--danger-fg); }

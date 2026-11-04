@@ -11650,13 +11650,113 @@ def listar_citas_reagendar(centro: str | None = Query(None),
             " FROM" + origen + where +
             " ORDER BY r.id DESC LIMIT %s OFFSET %s", (*args, limite, (pagina - 1) * limite))
         filas = cur.fetchall()
+    numeros_prueba = _numeros_prueba_editables("desarrollo") | _numeros_prueba_editables("produccion")
     for fila in filas:
+        fila["puede_enviar_prueba"] = normalizar_telefono(fila.get("paciente_telefono_normalizado") or "") in numeros_prueba
         motivo = paciente_reagendar.motivo_no_reintentar(fila, permitir_incierto=True)
         fila["puede_reintentar"] = motivo is None
         fila["motivo_no_reintentar"] = motivo
         if fila.get("estado_envio") == "ENVIADO" and fila.get("estado_whatsapp") == "failed":
             fila["estado_envio"] = "ERROR"
     return {"total": total, "pagina": pagina, "limite": limite, "items": filas}
+
+
+@app.post("/api/v1/paciente-reagendar/{cita_id}/enviar-prueba")
+async def enviar_prueba_reagendamiento(cita_id: int, sesion: dict = Depends(solo_admin)):
+    """Prueba individual real; crea un registro aislado sin alterar la cita original."""
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("SELECT * FROM paciente_reagendar WHERE id=%s", (cita_id,))
+        cita = cur.fetchone()
+    if not cita:
+        raise HTTPException(404, detail="El paciente de reagendamiento no existe.")
+    telefono = normalizar_telefono(cita.get("paciente_telefono_normalizado") or "")
+    if not telefono or not es_numero_prueba(telefono):
+        raise HTTPException(403, detail="Solo se puede enviar a números de prueba configurados.")
+    if cita.get("whatsapp_opt_out") or esta_suprimido(telefono) or esta_de_baja(telefono):
+        raise HTTPException(409, detail="El número está dado de baja o suprimido.")
+    cfg = config_all(refresh=True)
+    if cfg.get("metodo_envio") != "api_oficial":
+        raise HTTPException(400, detail="Activa api_oficial para enviar una prueba real.")
+    codigo = cita.get("centro_codigo")
+    try:
+        mapa = json.loads(cfg.get("reagendar_plantillas_json") or "{}")
+    except (ValueError, TypeError):
+        raise HTTPException(409, detail="Revisa la configuración de plantillas de reagendamiento.")
+    plantilla = next((p for p in leer_plantillas() if p.get("clave") == mapa.get(codigo)
+                      and p.get("centro_codigo") == codigo), None)
+    if not plantilla or plantilla.get("whatsapp_template_status") != "APPROVED" or _aprobacion_plantilla(plantilla) != "aprobada":
+        raise HTTPException(409, detail="Configura una plantilla de reagendamiento aprobada para esta clínica.")
+    emisor = _exigir_centro_envio(codigo)
+    vista = presentar_plantilla(plantilla, paciente_reagendar.variables_plantilla_reagendar(cita))
+    if vista["errores"]:
+        raise HTTPException(400, detail=" ".join(vista["errores"]))
+    servicio = WhatsAppService(phone_number_id=emisor["phoneNumberId"])
+    if not servicio.configurada():
+        raise HTTPException(409, detail="El número emisor de la clínica no está configurado.")
+    llave = (plantilla["id"], telefono, codigo)
+    with _pruebas_plantilla_lock:
+        restante = math.ceil(30 - (time.monotonic() - _pruebas_plantilla_ultima.get(llave, -1e9)))
+        if llave in _pruebas_plantilla_en_curso or restante > 0:
+            raise HTTPException(429, detail=f"Espera {max(1, restante)} segundos antes de repetir la prueba.")
+        _pruebas_plantilla_en_curso.add(llave)
+    prueba_id = None
+    try:
+        # Una copia separada conserva el contexto del botón sin modificar la
+        # cita ni las reservas que gobiernan el envío masivo.
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute("INSERT INTO paciente_reagendar (fecha, ventana, clinica_id, clinica_nombre,"
+                        " reservo_cita_uuid, paciente_nombre, paciente_telefono, paciente_telefono_normalizado,"
+                        " doctor_nombre, inicio_cita, centro_codigo, modo_prueba, estado_envio, intentos_envio)"
+                        " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1,'PROCESANDO',1)",
+                        (cita['fecha'], cita['ventana'], cita.get('clinica_id'), cita['clinica_nombre'],
+                         'prueba-' + uuid.uuid4().hex, cita['paciente_nombre'], telefono, telefono,
+                         cita.get('doctor_nombre'), cita['inicio_cita'], codigo))
+            prueba_id = cur.lastrowid
+            conn.commit()
+        if not es_numero_prueba(telefono) or esta_suprimido(telefono) or esta_de_baja(telefono):
+            raise HTTPException(409, detail="El número ya no está habilitado para la prueba.")
+        ok, message_id, error, _ = await servicio.enviar(
+            telefono, vista['cuerpo'], plantilla=plantilla, variables=vista['ejemplos'], es_prueba=True)
+        if not ok or not message_id:
+            raise HTTPException(502, detail=error or "Meta no aceptó la prueba.")
+        with _pruebas_plantilla_lock:
+            _pruebas_plantilla_ultima[llave] = time.monotonic()
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute("INSERT INTO log_envios (nombre_paciente, numero_telefono, mensaje, plantilla_clave,"
+                        " estado_envio, whatsapp_message_id, estado_whatsapp, wa_phone_id, centro_codigo,"
+                        " numero_emisor, tabla_pacientes) VALUES (%s,%s,%s,%s,'enviado',%s,'sent',%s,%s,%s,'paciente_reagendar')",
+                        (cita['paciente_nombre'], telefono, vista['cuerpo'], plantilla['clave'], message_id,
+                         emisor['phoneNumberId'], codigo, emisor['phoneNumber']))
+            log_id = cur.lastrowid
+            cur.execute("UPDATE paciente_reagendar SET estado_envio='ENVIADO', enviado_en=UTC_TIMESTAMP(),"
+                        " whatsapp_message_id=%s, whatsapp_phone_number_id=%s, whatsapp_numero_emisor=%s,"
+                        " plantilla_clave=%s, log_envio_id=%s WHERE id=%s AND estado_envio='PROCESANDO'",
+                        (message_id, emisor['phoneNumberId'], emisor['phoneNumber'], plantilla['clave'], log_id, prueba_id))
+            if cur.rowcount != 1:
+                raise RuntimeError("No se pudo asociar la prueba aceptada")
+            conn.commit()
+        try:
+            auditoria_registrar(sesion.get('usuario', ''), 'reagendar_prueba_enviada',
+                               'paciente_reagendar', 'Prueba individual de reagendamiento aceptada por Meta')
+        except Exception as exc:
+            log_error("reagendar: no se pudo auditar la prueba", exc, solo_tipo=True)
+        return {"ok": True, "mensaje": "Meta aceptó la prueba. La entrega debe confirmarse por WhatsApp."}
+    except Exception as exc:
+        if prueba_id:
+            try:
+                with conectar() as conn, conn.cursor() as cur:
+                    cur.execute("UPDATE paciente_reagendar SET estado_envio='ERROR', ultimo_error_codigo=%s"
+                                " WHERE id=%s AND estado_envio='PROCESANDO'", ('PRUEBA_INCIERTA', prueba_id))
+                    conn.commit()
+            except Exception as guardar_exc:
+                log_error("reagendar: no se pudo registrar el resultado de prueba", guardar_exc, solo_tipo=True)
+        if isinstance(exc, HTTPException):
+            raise
+        log_error("reagendar: prueba individual con resultado incierto", exc, solo_tipo=True)
+        raise HTTPException(502, detail="No se pudo confirmar la prueba. Revisa WhatsApp antes de repetirla.") from exc
+    finally:
+        with _pruebas_plantilla_lock:
+            _pruebas_plantilla_en_curso.discard(llave)
 
 
 class ReintentarReagendarIn(BaseModel):
