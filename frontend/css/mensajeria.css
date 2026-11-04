@@ -242,3 +242,8 @@
   text-align: left;
   white-space: pre-wrap;
 }
+
+.field.tpl-botones .tpl-boton__crm-campo { grid-column: 1 / -1; }
+.field.tpl-botones .tpl-boton__crm-mensaje { width: 100%; min-height: 76px; padding: 10px 12px; border: 1px solid var(--borde); border-radius: 10px; background: var(--surface-2); color: var(--texto); font: inherit; resize: vertical; }
+.field.tpl-botones .tpl-boton__crm-mensaje:focus { border-color: var(--verde); outline: 2px solid var(--verde); outline-offset: 1px; }
+.tpl-boton__crm-campo small { color: var(--texto-suave); line-height: 1.4; }

@@ -4197,6 +4197,11 @@ def sincronizar_plantillas_meta(body: SincronizarPlantillasIn,
             if botones_meta is not None:
                 for boton_meta in botones_meta:
                     for boton_local in p.get("botones") or []:
+                        if (boton_meta.get("tipo") == "url" and boton_local.get("crm_mensaje")
+                                and boton_meta.get("url") == boton_local.get("url")
+                                and boton_meta.get("texto") == boton_local.get("texto")):
+                            boton_meta["crm_mensaje"] = boton_local["crm_mensaje"]
+                            break
                         if (boton_meta.get("tipo") == "respuesta"
                                 and boton_local.get("tipo") == "respuesta"
                                 and boton_meta.get("texto") == boton_local.get("texto")):
@@ -4372,6 +4377,34 @@ def _validar_media_plantilla(media_id: str | None, sesion: dict,
     return media_id
 
 
+def _resolver_botones_crm(botones, centro):
+    """Construye un enlace fijo para Meta usando únicamente el CRM de la clínica."""
+    if botones is None:
+        return None
+    resultado = []
+    for boton in botones:
+        if not isinstance(boton, dict) or boton.get("tipo") != "crm":
+            resultado.append(boton)
+            continue
+        mensaje = boton.get("crm_mensaje")
+        if not isinstance(mensaje, str) or not mensaje.strip() or len(mensaje.strip()) > 500:
+            raise HTTPException(400, detail="Escribe el mensaje preparado del CRM (máximo 500 caracteres).")
+        if re.search(r"[{}]", mensaje):
+            raise HTTPException(400, detail="El mensaje preparado del CRM debe ser fijo y no admite variables.")
+        if not centro or centro not in catalogo_centros():
+            raise HTTPException(400, detail="Selecciona la clínica para crear el enlace a su CRM.")
+        numero = re.sub(r"\D", "", config_get(f"{centro}_CRM_PHONE_NUMBER") or "")
+        if not re.fullmatch(r"[1-9]\d{7,14}", numero):
+            raise HTTPException(400, detail="Configura un número CRM válido para esta clínica.")
+        mensaje = mensaje.strip()
+        url = f"https://wa.me/{numero}?text={urllib.parse.quote(mensaje, safe='')}"
+        if len(url) > 2000:
+            raise HTTPException(400, detail="El mensaje preparado genera un enlace demasiado largo.")
+        resultado.append({"tipo": "url", "texto": boton.get("texto"), "url": url,
+                          "crm_mensaje": mensaje})
+    return resultado
+
+
 def _exigir_revision_valida(plantilla: dict, ejemplos: dict | None = None) -> dict:
     vista = presentar_plantilla(plantilla, ejemplos)
     if vista["errores"]:
@@ -4405,7 +4438,7 @@ def previsualizar_plantilla(body: PlantillaPreviaIn,
     borrador["encabezado_texto"] = encabezado_texto
     borrador["pie_texto"] = pie_texto
     if "botones" in body.model_fields_set:
-        borrador["botones"] = body.botones
+        borrador["botones"] = _resolver_botones_crm(body.botones, body.centro or (actual or {}).get("centro_codigo"))
     if (media_id != (actual or {}).get("encabezado_media_id") or
             encabezado_texto != ((actual or {}).get("encabezado_texto") or "")):
         borrador["whatsapp_header_format"] = None
@@ -4565,7 +4598,7 @@ def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(exigir("plantillas
     pie_texto = (body.pie_texto or "").strip()
     vista = _exigir_revision_valida({"texto": body.texto, "encabezado_media_id": media_id,
                                      "encabezado_texto": encabezado_texto,
-                                     "pie_texto": pie_texto, "botones": body.botones}, body.ejemplos)
+                                     "pie_texto": pie_texto, "botones": _resolver_botones_crm(body.botones, body.centro)}, body.ejemplos)
 
     plantillas = leer_plantillas()
     clave = slug(body.clave or body.nombre)
@@ -4657,6 +4690,8 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
             _exigir_plantilla_en_alcance(sesion, p)
             if body.centro and body.centro != p.get("centro_codigo"):
                 raise HTTPException(409, detail="No se puede cambiar la WABA de una plantilla existente. Sincronízala desde la otra clínica.")
+            if "botones" in body.model_fields_set:
+                body.botones = _resolver_botones_crm(body.botones, p.get("centro_codigo"))
             encabezado_crudo = ((body.encabezado_texto if "encabezado_texto" in body.model_fields_set
                                  else p.get("encabezado_texto")) or "")
             encabezado_texto = encabezado_crudo.strip()

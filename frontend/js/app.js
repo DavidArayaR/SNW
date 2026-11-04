@@ -243,7 +243,6 @@ const inpMensaje = $("#inpMensaje");
 const editorBotones = $("#editorBotones");
 const btnAgregarBoton = $("#btnAgregarBoton");
 const BOTONES_INICIALES = [
-  { tipo: "respuesta", texto: "Me interesa", accion: "interes" },
   { tipo: "respuesta", texto: "No me interesa", accion: "desinteres" },
   { tipo: "respuesta", texto: "Dar de baja", accion: "baja" },
 ];
@@ -262,6 +261,7 @@ function botonesDelEditor() {
         .map((opcion) => ({ texto: opcion.querySelector(".tpl-boton__opcion-texto").value.trim(),
           mensaje: opcion.querySelector(".tpl-boton__opcion-mensaje").value.trim() }));
     }
+    if (tipo === "crm") boton.crm_mensaje = fila.querySelector(".tpl-boton__crm-mensaje").value.trim();
     if (tipo === "url") boton.url = fila.querySelector(".tpl-boton__destino").value.trim();
     if (tipo === "telefono") boton.telefono = fila.querySelector(".tpl-boton__destino").value.trim();
     return boton;
@@ -298,7 +298,7 @@ function agregarFilaBoton(datos = {}) {
       <span class="tpl-boton__ayuda"></span></div>
     <button type="button" class="btn btn--ghost tpl-boton__quitar" aria-label="Quitar botón" title="Quitar botón"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
     <label class="tpl-boton__campo"><span>Tipo de botón</span><select class="tpl-boton__tipo">
-      <option value="respuesta">Respuesta rápida</option><option value="url">Abrir enlace</option>
+      <option value="respuesta">Respuesta rápida</option><option value="crm">Abrir chat del CRM</option><option value="url">Abrir enlace</option>
       <option value="interes">Me interesa</option>
       <option value="nointeres">No interesa</option>
       <option value="reagendar">Reagendar</option>
@@ -314,6 +314,9 @@ function agregarFilaBoton(datos = {}) {
         <option value="baja">Baja</option></select></label>
     <label class="tpl-boton__campo tpl-boton__destino-campo"><span class="tpl-boton__destino-label">Destino</span>
       <input class="tpl-boton__destino"></label>
+    <label class="tpl-boton__campo tpl-boton__crm-campo" hidden><span>Mensaje preparado para el CRM</span>
+      <textarea class="tpl-boton__crm-mensaje" maxlength="500" rows="3" placeholder="Ej.: Hola, quiero saber más sobre la promoción"></textarea>
+      <small>El paciente verá el mensaje escrito y podrá enviarlo. Usa texto fijo, sin datos personales. Si cambia el número CRM, actualiza la plantilla en Meta.</small></label>
     <button type="button" class="btn tpl-boton__crear-lista"><i class="fa-solid fa-list" aria-hidden="true"></i> Convertir en lista de opciones</button>
     <div class="tpl-boton__opciones" hidden><h4>Opciones de este botón</h4><p class="field__hint">Al tocar «Ver opciones», el paciente recibirá una lista. Agrega hasta 10 opciones y el mensaje de respuesta de cada una.</p>
       <div class="tpl-boton__opciones-lista"></div>
@@ -332,7 +335,7 @@ function agregarFilaBoton(datos = {}) {
     opcionExistente.disabled = true;
     tipo.add(opcionExistente);
   }
-  tipo.value = datos.accion === "baja" || datos.tipo === "baja" ? "baja" :
+  tipo.value = datos.crm_mensaje ? "crm" : datos.accion === "baja" || datos.tipo === "baja" ? "baja" :
     (datos.tipo === "reagendar" || (datos.tipo === "respuesta" && datos.accion === "reagendar" && datos.texto === "Si quiero reagendar")
       ? "reagendar" :
     (datos.tipo === "interes" || (datos.tipo === "respuesta" && datos.accion === "interes" && datos.texto === "Me interesa")
@@ -343,6 +346,7 @@ function agregarFilaBoton(datos = {}) {
   accion.value = datos.accion || ({ "Me interesa": "interes", "No me interesa": "desinteres",
     "Dar de baja": "baja", "Si quiero reagendar": "reagendar" }[datos.texto] || "ninguna");
   destino.value = datos.url || datos.telefono || "";
+  fila.querySelector(".tpl-boton__crm-mensaje").value = datos.crm_mensaje || "";
   for (const opcion of datos.opciones || []) agregarOpcionLista(panelOpciones, opcion);
   const sincronizarTipo = () => {
     if (["baja", "interes", "nointeres", "reagendar"].includes(tipo.value)) {
@@ -352,6 +356,7 @@ function agregarFilaBoton(datos = {}) {
     texto.readOnly = ["baja", "interes", "nointeres", "reagendar"].includes(tipo.value);
     fila.querySelector(".tpl-boton__accion-campo").hidden = tipo.value !== "respuesta";
     fila.querySelector(".tpl-boton__destino-campo").hidden = !["url", "telefono"].includes(tipo.value);
+    fila.querySelector(".tpl-boton__crm-campo").hidden = tipo.value !== "crm";
     crearLista.hidden = tipo.value !== "respuesta" || ["baja", "opciones"].includes(accion.value);
     panelOpciones.hidden = tipo.value !== "respuesta" || accion.value !== "opciones";
     if (!panelOpciones.hidden && !panelOpciones.querySelector(".tpl-boton__opcion")) {
@@ -363,6 +368,7 @@ function agregarFilaBoton(datos = {}) {
     fila.querySelector(".tpl-boton__ayuda").textContent = ({
       respuesta: "Escribe el texto y elige qué hará el sistema al recibir la respuesta.",
       url: "El paciente abrirá el enlace indicado.",
+      crm: "Abre directamente el chat del CRM de la clínica con el mensaje preparado.",
       telefono: "El paciente podrá llamar al número indicado.",
       interes: "Se mostrará «Me interesa» y la respuesta se marcará como interés.",
       nointeres: "Se mostrará «No me interesa» y la respuesta se marcará como desinterés.",
@@ -378,6 +384,13 @@ function agregarFilaBoton(datos = {}) {
     if (["baja", "interes", "nointeres", "reagendar"].includes(tipo.dataset.tipoAnterior) && tipo.value !== tipo.dataset.tipoAnterior) {
       texto.value = "";
       accion.value = "ninguna";
+    }
+    if (tipo.value === "crm") {
+      for (const otra of [...editorBotones.querySelectorAll(".tpl-boton")]) {
+        if (otra !== fila && otra.querySelector(".tpl-boton__tipo").value === "interes") otra.remove();
+      }
+      if (!texto.value.trim()) texto.value = "Ir a call center";
+      actualizarBotonAgregar();
     }
     sincronizarTipo();
     refrescarEditor();
@@ -396,7 +409,7 @@ function agregarFilaBoton(datos = {}) {
     refrescarEditor();
     panelOpciones.querySelector(".tpl-boton__opcion-texto")?.focus();
   });
-  [texto, destino].forEach((control) => control.addEventListener("input", refrescarEditor));
+  [texto, destino, fila.querySelector(".tpl-boton__crm-mensaje")].forEach((control) => control.addEventListener("input", refrescarEditor));
   panelOpciones.querySelector(".tpl-boton__agregar-opcion").addEventListener("click", () => {
     agregarOpcionLista(panelOpciones);
     refrescarEditor();
@@ -1279,7 +1292,7 @@ async function consultarPreview(solicitud) {
   try {
     const res = await fetch(`${API_URL}/previsualizar`, {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ plantilla_id: activaId, texto: inpMensaje.value,
+      body: JSON.stringify({ plantilla_id: activaId, centro: inpCentroPlantilla?.value || null, texto: inpMensaje.value,
         encabezado_media_id: encabezadoMediaActivo(),
         encabezado_texto: encabezadoTextoActivo(),
         pie_texto: inpPieTexto.value.trim(), ejemplos: ejemplosPreview(), botones: botonesDelEditor() }),

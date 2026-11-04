@@ -32,6 +32,7 @@ class SincronizarPlantillasIn(BaseModel):
 
 class PlantillaPreviaIn(BaseModel):
     plantilla_id: int | None = None
+    centro: str | None = None
     texto: str
     encabezado_media_id: str | None = None
     encabezado_texto: str | None = None

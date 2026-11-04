@@ -202,7 +202,8 @@ def presentar_plantilla(plantilla: dict, ejemplos: dict | None = None) -> dict:
                                      "url": (boton.get("url") or "").strip() if tipo == "url" else None,
                                      "telefono": (boton.get("telefono") or "").strip() if tipo == "telefono" else None,
                                      "accion": accion if tipo == "respuesta" else None,
-                                     "opciones": opciones if accion == "opciones" and tipo == "respuesta" else None})
+                                     "opciones": opciones if accion == "opciones" and tipo == "respuesta" else None,
+                                     **({"crm_mensaje": boton["crm_mensaje"]} if tipo == "url" and isinstance(boton.get("crm_mensaje"), str) else {})})
     if total_url > 2 or total_telefono > 1:
         errores.append("Se permiten como máximo 2 enlaces y 1 botón de llamada.")
     if sum(b["accion"] == "opciones" for b in botones_normalizados) > 1:
