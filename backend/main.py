@@ -6915,12 +6915,15 @@ def _emisor_vigente(emisor: dict | None) -> bool:
 
 
 def _paciente_habilitado_antes_de_enviar(paciente_id: int, telefono: str,
-                                          ambiente: str, tabla: str) -> bool:
-    """Revalida una cohorte congelada justo antes del envío (baja o borrado)."""
+                                          ambiente: str, tabla: str, emisor: dict | None = None) -> bool:
+    """Revalida baja, borrado y la espera antes del envío."""
     try:
         with conectar(ambiente) as conn, conn.cursor() as cur:
-            cur.execute(f"SELECT telefono, whatsapp_opt_out FROM {tabla} WHERE id = %s",
-                        (paciente_id,))
+            cond = "id = %(paciente_id)s"
+            params = {**_parametros_espera(emisor), "paciente_id": paciente_id}
+            if ambiente != "desarrollo" and emisor:
+                cond += " AND " + _condicion_espera_plantilla("p")
+            cur.execute(f"SELECT p.telefono, p.whatsapp_opt_out FROM {tabla} p WHERE " + cond, params)
             fila = cur.fetchone()
         return bool(fila and not fila.get("whatsapp_opt_out")
                     and normalizar_telefono(fila.get("telefono") or "") == normalizar_telefono(telefono))
@@ -6991,7 +6994,7 @@ def _procesar_job_api_concurrente(job_id: str, canal: MotorApiOficial) -> None:
             if esta_suprimido(d["telefono"]):
                 fallido(d, "Número suprimido")
                 return
-            if not _paciente_habilitado_antes_de_enviar(d["id"], d["telefono"], amb, tabla):
+            if not _paciente_habilitado_antes_de_enviar(d["id"], d["telefono"], amb, tabla, emisor):
                 fallido(d, "Paciente dado de baja o ya no disponible")
                 return
             bloqueo = _restriccion_envio_desarrollo(amb, tabla_area, d["telefono"])
@@ -7189,7 +7192,7 @@ def _procesar_job(job_id: str) -> None:
             job["errores"].append({"id": d["id"], "detalle": "Número suprimido"})
             continue
         if not _paciente_habilitado_antes_de_enviar(
-                d["id"], d["telefono"], amb, t_esp or tabla_pacientes(amb)):
+                d["id"], d["telefono"], amb, t_esp or tabla_pacientes(amb), emisor):
             job["fallidos"] += 1
             job["errores"].append({"id": d["id"], "detalle": "Paciente dado de baja o ya no disponible"})
             continue
@@ -7410,50 +7413,23 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
 
         base_select = "SELECT " + expr_select_pacientes(amb_q, tabla=t) + from_pacientes(amb_q, tabla=t)
 
+        cond = []
+        params = _parametros_espera(emisor)
         if body.pacientes:
-            # Se traen TODOS los seleccionados (incluidos los de baja) para poder
-            # informar al usuario por qué se descartó cada uno.
-            placeholders = ", ".join("%s" for _ in body.pacientes)
-            where_lista = "p.lista_id = %s AND " if lista_id is not None else ""
-            args_lista = (lista_id,) if lista_id is not None else ()
-            cur.execute(base_select + f" WHERE {where_lista}p.id IN ({placeholders})",
-                        (*args_lista, *body.pacientes))
-        elif lista_id is not None:
-            # Reservo entrega pacientes ya filtrados por autorización; los
-            # teléfonos inválidos se mantienen visibles, pero no son elegibles.
-            cur.execute(base_select + " WHERE p.lista_id=%s AND p.telefono_valido=1 ORDER BY p.id",
-                        (lista_id,))
-        else:
-            if amb_q == "desarrollo":
-                # En desarrollo se puede reenviar sin importar el estado del paciente;
-                # la única restricción real sigue siendo el filtro de números autorizados,
-                # que se aplica más abajo en este mismo endpoint.
-                if tiene_opt_out:
-                    cur.execute(base_select + " WHERE p.whatsapp_opt_out = 0 ORDER BY p.id")
-                else:
-                    cur.execute(base_select + " ORDER BY p.id")
-            else:
-                cond = []
-                if tiene_estado:
-                    partes_estado = ["p.estado = 'pendiente'"]
-                    # Los que respondieron "me interesa" / "no me interesa" a una
-                    # oferta vuelven a ser elegibles al cabo de una semana.
-                    if columna_existe(t, "interes_fecha", amb_q):
-                        cols_t = columnas_tabla(t, amb_q)
-                        partes_interes = [c for c in ("interesado", "no_interesado") if c in cols_t]
-                        if partes_interes:
-                            partes_estado.append(
-                                "((" + " OR ".join(f"p.{c} = 1" for c in partes_interes) + ")"
-                                " AND p.interes_fecha IS NOT NULL"
-                                " AND p.interes_fecha < DATE_SUB(NOW(), INTERVAL 7 DAY))"
-                            )
-                    cond.append("(" + " OR ".join(partes_estado) + ")")
-                if tiene_opt_out:
-                    cond.append("p.whatsapp_opt_out = 0")
-                if cond:
-                    cur.execute(base_select + " WHERE " + " AND ".join(cond) + " ORDER BY p.id")
-                else:
-                    cur.execute(base_select + " ORDER BY p.id")
+            params.update({f"pac_{i}": int(pid) for i, pid in enumerate(body.pacientes)})
+            cond.append("p.id IN (" + ", ".join(f"%(pac_{i})s" for i in range(len(body.pacientes))) + ")")
+        if lista_id is not None:
+            cond.extend(("p.lista_id=%(lista_id)s", "p.telefono_valido=1"))
+            params["lista_id"] = lista_id
+        if amb_q != "desarrollo":
+            if tiene_estado:
+                cond.append("p.estado <> 'error'")
+            cond.append(_condicion_espera_plantilla())
+        if tiene_opt_out:
+            cond.append("p.whatsapp_opt_out = 0")
+        if columna_existe(t, "respuesta", amb_q):
+            cond.append("(p.respuesta IS NULL OR p.respuesta <> 'baja')")
+        cur.execute(base_select + (" WHERE " + " AND ".join(cond) if cond else "") + " ORDER BY p.id", params)
         filas = cur.fetchall()
 
     rechazados: list[dict] = []
@@ -7835,19 +7811,45 @@ def confirmar_envio(token: str, background_tasks: BackgroundTasks):
 """)
 
 
+def _condicion_espera_plantilla(alias: str = "p") -> str:
+    """Excluye envíos aceptados de la misma clínica en las 24 h anteriores."""
+    telefono = f"REPLACE(REPLACE(REPLACE(REPLACE(REPLACE({alias}.telefono, ' ', ''), '-', ''), '(', ''), ')', ''), '+', '')"
+    normalizado = (f"CASE WHEN LENGTH({telefono})=11 AND LEFT({telefono},3)='569' THEN CONCAT('+',{telefono}) "
+                   f"WHEN LENGTH({telefono})=10 AND LEFT({telefono},2)='56' THEN CONCAT('+569',SUBSTRING({telefono},3)) "
+                   f"WHEN LENGTH({telefono})=9 AND LEFT({telefono},1)='9' THEN CONCAT('+56',{telefono}) "
+                   f"WHEN LENGTH({telefono})=8 AND LEFT({telefono},1)='9' THEN CONCAT('+569',{telefono}) ELSE '' END")
+    # Mantener la columna indexada intacta; la colación explícita evita conflictos
+    # entre tablas creadas con distintas configuraciones de MySQL.
+    return ("NOT EXISTS (SELECT 1 FROM log_envios le WHERE le.numero_telefono = "
+            f"CONVERT(({normalizado}) USING utf8mb4) COLLATE utf8mb4_unicode_ci "
+            "AND le.envio_id IS NOT NULL AND le.estado_envio='enviado' "
+            "AND le.whatsapp_message_id IS NOT NULL AND COALESCE(le.estado_whatsapp,'') <> 'failed' "
+            "AND (le.centro_codigo=%(espera_centro)s OR "
+            "(le.wa_phone_id=%(espera_phone)s AND %(espera_phone)s <> '')) "
+            "AND le.fecha_hora > DATE_SUB(%(espera_fecha)s, INTERVAL 24 HOUR) "
+            "AND le.fecha_hora <= %(espera_fecha)s)")
+
+
+def _parametros_espera(emisor: dict | None, fecha=None) -> dict:
+    return {"espera_centro": (emisor or {}).get("codigo") or "",
+            "espera_phone": (emisor or {}).get("phoneNumberId") or "",
+            "espera_fecha": fecha or datetime.datetime.now()}
+
+
 class DestinosIn(BaseModel):
     ambiente: str = "produccion"
     plantilla_id: int | None = None
     area_id: int | None = None
     fecha: str | None = None
     prevision_programado: bool = False
+    programado_para: str | None = None
     centro: str | None = None
     reservo_lista_id: int | None = None
 
 
 def _contar_elegibles_tabla(t: str, amb_q: str, amb: str,
-                            reservo_lista_id: int | None = None) -> tuple[int, int]:
-    """(total, elegibles) de una tabla. Producción requiere estado pendiente;
+                            reservo_lista_id: int | None = None, emisor: dict | None = None, fecha=None) -> tuple[int, int]:
+    """(total, elegibles) de una tabla. Producción respeta errores y la espera;
     desarrollo permite reenviar sin importar estado, siempre entre números de prueba."""
     with conectar(amb) as conn, conn.cursor() as cur:
         lista_reservo = t == reservo_pacientes.TABLA_LISTA_RESERVO
@@ -7860,19 +7862,21 @@ def _contar_elegibles_tabla(t: str, amb_q: str, amb: str,
         conds = []
         es_desarrollo = entorno_valido(amb) == "desarrollo"
         if lista_reservo:
-            conds.append("telefono_valido=1")
-        elif not es_desarrollo and columna_existe(t, "estado", amb_q):
-            conds.append("estado = 'pendiente'")
+            conds.append("p.telefono_valido=1")
+        if not es_desarrollo and columna_existe(t, "estado", amb_q):
+            conds.append("p.estado <> 'error'")
+        if not es_desarrollo and emisor:
+            conds.append(_condicion_espera_plantilla())
         if columna_existe(t, "whatsapp_opt_out", amb_q):
-            conds.append("whatsapp_opt_out = 0")
+            conds.append("p.whatsapp_opt_out = 0")
         if columna_existe(t, "respuesta", amb_q):
-            conds.append("(respuesta IS NULL OR respuesta <> 'baja')")
+            conds.append("(p.respuesta IS NULL OR p.respuesta <> 'baja')")
         if lista_reservo:
-            conds.insert(0, "lista_id=%s")
+            conds.insert(0, "p.lista_id=%(lista_id)s")
         cur.execute(
-            f"SELECT telefono FROM {t}"
+            f"SELECT p.telefono FROM {t} p"
             + (" WHERE " + " AND ".join(conds) if conds else ""),
-            ((reservo_lista_id,) if lista_reservo else ()),
+            {**_parametros_espera(emisor, fecha), "lista_id": reservo_lista_id},
         )
         telefonos = [r.get("telefono") or "" for r in cur.fetchall()]
         if es_desarrollo:
@@ -7926,7 +7930,14 @@ def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensaj
     else:
         t = tabla_pacientes(amb)
         amb_q = amb
-    total, elegibles = _contar_elegibles_tabla(t, amb_q, amb, lista_id)
+    fecha_elegibilidad = None
+    if body.programado_para:
+        try:
+            fecha_elegibilidad = datetime.datetime.strptime(body.programado_para, "%Y-%m-%dT%H:%M")
+        except ValueError:
+            raise HTTPException(422, detail="Fecha y hora de envío inválidas.")
+    emisor_elegibilidad = resolver_centro(body.centro) if body.centro in catalogo_centros() else None
+    total, elegibles = _contar_elegibles_tabla(t, amb_q, amb, lista_id, emisor_elegibilidad, fecha_elegibilidad)
     # Los que ya están tomados por un programado activo no se pueden preelegir
     # de nuevo: son los que quedan libres para este envío/horario.
     try:
@@ -8231,10 +8242,10 @@ def _contar_reservados_prog(t: str, amb: str, amb_q: str,
 
 
 def _preelegir_pacientes_prog(t: str, amb: str, amb_q: str, n: int, cur=None,
-                              reservo_lista_id: int | None = None) -> list[dict]:
+                              reservo_lista_id: int | None = None, emisor: dict | None = None, fecha=None) -> list[dict]:
     """Primeros N pacientes libres: sin opt-out ni baja y no preelegidos por
     otro programado activo. En desarrollo se permite cualquier estado; en
-    producción solo pendientes. Orden estable por id.
+    producción respeta errores y la espera. Orden estable por id.
 
     Si se pasa `cur` (la misma transacción que va a guardar la lista) la lectura
     se hace con FOR UPDATE: dos programados creados a la vez se serializan y no
@@ -8248,8 +8259,10 @@ def _preelegir_pacientes_prog(t: str, amb: str, amb_q: str, n: int, cur=None,
         if reservo_lista_id is None:
             raise ValueError("Falta identificar la lista Reservo del envío programado.")
         cond.extend(("p.lista_id = %(lista_id)s", "p.telefono_valido = 1"))
-    elif not solo_pruebas and columna_existe(t, "estado", amb_q):
-        cond.append("p.estado = 'pendiente'")
+    if not solo_pruebas and columna_existe(t, "estado", amb_q):
+        cond.append("p.estado <> 'error'")
+    if not solo_pruebas and emisor:
+        cond.append(_condicion_espera_plantilla())
     if columna_existe(t, "whatsapp_opt_out", amb_q):
         cond.append("p.whatsapp_opt_out = 0")
     if columna_existe(t, "respuesta", amb_q):
@@ -8266,7 +8279,7 @@ def _preelegir_pacientes_prog(t: str, amb: str, amb_q: str, n: int, cur=None,
     sql = (f"SELECT p.id, p.nombre, p.apellido, p.telefono FROM {t} p{where}"
            " ORDER BY p.id" + ("" if solo_pruebas else " LIMIT %(n)s")
            + (" FOR UPDATE" if cur else ""))
-    params = {"t": t, "amb": amb_q}
+    params = {"t": t, "amb": amb_q, **_parametros_espera(emisor, fecha)}
     if lista_reservo:
         params["lista_id"] = int(reservo_lista_id)
     if not solo_pruebas:
@@ -8307,8 +8320,8 @@ def _liberar_destinatarios_prog(prog_id: int) -> None:
 
 
 def _revivir_destinatarios_prog(tabla: str, amb: str, amb_q: str,
-                                 ids: list[int], reservo_lista_id: int | None = None) -> tuple[list[dict], list[dict]]:
-    """Revalida lista congelada: producción exige que sigan pendientes;
+                                 ids: list[int], reservo_lista_id: int | None = None, emisor: dict | None = None) -> tuple[list[dict], list[dict]]:
+    """Revalida lista congelada: producción respeta errores y la espera;
     desarrollo permite cualquier estado. En ambos casos excluye bajas/opt-out."""
     if not ids:
         return [], []
@@ -8320,20 +8333,23 @@ def _revivir_destinatarios_prog(tabla: str, amb: str, amb_q: str,
         cols.append("p.whatsapp_opt_out")
     if columna_existe(tabla, "respuesta", amb_q):
         cols.append("p.respuesta")
-    cond = [f"p.id IN ({', '.join('%s' for _ in ids)})"]
-    args = list(ids)
+    cond = ["p.id IN (" + ", ".join(f"%(pid_{i})s" for i in range(len(ids))) + ")"]
+    args = {**_parametros_espera(emisor), **{f"pid_{i}": int(pid) for i, pid in enumerate(ids)}}
     if lista_reservo:
         if reservo_lista_id is None:
             return [], [{"id": pid, "nombre": "", "motivo": "No se pudo identificar la base Reservo"}
                         for pid in ids]
-        cond.append("p.lista_id=%s")
-        args.append(int(reservo_lista_id))
-    elif entorno_valido(amb) != "desarrollo" and columna_existe(tabla, "estado", amb_q):
-        cond.append("p.estado = 'pendiente'")
+        cond.append("p.lista_id=%(lista_id)s")
+        args["lista_id"] = int(reservo_lista_id)
+    if entorno_valido(amb) != "desarrollo":
+        if columna_existe(tabla, "estado", amb_q):
+            cond.append("p.estado <> 'error'")
+        if emisor:
+            cond.append(_condicion_espera_plantilla())
     with conectar(amb) as conn, conn.cursor() as cur:
         cur.execute(
             f"SELECT {', '.join(cols)} FROM {tabla} p WHERE " + " AND ".join(cond),
-            tuple(args),
+            args,
         )
         filas = cur.fetchall()
     por_id = {r["id"]: r for r in filas}
@@ -8341,7 +8357,7 @@ def _revivir_destinatarios_prog(tabla: str, amb: str, amb_q: str,
     for pid in ids:
         r = por_id.get(pid)
         if r is None:
-            excluidos.append({"id": pid, "nombre": "", "motivo": "Ya no está en la base"})
+            excluidos.append({"id": pid, "nombre": "", "motivo": "No disponible: error, envío reciente o registro eliminado"})
         elif r.get("whatsapp_opt_out") or (r.get("respuesta") or "") == "baja":
             excluidos.append({"id": pid, "nombre": " ".join(
                 x for x in [r.get("nombre"), r.get("apellido")] if x),
@@ -8547,7 +8563,7 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
     # Tope real: elegibles libres (en desarrollo incluye todos los estados),
     # sin repetir destinatarios ya reservados ni superar el cupo de Meta.
     amb_q = "produccion" if esp is not None else amb
-    _, elegibles = _contar_elegibles_tabla(tabla, amb_q, amb, lista_id)
+    _, elegibles = _contar_elegibles_tabla(tabla, amb_q, amb, lista_id, emisor, cuando)
     try:
         reservados = _contar_reservados_prog(tabla, amb, amb_q, lista_id)
     except Exception as e:
@@ -8635,7 +8651,8 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
 
     with conectar() as conn, conn.cursor() as cur:
         preelegidos = _preelegir_pacientes_prog(
-            tabla, amb, amb_q, n_preelegir, cur=cur, reservo_lista_id=lista_id)
+            tabla, amb, amb_q, n_preelegir, cur=cur, reservo_lista_id=lista_id,
+            emisor=emisor, fecha=cuando)
         if not preelegidos:
             conn.rollback()
             raise HTTPException(422, detail=(
@@ -9134,7 +9151,7 @@ def _ejecutar_programado(f: dict) -> None:
         return
     vivos, excluidos = _revivir_destinatarios_prog(
         f.get("tabla") or nombre_base(amb_prog), amb_prog, amb_q,
-        [p["id"] for p in cohorte], f.get("reservo_lista_id"))
+        [p["id"] for p in cohorte], f.get("reservo_lista_id"), emisor)
     if not vivos:
         motivo = (f"Los {len(cohorte)} destinatarios preelegidos ya no se pueden contactar "
                   f"({len(excluidos)} dados de baja). No se envió nada. Reprograma el envío.")

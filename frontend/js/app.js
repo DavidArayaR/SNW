@@ -1102,7 +1102,7 @@ function actualizarCostoProg() {
   const modo = $("#selProgLimiteModo")?.value || "";
   const cantidad = limiteProgElegido() ? Number($("#inpProgLimite").value) : null;
   const base = $("#selProgBase")?.value || "";
-  const fecha = $("#inpProgFecha")?.value.slice(0, 10) || "";
+  const fecha = $("#inpProgFecha")?.value || "";
   const costo = base && fecha && progCupoKey === `${base}|${fecha}|${tplSelId || ""}|${$("#selProgCentro")?.value || ""}`
     ? progCupo?.costo : null;
   pintarCostoEstimado(
@@ -3772,8 +3772,9 @@ async function cargarCupoProg(forzar = false) {
   const listaReservoId = idListaReservo(base);
   const areaId = base.startsWith("esp:") ? Number(base.slice(4)) : "";
   const ambiente = areaId || listaReservoId != null ? "produccion" : base;
-  const fecha = $("#inpProgFecha")?.value.slice(0, 10) || "";
-  const key = `${base}|${fecha}|${tplSelId || ""}|${$("#selProgCentro")?.value || ""}`;
+  const fechaHora = $("#inpProgFecha")?.value || "";
+  const fecha = fechaHora.slice(0, 10);
+  const key = `${base}|${fechaHora}|${tplSelId || ""}|${$("#selProgCentro")?.value || ""}`;
   if (!forzar && key === progCupoKey) { aplicarCupoProg(); return; }
   const consulta = ++progCupoConsulta;
   progCupoKey = key;
@@ -3787,6 +3788,7 @@ async function cargarCupoProg(forzar = false) {
     if (areaId) cuerpo.area_id = areaId;
     if (listaReservoId != null) cuerpo.reservo_lista_id = listaReservoId;
     if (fecha) cuerpo.fecha = fecha;
+    if (fechaHora && fechaHora.length >= 16) cuerpo.programado_para = fechaHora.slice(0, 16);
     if (tplSelId) cuerpo.plantilla_id = tplSelId;
     const res = await fetch("api/notificaciones/destinatarios", {
       method: "POST",
