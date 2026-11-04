@@ -10,11 +10,11 @@
   <link rel="stylesheet" href="css/styles.css?v=estado-prueba-meta1">
   <link rel="stylesheet" href="css/componentes.css?v=paginador-cinco1">
   <link rel="stylesheet" href="css/layout.css?v=navcolor1">
-  <link rel="stylesheet" href="css/mensajeria.css?v=boton-crm-plantilla1">
+  <link rel="stylesheet" href="css/mensajeria.css?v=respuestas-plantilla1">
   <link rel="stylesheet" href="css/calendario.css?v=base1">
   <link rel="stylesheet" href="css/calendario-programados.css?v=programados2">
   <link rel="stylesheet" href="css/refinamiento.css?v=merge-frontend1">
-  <link rel="stylesheet" href="css/mensajeria-nuevo.css?v=filtro-bases-clinica1">
+  <link rel="stylesheet" href="css/mensajeria-nuevo.css?v=respuestas-plantilla1">
   <link rel="stylesheet" href="css/estilo-nuevo.css?v=ui-unslop1">
   <script src="js/tema.js?v=scrollbar1"></script>
 </head>
@@ -34,6 +34,7 @@
           <button type="button" class="msg-tab activo" data-msgtab="plantillas" role="tab">Plantillas</button>
           <button type="button" class="msg-tab" data-msgtab="envios" role="tab">Envío manual</button>
           <button type="button" class="msg-tab" data-msgtab="programados" role="tab">Envíos programados</button>
+          <button type="button" class="msg-tab" data-msgtab="respuestas" role="tab">Respuestas</button>
         </div>
         <span class="app-topbar__sep"></span>
       </header>
@@ -66,6 +67,11 @@
       </div>
       <ul id="listaPlantillas" class="tpl-list" aria-label="Listado de plantillas" aria-busy="false"></ul>
     </aside>
+
+    <section class="panel panel--editor" id="panelRespuestasPlantilla" hidden>
+      <div class="panel__head"><h2>Botones y respuestas</h2></div>
+      <div class="respuestas-plantilla" id="contenidoRespuestasPlantilla" aria-live="polite"></div>
+    </section>
 
     <section class="panel panel--editor" id="panelEditor">
       <div class="panel__head">
@@ -615,7 +621,7 @@
   <script src="js/layout.js?v=reservo-nav2"></script>
   <script src="js/pass-toggle.js"></script>
   <script src="js/plantilla-ia.js?v=sin-confirmacion1"></script>
-  <script src="js/app.js?v=mensaje-preparado-local1"></script>
+  <script src="js/app.js?v=respuestas-plantilla1"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>

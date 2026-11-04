@@ -53,7 +53,7 @@ body[data-pagina="mensajeria"] .layout {
   margin: 24px auto;
   padding-inline: 20px;
 }
-body[data-pagina="mensajeria"] :is(#panelPlantillas, #panelEditor, #panelEnvio, .prog-columna > .panel) {
+body[data-pagina="mensajeria"] :is(#panelPlantillas, #panelEditor, #panelEnvio, #panelRespuestasPlantilla, .prog-columna > .panel) {
   min-width: 0;
   border: 1px solid var(--borde);
   border-radius: 16px;

@@ -997,6 +997,13 @@ function crearItemPlantilla(p) {
 // Click en la lista según la tab: editor, envío o programar. La selección
 // (tplSelId) es única y persiste entre tabs.
 function clicPlantilla(id) {
+  if (tabMsg === "respuestas") {
+    tplSelId = id;
+    guardarSelTpl();
+    renderLista(buscadorEl.value);
+    renderRespuestasPlantilla();
+    return;
+  }
   if (tabMsg === "envios") {
     tplSelId = id;
     renderLista(buscadorEl.value);
@@ -1997,6 +2004,7 @@ function modoVacia() {
   establecerEncabezado(null);
   estadoVacio.style.display = "flex";
   tituloForm.textContent = "Plantillas";
+  if (tabMsg === "respuestas") renderRespuestasPlantilla();
   actualizarBotonesSegunEstado(null);
   renderLista(buscadorEl.value);
 }
@@ -3565,10 +3573,10 @@ if (btnSincronizarMeta) {
 
 /* ---------- Tabs de Mensajería ---------- */
 let tabMsg = localStorage.getItem("snw_tab_msg") || "plantillas";
-if (["plantillas", "envios", "programados"].indexOf(tabMsg) === -1) tabMsg = "plantillas";
+if (["plantillas", "envios", "programados", "respuestas"].indexOf(tabMsg) === -1) tabMsg = "plantillas";
 // Deep-link desde la sidebar: ?tab= tiene prioridad sobre lo recordado.
 const tabUrl = new URLSearchParams(location.search).get("tab");
-if (tabUrl && ["plantillas", "envios", "programados"].indexOf(tabUrl) !== -1) {
+if (tabUrl && ["plantillas", "envios", "programados", "respuestas"].indexOf(tabUrl) !== -1) {
   tabMsg = tabUrl;
   try { localStorage.setItem("snw_tab_msg", tabMsg); } catch { /* sin almacenamiento */ }
 }
@@ -3612,14 +3620,92 @@ function pintarTabsMsg() {
   if (pE) pE.hidden = !enPlantillas;
   if (pV) pV.hidden = tabMsg !== "envios";
   if (pG) pG.hidden = tabMsg !== "programados";
+  const pR = $("#panelRespuestasPlantilla");
+  if (pR) pR.hidden = tabMsg !== "respuestas";
+  if (tabMsg === "respuestas") renderRespuestasPlantilla();
+}
+
+function renderRespuestasPlantilla() {
+  const contenedor = $("#contenidoRespuestasPlantilla");
+  if (!contenedor) return;
+  contenedor.replaceChildren();
+  const plantilla = plantillas.find((p) => p.id === tplSelId);
+  if (!plantilla) {
+    const vacio = document.createElement("p");
+    vacio.className = "field__hint";
+    vacio.textContent = "Selecciona una plantilla de la lista. Puedes filtrarla por clínica.";
+    contenedor.append(vacio);
+    return;
+  }
+  const titulo = document.createElement("h3");
+  titulo.textContent = plantilla.nombre;
+  const cuenta = document.createElement("p");
+  cuenta.className = "field__hint";
+  cuenta.textContent = descripcionCuentaPlantilla(plantilla.centro_codigo);
+  contenedor.append(titulo, cuenta);
+  const botones = plantilla.botones || (esPlantillaProtegida(plantilla) ? [] : BOTONES_INICIALES);
+  if (!botones.length) {
+    const vacio = document.createElement("p"); vacio.textContent = "Esta plantilla no tiene botones configurados.";
+    contenedor.append(vacio); return;
+  }
+  for (const boton of botones) {
+    const bloque = document.createElement("article"); bloque.className = "respuesta-plantilla-boton";
+    const nombre = document.createElement("strong"); nombre.textContent = boton.texto || "Botón";
+    const detalle = document.createElement("p"); detalle.className = "field__hint";
+    const tipo = boton.accion === "interes" || boton.tipo === "crm" ? "interes"
+      : boton.accion === "reagendar" ? "reagendar" : "";
+    detalle.textContent = tipo === "interes" ? "Al responder, recibirá el botón de call center."
+      : tipo === "reagendar" ? "Al responder, recibirá el botón de call center para reagendar."
+      : boton.accion === "baja" ? "Se usa la respuesta de baja configurada para la clínica."
+      : boton.accion === "desinteres" ? "Registra que al paciente no le interesa."
+      : boton.tipo === "url" ? "Abre un enlace configurado en Meta."
+      : "Este botón no tiene un mensaje preparado para call center.";
+    bloque.append(nombre, detalle);
+    if (tipo) {
+      const etiqueta = document.createElement("label"); etiqueta.textContent = "Mensaje preparado para call center";
+      const area = document.createElement("textarea"); area.rows = 3; area.maxLength = 500;
+      area.value = tipo === "interes" ? (boton.crm_mensaje || "") : (plantilla.mensaje_preparado_reagendar || "");
+      let anterior = area.value;
+      area.placeholder = "Vacío: usar el mensaje configurado para la clínica";
+      const ayuda = document.createElement("p"); ayuda.className = "field__hint";
+      ayuda.textContent = tipo === "reagendar" ? "Incluye {paciente_nombre}, {doctor_nombre} y {clinica_nombre}. Vacío: usa el texto de la clínica."
+        : "Vacío: usa el texto de la clínica. Este mensaje no modifica la plantilla de Meta.";
+      const guardar = document.createElement("button"); guardar.type = "button"; guardar.className = "btn btn--primary";
+      guardar.textContent = "Guardar mensaje"; guardar.disabled = true;
+      const estado = document.createElement("p"); estado.className = "field__hint"; estado.setAttribute("role", "status");
+      const puedeEditar = PUEDE_EDITAR_PLANTILLAS && puedeEditarEsta(plantilla) && !esPlantillaProtegida(plantilla);
+      area.disabled = !puedeEditar;
+      area.addEventListener("input", () => { guardar.disabled = !puedeEditar || area.value.trim() === anterior; });
+      guardar.addEventListener("click", async () => {
+        guardar.disabled = true; estado.textContent = "Guardando…";
+        try {
+          const res = await fetch(`${API_URL}/${plantilla.id}/mensaje-preparado`, {
+            method: "PUT", headers: authHeaders({ "Content-Type": "application/json" }),
+            body: JSON.stringify({ tipo, mensaje: area.value, anterior }),
+          });
+          const datos = await res.json().catch(() => ({}));
+          if (res.status === 401) { window.snwSesionExpirada(); return; }
+          if (!res.ok) throw new Error(datos.detail || "No se pudo guardar el mensaje.");
+          anterior = datos.mensaje; area.value = anterior;
+          const indice = plantillas.findIndex((p) => p.id === plantilla.id);
+          if (indice >= 0) plantillas[indice] = datos.plantilla;
+          if (activaId === plantilla.id && !hayCambios()) abrir(plantilla.id);
+          estado.textContent = "Mensaje guardado. No requiere revisión de Meta.";
+        } catch (error) { estado.textContent = error.message; }
+        finally { guardar.disabled = !puedeEditar || area.value.trim() === anterior; }
+      });
+      etiqueta.append(area); bloque.append(etiqueta, ayuda, guardar, estado);
+    }
+    contenedor.append(bloque);
+  }
 }
 
 window.addEventListener("resize", posicionarIndicadorTabsMsg);
 
 function cambiarTabMsg(t) {
-  const orden = { plantillas: 0, envios: 1, programados: 2 };
+  const orden = { plantillas: 0, envios: 1, programados: 2, respuestas: 3 };
   const panelDestino = {
-    plantillas: "#panelEditor", envios: "#panelEnvio", programados: "#progColumna",
+    plantillas: "#panelEditor", envios: "#panelEnvio", programados: "#progColumna", respuestas: "#panelRespuestasPlantilla",
   }[t];
   document.querySelector(panelDestino)?.style.setProperty(
     "--msg-panel-entrada-x", orden[t] > orden[tabMsg] ? "20px" : "-20px"

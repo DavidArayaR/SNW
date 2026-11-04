@@ -179,7 +179,7 @@
 .preview-validaciones__item--aviso { color: var(--warn-fg); background: var(--warn-bg); border: 1px solid var(--warn-bd); }
 
 /* Solo entra el panel de la pestaña elegida; la lista común permanece fija. */
-:is(#panelEditor, #panelEnvio, #progColumna):not([hidden]) {
+:is(#panelEditor, #panelEnvio, #progColumna, #panelRespuestasPlantilla):not([hidden]) {
   animation: msg-panel-entrada .24s ease-out both;
 }
 @keyframes msg-panel-entrada {
@@ -187,7 +187,7 @@
   to { opacity: 1; transform: translateX(0); }
 }
 @media (prefers-reduced-motion: reduce) {
-  :is(#panelEditor, #panelEnvio, #progColumna):not([hidden]) { animation: none; }
+  :is(#panelEditor, #panelEnvio, #progColumna, #panelRespuestasPlantilla):not([hidden]) { animation: none; }
 }
 
 .estado-meta-fila { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -247,3 +247,9 @@
 .field.tpl-botones .tpl-boton__crm-mensaje { width: 100%; min-height: 76px; padding: 10px 12px; border: 1px solid var(--borde); border-radius: 10px; background: var(--surface-2); color: var(--texto); font: inherit; resize: vertical; }
 .field.tpl-botones .tpl-boton__crm-mensaje:focus { border-color: var(--verde); outline: 2px solid var(--verde); outline-offset: 1px; }
 .tpl-boton__crm-campo small { color: var(--texto-suave); line-height: 1.4; }
+.respuestas-plantilla { display: grid; gap: 12px; padding: 18px; }
+.respuestas-plantilla h3, .respuestas-plantilla p { margin: 0; }
+.respuesta-plantilla-boton { display: grid; gap: 8px; padding: 14px; border: 1px solid var(--borde); border-radius: 10px; background: var(--surface-2); }
+.respuesta-plantilla-boton label { display: grid; gap: 6px; font-weight: 600; }
+.respuesta-plantilla-boton textarea { width: 100%; padding: 10px; border: 1px solid var(--borde); border-radius: 8px; background: var(--panel); color: var(--texto); font: inherit; resize: vertical; }
+.respuesta-plantilla-boton .btn { justify-self: start; }

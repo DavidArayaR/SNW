@@ -113,12 +113,16 @@ MENSAJE_PREPARADO_REAGENDAR = ("Sí me gustaría agendar, mi nombre es {paciente
 MENSAJE_PREPARADO_CONSULTA = "Hola, esta es mi consulta: {consulta}"
 
 
+proveedor_mensaje_preparado = None
+
+
 def mensaje_preparado_reagendar(cita: dict) -> str:
     if not cita.get("doctor_nombre"):
         raise ValueError("Falta el médico para preparar el reagendamiento")
     codigo = cita.get("centro_codigo")
-    formato = ((config_get(f"respuesta_sistema_{codigo}_preparado_reagendar") or "").strip()
-               if codigo else "") or MENSAJE_PREPARADO_REAGENDAR
+    propio = proveedor_mensaje_preparado(cita) if callable(proveedor_mensaje_preparado) else ""
+    formato = propio or ((config_get(f"respuesta_sistema_{codigo}_preparado_reagendar") or "").strip()
+                         if codigo else "") or MENSAJE_PREPARADO_REAGENDAR
     for clave in ("paciente_nombre", "doctor_nombre", "clinica_nombre"):
         formato = formato.replace("{" + clave + "}", str(cita.get(clave) or ""))
     return formato

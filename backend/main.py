@@ -2617,6 +2617,18 @@ def _mensaje_boton_call_center(paciente_id, ambiente: str) -> str:
     return oferta if _CC_PALABRAS_OFERTA.search(texto_origen) else generico
 
 
+def _mensaje_reagendar_de_plantilla(cita: dict) -> str:
+    clave, centro = cita.get("plantilla_clave"), cita.get("centro_codigo")
+    if not clave or not centro:
+        return ""
+    plantilla = next((p for p in leer_plantillas() if p.get("clave") == clave
+                      and p.get("centro_codigo") == centro), None)
+    return str((plantilla or {}).get("mensaje_preparado_reagendar") or "").strip()
+
+
+paciente_reagendar.proveedor_mensaje_preparado = _mensaje_reagendar_de_plantilla
+
+
 def _mensaje_crm_ultima_campania(telefono: str, emisor: dict | None, referencia: str | None = None) -> str | None:
     """Mensaje local de la última campaña aceptada para este teléfono y clínica."""
     phone_id = (emisor or {}).get("phoneNumberId")
@@ -2641,8 +2653,40 @@ def _mensaje_crm_ultima_campania(telefono: str, emisor: dict | None, referencia:
         return None
 
 
+def _contexto_prueba_interes(telefono: str, emisor: dict | None, referencia: str | None) -> dict | None:
+    """Pruebas aceptadas en las últimas 24 h, acotadas al teléfono y emisor."""
+    phone_id = (emisor or {}).get("phoneNumberId")
+    if not phone_id:
+        return None
+    with conectar() as conn, conn.cursor() as cur:
+        sql = ("SELECT mensaje_id, telefono, centro_codigo, plantilla_id, ambiente, nombre, apellido"
+               " FROM call_center_prueba_envios WHERE telefono=%s AND wa_phone_id=%s"
+               " AND centro_codigo=%s AND creado >= DATE_SUB(NOW(), INTERVAL 24 HOUR)")
+        args = (telefono, phone_id, (emisor or {}).get("codigo"))
+        if referencia:
+            sql += " AND BINARY mensaje_id=BINARY %s"
+            args += (referencia,)
+        cur.execute(sql + " ORDER BY creado DESC LIMIT 1", args)
+        return cur.fetchone()
+
+
+def _guardar_contexto_prueba(message_id: str, telefono: str, emisor: dict,
+                             plantilla: dict, ambiente: str, ejemplos: dict) -> None:
+    if not message_id:
+        raise ValueError("Meta no entregó identificador de la prueba")
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM call_center_prueba_envios WHERE creado < DATE_SUB(NOW(), INTERVAL 48 HOUR)")
+        cur.execute("INSERT INTO call_center_prueba_envios"
+                    " (mensaje_id, telefono, wa_phone_id, centro_codigo, plantilla_id, ambiente, nombre, apellido)"
+                    " VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                    (message_id, telefono, emisor["phoneNumberId"], emisor["codigo"], plantilla["id"], ambiente,
+                     (ejemplos.get("nombre") or "")[:150], (ejemplos.get("apellido") or "")[:150]))
+        conn.commit()
+
+
 def _cc_datos_envio(pac: dict, ambiente: str, consulta: str = "",
-                    emisor: dict | None = None, referencia: str | None = None) -> tuple[str, dict, str]:
+                    emisor: dict | None = None, referencia: str | None = None,
+                    mensaje_prueba: str | None = None) -> tuple[str, dict, str]:
     """Devuelve (texto renderizado, datos_plantilla, numero_asignado) para el
     mensaje fijo de call center. Añade el botón que abre el chat del call
     center si la clínica receptora tiene un número CRM válido. Nunca usa el
@@ -2658,7 +2702,7 @@ def _cc_datos_envio(pac: dict, ambiente: str, consulta: str = "",
         url = f"https://wa.me/{numero}"
         mensaje_preparado = (paciente_reagendar.mensaje_preparado_consulta(consulta, codigo)
                              if consulta else
-                             _mensaje_crm_ultima_campania(
+                             mensaje_prueba or _mensaje_crm_ultima_campania(
                                  normalizar_telefono(pac.get("telefono") or "") or "", emisor, referencia)
                              or _respuesta_sistema("preparado_interes", codigo))
         url += "?text=" + urllib.parse.quote(mensaje_preparado, safe="")
@@ -2715,7 +2759,7 @@ def _tabla_ultimo_envio_emisor(telefono: str, referencia: str | None = None) -> 
 def _despachar_call_center(pac: dict, ambiente: str, tabla: str | None = None,
                            consulta: str = "", texto_personalizado: str | None = None,
                            emisor_forzado: dict | None = None, automatico: bool = True,
-                           referencia: str | None = None) -> dict:
+                           referencia: str | None = None, mensaje_prueba: str | None = None) -> dict:
     """Envía el mensaje fijo de call center a un paciente y lo registra en el
     historial y en call_center_log. Devuelve {ok, error, telefono}. No lanza.
     Con `tabla` (area) se etiqueta esa tabla y se salta el filtro de
@@ -2734,8 +2778,11 @@ def _despachar_call_center(pac: dict, ambiente: str, tabla: str | None = None,
     emisor = emisor_forzado or _emisor_para_respuesta(telefono, tabla or tabla_pacientes(ambiente))
     if not emisor:
         return {"ok": False, "error": "No se pudo identificar el número emisor", "telefono": telefono}
-    texto, datos_plantilla, numero_cc = (_cc_datos_envio(pac, ambiente, consulta, emisor, referencia)
-                                         if referencia else _cc_datos_envio(pac, ambiente, consulta, emisor))
+    texto, datos_plantilla, numero_cc = (
+        _cc_datos_envio(pac, ambiente, consulta, emisor, referencia, mensaje_prueba)
+        if mensaje_prueba is not None else
+        _cc_datos_envio(pac, ambiente, consulta, emisor, referencia)
+        if referencia else _cc_datos_envio(pac, ambiente, consulta, emisor))
     if texto_personalizado is not None:
         texto = texto_personalizado.strip()
         datos_plantilla["texto"] = texto
@@ -2799,6 +2846,25 @@ def _enviar_call_center_auto(tel: str, mensaje_prueba_id: str | None = None,
         if esta_suprimido(tel):
             return
         prueba_por_mensaje = bool(mensaje_prueba_id and es_numero_prueba(tel))
+        if prueba_por_mensaje:
+            emisor_prueba = emisor_webhook_actual()
+            contexto_prueba = _contexto_prueba_interes(tel, emisor_prueba, referencia) if emisor_prueba else None
+            if contexto_prueba:
+                plantilla_prueba = next((p for p in leer_plantillas()
+                    if p.get("id") == contexto_prueba["plantilla_id"]
+                    and p.get("centro_codigo") == contexto_prueba["centro_codigo"]), None)
+                if not plantilla_prueba:
+                    log_error("call center: plantilla de prueba ya no disponible")
+                    return
+                preparado = next((b.get("crm_mensaje") for b in plantilla_prueba.get("botones") or []
+                                  if b.get("accion") == "interes" and b.get("crm_mensaje")), "")
+                paciente = {"id": None, "nombre": contexto_prueba.get("nombre") or "",
+                            "apellido": contexto_prueba.get("apellido") or "", "telefono": tel}
+                resultado = _despachar_call_center(paciente, contexto_prueba["ambiente"],
+                    emisor_forzado=emisor_prueba, referencia=referencia, mensaje_prueba=preparado)
+                if not resultado.get("ok"):
+                    log_error("call center: no se pudo enviar la respuesta a la prueba")
+                return
         # Una consulta reciente ya abrió el camino al número externo; no
         # intercalar el mensaje genérico mientras esa derivación esté vigente.
         if not prueba_por_mensaje:
@@ -4466,6 +4532,63 @@ def _validar_botones_obligatorios(botones, texto=""):
                             f"{primero_nombre}, No me interesa y Dar de baja."))
 
 
+class MensajePreparadoPlantillaIn(BaseModel):
+    mensaje: str = Field(default="", max_length=500)
+    anterior: str = Field(default="", max_length=500)
+    tipo: str
+
+
+@app.put("/api/plantillas/{plantilla_id}/mensaje-preparado")
+def guardar_mensaje_preparado_plantilla(plantilla_id: int, body: MensajePreparadoPlantillaIn,
+                                       sesion: dict = Depends(exigir("plantillas_editar"))):
+    plantillas = leer_plantillas()
+    p = next((p for p in plantillas if p.get("id") == plantilla_id), None)
+    if not p or p.get("especial") or _es_plantilla_protegida(p):
+        raise HTTPException(404, detail="Plantilla no disponible.")
+    if not (_es_privilegiado(sesion) or _es_creador_plantilla(p, sesion)):
+        raise HTTPException(403, detail="Solo puedes editar tus plantillas.")
+    _exigir_plantilla_en_alcance(sesion, p)
+    mensaje = body.mensaje.strip()
+    if any(ord(c) < 32 and c not in "\n\t" for c in mensaje):
+        raise HTTPException(422, detail="El mensaje contiene caracteres no permitidos.")
+    botones = p.get("botones")
+    if botones is None:
+        botones = presentar_plantilla(p)["botones"]
+    if not isinstance(botones, list):
+        raise HTTPException(409, detail="La plantilla no tiene botones compatibles.")
+    botones = [dict(b) for b in botones]
+    interes = next((b for b in botones if b.get("tipo") == "respuesta" and b.get("accion") == "interes"), None)
+    reagendar = next((b for b in botones if b.get("tipo") == "respuesta" and b.get("accion") == "reagendar"), None)
+    if body.tipo == "interes" and interes is not None:
+        actual = interes.get("crm_mensaje") or ""
+        if re.search(r"[{}]", mensaje):
+            raise HTTPException(422, detail="El mensaje de interés no admite variables.")
+        if actual != body.anterior:
+            raise HTTPException(409, detail="El mensaje cambió en otra sesión. Actualiza antes de guardar.")
+        interes["crm_mensaje"] = mensaje
+        p["botones"] = botones
+    elif body.tipo == "reagendar" and reagendar is not None:
+        actual = p.get("mensaje_preparado_reagendar") or ""
+        if actual != body.anterior:
+            raise HTTPException(409, detail="El mensaje cambió en otra sesión. Actualiza antes de guardar.")
+        variables = set(re.findall(r"\{([^{}]+)\}", mensaje))
+        resto = re.sub(r"\{[^{}]+\}", "", mensaje)
+        if mensaje and (variables != {"paciente_nombre", "doctor_nombre", "clinica_nombre"}
+                        or "{" in resto or "}" in resto):
+            raise HTTPException(422, detail="Incluye {paciente_nombre}, {doctor_nombre} y {clinica_nombre} sin otras variables.")
+        p["mensaje_preparado_reagendar"] = mensaje
+    else:
+        raise HTTPException(400, detail="El botón no permite editar ese mensaje preparado.")
+    p["actualizada"] = int(time.time() * 1000)
+    escribir_plantillas(plantillas)
+    try:
+        auditoria_registrar(sesion.get("usuario", ""), "mensaje_preparado_plantilla", p.get("clave", ""),
+                            "Mensaje preparado de plantilla actualizado")
+    except Exception as exc:
+        log_error("auditar mensaje preparado de plantilla", exc, solo_tipo=True)
+    return {"mensaje": mensaje, "plantilla": p}
+
+
 def _exigir_revision_valida(plantilla: dict, ejemplos: dict | None = None) -> dict:
     vista = presentar_plantilla(plantilla, ejemplos)
     if vista["errores"]:
@@ -4602,6 +4725,12 @@ def enviar_prueba_plantilla(plantilla_id: int, body: PruebaPlantillaIn,
             raise HTTPException(502, detail=error or "Meta no aceptó el mensaje de prueba.")
         with _pruebas_plantilla_lock:
             _pruebas_plantilla_ultima[llave] = time.monotonic()
+        advertencia_contexto = False
+        try:
+            _guardar_contexto_prueba(message_id, telefono, emisor, plantilla, ambiente, vista["ejemplos"])
+        except Exception as exc:
+            advertencia_contexto = True
+            log_error("prueba de plantilla: no se pudo guardar el contexto de respuesta", exc, solo_tipo=True)
         estado_meta = servicio_wa.ultimo_estado_meta or "accepted"
         print(f"[PRUEBA PLANTILLA] id={plantilla_id} centro={emisor['codigo']} "
               f"message_id={message_id} estado_meta={estado_meta}", flush=True)
@@ -4613,12 +4742,15 @@ def enviar_prueba_plantilla(plantilla_id: int, body: PruebaPlantillaIn,
         retenido = estado_meta == "held_for_quality_assessment"
         pausado = estado_meta == "paused"
         return {"ok": True, "message_id": message_id, "centro": emisor["codigo"],
+                "advertencia_contexto": advertencia_contexto,
                 "estado_meta": estado_meta,
                 "mensaje": ("Meta retuvo la prueba para evaluar la calidad de la plantilla. "
                             "Aún no se envió al teléfono."
                             if retenido else
                             "Meta pausó la entrega de esta prueba. Revisa el estado de la plantilla."
                             if pausado else
+                            "Meta aceptó la prueba, pero no se pudo guardar el contexto para responder. Revisa los logs."
+                            if advertencia_contexto else
                             "Meta aceptó la prueba; la entrega aún debe confirmarse por webhook.")}
     except HTTPException:
         raise
