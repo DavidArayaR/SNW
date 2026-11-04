@@ -275,6 +275,71 @@ class ParserCitasTests(unittest.TestCase):
         self.assertIn("ORDER BY le.id DESC LIMIT 1", consulta.args[0])
         self.assertEqual(consulta.args[1], ("+56911111111", "12345"))
 
+    def test_consulta_sin_contexto_usa_ultimo_reagendamiento_y_guarda_mensaje(self):
+        conexion = MagicMock()
+        cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cita = {"id": 7, "log_envio_id": 42, "paciente_nombre": "Persona Prueba"}
+        cur.fetchone.side_effect = [None, cita, None, None]
+        cur.rowcount = 1
+        with patch.object(reagendar, "conectar", return_value=conexion):
+            evento = reagendar.registrar_respuesta_reagendar(
+                "+56911111111", "12345", "wamid.in", None,
+                "¿Atienden por telemedicina mañana?")
+        self.assertEqual(evento["accion"], "CONSULTA")
+        self.assertEqual(evento["mensaje_preparado"],
+                         "Hola, esta es mi consulta: ¿Atienden por telemedicina mañana?")
+        insercion = next(call for call in cur.execute.call_args_list
+                         if "INSERT IGNORE INTO reagendar_interacciones" in call.args[0])
+        self.assertEqual(insercion.args[1][-1], evento["mensaje_preparado"])
+        actualizacion = next(call for call in cur.execute.call_args_list
+                             if "UPDATE log_envios SET respuesta" in call.args[0])
+        self.assertEqual(actualizacion.args[1], ("respondio", 42, "12345", "+56911111111"))
+
+    def test_consulta_sin_contexto_no_se_atribuye_a_otra_campana(self):
+        conexion = MagicMock()
+        cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cur.fetchone.side_effect = [None, {"id": None}, None]
+        with patch.object(reagendar, "conectar", return_value=conexion):
+            evento = reagendar.registrar_respuesta_reagendar(
+                "+56911111111", "12345", "wamid.in", None, "¿Atienden mañana?")
+        self.assertIsNone(evento)
+        self.assertFalse(any("INSERT IGNORE INTO reagendar_interacciones" in llamada.args[0]
+                             for llamada in cur.execute.call_args_list))
+
+    def test_consulta_en_curso_sin_contexto_conserva_la_cita(self):
+        conexion = MagicMock()
+        cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cita = {"id": 7, "paciente_nombre": "Persona Prueba"}
+        cur.fetchone.side_effect = [cita, None, {"estado": "ESPERANDO_CONSULTA"}]
+        cur.rowcount = 1
+        with patch.object(reagendar, "conectar", return_value=conexion):
+            evento = reagendar.registrar_respuesta_reagendar(
+                "+56911111111", "12345", "wamid.in", None, "¿Tienen horas mañana?")
+        self.assertEqual(evento["accion"], "CONSULTA")
+        self.assertEqual(evento["cita"]["id"], 7)
+
+    def test_solicitud_de_consulta_sin_contexto_pide_detalle(self):
+        conexion = MagicMock()
+        cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cur.fetchone.side_effect = [None, {"id": 7}, None, None]
+        cur.rowcount = 1
+        with patch.object(reagendar, "conectar", return_value=conexion):
+            evento = reagendar.registrar_respuesta_reagendar(
+                "+56911111111", "12345", "wamid.in", None, "Tengo una consulta")
+        self.assertEqual(evento["accion"], "SOLICITAR_CONSULTA")
+        self.assertIsNone(evento["mensaje_preparado"])
+
+    def test_saludo_sin_contexto_no_activa_consulta(self):
+        conexion = MagicMock()
+        cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cur.fetchone.side_effect = [None, None]
+        with patch.object(reagendar, "conectar", return_value=conexion):
+            evento = reagendar.registrar_respuesta_reagendar(
+                "+56911111111", "12345", "wamid.in", None, "Hola")
+        self.assertIsNone(evento)
+        self.assertFalse(any("FROM log_envios le" in llamada.args[0]
+                             for llamada in cur.execute.call_args_list))
+
     def test_aceptacion_repetida_no_reenvia_boton_crm(self):
         conexion = MagicMock()
         cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value

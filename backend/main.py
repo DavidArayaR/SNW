@@ -3276,7 +3276,8 @@ def _enviar_respuesta_reagendar(evento: dict) -> None:
                 preparado = (evento.get("mensaje_preparado")
                              or paciente_reagendar.mensaje_preparado_reagendar(cita))
             else:
-                preparado = "Hola, esta es mi consulta: " + evento["texto"].strip()[:500]
+                preparado = (evento.get("mensaje_preparado")
+                             or "Hola, esta es mi consulta: " + evento["texto"].strip()[:500])
             numero = re.sub(r"\D", "", cfg.get(f"{canal['codigo']}_CRM_PHONE_NUMBER") or "")
             if not re.fullmatch(r"[1-9]\d{7,14}", numero):
                 raise ValueError("Número CRM de la clínica no disponible")

@@ -947,6 +947,24 @@ def registrar_respuesta_reagendar(telefono: str, phone_id: str, mensaje_id: str,
     from supresion import (activar_huella_baja, bloquear_huella_baja,
                            limpiar_cerrojos_baja_inactivos, retirar_huella_baja)
     with conectar() as conn, conn.cursor() as cur:
+        def ultima_cita_del_emisor():
+            # Se mira primero el último envío, incluso si pertenece a otra
+            # campaña; buscar solo reagendamientos atribuiría respuestas mal.
+            cur.execute(
+                "SELECT r.* FROM log_envios le"
+                " LEFT JOIN paciente_reagendar r ON r.log_envio_id=le.id"
+                " AND BINARY r.paciente_telefono_normalizado=BINARY le.numero_telefono"
+                " AND BINARY r.whatsapp_phone_number_id=BINARY le.wa_phone_id"
+                " AND r.estado_envio='ENVIADO'"
+                " WHERE le.numero_telefono=%s AND le.wa_phone_id=%s"
+                " AND le.estado_envio='enviado'"
+                " AND le.envio_id IS NOT NULL"
+                " AND le.plantilla_clave NOT IN ('respuesta','ajuste_manual')"
+                " AND le.fecha_hora >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
+                " ORDER BY le.id DESC LIMIT 1", (telefono, phone_id))
+            ultima = cur.fetchone()
+            return ultima if ultima and ultima.get("id") is not None else None
+
         cita = None
         if referencia_id:
             cur.execute(
@@ -969,17 +987,7 @@ def registrar_respuesta_reagendar(telefono: str, phone_id: str, mensaje_id: str,
             # Un texto nuevo sin contexto solo se atribuye al reagendamiento
             # si fue el último mensaje saliente de este número y clínica.
             if not referencia_id and es_aceptacion_reagendar(texto):
-                cur.execute(
-                    "SELECT r.* FROM log_envios le"
-                    " LEFT JOIN paciente_reagendar r ON r.log_envio_id=le.id"
-                    " WHERE le.numero_telefono=%s AND le.wa_phone_id=%s"
-                    " AND le.estado_envio='enviado'"
-                    " AND le.envio_id IS NOT NULL"
-                    " AND le.plantilla_clave NOT IN ('respuesta','ajuste_manual')"
-                    " AND le.fecha_hora >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
-                    " ORDER BY le.id DESC LIMIT 1", (telefono, phone_id))
-                ultima = cur.fetchone()
-                cita = ultima if ultima and ultima.get("id") is not None else None
+                cita = ultima_cita_del_emisor()
         if not cita and not es_aceptacion_reagendar(texto):
             cur.execute(
                 "SELECT r.* FROM reagendar_flujo f JOIN paciente_reagendar r ON r.id=f.cita_id"
@@ -989,6 +997,10 @@ def registrar_respuesta_reagendar(telefono: str, phone_id: str, mensaje_id: str,
                 " ORDER BY f.actualizado_en DESC LIMIT 1",
                 (telefono, phone_id))
             cita = cur.fetchone()
+        if not cita and not referencia_id and not es_aceptacion_reagendar(texto):
+            from whatsapp_service import es_solo_saludo_o_estado
+            if declina or not es_solo_saludo_o_estado(texto):
+                cita = ultima_cita_del_emisor()
         if not cita:
             if declina:
                 return None
@@ -1033,7 +1045,8 @@ def registrar_respuesta_reagendar(telefono: str, phone_id: str, mensaje_id: str,
             accion, estado = "CONSULTA", "CONTACTO_OFRECIDO"
         else:
             accion, estado = "SOLICITAR_CONSULTA", "ESPERANDO_CONSULTA"
-        preparado = mensaje_preparado_reagendar(cita) if accion == "REAGENDAR" else None
+        preparado = (mensaje_preparado_reagendar(cita) if accion == "REAGENDAR" else
+                     "Hola, esta es mi consulta: " + texto.strip()[:500] if accion == "CONSULTA" else None)
         cur.execute(
             "INSERT IGNORE INTO reagendar_interacciones"
             " (mensaje_id, cita_id, accion, texto, mensaje_preparado)"
