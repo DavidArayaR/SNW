@@ -38,9 +38,20 @@
 
   async function request(url, options = {}) {
     const response = await fetch(url, { ...options, headers: headers(options.headers || {}), cache: "no-store" });
-    const data = await response.json().catch(() => ({}));
+    const cuerpo = await response.text().catch(() => "");
+    let data = {};
+    try { data = cuerpo ? JSON.parse(cuerpo) : {}; } catch { /* Respuesta no JSON, como una página de proxy. */ }
     if (response.status === 401) { window.snwSesionExpirada(); throw new Error("La sesión expiró."); }
-    if (!response.ok) throw new Error(data.detail || "No se pudo completar la solicitud.");
+    if (!response.ok) {
+      const detalle = typeof data.detail === "string" ? data.detail
+        : Array.isArray(data.detail) ? data.detail.map((item) => item.msg || "").filter(Boolean).join("; ")
+        : typeof data.message === "string" ? data.message : "";
+      const estado = `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}`;
+      const respaldo = [502, 503, 504].includes(response.status)
+        ? `El servidor o el proxy interrumpió la solicitud (${estado}). Revisa los logs del backend.`
+        : `SNW respondió con un error (${estado}).`;
+      throw new Error(detalle || respaldo);
+    }
     return data;
   }
 
