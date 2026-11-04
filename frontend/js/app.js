@@ -243,6 +243,7 @@ const inpMensaje = $("#inpMensaje");
 const editorBotones = $("#editorBotones");
 const btnAgregarBoton = $("#btnAgregarBoton");
 const BOTONES_INICIALES = [
+  { tipo: "crm", texto: "Me interesa", crm_mensaje: "" },
   { tipo: "respuesta", texto: "No me interesa", accion: "desinteres" },
   { tipo: "respuesta", texto: "Dar de baja", accion: "baja" },
 ];
@@ -335,7 +336,7 @@ function agregarFilaBoton(datos = {}) {
     opcionExistente.disabled = true;
     tipo.add(opcionExistente);
   }
-  tipo.value = datos.crm_mensaje ? "crm" : datos.accion === "baja" || datos.tipo === "baja" ? "baja" :
+  tipo.value = datos.tipo === "crm" || datos.crm_mensaje ? "crm" : datos.accion === "baja" || datos.tipo === "baja" ? "baja" :
     (datos.tipo === "reagendar" || (datos.tipo === "respuesta" && datos.accion === "reagendar" && datos.texto === "Si quiero reagendar")
       ? "reagendar" :
     (datos.tipo === "interes" || (datos.tipo === "respuesta" && datos.accion === "interes" && datos.texto === "Me interesa")
@@ -452,6 +453,13 @@ function establecerBotones(botones) {
   for (const boton of botones || BOTONES_INICIALES) agregarFilaBoton(boton);
   actualizarBotonAgregar();
 }
+
+$("#btnRestablecerBotones")?.addEventListener("click", () => {
+  const actual = botonesDelEditor();
+  const crm = actual.find((b) => b.tipo === "crm");
+  establecerBotones([crm || BOTONES_INICIALES[0], BOTONES_INICIALES[1], BOTONES_INICIALES[2]]);
+  refrescarEditor();
+});
 
 btnAgregarBoton.addEventListener("click", () => {
   agregarFilaBoton({ tipo: "respuesta", texto: "", accion: "ninguna" });
@@ -1659,6 +1667,8 @@ function actualizarBotonesSegunEstado(p) {
   // sigue disponible aunque Guardar esté bloqueado por el enfriamiento.
   // Además solo el creador edita/elimina las suyas (admin/dev, cualquiera).
   const puedeGuardar = PUEDE_EDITAR_PLANTILLAS && puedeEditarEsta(p) && editable && !enEnfriamiento && !esPlantillaProtegida(p);
+  const btnRestablecer = $("#btnRestablecerBotones");
+  if (btnRestablecer) btnRestablecer.hidden = !puedeGuardar;
   const puedeEliminar = PUEDE_ELIMINAR_PLANTILLAS && puedeEditarEsta(p) &&
     (editable || esRegistroMetaFallido(p)) && !esPlantillaProtegida(p);
   const puedeRevisar = p && ap === "pendiente" && puedeAprobarPlantillas();

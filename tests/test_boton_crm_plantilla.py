@@ -30,6 +30,15 @@ class BotonCrmPlantillaTest(unittest.TestCase):
         self.assertEqual(vista['botones'][0]['crm_mensaje'], 'Hola, me interesa la promoción 💚')
         self.assertEqual(botones_para_meta(vista['botones'])[0]['url'], boton['url'])
 
+    def test_orden_obligatorio(self):
+        crm = self.resolver({'tipo': 'crm', 'texto': 'Me interesa', 'crm_mensaje': 'Hola'})
+        no = {'tipo': 'respuesta', 'texto': 'No me interesa', 'accion': 'desinteres'}
+        baja = {'tipo': 'respuesta', 'texto': 'Dar de baja', 'accion': 'baja'}
+        main._validar_botones_obligatorios([crm, no, baja])
+        for botones in ([no, crm, baja], [crm, baja], [crm, baja, no]):
+            with self.assertRaises(HTTPException):
+                main._validar_botones_obligatorios(botones)
+
     def test_rechaza_numero_invalido_y_variables(self):
         boton = {'tipo': 'crm', 'texto': 'Abrir', 'crm_mensaje': 'Hola'}
         with self.assertRaises(HTTPException):

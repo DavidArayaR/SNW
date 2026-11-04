@@ -4405,6 +4405,21 @@ def _resolver_botones_crm(botones, centro):
     return resultado
 
 
+def _validar_botones_obligatorios(botones):
+    """Las plantillas editables usan la misma secuencia de tres acciones."""
+    valido = (isinstance(botones, list) and len(botones) == 3
+              and botones[0].get("tipo") == "url" and bool(botones[0].get("crm_mensaje"))
+              and botones[1].get("tipo") == "respuesta"
+              and botones[1].get("accion") == "desinteres"
+              and botones[1].get("texto") == "No me interesa"
+              and botones[2].get("tipo") == "respuesta"
+              and botones[2].get("accion") == "baja"
+              and botones[2].get("texto") == "Dar de baja")
+    if not valido:
+        raise HTTPException(400, detail=("La plantilla debe tener estos tres botones en orden: "
+                            "Abrir chat del CRM, No me interesa y Dar de baja."))
+
+
 def _exigir_revision_valida(plantilla: dict, ejemplos: dict | None = None) -> dict:
     vista = presentar_plantilla(plantilla, ejemplos)
     if vista["errores"]:
@@ -4444,6 +4459,11 @@ def previsualizar_plantilla(body: PlantillaPreviaIn,
         borrador["whatsapp_header_format"] = None
         borrador["encabezado_meta_registrado"] = False
     vista = presentar_plantilla(borrador, body.ejemplos)
+    if not actual or not _es_plantilla_protegida(actual):
+        try:
+            _validar_botones_obligatorios(vista["botones"])
+        except HTTPException as exc:
+            vista["errores"].append(exc.detail)
     if not actual:
         vista["avisos"].append("Guarda la plantilla y espera la aprobación de Meta para enviar una prueba.")
     elif actual.get("whatsapp_template_status") != "APPROVED":
@@ -4600,6 +4620,7 @@ def crear_plantilla(body: PlantillaIn, sesion: dict = Depends(exigir("plantillas
                                      "encabezado_texto": encabezado_texto,
                                      "pie_texto": pie_texto, "botones": _resolver_botones_crm(body.botones, body.centro)}, body.ejemplos)
 
+    _validar_botones_obligatorios(vista["botones"])
     plantillas = leer_plantillas()
     clave = slug(body.clave or body.nombre)
 
@@ -4734,6 +4755,7 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
             if "botones" in body.model_fields_set:
                 revision_borrador["botones"] = body.botones
             vista = _exigir_revision_valida(revision_borrador, body.ejemplos)
+            _validar_botones_obligatorios(vista["botones"])
             if _aprobacion_plantilla(p) != "aprobada":
                 # Pendiente/rechazada: aún no existe en Meta. Si la edita su
                 # creador y estaba rechazada, vuelve a pendiente (pide revisión
