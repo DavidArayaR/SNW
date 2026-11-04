@@ -1200,13 +1200,27 @@ def asegurar_tabla_config() -> None:
                 "  id INT AUTO_INCREMENT PRIMARY KEY,"
                 "  fecha_hora DATETIME DEFAULT CURRENT_TIMESTAMP,"
                 "  actor VARCHAR(150) NOT NULL,"
-                "  accion VARCHAR(30) NOT NULL,"
+                "  accion VARCHAR(120) NOT NULL,"
                 "  objetivo VARCHAR(150) NOT NULL,"
                 "  detalle VARCHAR(500) NOT NULL DEFAULT '',"
                 "  INDEX idx_aud_objetivo (objetivo),"
                 "  INDEX idx_aud_fecha (fecha_hora)"
                 ") CHARACTER SET utf8mb4"
             )
+            # Algunas acciones de módulos recientes (por ejemplo, Reservo)
+            # superan los 30 caracteres del esquema histórico.
+            cur.execute(
+                "SELECT CHARACTER_MAXIMUM_LENGTH AS longitud"
+                " FROM information_schema.COLUMNS"
+                " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'usuarios_auditoria'"
+                " AND COLUMN_NAME = 'accion'"
+            )
+            columna_accion = cur.fetchone() or {}
+            if int(columna_accion.get("longitud") or 0) < 120:
+                cur.execute(
+                    "ALTER TABLE usuarios_auditoria"
+                    " MODIFY COLUMN accion VARCHAR(120) NOT NULL"
+                )
             # Envíos masivos programados (pestaña Programados en Mensajería):
             # un usuario los crea para su area (requieren aprobación de un
             # superior); admin/supervisor en cualquier area sin confirmación.
@@ -1841,7 +1855,8 @@ def auditoria_registrar(actor: str, accion: str, objetivo: str, detalle: str = "
             cur.execute(
                 "INSERT INTO usuarios_auditoria (actor, accion, objetivo, detalle)"
                 " VALUES (%s, %s, %s, %s)",
-                ((actor or "").strip().lower(), accion, (objetivo or "").strip().lower(), (detalle or "")[:500]),
+                ((actor or "").strip().lower(), str(accion or "")[:120],
+                 (objetivo or "").strip().lower(), (detalle or "")[:500]),
             )
             conn.commit()
     except Exception as e:
