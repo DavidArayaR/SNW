@@ -473,7 +473,6 @@ def solo_dev(sesion: dict = Depends(sesion_actual)) -> dict:
 
 _NOMBRE_LOG_ERROR = re.compile(
     r"(?:errores|csv-remoto)-(\d{4}-\d{2}-\d{2})(?:_(\d{2}-\d{2}-\d{2}-\d{6})-(\d+)(?:-(\d+))?)?\.log\Z")
-_MAX_LOG_VISTA_BYTES = 5 * 1024 * 1024
 _LOGS_LOTE_BORRADO = 100
 _LOGS_EDAD_MINIMA_SEGUNDOS = 24 * 60 * 60
 
@@ -533,7 +532,7 @@ def listar_logs_consola(sesion: dict = Depends(solo_dev)):
 
 
 def leer_log_consola(nombre: str, sesion: dict = Depends(solo_dev)):
-    """Lee hasta los últimos 5 MiB de un log, sin permitir rutas arbitrarias."""
+    """Lee el log completo, sin permitir rutas arbitrarias."""
     if not _NOMBRE_LOG_ERROR.fullmatch(nombre):
         raise HTTPException(404, detail="Registro no encontrado.")
     ruta = LOGS_DIR / nombre
@@ -542,17 +541,12 @@ def leer_log_consola(nombre: str, sesion: dict = Depends(solo_dev)):
     try:
         with ruta.open("rb") as archivo:
             tamano = archivo.seek(0, 2)
-            truncado = tamano > _MAX_LOG_VISTA_BYTES
-            if truncado:
-                archivo.seek(-_MAX_LOG_VISTA_BYTES, 2)
-                archivo.readline()  # evitar comenzar a mitad de una entrada
-            else:
-                archivo.seek(0)
+            archivo.seek(0)
             contenido = archivo.read().decode("utf-8", errors="replace")
     except OSError as exc:
         log_error("leer registro de errores", exc, solo_tipo=True)
         raise HTTPException(500, detail="No se pudo leer el registro.") from None
-    return {"nombre": nombre, "contenido": contenido, "truncado": truncado,
+    return {"nombre": nombre, "contenido": contenido, "truncado": False,
             "bytes": tamano}
 
 
@@ -7358,7 +7352,11 @@ def _procesar_job_api_concurrente(job_id: str, canal: MotorApiOficial) -> None:
                         and not detener.is_set():
                     d = destinatarios[siguiente]
                     siguiente += 1
-                    futuros.add(pool.submit(trabajador, d))
+                    # ThreadPoolExecutor no propaga ContextVar automáticamente.
+                    # Copiamos el contexto para que stdout/stderr del worker
+                    # quede dentro del log de la acción de envío correspondiente.
+                    contexto_worker = contextvars.copy_context()
+                    futuros.add(pool.submit(contexto_worker.run, trabajador, d))
                 if not futuros:
                     if siguiente >= len(destinatarios):
                         break

@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -30,19 +31,129 @@ _LOG_LOCK = threading.Lock()
 _ZONA_LOG = ZoneInfo("America/Santiago")
 _SECUENCIA_LOG = itertools.count(1)
 _ACCION_ERROR = ContextVar("snw_accion_error", default=None)
+_CAPTURA_CONSOLA_ACCION = ContextVar("snw_captura_consola_accion", default=None)
+_STREAMS_CONSOLA_ORIGINALES = {}
+_STREAMS_CONSOLA_CAPTURA = {}
 _NOMBRE_ERROR_RECIENTE = re.compile(
     r"errores-(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-\d{6})-\d+-\d+\.log\Z")
 _MAX_ERRORES_CONTEXTO = 100
 
 
+class _BufferConsolaAccion:
+    """Captura la salida de consola del contexto de una acción sin cruzar requests."""
+
+    def __init__(self):
+        self.inicio = datetime.now(_ZONA_LOG)
+        self._archivo = tempfile.SpooledTemporaryFile(
+            max_size=1024 * 1024, mode="w+t", encoding="utf-8", newline="\n")
+        self._pendientes = {"stdout": "", "stderr": ""}
+        self._lock = threading.RLock()
+        self._cerrado = False
+
+    @staticmethod
+    def _formatear_linea(canal: str, linea: str) -> str:
+        ahora = datetime.now(_ZONA_LOG)
+        original = linea.rstrip("\r\n")
+        segura = _texto_log_seguro(original, limite=None)
+        return f"[{ahora:%Y-%m-%d %H:%M:%S%z}] [{canal}] {segura}\n"
+
+    def escribir(self, canal: str, texto: str) -> None:
+        if canal not in self._pendientes or not isinstance(texto, str) or not texto:
+            return
+        with self._lock:
+            if self._cerrado:
+                return
+            combinado = self._pendientes[canal] + texto
+            lineas = combinado.splitlines(keepends=True)
+            if lineas and not lineas[-1].endswith(("\n", "\r")):
+                self._pendientes[canal] = lineas.pop()
+            else:
+                self._pendientes[canal] = ""
+            for linea in lineas:
+                self._archivo.write(self._formatear_linea(canal, linea))
+
+    def contenido(self) -> str:
+        with self._lock:
+            self._archivo.flush()
+            posicion = self._archivo.tell()
+            self._archivo.seek(0)
+            contenido = self._archivo.read()
+            self._archivo.seek(posicion)
+            for canal, parcial in self._pendientes.items():
+                if parcial:
+                    contenido += self._formatear_linea(canal, parcial + " [línea incompleta]")
+            return contenido
+
+    def cerrar(self) -> None:
+        with self._lock:
+            if not self._cerrado:
+                self._cerrado = True
+                self._archivo.close()
+
+
+class _StreamConCapturaAccion:
+    """Reenvía la consola original y copia sus líneas al contexto activo."""
+
+    def __init__(self, original, canal: str):
+        self._original = original
+        self._canal = canal
+
+    def write(self, texto):
+        captura = _CAPTURA_CONSOLA_ACCION.get()
+        if captura is not None:
+            captura.escribir(self._canal, texto)
+        return self._original.write(texto)
+
+    def __getattr__(self, nombre):
+        return getattr(self._original, nombre)
+
+
+def _instalar_captura_consola_accion() -> None:
+    """Enruta stdout/stderr de consola por una copia contextual no invasiva."""
+    for canal in ("stdout", "stderr"):
+        actual = getattr(sys, canal)
+        if isinstance(actual, _StreamConCapturaAccion):
+            _STREAMS_CONSOLA_CAPTURA[canal] = actual
+            _STREAMS_CONSOLA_ORIGINALES[canal] = actual._original
+            continue
+        _STREAMS_CONSOLA_ORIGINALES[canal] = actual
+        _STREAMS_CONSOLA_CAPTURA[canal] = _StreamConCapturaAccion(actual, canal)
+        setattr(sys, canal, _STREAMS_CONSOLA_CAPTURA[canal])
+
+    originales = {id(stream): _STREAMS_CONSOLA_CAPTURA[canal]
+                  for canal, stream in _STREAMS_CONSOLA_ORIGINALES.items()}
+    loggers = [logging.getLogger(), logging.getLogger("uvicorn.error")]
+    loggers.extend(logger for logger in logging.Logger.manager.loggerDict.values()
+                   if isinstance(logger, logging.Logger))
+    vistos = set()
+    for logger in loggers:
+        for handler in logger.handlers:
+            if id(handler) in vistos or not isinstance(handler, logging.StreamHandler):
+                continue
+            vistos.add(id(handler))
+            reemplazo = originales.get(id(handler.stream))
+            if reemplazo is not None:
+                try:
+                    handler.setStream(reemplazo)
+                except (AttributeError, OSError, ValueError):
+                    continue
+
+
 @contextmanager
 def accion_de_error(accion):
-    """Asocia una acción a este request o trabajo sin contaminar otros."""
-    token = _ACCION_ERROR.set(accion)
+    """Asocia errores y salida de consola a una acción sin cruzar requests."""
+    _instalar_captura_consola_accion()
+    captura_previa = _CAPTURA_CONSOLA_ACCION.get()
+    captura = captura_previa or _BufferConsolaAccion()
+    token_accion = _ACCION_ERROR.set(accion)
+    token_captura = _CAPTURA_CONSOLA_ACCION.set(captura)
     try:
         yield
     finally:
-        _ACCION_ERROR.reset(token)
+        _CAPTURA_CONSOLA_ACCION.reset(token_captura)
+        _ACCION_ERROR.reset(token_accion)
+        if captura_previa is None:
+            captura.cerrar()
 
 
 def _accion_actual(contexto: str) -> str:
@@ -60,14 +171,17 @@ def _nombre_log_para(ahora: datetime, secuencia: int) -> str:
     return f"errores-{ahora:%Y-%m-%d_%H-%M-%S-%f}-{os.getpid()}-{secuencia}.log"
 
 
-def _texto_log_seguro(valor: str) -> str:
+def _texto_log_seguro(valor: str, limite: int | None = 1500) -> str:
     """Reduce PII y secretos antes de persistir un diagnóstico."""
     texto = re.sub(r"(?i)\bBearer\s+\S+", "Bearer [oculto]", str(valor))
-    texto = re.sub(r"(?i)\b(token|secret|password|clave|api[_-]?key)\s*(?:[:=]|\s)\s*[^\s,;)]+",
+    texto = re.sub(
+        r"(?i)\b([a-z0-9_-]*(?:token|secret|password|passwd|api[_-]?key|"
+        r"private[_-]?key|encryption[_-]?key|clave))\b\s*(?:[:=]\s*|\s+)"
+        r"['\"]?[^'\"\s,;)&]+",
                    r"\1=[oculto]", texto)
     texto = re.sub(r"(?i)[\w.+-]+@[\w.-]+\.[a-z]{2,}", "[correo]", texto)
     texto = re.sub(r"(?<!\d)\+?\d[\d ().-]{8,}\d(?!\d)", "[numero]", texto)
-    return texto[:1500]
+    return texto if limite is None else texto[:limite]
 
 
 def _errores_ultimos_cinco_minutos(ahora: datetime) -> tuple[list[str], int]:
@@ -113,6 +227,15 @@ def _guardar_error_archivo(contexto: str, exc: BaseException | None = None) -> N
             for frame in traceback.extract_tb(exc.__traceback__):
                 traza += (f"\n  {Path(frame.filename).name}:{frame.lineno} "
                           f"en {frame.name}")
+    captura = _CAPTURA_CONSOLA_ACCION.get()
+    consola = captura.contenido() if captura is not None else ""
+    if consola:
+        traza += (f"\nConsola del backend capturada desde el inicio de la acción "
+                  f"({captura.inicio:%Y-%m-%d %H:%M:%S%z}) hasta este error:\n{consola.rstrip()}")
+    elif captura is not None:
+        traza += (f"\nConsola del backend capturada desde el inicio de la acción "
+                  f"({captura.inicio:%Y-%m-%d %H:%M:%S%z}): "
+                  "no hubo salida de consola antes del error.")
     try:
         with _LOG_LOCK:
             LOGS_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -165,6 +288,7 @@ _ARCHIVO_ERRORES_HANDLER = _ErroresEstandarArchivo()
 
 def instalar_registro_errores() -> None:
     """Cubre errores del logger estándar y de Uvicorn en este proceso."""
+    _instalar_captura_consola_accion()
     for nombre in ("", "uvicorn.error"):
         logger = logging.getLogger(nombre)
         if _ARCHIVO_ERRORES_HANDLER not in logger.handlers:
