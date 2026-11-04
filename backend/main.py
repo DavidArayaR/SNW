@@ -4525,8 +4525,10 @@ def previsualizar_plantilla(body: PlantillaPreviaIn,
                    encabezado_texto != (actual.get("encabezado_texto") or "") or
                    pie_texto != (actual.get("pie_texto") or "") or
                    ("botones" in body.model_fields_set and
-                    presentar_plantilla({**actual, "botones": borrador["botones"]})["botones"] !=
-                    presentar_plantilla(actual)["botones"])):
+                    [{k: v for k, v in b.items() if k != "crm_mensaje"} for b in
+                     presentar_plantilla({**actual, "botones": borrador["botones"]})["botones"]] !=
+                    [{k: v for k, v in b.items() if k != "crm_mensaje"} for b in
+                     presentar_plantilla(actual)["botones"]])):
         vista["avisos"].append("Estos cambios requieren guardar y esperar una nueva revisión de Meta.")
     vista["puede_enviar_prueba"] = bool(actual and not vista["errores"]
                                       and not vista["avisos"]
@@ -4764,6 +4766,48 @@ def actualizar_plantilla(plantilla_id: int, body: PlantillaIn, sesion: dict = De
             encabezado_texto = encabezado_crudo.strip()
             pie_texto = ((body.pie_texto if "pie_texto" in body.model_fields_set
                           else p.get("pie_texto")) or "").strip()
+            # El mensaje preparado es una preferencia local del aviso de
+            # servicio, no forma parte del botón aprobado por Meta.
+            if "botones" in body.model_fields_set and isinstance(body.botones, list):
+                anteriores = presentar_plantilla(p)["botones"]
+                nuevos = presentar_plantilla({**p, "botones": body.botones})["botones"]
+                sin_preparado = lambda filas: [{k: v for k, v in boton.items() if k != "crm_mensaje"}
+                                               for boton in filas]
+                cambio_preparado = len(nuevos) == len(anteriores) and any(
+                    (a.get("crm_mensaje") or "") != (b.get("crm_mensaje") or "")
+                    for a, b in zip(anteriores, nuevos))
+                solo_preparado = (
+                    cambio_preparado and sin_preparado(anteriores) == sin_preparado(nuevos)
+                    and body.nombre.strip() == p.get("nombre", "")
+                    and body.texto == (p.get("texto") or "")
+                    and ((body.whatsapp_template_lang or "").strip() or None) == p.get("whatsapp_template_lang")
+                    and body.whatsapp_template_categoria == p.get("whatsapp_template_categoria")
+                    and (body.encabezado_media_id if "encabezado_media_id" in body.model_fields_set
+                         else p.get("encabezado_media_id")) == p.get("encabezado_media_id")
+                    and encabezado_texto == (p.get("encabezado_texto") or "")
+                    and pie_texto == (p.get("pie_texto") or "")
+                    and ("area_id" not in body.model_fields_set or body.area_id == p.get("area_id"))
+                )
+                if solo_preparado:
+                    for anterior, nuevo in zip(anteriores, nuevos):
+                        mensaje = nuevo.get("crm_mensaje") or ""
+                        if (mensaje != (anterior.get("crm_mensaje") or "") and
+                                (anterior.get("tipo") != "respuesta" or anterior.get("accion") != "interes")):
+                            raise HTTPException(400, detail="El mensaje preparado solo corresponde al botón de interés.")
+                        if len(mensaje) > 500 or re.search(r"[{}]", mensaje):
+                            raise HTTPException(400, detail="El mensaje preparado admite hasta 500 caracteres y no usa variables.")
+                    originales = p.get("botones")
+                    if isinstance(originales, list) and len(originales) == len(nuevos):
+                        actualizados = [dict(boton) for boton in originales]
+                        for boton, nuevo in zip(actualizados, nuevos):
+                            if nuevo.get("tipo") == "respuesta" and nuevo.get("accion") == "interes":
+                                boton["crm_mensaje"] = nuevo.get("crm_mensaje") or ""
+                        p["botones"] = actualizados
+                    else:
+                        p["botones"] = nuevos
+                    p["actualizada"] = int(time.time() * 1000)
+                    escribir_plantillas(plantillas)
+                    return p
             # El área solo organiza la copia local. Cambiarla durante el
             # enfriamiento no requiere validar ni reenviar contenido a Meta.
             solo_area = (

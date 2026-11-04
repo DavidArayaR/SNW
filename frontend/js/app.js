@@ -1549,8 +1549,13 @@ function soloCambioArea() {
   if (!activaId || snapshot === null || !hayCambios()) return false;
   const antes = JSON.parse(snapshot);
   const ahora = JSON.parse(estadoActualEditor());
-  return antes[5] !== ahora[5] && antes.every((valor, i) =>
+  const botonesSinMensaje = (botones) => botones.map(({ crm_mensaje, ...resto }) => resto);
+  const soloMensaje = antes.every((valor, i) => i === 10
+    ? JSON.stringify(botonesSinMensaje(valor)) === JSON.stringify(botonesSinMensaje(ahora[i]))
+    : JSON.stringify(valor) === JSON.stringify(ahora[i]));
+  const soloArea = antes[5] !== ahora[5] && antes.every((valor, i) =>
     i === 5 || JSON.stringify(valor) === JSON.stringify(ahora[i]));
+  return soloMensaje || soloArea;
 }
 
 // El botón «Guardar» solo se habilita si hubo algún cambio desde que se abrió
@@ -1677,7 +1682,7 @@ function actualizarBotonesSegunEstado(p) {
   const puedeRevisar = p && ap === "pendiente" && puedeAprobarPlantillas();
   document.querySelectorAll(".wildcards").forEach((el) => { el.hidden = !puedeGuardar; });
   const puedeGuardarArea = p && PUEDE_EDITAR_PLANTILLAS && puedeEditarEsta(p) &&
-    editable && !esPlantillaProtegida(p);
+    !esPlantillaProtegida(p);
   btnGuardar.hidden = !(puedeGuardar || puedeGuardarArea);
   const btnAprobar = $("#btnAprobar");
   const btnRechazar = $("#btnRechazar");
@@ -1789,6 +1794,12 @@ function actualizarBloqueoCampos() {
 
   if (!PUEDE_EDITAR_PLANTILLAS || (p && (!esPlantillaEditable(p) || editadaRecientemente(p) || !puedeEditarEsta(p)))) {
     formEl.querySelectorAll("input, textarea, select").forEach((el) => { el.disabled = true; });
+    if (p && PUEDE_EDITAR_PLANTILLAS && puedeEditarEsta(p) && !esPlantillaProtegida(p)) {
+      editorBotones.querySelectorAll(".tpl-boton").forEach((fila) => {
+        if (fila.querySelector(".tpl-boton__tipo")?.value === "crm")
+          fila.querySelector(".tpl-boton__crm-mensaje").disabled = false;
+      });
+    }
     // La revisión y la prueba son independientes de editar la plantilla.
     // Una plantilla aprobada puede estar en solo lectura y aun así probarse.
     inpEjemploNombre.disabled = false;
@@ -2158,7 +2169,7 @@ formEl.addEventListener("submit", async (e) => {
   // Ctrl+S/Enter. Un cambio exclusivo de área se guarda localmente.
   if (activaId) {
     const activa = plantillas.find((x) => x.id === activaId);
-    if (!esPlantillaEditable(activa) || (editadaRecientemente(activa) && !soloCambioArea())) return;
+    if ((!esPlantillaEditable(activa) || editadaRecientemente(activa)) && !soloCambioArea()) return;
     if (!puedeEditarEsta(activa)) return toast("Solo puedes editar las plantillas que tú creaste.", "error");
   }
 
