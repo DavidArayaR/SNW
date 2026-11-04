@@ -33,11 +33,6 @@
     h1 { margin: 8px 0 4px; font-size: clamp(2rem, 5vw, 3rem); line-height: 1.15; }
     header p { margin: 8px 0 0; color: #d3e7e0; }
     main { padding: 28px 0 54px; }
-    .notice {
-      margin: 0 0 20px; padding: 16px 18px; border: 1px solid #e8c77c;
-      border-radius: 12px; background: var(--warning-bg); color: var(--warning);
-    }
-    .notice strong { display: block; margin-bottom: 4px; }
     article { padding: clamp(20px, 5vw, 42px); border: 1px solid var(--line); border-radius: 18px; background: var(--surface); box-shadow: 0 16px 44px #163e3210; }
     h2 { margin: 30px 0 8px; color: #145a4c; font-size: 1.23rem; line-height: 1.35; }
     h2:first-child { margin-top: 0; }
@@ -66,10 +61,6 @@
     </div>
   </header>
   <main class="wrap">
-    <div class="notice" role="status">
-      <strong>Antes de publicar como política definitiva</strong>
-      Falta por definir el plazo de conservación de cada tipo de dato. No envíes esta versión a revisión de Meta mientras ese campo siga pendiente.
-    </div>
     <article>
       <section>
         <h2>1. Quién es responsable</h2>
@@ -130,8 +121,19 @@
 
       <section>
         <h2>7. Conservación y eliminación</h2>
-        <p>Los plazos de conservación deben definirse según la finalidad, las instrucciones de la clínica y las obligaciones aplicables. Plazo aprobado para datos operativos e historial: <span class="field">[PLAZO DE CONSERVACIÓN]</span>. Las clínicas deben aplicar sus propias reglas de conservación en los sistemas de origen.</p>
+        <p>La antigüedad se calcula según la fecha propia de cada registro (por ejemplo, recepción, última actualización o creación). La limpieza comienza cada día a las 03:30, hora de Chile. Si hay más de 5.000 registros vencidos en una categoría, el proceso continúa en lotes cada 15 minutos hasta ponerse al día.</p>
+        <ul>
+          <li><strong>Datos identificables en bases de pacientes, Reservo y reagendamientos:</strong> hasta 12 meses. Después se eliminan de SNW. Los envíos programados que lleven más de 12 meses sin ejecutarse se cancelan; un envío vigente puede conservar sus destinatarios hasta que termine.</li>
+          <li><strong>Mensajes recibidos, transcripciones y texto completo guardado para clasificación:</strong> 12 meses desde su recepción. Después se eliminan. Los ejemplos desidentificados usados para mejorar la clasificación se conservan hasta 24 meses.</li>
+          <li><strong>Detalle de cada destinatario de una campaña:</strong> durante 12 meses se conserva para el historial; cumplido ese plazo, se eliminan nombre, teléfono, mensaje, identificadores de WhatsApp y otros datos de contacto. El detalle por destinatario se elimina al cumplir 24 meses. Se mantienen los contadores generales del envío —total, enviados, errores e inválidos—, pero ya no se muestran el costo desglosado ni las respuestas individuales anteriores a ese plazo.</li>
+          <li><strong>Registros de derivación a call center:</strong> a los 12 meses se quitan teléfono, mensaje y vínculo con el paciente; el registro se elimina al cumplir 24 meses.</li>
+          <li><strong>Registros técnicos de errores y cargas CSV:</strong> 90 días.</li>
+          <li><strong>Auditoría de cuentas de SNW:</strong> 24 meses. Las solicitudes de recuperación de contraseña e invitaciones se eliminan al usarse o, como máximo, siete días después de vencer.</li>
+          <li><strong>Datos temporales:</strong> las consultas en caché de Reservo se eliminan al vencer y, como máximo, en un día; los registros de pruebas y las interacciones técnicas, en 30 días. Las cuotas técnicas se eliminan a los 90 días.</li>
+        </ul>
+        <p>Los plazos son límites máximos operativos de SNW. La clínica debe aplicar sus propias reglas de conservación en Reservo, CRM, WhatsApp/Meta y los demás sistemas de origen.</p>
         <p>Para dejar de recibir mensajes, la persona puede usar el botón de baja disponible o pedirlo respondiendo al WhatsApp de la clínica. La baja bloquea futuras comunicaciones en SNW, pero por sí sola no equivale a borrar todos los datos. Para solicitar eliminación permanente en SNW, debe seguir el aviso que el sistema envía y confirmar escribiendo «ELIMINAR». La solicitud quita sus datos de las listas operativas, conversaciones y colas de envío que SNW controla, y reduce o seudonimiza el historial que deba conservarse. La huella criptográfica de supresión puede permanecer para impedir una nueva importación o contacto.</p>
+        <p>Después de vencer un registro de reagendamiento enviado, SNW puede conservar una huella criptográfica del teléfono para impedir un segundo envío de reagendamiento. La huella no permite recuperar el número y se mantiene mientras sea necesario para esta prevención. Las huellas de solicitudes permanentes de eliminación se conservan mientras sea necesario para respetar la instrucción y evitar una reimportación.</p>
         <p>La eliminación en SNW no borra automáticamente los datos del sistema de origen de la clínica, de Meta/WhatsApp, de Reservo, del CRM ni de copias que estén bajo control de esos proveedores. Para esos datos, la persona puede presentar también una solicitud ante la clínica responsable.</p>
       </section>
 

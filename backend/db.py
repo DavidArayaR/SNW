@@ -467,6 +467,12 @@ CONFIG_DEFAULTS = {
     "reagendar_envio_activo": "false",
     "reagendar_plantillas_json": "{}",
     "reagendar_clinicas_ids": "{}",
+    # Política de conservación aplicada por retencion_datos.py. Los plazos
+    # son días y se guardan aquí, no en variables de entorno.
+    "retencion_datos_dias": "365",
+    "retencion_logs_dias": "90",
+    "retencion_auditoria_dias": "730",
+    "retencion_historial_dias": "730",
     "wa_verify_token": "",
     "wa_app_secret": "",
     "wa_template_nombre": "",

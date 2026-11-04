@@ -89,6 +89,7 @@ import servicio_areas
 import paciente_reagendar
 import reagendar_batches
 import reservo_pacientes
+import retencion_datos
 from reservo_catalogo import (
     RESERVO_CLINICAS, CLAVES_TOKEN as CLAVES_TOKEN_RESERVO,
     clave_estado_atendido as clave_estado_atendido_reservo,
@@ -9711,6 +9712,25 @@ async def _loop_reagendar() -> None:
         await asyncio.sleep(30)
 
 
+async def _loop_retencion_datos() -> None:
+    """Limpieza de retención diaria en horario de baja actividad de Chile."""
+    espera = await asyncio.to_thread(retencion_datos.segundos_hasta_limpieza_diaria)
+    while True:
+        await asyncio.sleep(espera)
+        try:
+            with accion_de_error("limpieza diaria de retención de datos"):
+                await asyncio.to_thread(retencion_datos.asegurar_esquema)
+                resultado = await asyncio.to_thread(retencion_datos.ejecutar_limpieza)
+            if resultado.get("errores"):
+                print("[RETENCIÓN DE DATOS] Hubo errores; se reintentará en la próxima ejecución.",
+                      flush=True)
+            espera = (15 * 60 if resultado.get("requiere_continuar") else
+                      await asyncio.to_thread(retencion_datos.segundos_hasta_limpieza_diaria))
+        except Exception as exc:
+            log_error("limpieza diaria de retención de datos", exc)
+            espera = await asyncio.to_thread(retencion_datos.segundos_hasta_limpieza_diaria)
+
+
 @app.on_event("startup")
 async def _arrancar_scheduler_programados() -> None:
     instalar_registro_errores()
@@ -9718,6 +9738,11 @@ async def _arrancar_scheduler_programados() -> None:
     # sincronización de Reservo; varias instancias se coordinan en MySQL.
     await asyncio.to_thread(asegurar_tabla_supresion)
     await asyncio.to_thread(migrar_huellas_baja_existentes)
+    try:
+        await asyncio.to_thread(retencion_datos.asegurar_esquema)
+    except Exception as exc:
+        log_error("preparar esquema de retención de datos", exc)
+    asyncio.create_task(_loop_retencion_datos())
     asyncio.create_task(_loop_programados())
     asyncio.create_task(_loop_supresion())
     asyncio.create_task(_loop_reagendar())

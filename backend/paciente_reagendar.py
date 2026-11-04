@@ -15,6 +15,7 @@ import pymysql
 import reagendar_batches
 
 from db import conectar, config_all, config_get
+from supresion import huella_telefono
 from telefono import normalizar_telefono
 from whatsapp_channels import catalogo_centros
 
@@ -495,6 +496,19 @@ def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None,
                             " WHERE d.telefono=%s AND d.modo_prueba=%s FOR UPDATE",
                             (telefono, int(modo_prueba)))
                 destinatario = cur.fetchone()
+                if not destinatario and not modo_prueba:
+                    # Se consulta después de bloquear el marcador en claro.
+                    # Así una importación concurrente espera a la limpieza de
+                    # vencidos y luego ve la huella creada en esa transacción.
+                    cur.execute(
+                        "SELECT 1 FROM reagendar_destinatarios_huellas"
+                        " WHERE huella=%s FOR UPDATE",
+                        (huella_telefono(telefono),),
+                    )
+                    if cur.fetchone():
+                        duplicados += 1
+                        ya_enviados += 1
+                        continue
                 if destinatario:
                     duplicados += 1
                     enviado = (destinatario["estado"] == "ENVIADO"
