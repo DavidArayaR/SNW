@@ -26,7 +26,11 @@ def resumen(cur, envio_id: int) -> dict:
         ") resultados", (envio_id, envio_id))
     datos = {k: int(v or 0) for k, v in cur.fetchone().items()}
     pendientes = datos.pop("pendientes")
-    datos["estado"] = "en_proceso" if pendientes else "error" if datos["fallidos"] or datos["invalidos"] else "completado"
+    # Igual que en el historial de campañas, un lote solo se considera fallido
+    # cuando más de la mitad de sus destinatarios terminó con error. Los
+    # inválidos se muestran en su contador, pero no cuentan como errores de envío.
+    mayoria_con_error = datos["total_pacientes"] > 0 and datos["fallidos"] * 2 > datos["total_pacientes"]
+    datos["estado"] = "en_proceso" if pendientes else "error" if mayoria_con_error else "completado"
     return datos
 
 
