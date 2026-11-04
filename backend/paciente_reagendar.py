@@ -936,7 +936,8 @@ def completar_lote_si_corresponde(lote_id: int) -> None:
 
 def registrar_respuesta_reagendar(telefono: str, phone_id: str, mensaje_id: str,
                                   referencia_id: str | None, texto: str,
-                                  *, declina: str | None = None) -> dict | None:
+                                  *, declina: str | None = None,
+                                  consulta: bool | None = None) -> dict | None:
     """Asocia una respuesta al envío exacto (o a una consulta en curso).
 
     No consume respuestas genéricas sin contexto: una conversación de otra
@@ -944,6 +945,9 @@ def registrar_respuesta_reagendar(telefono: str, phone_id: str, mensaje_id: str,
     """
     if not mensaje_id or not phone_id or not telefono:
         return None
+    if consulta is None:
+        from whatsapp_service import es_consulta_explicita
+        consulta = es_consulta_explicita(texto)
     from supresion import (activar_huella_baja, bloquear_huella_baja,
                            limpiar_cerrojos_baja_inactivos, retirar_huella_baja)
     with conectar() as conn, conn.cursor() as cur:
@@ -1039,6 +1043,8 @@ def registrar_respuesta_reagendar(telefono: str, phone_id: str, mensaje_id: str,
             return None
         elif es_aceptacion_reagendar(texto):
             accion, estado = "REAGENDAR", "CONTACTO_OFRECIDO"
+        elif not consulta:
+            accion, estado = "RESPUESTA", flujo.get("estado") or "SIN_ACCION"
         elif flujo.get("estado") == "ESPERANDO_CONSULTA":
             accion, estado = "CONSULTA", "CONTACTO_OFRECIDO"
         elif ("?" in texto or "¿" in texto) and len(texto.strip()) >= 15:

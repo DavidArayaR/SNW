@@ -1121,12 +1121,23 @@ const etiquetasMotivoCC = {
 };
 const etiquetasEstadoCC = {
   pendiente: "Pendiente",
-  notificado: "Botón enviado",
+  notificado: "Sin confirmación",
   error: "Error de envío",
   finalizado: "Finalizada"
 };
 
-function badgeEstadoCC(estado) {
+function badgeEstadoCC(estado, entrega) {
+  if (estado === "notificado") {
+    const estadosEntrega = {
+      aceptado: ["pendiente", "Aceptado por Meta"],
+      entregado: ["notificado", "Entregado"],
+      leido: ["notificado", "Leído"],
+      no_entregado: ["error", "No entregado"],
+      sin_confirmacion: ["pendiente", "Sin confirmación"]
+    };
+    const [estilo, texto] = estadosEntrega[entrega] || estadosEntrega.sin_confirmacion;
+    return `<span class="historial__cc-estado-badge historial__cc-estado-badge--${estilo}">${texto}</span>`;
+  }
   const clave = Object.hasOwn(etiquetasEstadoCC, estado) ? estado : "pendiente";
   return `<span class="historial__cc-estado-badge historial__cc-estado-badge--${clave}">${etiquetasEstadoCC[clave]}</span>`;
 }
@@ -1204,7 +1215,7 @@ async function cargarLogCC(mostrarFeedback = false) {
             `<span class="historial__cc-motivo">${escaparHtml(etiquetasMotivoCC[motivo] || motivo)}</span>`
           ).join("") || "—"}</div></td>` +
           `<td>${numeroCCConClinica(d.numero_call_center, d.clinica_nombre)}</td>` +
-          `<td>${badgeEstadoCC(d.estado)}` +
+          `<td>${badgeEstadoCC(d.estado, d.estado_entrega)}` +
           (d.puede_reintentar ? ` <button type="button" class="btn btn--ghost historial__cc-reintentar" data-reintentar-derivacion="${Number(d.id)}">Reintentar</button>` : "") +
           `</td>` +
           `</tr>`).join("")

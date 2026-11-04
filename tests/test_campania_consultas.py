@@ -64,6 +64,23 @@ class EnrutamientoWebhookTests(unittest.TestCase):
         flujo.assert_not_called()
         derivar.assert_not_called()
 
+    def test_comentario_personal_no_activa_consulta_ni_boton(self):
+        with patch("whatsapp_service.al_respuesta_reagendar", return_value=None), \
+                patch("whatsapp_service.al_consulta_campania") as flujo, \
+                patch("whatsapp_service.al_detectar_consulta") as derivar:
+            acciones = self.procesar("Me tomé una pastilla para dormir")
+        self.assertIn("respuesta_registrada", acciones)
+        flujo.assert_not_called()
+        derivar.assert_not_called()
+
+    def test_estado_de_boton_distingue_aceptacion_entrega_y_lectura(self):
+        for meta, esperado in (("sent", "aceptado"), ("delivered", "entregado"),
+                               ("read", "leido"), ("failed", "no_entregado")):
+            self.assertEqual(main._estado_entrega_derivacion("notificado", "wamid.1", meta), esperado)
+        self.assertEqual(main._estado_entrega_derivacion("notificado", None, None), "sin_confirmacion")
+        self.assertEqual(main._estado_entrega_derivacion("notificado", "wamid.1", None), "aceptado")
+        self.assertIsNone(main._estado_entrega_derivacion("error", None, None))
+
     def test_pregunta_libre_pide_detalle_y_no_deriva_inmediatamente(self):
         with patch("whatsapp_service.al_consulta_campania",
                    return_value="detalle_solicitado") as flujo, \

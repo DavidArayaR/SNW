@@ -260,6 +260,17 @@ def es_solo_saludo_o_estado(texto: str) -> bool:
         normalizado,
     ))
 
+
+def es_consulta_explicita(texto: str, clasificacion=None) -> bool:
+    """Solo inicia una derivación cuando hay pregunta o intención reconocida."""
+    if es_solo_saludo_o_estado(texto):
+        return False
+    clasificacion = clasificacion or clasificar(texto)
+    if clasificacion.automatizacion != "SIN_EVIDENCIA_AUTOMATIZACION":
+        return False
+    return bool((len((texto or "").strip()) >= 4 and any(c in texto for c in "¿?"))
+                or clasificacion.derivar)
+
 # Callback opcional que main.py registra: se llama con el teléfono del paciente
 # cuando el webhook detecta que se dio de baja (por botón o por texto libre),
 # para mandarle el mensaje de despedida.
@@ -1439,7 +1450,9 @@ class WhatsAppService:
                     reagendar = al_respuesta_reagendar(
                         telefono, cuerpo, mensaje.get("id"),
                         (mensaje.get("context") or {}).get("id"),
-                        "BAJA" if fue_baja else "DESINTERES" if no_interes else None)
+                        "BAJA" if fue_baja else "DESINTERES" if no_interes else None,
+                        es_consulta_explicita(cuerpo, clasificacion) if tipo == "text" else
+                        accion_payload == "consulta")
                 except Exception as exc:
                     log_error("al_respuesta_reagendar", exc)
             if reagendar == "gestionado":
@@ -1549,7 +1562,7 @@ class WhatsAppService:
             if (tipo == "text" and reagendar is None and not estaba_opt_out
                     and not es_interes_directo(cuerpo)
                     and not fue_baja and not no_interes
-                    and not es_solo_saludo_o_estado(cuerpo)):
+                    and es_consulta_explicita(cuerpo, clasificacion)):
                 if callable(al_consulta_campania):
                     try:
                         estado = al_consulta_campania(

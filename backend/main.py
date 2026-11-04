@@ -3303,13 +3303,14 @@ def _enviar_respuesta_reagendar(evento: dict) -> None:
 
 def _registrar_respuesta_reagendar(telefono: str, texto: str, mensaje_id: str,
                                    referencia_id: str | None,
-                                   declina: str | None) -> str | None:
+                                   declina: str | None,
+                                   consulta: bool | None = None) -> str | None:
     emisor = emisor_webhook_actual()
     if not emisor:
         return None
     evento = paciente_reagendar.registrar_respuesta_reagendar(
         telefono, emisor["phoneNumberId"], mensaje_id, referencia_id, texto,
-        declina=declina)
+        declina=declina, consulta=consulta)
     if not evento:
         return None
     if evento["accion"] == "DUPLICADO":
@@ -3318,6 +3319,9 @@ def _registrar_respuesta_reagendar(telefono: str, texto: str, mensaje_id: str,
         paciente_reagendar.marcar_respuesta_reagendar(mensaje_id, None, "OMITIDO")
         return "declinado"
     if evento["accion"] == "REACTIVADO":
+        return "gestionado"
+    if evento["accion"] == "RESPUESTA":
+        paciente_reagendar.marcar_respuesta_reagendar(mensaje_id, None, "OMITIDO")
         return "gestionado"
     threading.Thread(target=_enviar_respuesta_reagendar, args=(evento,), daemon=True).start()
     return "gestionado"
@@ -4935,6 +4939,16 @@ def rechazar_plantilla(plantilla_id: int, body: RechazoPlantillaIn, sesion: dict
 # El aviso se edita en Configuración → Respuestas del sistema;
 # el historial de sus envíos se consulta aquí.
 
+def _estado_entrega_derivacion(estado: str, aviso_id: str | None,
+                               estado_whatsapp: str | None) -> str | None:
+    if estado != "notificado":
+        return None
+    if not aviso_id:
+        return "sin_confirmacion"
+    return {"sent": "aceptado", "delivered": "entregado", "read": "leido",
+            "failed": "no_entregado"}.get(estado_whatsapp, "aceptado")
+
+
 def obtener_call_center_log(sesion: dict = Depends(exigir("call_center_registro"))):
     """Últimas respuestas enviadas a pacientes interesados, con el número de
     call center asignado a cada una, y el contador de usos por número.
@@ -5001,9 +5015,14 @@ def obtener_call_center_log(sesion: dict = Depends(exigir("call_center_registro"
                     r["descripcion_error"] = None
                 entradas.append(r)
             cur.execute(
-                "SELECT id, paciente_id, telefono, mensaje_original, motivos, estado,"
-                " numero_call_center, centro_codigo, base_datos, creado"
-                " FROM call_center_derivaciones"
+                "SELECT d.id, d.paciente_id, d.telefono, d.mensaje_original, d.motivos, d.estado,"
+                " d.numero_call_center, d.centro_codigo, d.base_datos, d.creado, d.aviso_id,"
+                " (SELECT le.estado_whatsapp FROM log_envios le"
+                " WHERE d.aviso_id IS NOT NULL AND d.wa_phone_id IS NOT NULL"
+                " AND BINARY le.whatsapp_message_id=BINARY d.aviso_id"
+                " AND BINARY le.wa_phone_id=BINARY d.wa_phone_id"
+                " ORDER BY le.id DESC LIMIT 1) AS estado_whatsapp"
+                " FROM call_center_derivaciones d"
                 + (f" WHERE {filtro_area}" if filtro_area else "")
                 + " ORDER BY id DESC LIMIT 100", args or None)
             solicitudes = cur.fetchall()
@@ -5011,6 +5030,8 @@ def obtener_call_center_log(sesion: dict = Depends(exigir("call_center_registro"
                 derivaciones.append({
                     "id": d["id"], "motivos": d["motivos"].split(","),
                     "estado": d["estado"], "numero_call_center": d.get("numero_call_center"),
+                    "estado_entrega": _estado_entrega_derivacion(
+                        d["estado"], d.get("aviso_id"), d.get("estado_whatsapp")),
                     "clinica_nombre": nombres_clinicas.get(d.get("centro_codigo"))
                     or clinica_del_numero(d.get("numero_call_center")),
                     "base_datos": d.get("base_datos"),

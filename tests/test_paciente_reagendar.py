@@ -318,6 +318,22 @@ class ParserCitasTests(unittest.TestCase):
         self.assertEqual(evento["accion"], "CONSULTA")
         self.assertEqual(evento["cita"]["id"], 7)
 
+    def test_comentario_personal_en_reagendamiento_se_registra_sin_derivar(self):
+        conexion = MagicMock()
+        cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cita = {"id": 7, "log_envio_id": 42}
+        cur.fetchone.side_effect = [cita, None, {"estado": "ESPERANDO_CONSULTA"}]
+        cur.rowcount = 1
+        with patch.object(reagendar, "conectar", return_value=conexion):
+            evento = reagendar.registrar_respuesta_reagendar(
+                "+56911111111", "12345", "wamid.in", "wamid.out",
+                "Me tomé una pastilla para dormir")
+        self.assertEqual(evento["accion"], "RESPUESTA")
+        self.assertIsNone(evento["mensaje_preparado"])
+        actualizacion = next(call for call in cur.execute.call_args_list
+                             if "INSERT INTO reagendar_flujo" in call.args[0])
+        self.assertEqual(actualizacion.args[1][1], "ESPERANDO_CONSULTA")
+
     def test_solicitud_de_consulta_sin_contexto_pide_detalle(self):
         conexion = MagicMock()
         cur = conexion.__enter__.return_value.cursor.return_value.__enter__.return_value
