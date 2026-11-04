@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 import pymysql
 import reagendar_batches
 
-from db import conectar, config_all
+from db import conectar, config_all, config_get
 from telefono import normalizar_telefono
 from whatsapp_channels import catalogo_centros
 
@@ -108,12 +108,26 @@ def es_aceptacion_reagendar(texto: str) -> bool:
     }
 
 
+MENSAJE_PREPARADO_REAGENDAR = ("Sí me gustaría agendar, mi nombre es {paciente_nombre}, "
+                               "con el médico: {doctor_nombre}, clínica: {clinica_nombre}")
+MENSAJE_PREPARADO_CONSULTA = "Hola, esta es mi consulta: {consulta}"
+
+
 def mensaje_preparado_reagendar(cita: dict) -> str:
     if not cita.get("doctor_nombre"):
         raise ValueError("Falta el médico para preparar el reagendamiento")
-    return ("Sí me gustaría agendar, mi nombre es "
-            f"{cita['paciente_nombre']}, con el médico: "
-            f"{cita['doctor_nombre']}, clínica: {cita['clinica_nombre']}")
+    codigo = cita.get("centro_codigo")
+    formato = ((config_get(f"respuesta_sistema_{codigo}_preparado_reagendar") or "").strip()
+               if codigo else "") or MENSAJE_PREPARADO_REAGENDAR
+    for clave in ("paciente_nombre", "doctor_nombre", "clinica_nombre"):
+        formato = formato.replace("{" + clave + "}", str(cita.get(clave) or ""))
+    return formato
+
+
+def mensaje_preparado_consulta(texto: str, codigo: str | None = None) -> str:
+    formato = ((config_get(f"respuesta_sistema_{codigo}_preparado_consulta") or "").strip()
+               if codigo else "") or MENSAJE_PREPARADO_CONSULTA
+    return formato.replace("{consulta}", texto.strip()[:500])
 
 
 def variables_plantilla_reagendar(cita: dict) -> dict[str, str]:
@@ -1052,7 +1066,7 @@ def registrar_respuesta_reagendar(telefono: str, phone_id: str, mensaje_id: str,
         else:
             accion, estado = "SOLICITAR_CONSULTA", "ESPERANDO_CONSULTA"
         preparado = (mensaje_preparado_reagendar(cita) if accion == "REAGENDAR" else
-                     "Hola, esta es mi consulta: " + texto.strip()[:500] if accion == "CONSULTA" else None)
+                     mensaje_preparado_consulta(texto, cita.get("centro_codigo")) if accion == "CONSULTA" else None)
         cur.execute(
             "INSERT IGNORE INTO reagendar_interacciones"
             " (mensaje_id, cita_id, accion, texto, mensaje_preparado)"

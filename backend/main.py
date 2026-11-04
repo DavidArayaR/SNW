@@ -2617,8 +2617,32 @@ def _mensaje_boton_call_center(paciente_id, ambiente: str) -> str:
     return oferta if _CC_PALABRAS_OFERTA.search(texto_origen) else generico
 
 
+def _mensaje_crm_ultima_campania(telefono: str, emisor: dict | None, referencia: str | None = None) -> str | None:
+    """Mensaje local de la última campaña aceptada para este teléfono y clínica."""
+    phone_id = (emisor or {}).get("phoneNumberId")
+    if not telefono or not phone_id:
+        return None
+    try:
+        with conectar() as conn, conn.cursor() as cur:
+            sql = ("SELECT plantilla_clave FROM log_envios WHERE numero_telefono=%s"
+                   " AND wa_phone_id=%s AND envio_id IS NOT NULL AND estado_envio='enviado'")
+            args = (telefono, phone_id)
+            if referencia:
+                sql += " AND BINARY whatsapp_message_id=BINARY %s"
+                args += (referencia,)
+            cur.execute(sql + " ORDER BY id DESC LIMIT 1", args)
+            clave = (cur.fetchone() or {}).get("plantilla_clave")
+        plantilla = next((p for p in leer_plantillas() if p.get("clave") == clave
+                          and p.get("centro_codigo") == (emisor or {}).get("codigo")), None)
+        return next((b.get("crm_mensaje") for b in (plantilla or {}).get("botones", [])
+                     if b.get("accion") == "interes" and b.get("crm_mensaje")), None)
+    except Exception as exc:
+        log_error("call center: no se pudo recuperar el mensaje de la campaña", exc, solo_tipo=True)
+        return None
+
+
 def _cc_datos_envio(pac: dict, ambiente: str, consulta: str = "",
-                    emisor: dict | None = None) -> tuple[str, dict, str]:
+                    emisor: dict | None = None, referencia: str | None = None) -> tuple[str, dict, str]:
     """Devuelve (texto renderizado, datos_plantilla, numero_asignado) para el
     mensaje fijo de call center. Añade el botón que abre el chat del call
     center si la clínica receptora tiene un número CRM válido. Nunca usa el
@@ -2632,9 +2656,11 @@ def _cc_datos_envio(pac: dict, ambiente: str, consulta: str = "",
         numero = ""
     if numero:
         url = f"https://wa.me/{numero}"
-        mensaje_preparado = (("Hola, esta es mi consulta: " + consulta.strip()[:500])
+        mensaje_preparado = (paciente_reagendar.mensaje_preparado_consulta(consulta, codigo)
                              if consulta else
-                             "Hola, estoy interesado/a en la oferta que me enviaron.")
+                             _mensaje_crm_ultima_campania(
+                                 normalizar_telefono(pac.get("telefono") or "") or "", emisor, referencia)
+                             or _respuesta_sistema("preparado_interes", codigo))
         url += "?text=" + urllib.parse.quote(mensaje_preparado, safe="")
         datos["cta"] = {
             "texto": CALL_CENTER_PLANTILLA_FIJA["cc_boton_texto"][:20],
@@ -2666,18 +2692,20 @@ def _emisor_para_respuesta(telefono: str, tabla: str | None = None) -> dict | No
         return None
 
 
-def _tabla_ultimo_envio_emisor(telefono: str) -> str | None:
+def _tabla_ultimo_envio_emisor(telefono: str, referencia: str | None = None) -> str | None:
     emisor = emisor_webhook_actual()
     if not emisor:
         return None
     try:
         with conectar() as conn, conn.cursor() as cur:
-            cur.execute(
-                "SELECT COALESCE(l.tabla_pacientes, e.base_datos) AS tabla_pacientes"
-                " FROM log_envios l JOIN envios e ON e.id = l.envio_id"
-                " WHERE l.wa_phone_id = %s AND l.numero_telefono = %s"
-                " ORDER BY l.id DESC LIMIT 1", (emisor["phoneNumberId"], telefono),
-            )
+            sql = ("SELECT COALESCE(l.tabla_pacientes, e.base_datos) AS tabla_pacientes"
+                   " FROM log_envios l JOIN envios e ON e.id = l.envio_id"
+                   " WHERE l.wa_phone_id = %s AND l.numero_telefono = %s")
+            args = (emisor["phoneNumberId"], telefono)
+            if referencia:
+                sql += " AND BINARY l.whatsapp_message_id=BINARY %s"
+                args += (referencia,)
+            cur.execute(sql + " ORDER BY l.id DESC LIMIT 1", args)
             return (cur.fetchone() or {}).get("tabla_pacientes")
     except Exception as exc:
         log_error("_tabla_ultimo_envio_emisor", exc)
@@ -2686,7 +2714,8 @@ def _tabla_ultimo_envio_emisor(telefono: str) -> str | None:
 
 def _despachar_call_center(pac: dict, ambiente: str, tabla: str | None = None,
                            consulta: str = "", texto_personalizado: str | None = None,
-                           emisor_forzado: dict | None = None, automatico: bool = True) -> dict:
+                           emisor_forzado: dict | None = None, automatico: bool = True,
+                           referencia: str | None = None) -> dict:
     """Envía el mensaje fijo de call center a un paciente y lo registra en el
     historial y en call_center_log. Devuelve {ok, error, telefono}. No lanza.
     Con `tabla` (area) se etiqueta esa tabla y se salta el filtro de
@@ -2705,7 +2734,8 @@ def _despachar_call_center(pac: dict, ambiente: str, tabla: str | None = None,
     emisor = emisor_forzado or _emisor_para_respuesta(telefono, tabla or tabla_pacientes(ambiente))
     if not emisor:
         return {"ok": False, "error": "No se pudo identificar el número emisor", "telefono": telefono}
-    texto, datos_plantilla, numero_cc = _cc_datos_envio(pac, ambiente, consulta, emisor)
+    texto, datos_plantilla, numero_cc = (_cc_datos_envio(pac, ambiente, consulta, emisor, referencia)
+                                         if referencia else _cc_datos_envio(pac, ambiente, consulta, emisor))
     if texto_personalizado is not None:
         texto = texto_personalizado.strip()
         datos_plantilla["texto"] = texto
@@ -2754,7 +2784,8 @@ _cc_auto_lock = threading.Lock()
 _cc_auto_pendientes: set[str | tuple[str, str]] = set()
 
 
-def _enviar_call_center_auto(tel: str, mensaje_prueba_id: str | None = None) -> None:
+def _enviar_call_center_auto(tel: str, mensaje_prueba_id: str | None = None,
+                             referencia: str | None = None) -> None:
     """Timer: envía el mensaje fijo de call center al paciente interesado cuyo
     número coincide, en la(s) base(s) donde esté marcado como interesado.
 
@@ -2783,7 +2814,10 @@ def _enviar_call_center_auto(tel: str, mensaje_prueba_id: str | None = None) -> 
         objetivos = [("produccion", None), ("desarrollo", None)]
         for _e in servicio_areas.listar_tablas_areas():
             objetivos.append(("produccion", _e["nombre_tabla_base"]))
-        tabla_origen = _tabla_ultimo_envio_emisor(tel)
+        tabla_origen = (_tabla_ultimo_envio_emisor(tel, referencia) if referencia
+                        else _tabla_ultimo_envio_emisor(tel))
+        if referencia and not tabla_origen:
+            return  # No atribuir un clic a otra campaña o clínica.
         if tabla_origen:
             objetivos = [(amb, tabla) for amb, tabla in objetivos
                          if (tabla or tabla_pacientes(amb)) == tabla_origen]
@@ -2828,7 +2862,8 @@ def _enviar_call_center_auto(tel: str, mensaje_prueba_id: str | None = None) -> 
                     if not prueba_por_mensaje and ult_cc is not None and (
                             ult_plantilla is None or ult_cc > ult_plantilla):
                         continue
-                res = _despachar_call_center(pac, amb, tabla=t_esp)
+                res = (_despachar_call_center(pac, amb, tabla=t_esp, referencia=referencia)
+                       if referencia else _despachar_call_center(pac, amb, tabla=t_esp))
                 if res.get("ok"):
                     print("[CALL-CENTER auto] respuesta enviada", flush=True)
                     return  # Una sola respuesta por mensaje y centro, aunque esté en varias bases.
@@ -2844,7 +2879,8 @@ def _enviar_call_center_auto(tel: str, mensaje_prueba_id: str | None = None) -> 
 CALL_CENTER_AUTO_SEGUNDOS = 1  # espera fija: siempre da tiempo a que quede feedback perceptible.
 
 
-def _programar_call_center_auto(telefono: str, mensaje_id: str | None = None) -> None:
+def _programar_call_center_auto(telefono: str, mensaje_id: str | None = None,
+                                referencia: str | None = None) -> None:
     """Callback del webhook: programa el envío automático 1s después de
     detectar interés. Para números reales agrupa por teléfono; para pruebas
     reserva cada ID de Meta y evita repetir el mismo mensaje."""
@@ -2869,7 +2905,8 @@ def _programar_call_center_auto(telefono: str, mensaje_id: str | None = None) ->
         _cc_auto_pendientes.add(clave_pendiente)
     contexto = contextvars.copy_context()
     timer = threading.Timer(CALL_CENTER_AUTO_SEGUNDOS, contexto.run,
-                            args=(_enviar_call_center_auto, tel, mensaje_id if prueba else None))
+                            args=((_enviar_call_center_auto, tel, mensaje_id if prueba else None, referencia)
+                                  if referencia else (_enviar_call_center_auto, tel, mensaje_id if prueba else None)))
     timer.daemon = True
     timer.start()
 
@@ -3277,7 +3314,7 @@ def _enviar_respuesta_reagendar(evento: dict) -> None:
                              or paciente_reagendar.mensaje_preparado_reagendar(cita))
             else:
                 preparado = (evento.get("mensaje_preparado")
-                             or "Hola, esta es mi consulta: " + evento["texto"].strip()[:500])
+                             or paciente_reagendar.mensaje_preparado_consulta(evento["texto"], canal["codigo"]))
             numero = re.sub(r"\D", "", cfg.get(f"{canal['codigo']}_CRM_PHONE_NUMBER") or "")
             if not re.fullmatch(r"[1-9]\d{7,14}", numero):
                 raise ValueError("Número CRM de la clínica no disponible")
@@ -3355,6 +3392,12 @@ _MENSAJE_OPCIONES_INSULTO = (
 # Textos visibles al paciente. Cada clínica puede sobrescribirlos en la tabla
 # configuracion; sin valor propio se usa el texto vigente de SNW.
 _RESPUESTAS_SISTEMA = {
+    "preparado_interes": ("Mensaje preparado · interés", "Hola, estoy interesado/a en la oferta que me enviaron.",
+                            "Se abre en el chat del call center; una plantilla puede definir otro texto.") ,
+    "preparado_consulta": ("Mensaje preparado · consulta", paciente_reagendar.MENSAJE_PREPARADO_CONSULTA,
+                            "Incluye {consulta} para incorporar la consulta escrita por el paciente."),
+    "preparado_reagendar": ("Mensaje preparado · reagendamiento", paciente_reagendar.MENSAJE_PREPARADO_REAGENDAR,
+                             "Incluye {paciente_nombre}, {doctor_nombre} y {clinica_nombre}."),
     "interes": ("Interés · botón de call center", CALL_CENTER_TEXTO_DEFAULT,
                 "Se envía cuando el paciente indica interés en una campaña."),
     "consulta_callcenter": ("Consulta · botón de call center", "",
@@ -4197,11 +4240,6 @@ def sincronizar_plantillas_meta(body: SincronizarPlantillasIn,
             if botones_meta is not None:
                 for boton_meta in botones_meta:
                     for boton_local in p.get("botones") or []:
-                        if (boton_meta.get("tipo") == "url" and boton_local.get("crm_reagendar")
-                                and boton_meta.get("url") == boton_local.get("url")
-                                and boton_meta.get("texto") == boton_local.get("texto")):
-                            boton_meta["crm_reagendar"] = True
-                            break
                         if (boton_meta.get("tipo") == "url" and boton_local.get("crm_mensaje")
                                 and boton_meta.get("url") == boton_local.get("url")
                                 and boton_meta.get("texto") == boton_local.get("texto")):
@@ -4211,6 +4249,8 @@ def sincronizar_plantillas_meta(body: SincronizarPlantillasIn,
                                 and boton_local.get("tipo") == "respuesta"
                                 and boton_meta.get("texto") == boton_local.get("texto")):
                             boton_meta["accion"] = boton_local.get("accion") or boton_meta.get("accion")
+                            if boton_local.get("crm_mensaje"):
+                                boton_meta["crm_mensaje"] = boton_local["crm_mensaje"]
                             if boton_meta["accion"] == "opciones":
                                 boton_meta["opciones"] = boton_local.get("opciones")
                             break
@@ -4383,41 +4423,23 @@ def _validar_media_plantilla(media_id: str | None, sesion: dict,
 
 
 def _resolver_botones_crm(botones, centro):
-    """Construye un enlace fijo para Meta usando únicamente el CRM de la clínica."""
+    """Convierte el botón de interés en respuesta rápida y conserva su texto local."""
     if botones is None:
         return None
     resultado = []
     for boton in botones:
-        if isinstance(boton, dict) and boton.get("tipo") == "url" and boton.get("crm_reagendar"):
-            boton = {"tipo": "reagendar_url", "texto": boton.get("texto")}
-        if not isinstance(boton, dict) or boton.get("tipo") not in ("crm", "reagendar_url"):
+        if not isinstance(boton, dict) or boton.get("tipo") != "crm":
             resultado.append(boton)
             continue
-        if boton.get("tipo") == "reagendar_url":
-            if not centro or centro not in catalogo_centros():
-                raise HTTPException(400, detail="Selecciona la clínica para el botón de reagendamiento.")
-            numero = re.sub(r"\D", "", config_get(f"{centro}_CRM_PHONE_NUMBER") or "")
-            if not re.fullmatch(r"[1-9]\d{7,14}", numero):
-                raise HTTPException(400, detail="Configura un número CRM válido para esta clínica.")
-            resultado.append({"tipo": "url", "texto": boton.get("texto") or "Sí, quiero reagendar",
-                              "url": f"https://wa.me/{numero}?text={{{{1}}}}", "crm_reagendar": True})
-            continue
         mensaje = boton.get("crm_mensaje")
-        if not isinstance(mensaje, str) or not mensaje.strip() or len(mensaje.strip()) > 500:
-            raise HTTPException(400, detail="Escribe el mensaje preparado del CRM (máximo 500 caracteres).")
+        if mensaje is None:
+            mensaje = ""
+        if not isinstance(mensaje, str) or len(mensaje.strip()) > 500:
+            raise HTTPException(400, detail="El mensaje preparado del CRM admite hasta 500 caracteres.")
         if re.search(r"[{}]", mensaje):
             raise HTTPException(400, detail="El mensaje preparado del CRM debe ser fijo y no admite variables.")
-        if not centro or centro not in catalogo_centros():
-            raise HTTPException(400, detail="Selecciona la clínica para crear el enlace a su CRM.")
-        numero = re.sub(r"\D", "", config_get(f"{centro}_CRM_PHONE_NUMBER") or "")
-        if not re.fullmatch(r"[1-9]\d{7,14}", numero):
-            raise HTTPException(400, detail="Configura un número CRM válido para esta clínica.")
-        mensaje = mensaje.strip()
-        url = f"https://wa.me/{numero}?text={urllib.parse.quote(mensaje, safe='')}"
-        if len(url) > 2000:
-            raise HTTPException(400, detail="El mensaje preparado genera un enlace demasiado largo.")
-        resultado.append({"tipo": "url", "texto": boton.get("texto"), "url": url,
-                          "crm_mensaje": mensaje})
+        resultado.append({"tipo": "respuesta", "texto": boton.get("texto") or "Me interesa",
+                          "accion": "interes", "crm_mensaje": mensaje.strip()})
     return resultado
 
 
@@ -4425,12 +4447,12 @@ def _validar_botones_obligatorios(botones, texto=""):
     """Campañas y reagendamientos comparten las dos últimas acciones."""
     reagendar = bool({"nombre_paciente", "nombre_doc"}.intersection(variables_del_cuerpo(texto)))
     if isinstance(botones, list) and botones and isinstance(botones[0], dict):
-        reagendar = reagendar or bool(botones[0].get("crm_reagendar"))
+        reagendar = reagendar or botones[0].get("accion") == "reagendar"
     primero = (isinstance(botones, list) and len(botones) == 3
                 and isinstance(botones[0], dict) and
-                ((botones[0].get("tipo") == "url" and botones[0].get("crm_reagendar") is True)
+                ((botones[0].get("tipo") == "respuesta" and botones[0].get("accion") == "reagendar")
                  if reagendar else
-                 (botones[0].get("tipo") == "url" and bool(botones[0].get("crm_mensaje")))))
+                 (botones[0].get("tipo") == "respuesta" and botones[0].get("accion") == "interes")))
     valido = (primero and all(isinstance(b, dict) for b in botones)
               and botones[1].get("tipo") == "respuesta"
               and botones[1].get("accion") == "desinteres"
@@ -4439,7 +4461,7 @@ def _validar_botones_obligatorios(botones, texto=""):
               and botones[2].get("accion") == "baja"
               and botones[2].get("texto") == "Dar de baja")
     if not valido:
-        primero_nombre = "Sí, quiero reagendar" if reagendar else "Abrir chat del CRM"
+        primero_nombre = "Sí, quiero reagendar" if reagendar else "Me interesa"
         raise HTTPException(400, detail=(f"La plantilla debe tener estos tres botones en orden: "
                             f"{primero_nombre}, No me interesa y Dar de baja."))
 
@@ -4570,20 +4592,9 @@ def enviar_prueba_plantilla(plantilla_id: int, body: PruebaPlantillaIn,
             )
         _pruebas_plantilla_en_curso.add(llave)
     try:
-        variables_prueba = dict(vista["ejemplos"])
-        if any(b.get("crm_reagendar") for b in vista.get("botones", [])):
-            try:
-                variables_prueba["crm_reagendar"] = paciente_reagendar.mensaje_preparado_reagendar({
-                    "paciente_nombre": variables_prueba.get("nombre_paciente") or
-                                       " ".join(filter(None, (variables_prueba.get("nombre"), variables_prueba.get("apellido")))),
-                    "doctor_nombre": variables_prueba.get("nombre_doc"),
-                    "clinica_nombre": emisor.get("nombre") or centro_plantilla,
-                })
-            except ValueError as exc:
-                raise HTTPException(400, detail="Indica un médico de ejemplo para probar el reagendamiento.") from exc
         ok, message_id, error, _ = asyncio.run(servicio_wa.enviar(
             telefono, vista["cuerpo"], plantilla=plantilla,
-            variables=variables_prueba, es_prueba=True))
+            variables=vista["ejemplos"], es_prueba=True))
         if not ok:
             log_error(f"Prueba de plantilla {plantilla_id}: Meta no aceptó el envío")
             raise HTTPException(502, detail=error or "Meta no aceptó el mensaje de prueba.")
@@ -6131,6 +6142,18 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
                     422, detail="La respuesta debe tener entre 1 y 1000 caracteres "
                                 "y no contener caracteres de control.")
             normalizado = v.casefold()
+            variables_permitidas = {
+                "preparado_interes": set(),
+                "preparado_consulta": {"consulta"},
+                "preparado_reagendar": {"paciente_nombre", "doctor_nombre", "clinica_nombre"},
+            }
+            if tipo in variables_permitidas:
+                esperadas = variables_permitidas[tipo]
+                encontradas = set(re.findall(r"\{([^{}]+)\}", v))
+                sin_variables = re.sub(r"\{[^{}]+\}", "", v)
+                if encontradas != esperadas or "{" in sin_variables or "}" in sin_variables:
+                    detalle = ", ".join("{" + var + "}" for var in sorted(esperadas)) or "ninguna variable"
+                    raise HTTPException(422, detail=f"El mensaje preparado debe usar exactamente: {detalle}.")
             if tipo == "baja" and not all(fragmento in normalizado for fragmento in
                                             ("eliminar", "permanent", "reincorpor", "origen")):
                 raise HTTPException(
@@ -9444,7 +9467,7 @@ async def _procesar_cita_reagendar(cita: dict, plantillas_por_centro: dict) -> N
         precio = _precio_reagendamiento(plantilla)
         ok, message_id, _error, resultado = await servicio.enviar(
             telefono, vista["cuerpo"], plantilla=plantilla,
-            variables={**vista["ejemplos"], "crm_reagendar": paciente_reagendar.mensaje_preparado_reagendar(cita)})
+            variables=vista["ejemplos"])
         if ok:
             paciente_reagendar.marcar_enviado(cita, canal, plantilla, vista["cuerpo"], message_id,
                                              precio=precio)
@@ -11743,8 +11766,7 @@ async def enviar_prueba_reagendamiento(cita_id: int, sesion: dict = Depends(solo
         if not es_numero_prueba(telefono) or esta_suprimido(telefono) or esta_de_baja(telefono):
             raise HTTPException(409, detail="El número ya no está habilitado para la prueba.")
         ok, message_id, error, _ = await servicio.enviar(
-            telefono, vista['cuerpo'], plantilla=plantilla,
-            variables={**vista['ejemplos'], 'crm_reagendar': paciente_reagendar.mensaje_preparado_reagendar(cita)}, es_prueba=True)
+            telefono, vista['cuerpo'], plantilla=plantilla, variables=vista['ejemplos'], es_prueba=True)
         if not ok or not message_id:
             raise HTTPException(502, detail=error or "Meta no aceptó la prueba.")
         with _pruebas_plantilla_lock:

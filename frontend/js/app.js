@@ -254,7 +254,7 @@ function botonesDelEditor() {
     if (tipo === "baja") return { tipo: "respuesta", texto: "Dar de baja", accion: "baja" };
     if (tipo === "interes") return { tipo: "respuesta", texto: "Me interesa", accion: "interes" };
     if (tipo === "nointeres") return { tipo: "respuesta", texto: "No me interesa", accion: "desinteres" };
-    if (tipo === "reagendar") return { tipo: "reagendar_url", texto: fila.querySelector(".tpl-boton__texto").value.trim() };
+    if (tipo === "reagendar") return { tipo: "respuesta", texto: fila.querySelector(".tpl-boton__texto").value.trim(), accion: "reagendar" };
     const boton = { tipo, texto: fila.querySelector(".tpl-boton__texto").value.trim() };
     if (tipo === "respuesta") {
       boton.accion = fila.querySelector(".tpl-boton__accion").value;
@@ -299,8 +299,7 @@ function agregarFilaBoton(datos = {}) {
       <span class="tpl-boton__ayuda"></span></div>
     <button type="button" class="btn btn--ghost tpl-boton__quitar" aria-label="Quitar botón" title="Quitar botón"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
     <label class="tpl-boton__campo"><span>Tipo de botón</span><select class="tpl-boton__tipo">
-      <option value="respuesta">Respuesta rápida</option><option value="crm">Abrir chat del CRM</option><option value="url">Abrir enlace</option>
-      <option value="interes">Me interesa</option>
+      <option value="respuesta">Respuesta rápida</option><option value="crm">Me interesa</option><option value="url">Abrir enlace</option>
       <option value="nointeres">No interesa</option>
       <option value="reagendar">Reagendar</option>
       <option value="baja">Baja</option></select></label>
@@ -315,9 +314,9 @@ function agregarFilaBoton(datos = {}) {
         <option value="baja">Baja</option></select></label>
     <label class="tpl-boton__campo tpl-boton__destino-campo"><span class="tpl-boton__destino-label">Destino</span>
       <input class="tpl-boton__destino"></label>
-    <label class="tpl-boton__campo tpl-boton__crm-campo" hidden><span>Mensaje preparado para el CRM</span>
+    <label class="tpl-boton__campo tpl-boton__crm-campo" hidden><span>Mensaje preparado para call center</span>
       <textarea class="tpl-boton__crm-mensaje" maxlength="500" rows="3" placeholder="Ej.: Hola, quiero saber más sobre la promoción"></textarea>
-      <small>El paciente verá el mensaje escrito y podrá enviarlo. Usa texto fijo, sin datos personales. Si cambia el número CRM, actualiza la plantilla en Meta.</small></label>
+      <small>Opcional: personaliza el mensaje para esta plantilla. Si queda vacío, se usa el de Configuración → Respuestas del sistema para la clínica.</small></label>
     <button type="button" class="btn tpl-boton__crear-lista"><i class="fa-solid fa-list" aria-hidden="true"></i> Convertir en lista de opciones</button>
     <div class="tpl-boton__opciones" hidden><h4>Opciones de este botón</h4><p class="field__hint">Al tocar «Ver opciones», el paciente recibirá una lista. Agrega hasta 10 opciones y el mensaje de respuesta de cada una.</p>
       <div class="tpl-boton__opciones-lista"></div>
@@ -336,8 +335,8 @@ function agregarFilaBoton(datos = {}) {
     opcionExistente.disabled = true;
     tipo.add(opcionExistente);
   }
-  tipo.value = datos.tipo === "crm" || datos.crm_mensaje ? "crm" : datos.accion === "baja" || datos.tipo === "baja" ? "baja" :
-    (datos.tipo === "reagendar" || datos.tipo === "reagendar_url" || datos.crm_reagendar || (datos.tipo === "respuesta" && datos.accion === "reagendar" && ["Si quiero reagendar", "Sí, quiero reagendar"].includes(datos.texto))
+  tipo.value = datos.tipo === "crm" || datos.crm_mensaje || (datos.tipo === "respuesta" && datos.accion === "interes") ? "crm" : datos.accion === "baja" || datos.tipo === "baja" ? "baja" :
+    (datos.tipo === "reagendar" || (datos.tipo === "respuesta" && datos.accion === "reagendar" && ["Si quiero reagendar", "Sí, quiero reagendar"].includes(datos.texto))
       ? "reagendar" :
     (datos.tipo === "interes" || (datos.tipo === "respuesta" && datos.accion === "interes" && datos.texto === "Me interesa")
       ? "interes" : (datos.tipo === "nointeres" ||
@@ -347,7 +346,8 @@ function agregarFilaBoton(datos = {}) {
   accion.value = datos.accion || ({ "Me interesa": "interes", "No me interesa": "desinteres",
     "Dar de baja": "baja", "Si quiero reagendar": "reagendar" }[datos.texto] || "ninguna");
   destino.value = datos.url || datos.telefono || "";
-  fila.querySelector(".tpl-boton__crm-mensaje").value = datos.crm_mensaje || "";
+  fila.querySelector(".tpl-boton__crm-mensaje").value = datos.crm_mensaje ||
+    (tipo.value === "crm" ? BOTONES_INICIALES[0].crm_mensaje : "");
   for (const opcion of datos.opciones || []) agregarOpcionLista(panelOpciones, opcion);
   const sincronizarTipo = () => {
     if (["baja", "interes", "nointeres", "reagendar"].includes(tipo.value)) {
@@ -370,11 +370,11 @@ function agregarFilaBoton(datos = {}) {
     fila.querySelector(".tpl-boton__ayuda").textContent = ({
       respuesta: "Escribe el texto y elige qué hará el sistema al recibir la respuesta.",
       url: "El paciente abrirá el enlace indicado.",
-      crm: "Abre directamente el chat del CRM de la clínica con el mensaje preparado.",
+      crm: "Al pulsar «Me interesa», el paciente recibirá la respuesta con el botón de call center.",
       telefono: "El paciente podrá llamar al número indicado.",
       interes: "Se mostrará «Me interesa» y la respuesta se marcará como interés.",
       nointeres: "Se mostrará «No me interesa» y la respuesta se marcará como desinterés.",
-      reagendar: "Abre directamente el CRM de la clínica con el mensaje preparado para la cita.",
+      reagendar: "Se mostrará «Sí, quiero reagendar» y se preparará el mensaje para el CRM de la clínica cuando responda a un reagendamiento.",
       baja: "Se mostrará «Dar de baja» y se solicitará la baja del paciente.",
     })[tipo.value] || "";
     tipo.dataset.tipoAnterior = tipo.value;
@@ -458,7 +458,7 @@ function establecerBotones(botones) {
 $("#btnRestablecerBotones")?.addEventListener("click", () => {
   const actual = botonesDelEditor();
   const crm = actual.find((b) => b.tipo === "crm");
-  const reagendar = actual.find((b) => b.tipo === "reagendar_url" || b.accion === "reagendar") ||
+  const reagendar = actual.find((b) => b.accion === "reagendar") ||
     (/\{(?:nombre_paciente|nombre_doc)\}/.test(inpMensaje.value) ? { tipo: "reagendar", texto: "Sí, quiero reagendar", accion: "reagendar" } : null);
   establecerBotones([reagendar || crm || BOTONES_INICIALES[0], BOTONES_INICIALES[1], BOTONES_INICIALES[2]]);
   refrescarEditor();
@@ -4561,7 +4561,7 @@ Promise.all([cargaInicialCentrosEmisores, cargaInicialPlantillas]).then(() => {
   modoNueva();
   inpCentroPlantilla.value = codigo;
   inpNombre.value = `Reagendamiento ${centro.nombre}`;
-  inpMensaje.value = "¡Hola, {nombre_paciente}! 😊\n\nEsperamos que se encuentre bien. Queremos saber cómo le fue en su atención reciente con {nombre_doc} y si le indicaron un nuevo control.\n\nSi desea que le ayudemos a coordinar su próxima cita, pulse «Sí, quiero reagendar». Se abrirá el chat de atención de su clínica con un mensaje preparado para que lo envíe allí. 💚\n\nSi por ahora no necesita agendar, puede elegir «No me interesa». Si no desea recibir más notificaciones, elija «Dar de baja».";
+  inpMensaje.value = "¡Hola, {nombre_paciente}! 😊\n\nEsperamos que se encuentre bien. Queremos saber cómo le fue en su atención reciente con {nombre_doc} y si le indicaron un nuevo control.\n\nSi desea que le ayudemos a coordinar su próxima cita, pulse «Sí, quiero reagendar». Le enviaremos un botón para abrir el chat de atención de su clínica con un mensaje preparado para que lo envíe allí. 💚\n\nSi por ahora no necesita agendar, puede elegir «No me interesa». Si no desea recibir más notificaciones, elija «Dar de baja».";
   establecerBotones([
     { tipo: "respuesta", texto: "Sí, quiero reagendar", accion: "reagendar" },
     { tipo: "respuesta", texto: "No me interesa", accion: "desinteres" },

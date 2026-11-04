@@ -1179,17 +1179,6 @@ class WhatsAppService:
                 componentes.append({"type": "body", "parameters": [
                     {"type": "text", "text": valor} for valor in valores]})
             for indice, boton in enumerate(revision.get("botones", [])):
-                if boton.get("crm_reagendar"):
-                    from urllib.parse import quote
-                    preparado = vdict.get("crm_reagendar")
-                    if not isinstance(preparado, str) or not preparado.strip():
-                        return False, None, "Faltan los datos de la cita para preparar el enlace de reagendamiento", "failed"
-                    sufijo = quote(preparado.strip(), safe="")
-                    if len(boton["url"].replace("{{1}}", sufijo)) > 2000:
-                        return False, None, "El mensaje preparado para reagendar es demasiado largo", "failed"
-                    componentes.append({"type": "button", "sub_type": "url", "index": str(indice),
-                                        "parameters": [{"type": "text", "text": sufijo}]})
-                    continue
                 if boton["tipo"] != "respuesta":
                     continue
                 accion = boton.get("accion") or "ninguna"
@@ -1617,7 +1606,10 @@ class WhatsAppService:
                 acciones.append("interes_boton")
                 if callable(al_detectar_interes):
                     try:
-                        if numero_prueba:
+                        referencia = (mensaje.get("context") or {}).get("id")
+                        if referencia:
+                            al_detectar_interes(telefono, mensaje.get("id") if numero_prueba else None, referencia)
+                        elif numero_prueba:
                             al_detectar_interes(telefono, mensaje.get("id"))
                         else:
                             al_detectar_interes(telefono)
@@ -1644,7 +1636,10 @@ class WhatsAppService:
                 acciones.append("interes")
                 if callable(al_detectar_interes):
                     try:
-                        if numero_prueba:
+                        referencia = (mensaje.get("context") or {}).get("id")
+                        if referencia:
+                            al_detectar_interes(telefono, mensaje.get("id") if numero_prueba else None, referencia)
+                        elif numero_prueba:
                             al_detectar_interes(telefono, mensaje.get("id"))
                         else:
                             al_detectar_interes(telefono)
