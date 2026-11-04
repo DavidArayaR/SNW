@@ -305,7 +305,7 @@ if (selBaseHist) {
 }
 if (selOrigenHist) {
   const guardado = localStorage.getItem("snw_origen_historial") || "todos";
-  selOrigenHist.value = ["todos", "manual", "programado"].includes(guardado) ? guardado : "todos";
+  selOrigenHist.value = ["todos", "manual", "programado", "reagendamiento"].includes(guardado) ? guardado : "todos";
   selOrigenHist.addEventListener("change", () => {
     if (selOrigenHist.value === "todos") localStorage.removeItem("snw_origen_historial");
     else localStorage.setItem("snw_origen_historial", selOrigenHist.value);

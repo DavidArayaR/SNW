@@ -9742,7 +9742,7 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
     centro = centro if isinstance(centro, str) else "todos"
     if centro != "todos" and centro not in catalogo_centros():
         raise HTTPException(422, detail="Centro emisor inválido.")
-    if origen not in ("todos", "manual", "programado"):
+    if origen not in ("todos", "manual", "programado", "reagendamiento"):
         raise HTTPException(422, detail="Tipo de envío inválido.")
     if not tabla and ambiente == "desarrollo":
         _exigir_base_desarrollo(sesion, ambiente)
@@ -9764,7 +9764,10 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
         condiciones.append("centro_codigo = %s")
         args.append(centro)
 
-    if origen != "todos":
+    if origen == "reagendamiento":
+        condiciones.append("base_datos = 'paciente_reagendar'")
+    elif origen in ("manual", "programado"):
+        condiciones.append("(base_datos IS NULL OR base_datos <> 'paciente_reagendar')")
         if "programado_id" in cols_env:
             condiciones.append("programado_id IS NOT NULL" if origen == "programado"
                                else "programado_id IS NULL")
@@ -9797,8 +9800,12 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
         condiciones.append("base_datos = %s")
         args.append(tabla)
     elif ambiente != "todos":
-        condiciones.append("base_datos = %s")
-        args.append(nombre_base(ambiente))
+        if origen == "reagendamiento":
+            if ambiente != "produccion":
+                condiciones.append("1 = 0")
+        else:
+            condiciones.append("base_datos = %s")
+            args.append(nombre_base(ambiente))
 
     if _es_privilegiado(sesion):
         if area_id is not None:
@@ -9843,7 +9850,7 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
         f["origen"] = "programado" if f.pop("programado_id", None) is not None else "manual"
 
     # Los programados con lote ejecutado ya están en `envios`; no duplicarlos.
-    if origen != "manual":
+    if origen in ("todos", "programado"):
         with conectar() as conn, conn.cursor() as cur:
             sin_lote = (" WHERE NOT EXISTS (SELECT 1 FROM envios e WHERE e.programado_id = p.id)"
                         if "programado_id" in cols_env else "")
@@ -9955,7 +9962,7 @@ def _fuentes_historial_pagina(sesion: dict, ambiente: str, area_id: int | None,
                              tabla: str | None, origen: str, q: str,
                              cols_env: set[str], centro: str = "todos") -> tuple[str, tuple]:
     """Une solo claves/fechas visibles; los detalles se buscan tras paginar."""
-    if origen not in ("todos", "manual", "programado"):
+    if origen not in ("todos", "manual", "programado", "reagendamiento"):
         raise HTTPException(422, detail="Tipo de envío inválido.")
     if centro != "todos" and centro not in catalogo_centros():
         raise HTTPException(422, detail="Centro emisor inválido.")
@@ -9991,10 +9998,14 @@ def _fuentes_historial_pagina(sesion: dict, ambiente: str, area_id: int | None,
 
     if origen != "programado" or "programado_id" in cols_env:
         cond_e, args_e = ["NOT EXISTS (SELECT 1 FROM reagendar_envios_agrupados ag WHERE ag.envio_id=e.id)"], []
-        if origen == "manual" and "programado_id" in cols_env:
-            cond_e.append("e.programado_id IS NULL")
-        elif origen == "programado":
-            cond_e.append("e.programado_id IS NOT NULL")
+        if origen == "reagendamiento":
+            cond_e.append("e.base_datos = 'paciente_reagendar'")
+        elif origen in ("manual", "programado"):
+            cond_e.append("(e.base_datos IS NULL OR e.base_datos <> 'paciente_reagendar')")
+            if origen == "manual" and "programado_id" in cols_env:
+                cond_e.append("e.programado_id IS NULL")
+            elif origen == "programado":
+                cond_e.append("e.programado_id IS NOT NULL")
         if centro != "todos":
             cond_e.append("e.centro_codigo = %s")
             args_e.append(centro)
@@ -10002,8 +10013,12 @@ def _fuentes_historial_pagina(sesion: dict, ambiente: str, area_id: int | None,
             cond_e.append("e.base_datos = %s")
             args_e.append(tabla)
         elif ambiente != "todos":
-            cond_e.append("e.base_datos = %s")
-            args_e.append(nombre_base(ambiente))
+            if origen == "reagendamiento":
+                if ambiente != "produccion":
+                    cond_e.append("1 = 0")
+            else:
+                cond_e.append("e.base_datos = %s")
+                args_e.append(nombre_base(ambiente))
         if area_id is not None and "area_id" in cols_env:
             cond_e.append("e.area_id = %s")
             args_e.append(int(area_id))
@@ -10018,7 +10033,7 @@ def _fuentes_historial_pagina(sesion: dict, ambiente: str, area_id: int | None,
             cond_e.append("(e.base_datos LIKE %s OR e.plantilla_clave LIKE %s"
                           " OR e.plantilla_nombre LIKE %s)")
             args_e.extend((like, like, like))
-        if "programado_id" in cols_env and origen != "manual":
+        if "programado_id" in cols_env and origen not in ("manual", "reagendamiento"):
             fecha_e = "COALESCE(pp.creado, e.fecha_hora)"
             join_e = " LEFT JOIN envios_programados pp ON pp.id = e.programado_id"
         else:
@@ -10029,7 +10044,7 @@ def _fuentes_historial_pagina(sesion: dict, ambiente: str, area_id: int | None,
                           + (" WHERE " + " AND ".join(cond_e) if cond_e else ""))
         argumentos.extend(args_e)
 
-    if origen != "manual":
+    if origen in ("todos", "programado"):
         cond_p, args_p = [], []
         if centro != "todos":
             cond_p.append("p.centro_codigo = %s")
