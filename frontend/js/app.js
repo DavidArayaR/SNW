@@ -389,7 +389,7 @@ function agregarFilaBoton(datos = {}) {
       for (const otra of [...editorBotones.querySelectorAll(".tpl-boton")]) {
         if (otra !== fila && otra.querySelector(".tpl-boton__tipo").value === "interes") otra.remove();
       }
-      if (!texto.value.trim()) texto.value = "Ir a call center";
+      if (!texto.value.trim()) texto.value = "Me interesa";
       actualizarBotonAgregar();
     }
     sincronizarTipo();
