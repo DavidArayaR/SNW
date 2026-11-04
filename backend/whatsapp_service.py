@@ -1464,7 +1464,8 @@ class WhatsAppService:
                     acciones.append("baja_global")
                 info = self._registrar_respuesta(telefono, cuerpo, mensaje.get("timestamp"),
                                                  mensaje_id=mensaje.get("id"),
-                                                 referencia_meta_id=(mensaje.get("context") or {}).get("id"))
+                                                 referencia_meta_id=(mensaje.get("context") or {}).get("id"),
+                                                 gestionada_reagendar=True)
                 acciones.append(f"respuesta_{info}")
                 acciones.append("reagendar_gestionado")
                 continue
@@ -1803,6 +1804,7 @@ class WhatsAppService:
         areas. log_envios es compartida."""
         match = _TEL_MATCH.format(col="telefono")
         hallados = []
+        errores = []
         for t in self._tablas_pac():
             try:
                 limite = "" if t == "reservo_lista_pacientes" else " LIMIT 1"
@@ -1810,13 +1812,21 @@ class WhatsAppService:
                     f"SELECT id, nombre, telefono, whatsapp_opt_out FROM {t} WHERE {match}{limite}",
                     (telefono,),
                 )
-            except Exception:
-                continue  # tabla aún no creada o sin la columna
+            except Exception as exc:
+                # Una tabla opcional puede no existir; otros fallos deben quedar
+                # visibles y no confundirse con un teléfono inexistente.
+                if getattr(exc, "args", ()) and exc.args[0] == 1146:
+                    continue
+                errores.append(type(exc).__name__)
+                log_error(f"webhook: error al consultar base de pacientes ({t})", exc)
+                continue
             filas = cur.fetchall() if t == "reservo_lista_pacientes" else [cur.fetchone()]
             for row in filas:
                 if row:
                     row["tabla"] = t
                     hallados.append(row)
+        if errores and not hallados:
+            raise RuntimeError("No se pudo completar la búsqueda en todas las bases de pacientes")
         return hallados
 
     def _estaba_opt_out(self, telefono: str) -> bool:
@@ -1856,13 +1866,14 @@ class WhatsAppService:
 
     def _registrar_respuesta(self, telefono: str, texto: str, timestamp: str,
                             automatica: str = "", mensaje_id: str | None = None,
-                            referencia_meta_id: str | None = None) -> str:
+                            referencia_meta_id: str | None = None,
+                            gestionada_reagendar: bool = False) -> str:
         match = _TEL_MATCH.format(col="telefono")
         try:
             with conectar() as conn, conn.cursor() as cur:
                 pacientes = self._pacientes_con_tel(cur, telefono)
                 if not pacientes:
-                    if referencia_meta_id:
+                    if referencia_meta_id and not gestionada_reagendar:
                         emisor_actual = EMISOR_WEBHOOK.get() or {}
                         log_error("webhook: respuesta contextual sin paciente en bases"
                                   f" (centro={emisor_actual.get('codigo') or 'desconocido'})")
