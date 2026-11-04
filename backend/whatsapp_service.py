@@ -2322,8 +2322,14 @@ class WhatsAppService:
         for registro in cur.fetchall() or []:
             tabla = registro.get("tabla")
             paciente_id = registro.get("paciente_id")
-            if not paciente_id or not servicio_areas.tabla_valida(tabla) \
-                    or not servicio_areas.tabla_fisica_existe(tabla):
+            # Las bases Reservo comparten una tabla física; sus filas se
+            # identifican por el id de reservo_lista_pacientes, no por una
+            # tabla dinámica de área. No pasar esta tabla por el validador de
+            # áreas (que solo admite pacientes_<slug>).
+            es_lista_reservo = tabla == "reservo_lista_pacientes"
+            if not paciente_id or (not es_lista_reservo and (
+                    not servicio_areas.tabla_valida(tabla)
+                    or not servicio_areas.tabla_fisica_existe(tabla))):
                 continue
             if registro.get("estado_whatsapp") != estado:
                 continue

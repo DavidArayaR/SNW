@@ -10509,16 +10509,21 @@ def marcar_fallidos_pendientes(envio_id: int, body: FallidosPendientesIn,
             if (cur.fetchone() or {}).get("ultimo") != r["id"]:
                 omitidos += 1
                 continue
-            cur.execute(f"SELECT telefono, estado, whatsapp_opt_out FROM {tabla} WHERE id = %s FOR UPDATE",
-                        (r["paciente_id"],))
+            filtro_lista_paciente = " AND lista_id = %s" if es_lista_reservo else ""
+            args_paciente = ((r["paciente_id"], envio["reservo_lista_id"])
+                             if es_lista_reservo else (r["paciente_id"],))
+            cur.execute(
+                f"SELECT telefono, estado, whatsapp_opt_out FROM {tabla}"
+                f" WHERE id = %s{filtro_lista_paciente} FOR UPDATE", args_paciente)
             paciente = cur.fetchone()
             if not paciente or paciente.get("whatsapp_opt_out") or paciente.get("estado") == "pendiente" \
                     or normalizar_telefono(paciente.get("telefono") or "") != normalizar_telefono(r.get("numero_telefono") or "") \
                     or esta_suprimido(paciente["telefono"]):
                 omitidos += 1
                 continue
-            cur.execute(f"UPDATE {tabla} SET estado = 'pendiente' WHERE id = %s",
-                        (r["paciente_id"],))
+            cur.execute(
+                f"UPDATE {tabla} SET estado = 'pendiente' WHERE id = %s{filtro_lista_paciente}",
+                args_paciente)
             actualizados += 1
         conn.commit()
     if actualizados:
