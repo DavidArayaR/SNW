@@ -34,6 +34,7 @@ backup_*.sql
 backups/
 
 data/
+tests/
 documentacion/
 AGENTS.md
 DESIGN.md
