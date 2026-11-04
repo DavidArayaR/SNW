@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 import pymysql
+from telefono import normalizar_telefono
 
 from reservo_catalogo import (
     RESERVO_CLINICAS, clave_estado_atendido, clave_estado_verificado,
@@ -217,7 +218,15 @@ def guardar_pagina_citas_cache(codigo: str, desde: dt.date, hasta: dt.date,
             cliente = cita.get("cliente") if isinstance(cita, dict) else None
             telefono = (cliente or {}).get("telefono_1") if isinstance(cliente, dict) else None
             if not telefono:
+                cita["cliente"] = None
                 continue
+            telefono = normalizar_telefono(str(telefono))
+            if not telefono:
+                # Conserva datos de la cita/tratamiento, pero no PII de un
+                # paciente que no se puede importar ni comparar con supresión.
+                cita["cliente"] = None
+                continue
+            cliente["telefono_1"] = telefono
             huella, baja = bloquear_huella_baja(cur, telefono)
             if not baja:
                 huellas_temporales.append(huella)
@@ -409,7 +418,12 @@ def cliente_valido(cita: dict) -> dict | None:
     uuid = str(cliente.get("uuid") or "").strip()
     if not uuid or len(uuid) > 80 or any(ord(c) < 32 for c in uuid):
         return None
-    return cliente
+    telefono = normalizar_telefono(str(telefono_cliente(cliente) or ""))
+    if not telefono:
+        return None
+    resultado = dict(cliente)
+    resultado["telefono_1"] = telefono
+    return resultado
 
 
 def normalizar_cliente_uuid(valor: str) -> str:
@@ -979,25 +993,26 @@ def _guardar_paciente_cursor(cur, codigo: str, cliente: dict,
     apellido = (texto_cliente(cliente, "apellido_paterno", 200)
                 or texto_cliente(cliente, "apellidos", 200)
                 or texto_cliente(cliente, "apellido", 200))
-    telefono = telefono_cliente(cliente)
-    if telefono:
-        from supresion import bloquear_huella_baja
+    telefono = normalizar_telefono(str(telefono_cliente(cliente) or ""))
+    if not telefono:
+        return "telefono_invalido", 0
+    from supresion import bloquear_huella_baja
 
-        huella, baja = bloquear_huella_baja(cur, telefono)
-        if not baja and huellas_baja_inactivas is not None:
-            huellas_baja_inactivas.append(huella)
-        cur.execute("SELECT estado FROM supresion_telefonos WHERE huella=%s FOR UPDATE",
-                    (huella,))
-        supresion = cur.fetchone()
-        if baja:
-            return "omitido_baja", 0
-        cur.execute("SELECT 1 FROM whatsapp_avisos_unicos"
-                    " WHERE telefono=%s AND tipo='eliminacion_simulada' LIMIT 1",
-                    (telefono,))
-        if cur.fetchone():
-            return "omitido_baja", 0
-        if supresion and supresion.get("estado") != "exento":
-            return "omitido_eliminado", 0
+    huella, baja = bloquear_huella_baja(cur, telefono)
+    if not baja and huellas_baja_inactivas is not None:
+        huellas_baja_inactivas.append(huella)
+    cur.execute("SELECT estado FROM supresion_telefonos WHERE huella=%s FOR UPDATE",
+                (huella,))
+    supresion = cur.fetchone()
+    if baja:
+        return "omitido_baja", 0
+    cur.execute("SELECT 1 FROM whatsapp_avisos_unicos"
+                " WHERE telefono=%s AND tipo='eliminacion_simulada' LIMIT 1",
+                (telefono,))
+    if cur.fetchone():
+        return "omitido_baja", 0
+    if supresion and supresion.get("estado") != "exento":
+        return "omitido_eliminado", 0
     cur.execute("SELECT id FROM reservo_pacientes WHERE clinica_codigo=%s AND cliente_uuid=%s FOR UPDATE",
                 (codigo, uuid))
     existente = cur.fetchone()
