@@ -889,6 +889,17 @@ def asegurar_tabla_config() -> None:
                 " INDEX idx_cc_prueba_telefono (telefono)"
                 ") CHARACTER SET utf8mb4"
             )
+            # Contexto efímero de pruebas individuales, separado de campañas.
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS call_center_prueba_envios ("
+                " mensaje_id VARCHAR(255) NOT NULL PRIMARY KEY,"
+                " telefono VARCHAR(20) NOT NULL, wa_phone_id VARCHAR(100) NOT NULL,"
+                " centro_codigo VARCHAR(10) NOT NULL, plantilla_id INT NOT NULL,"
+                " ambiente VARCHAR(20) NOT NULL, nombre VARCHAR(150) NOT NULL DEFAULT '',"
+                " apellido VARCHAR(150) NOT NULL DEFAULT '', creado DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                " INDEX idx_prueba_telefono (telefono, wa_phone_id, creado)"
+                ") CHARACTER SET utf8mb4"
+            )
             cur.execute(
                 "CREATE TABLE IF NOT EXISTS call_center_derivaciones ("
                 " id BIGINT AUTO_INCREMENT PRIMARY KEY,"

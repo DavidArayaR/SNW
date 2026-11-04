@@ -2848,7 +2848,11 @@ def _enviar_call_center_auto(tel: str, mensaje_prueba_id: str | None = None,
         prueba_por_mensaje = bool(mensaje_prueba_id and es_numero_prueba(tel))
         if prueba_por_mensaje:
             emisor_prueba = emisor_webhook_actual()
-            contexto_prueba = _contexto_prueba_interes(tel, emisor_prueba, referencia) if emisor_prueba else None
+            try:
+                contexto_prueba = _contexto_prueba_interes(tel, emisor_prueba, referencia) if emisor_prueba else None
+            except Exception as exc:
+                log_error("call center: no se pudo consultar el contexto de prueba", exc, solo_tipo=True)
+                return
             if contexto_prueba:
                 plantilla_prueba = next((p for p in leer_plantillas()
                     if p.get("id") == contexto_prueba["plantilla_id"]

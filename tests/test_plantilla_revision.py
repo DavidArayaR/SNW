@@ -859,7 +859,7 @@ class EndpointPruebaPlantillaTests(unittest.TestCase):
         self.assertEqual(respuesta.json(), {"ambiente": "desarrollo", "telefonos": [TELEFONO]})
         numeros.assert_called_once_with("desarrollo")
 
-    def test_prueba_unitaria_sin_campana_ni_bd(self):
+    def test_prueba_unitaria_sin_campana_y_con_contexto(self):
         with patch.object(main, "leer_plantillas", return_value=[PLANTILLA]), \
              patch.object(main, "config_get", side_effect=self._config), \
              patch.object(main, "_numeros_prueba_editables", return_value={TELEFONO}), \
@@ -867,12 +867,15 @@ class EndpointPruebaPlantillaTests(unittest.TestCase):
              patch.object(main.WhatsAppService, "enviar", new_callable=AsyncMock,
                           return_value=(True, "wamid-prueba", None, "sent")) as enviar, \
              patch.object(main, "auditoria_registrar") as auditoria, \
+             patch.object(main, "_guardar_contexto_prueba") as contexto, \
              patch.object(main, "conectar", side_effect=AssertionError("No debe consultar campañas")):
             respuesta = self.cliente.post("/api/plantillas/7/prueba", json={
                 "telefono": TELEFONO, "ejemplos": {"nombre": "Ana"}})
         self.assertEqual(respuesta.status_code, 200)
         self.assertEqual(respuesta.json()["message_id"], "wamid-prueba")
         self.assertEqual(respuesta.json()["centro"], "SMPT")
+        self.assertFalse(respuesta.json()["advertencia_contexto"])
+        contexto.assert_called_once()
         self.assertEqual(enviar.await_count, 1)
         self.assertEqual(enviar.await_args.kwargs["variables"]["nombre"], "Ana")
         self.assertTrue(enviar.await_args.kwargs["es_prueba"])

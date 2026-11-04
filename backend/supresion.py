@@ -618,6 +618,7 @@ def _limpiar_datos(cur, telefono: str) -> tuple[int, int]:
     cur.execute("DELETE FROM reagendar_destinatarios WHERE telefono = %s", (telefono,))
     cur.execute("DELETE FROM whatsapp_conversaciones_mensajes WHERE telefono_paciente = %s", (telefono,))
     cur.execute("DELETE FROM call_center_prueba_interes WHERE telefono = %s", (telefono,))
+    cur.execute("DELETE FROM call_center_prueba_envios WHERE telefono = %s", (telefono,))
     # La cuota por pareja guarda solo la huella, pero sigue derivándose del
     # teléfono: también debe desaparecer al tramitar ELIMINAR.
     from wa_dispatch_limit import huella_pareja
