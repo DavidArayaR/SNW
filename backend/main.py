@@ -10288,6 +10288,137 @@ def mensajes_historial_reagendar(envio_id: int, registro_id: int,
                          else "respondio" if entrantes else "pendiente"}, "mensajes": mensajes}
 
 
+def mensajes_historial_reservo(envio_id: int, registro_id: int,
+                               ambiente: str = Query("produccion"),
+                               sesion: dict = Depends(exigir("historial"))):
+    """Carga una conversación de Reservo desde el envío/lista que la originó.
+
+    En Reservo, ``log_envios.paciente_id`` identifica una fila de
+    ``reservo_lista_pacientes``; no es un id de la tabla legacy ``pacientes``.
+    Por eso la consulta debe conservar el contexto de envío y lista.
+    """
+    ambiente = entorno_valido(ambiente)
+    if not _es_privilegiado(sesion) or not tiene_permiso(sesion, "pacientes_ver_datos"):
+        raise HTTPException(403, detail="No tienes permiso para ver esta conversación.")
+
+    detalle = detalle_historial(str(envio_id), ambiente=ambiente, sesion=sesion)
+    if not any(int(f.get("id") or 0) == int(registro_id) and f.get("es_reservo") for f in detalle):
+        raise HTTPException(404, detail="Conversación de Reservo no encontrada en este envío.")
+
+    with conectar(ambiente) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT le.id, le.nombre_paciente, le.numero_telefono, le.wa_phone_id,"
+            " le.whatsapp_message_id, rp.nombre, rp.apellido, rp.telefono,"
+            " rp.whatsapp_opt_out, rp.respuesta_manual, rp.interesado, rp.no_interesado"
+            " FROM log_envios le JOIN envios e ON e.id=le.envio_id"
+            " JOIN reservo_lista_pacientes rp ON rp.id=le.paciente_id"
+            "  AND rp.lista_id=e.reservo_lista_id"
+            " WHERE le.id=%s AND le.envio_id=%s"
+            " AND COALESCE(le.tabla_pacientes,e.tabla_pacientes,e.base_datos)=%s",
+            (registro_id, envio_id, reservo_pacientes.TABLA_LISTA_RESERVO),
+        )
+        origen = cur.fetchone()
+        if not origen:
+            raise HTTPException(404, detail="El paciente ya no está disponible en esta base de Reservo.")
+        wa_phone_id = origen.get("wa_phone_id")
+        telefono = normalizar_telefono(origen.get("telefono") or origen.get("numero_telefono") or "")
+        if not wa_phone_id or not telefono:
+            raise HTTPException(409, detail="Este envío no tiene datos suficientes para localizar la conversación.")
+
+        cur.execute(
+            "SELECT id, fecha_hora, mensaje, plantilla_clave, estado_envio, descripcion_error,"
+            " whatsapp_message_id FROM log_envios"
+            " WHERE BINARY wa_phone_id=BINARY %s AND numero_telefono=%s"
+            " AND ((mensaje IS NOT NULL AND mensaje <> '') OR plantilla_clave='respuesta')"
+            " AND COALESCE(plantilla_clave,'') <> 'ajuste_manual'"
+            " ORDER BY id DESC LIMIT 500",
+            (wa_phone_id, origen.get("numero_telefono")),
+        )
+        filas = list(reversed(cur.fetchall() or []))
+        cur.execute(
+            "SELECT mensaje_id, tipo, texto, recibido, audio_media_id, audio_transcripcion"
+            " FROM whatsapp_conversaciones_mensajes WHERE tipo='audio'"
+            " AND BINARY wa_phone_id=BINARY %s AND telefono_paciente=%s"
+            " ORDER BY recibido DESC LIMIT 500",
+            (wa_phone_id, telefono),
+        )
+        audios = list(reversed(cur.fetchall() or []))
+
+        ids_entrantes = [f["id"] for f in filas if f.get("plantilla_clave") == "respuesta"]
+        etiquetas_por_id = {}
+        if ids_entrantes:
+            marcas = ", ".join(["%s"] * len(ids_entrantes))
+            cur.execute(
+                f"SELECT log_envio_id, etiquetas, origen FROM respuesta_etiquetas"
+                f" WHERE log_envio_id IN ({marcas})", ids_entrantes,
+            )
+            for fila in cur.fetchall() or []:
+                try:
+                    etiquetas = [e for e in json.loads(fila["etiquetas"])
+                                 if e in ETIQUETAS_RESPUESTA]
+                except (TypeError, ValueError):
+                    etiquetas = []
+                etiquetas_por_id[fila["log_envio_id"]] = {
+                    "etiquetas": etiquetas,
+                    "origen": "automatico" if fila.get("origen") == "automatico" else "manual",
+                }
+
+    ids_audio = {a["mensaje_id"] for a in audios}
+    mensajes = []
+    entrantes = []
+    for fila in filas:
+        entrante = (fila.get("plantilla_clave") or "") == "respuesta"
+        if entrante:
+            entrantes.append(fila)
+            if fila.get("whatsapp_message_id") in ids_audio:
+                continue
+        texto = (fila.get("mensaje") or "").strip()
+        etiquetas_info = etiquetas_por_id.get(fila["id"], {
+            "etiquetas": list(etiquetas_automaticas(texto)), "origen": "automatico",
+        }) if entrante else {"etiquetas": [], "origen": None}
+        mensajes.append({
+            "id": fila["id"],
+            "fecha_dt": fila["fecha_hora"],
+            "direccion": "entrante" if entrante else "saliente",
+            "texto": texto or ("" if entrante else f"(plantilla: {fila.get('plantilla_clave') or '—'})"),
+            "plantilla": None if entrante else fila.get("plantilla_clave"),
+            "estado": fila.get("estado_envio"),
+            "error": fila.get("descripcion_error"),
+            "interes": entrante and es_mensaje_interes(texto),
+            "etiquetas": etiquetas_info["etiquetas"],
+            "origen_etiquetas": etiquetas_info["origen"],
+            "etiquetas_editables": False,
+        })
+    for audio in audios:
+        mensajes.append({**_presentar_audio(audio), "fecha_dt": audio.get("recibido")})
+    mensajes.sort(key=lambda m: (m.get("fecha_dt") or datetime.datetime.min,
+                                 m.get("direccion") or ""))
+    for mensaje in mensajes:
+        fecha = mensaje.pop("fecha_dt", None)
+        mensaje["fecha"] = fecha.strftime("%d-%m-%Y %H:%M") if fecha else "01-01-1970 00:00"
+
+    ultimo_texto = (entrantes[-1].get("mensaje") or "").strip() if entrantes else ""
+    baja = bool(origen.get("whatsapp_opt_out")) or WhatsAppService()._es_baja(ultimo_texto)
+    no_interes = bool(origen.get("no_interesado")) or whatsapp_service.es_mensaje_no_interes(ultimo_texto)
+    interesado = bool(origen.get("interesado")) or (
+        not baja and not no_interes and es_mensaje_interes(ultimo_texto))
+    respuesta = (origen.get("respuesta_manual") or
+                 ("baja" if baja else "no_interesado" if no_interes else
+                  "respondio" if entrantes else "pendiente"))
+    return {"paciente": {"id": None, "nombre": origen.get("nombre") or origen.get("nombre_paciente"),
+                         "apellido": origen.get("apellido") or "", "telefono": telefono,
+                         "interesado": bool(interesado), "respuesta": respuesta},
+            "mensajes": mensajes}
+
+
+def transcribir_audio_historial_reservo(envio_id: int, registro_id: int,
+                                        body: TranscribirAudioIn,
+                                        ambiente: str = Query("produccion"),
+                                        sesion: dict = Depends(exigir("historial"))):
+    datos = mensajes_historial_reservo(envio_id, registro_id, ambiente=ambiente, sesion=sesion)
+    return _transcribir_audio_visible(datos, body, sesion)
+
+
 def transcribir_audio_reagendar(envio_id: int, registro_id: int, body: TranscribirAudioIn,
                                sesion: dict = Depends(exigir("historial"))):
     datos = mensajes_historial_reagendar(envio_id, registro_id, sesion=sesion)
@@ -10344,14 +10475,17 @@ def detalle_historial(envio_id: str, ambiente: str = Query("produccion"),
         return _detalle_historial_reagendar(reagendar_batches.resolver_envio(envio_id), sesion)
     if tabla_env == reservo_pacientes.TABLA_LISTA_RESERVO and _e.get("reservo_lista_id"):
         t = reservo_pacientes.TABLA_LISTA_RESERVO
+        es_reservo = True
     elif tabla_env and servicio_areas.tabla_valida(tabla_env) \
             and servicio_areas.tabla_fisica_existe(tabla_env):
         t = tabla_env
+        es_reservo = False
     else:
         # Tabla legacy o de area eliminada: el join no encuentra filas
         # y el detalle usa la señal congelada en cada registro.
         t = tabla_pacientes(ambiente)
         tabla_env = None
+        es_reservo = False
     tiene_opt = columna_existe(t, "whatsapp_opt_out", ambiente)
     tiene_int = columna_existe(t, "interesado", ambiente)
     re_expr = expr_respuesta_efectiva("pac", tiene_opt, columna_existe(t, "respuesta_manual", ambiente),
@@ -10391,6 +10525,7 @@ def detalle_historial(envio_id: str, ambiente: str = Query("produccion"),
         filas = cur.fetchall()
     puede_ver_datos = tiene_permiso(sesion, "pacientes_ver_datos")
     for f in filas:
+        f["es_reservo"] = es_reservo
         centro_cc = f.pop("centro_codigo", None)
         f["callcenter_ventana_abierta"] = bool(f.get("callcenter_ventana_abierta"))
         f["puede_enviar_callcenter"] = bool(tiene_permiso(sesion, "call_center")

@@ -744,6 +744,8 @@ function pintarDetalle() {
         : "";
       const verMensajes = d.reagendamiento && d.chat_disponible !== false && d.datos_completos
         ? `<button type="button" class="btn btn--sm btn--ghost" data-mensajes-reagendar="${Number(d.id)}">Ver mensajes</button>`
+        : d.es_reservo && d.datos_completos
+        ? `<button type="button" class="btn btn--sm btn--ghost" data-mensajes-reservo="${Number(d.id)}">Ver mensajes</button>`
         : d.paciente_id && d.datos_completos
         ? `<button type="button" class="btn btn--sm btn--ghost" data-mensajes="${d.paciente_id}">Ver mensajes</button>` : "";
       const enviarCC = d.puede_enviar_callcenter
@@ -874,6 +876,11 @@ $("#detalleBody").addEventListener("click", (e) => {
     abrirMensajesReagendar(detalleActual.envioId, reagendar.dataset.mensajesReagendar);
     return;
   }
+  const reservo = e.target.closest("[data-mensajes-reservo]");
+  if (reservo && detalleActual) {
+    abrirMensajesReservo(detalleActual.envioId, reservo.dataset.mensajesReservo);
+    return;
+  }
   const cc = e.target.closest("[data-callcenter-manual]");
   if (cc) {
     const fila = filasDetalle.find(d => Number(d.id) === Number(cc.dataset.callcenterManual));
@@ -927,13 +934,30 @@ async function abrirMensajes(pacienteId) {
       headers: authHeaders(), cache: "no-store",
     });
     if (r.status === 401) { window.snwSesionExpirada(); return; }
-    if (!r.ok) throw new Error();
-    const data = await r.json();
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || "No se pudieron cargar los mensajes del paciente.");
     data.audio_url = `api/pacientes/${pacienteId}/audios/transcribir?ambiente=${ambienteDetalle}${qsEsp}`;
     renderMensajes(data);
-  } catch {
-    console.error("[historial.js abrirMensajes()]");
-    toast("No se pudieron cargar los mensajes del paciente.", "error");
+  } catch (error) {
+    console.error("[historial.js abrirMensajes()]", error);
+    toast(error.message || "No se pudieron cargar los mensajes del paciente.", "error");
+  }
+}
+
+async function abrirMensajesReservo(envioId, registroId) {
+  try {
+    const qs = `?ambiente=${encodeURIComponent(ambienteDetalle)}`;
+    const r = await fetch(`api/notificaciones/historial/${encodeURIComponent(envioId)}/registros/${encodeURIComponent(registroId)}/mensajes${qs}`, {
+      headers: authHeaders(), cache: "no-store",
+    });
+    if (r.status === 401) { window.snwSesionExpirada(); return; }
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || "No se pudieron cargar los mensajes del paciente.");
+    data.audio_url = `api/notificaciones/historial/${encodeURIComponent(envioId)}/registros/${encodeURIComponent(registroId)}/audios/transcribir${qs}`;
+    renderMensajes(data);
+  } catch (error) {
+    console.error("[historial.js abrirMensajesReservo()]", error);
+    toast(error.message || "No se pudieron cargar los mensajes del paciente.", "error");
   }
 }
 
@@ -946,7 +970,7 @@ async function abrirMensajesReagendar(envioId, registroId) {
     if (!res.ok) throw new Error(datos.detail || "No se pudo cargar la conversación de reagendamiento.");
     datos.audio_url = `api/notificaciones/historial/${encodeURIComponent(envioId)}/reagendamientos/${registroId}/audios/transcribir`;
     renderMensajes(datos);
-  } catch (err) { toast(err.message, "error"); }
+  } catch (err) { console.error("[historial.js abrirMensajesReagendar()]", err); toast(err.message, "error"); }
 }
 
 function renderMensajes(data) {

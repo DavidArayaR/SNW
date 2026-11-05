@@ -15,6 +15,8 @@ RUTAS = (
     ("/api/notificaciones/historial", "GET", "listar_historial", None),
     ("/api/notificaciones/historial/pagina", "GET", "listar_historial_pagina", None),
     ("/api/notificaciones/historial/{envio_id}/detalle", "GET", "detalle_historial", None),
+    ("/api/notificaciones/historial/{envio_id}/registros/{registro_id}/mensajes", "GET", "mensajes_historial_reservo", None),
+    ("/api/notificaciones/historial/{envio_id}/registros/{registro_id}/audios/transcribir", "POST", "transcribir_audio_historial_reservo", None),
     ("/api/notificaciones/historial/{envio_id}/reagendamientos/{registro_id}/mensajes", "GET", "mensajes_historial_reagendar", None),
     ("/api/notificaciones/historial/{envio_id}/reagendamientos/{registro_id}/audios/transcribir", "POST", "transcribir_audio_reagendar", None),
     ("/api/notificaciones/historial/{envio_id}/call-center/{registro_id}", "POST", "enviar_callcenter_manual", None),
