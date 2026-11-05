@@ -90,6 +90,7 @@ import servicio_areas
 import paciente_reagendar
 import reagendar_batches
 import reservo_pacientes
+import reservo_bases
 import retencion_datos
 from reservo_catalogo import (
     RESERVO_CLINICAS, CLAVES_TOKEN as CLAVES_TOKEN_RESERVO,
@@ -1204,18 +1205,18 @@ def _error_area(codigo: str) -> HTTPException:
 
 def listar_areas(sesion: dict = Depends(solo_admin)):
     """Todas las areas con su tabla y rol (solo admin/dev)."""
-    return servicio_areas.listar_areas()
+    return reservo_bases.presentar_areas(servicio_areas.listar_areas())
 
 
 def mis_areas(sesion: dict = Depends(sesion_actual)):
     """Areaes visibles para la sesión: todas si es privilegiada, solo
     las asignadas en caso contrario."""
     if sesion.get("rol") in ROLES_PRIVILEGIADOS:
-        return servicio_areas.listar_areas()
+        return reservo_bases.presentar_areas(servicio_areas.listar_areas())
     uid = servicio_areas.usuario_id_por_correo(sesion.get("usuario", ""))
     if not uid:
         return []
-    return servicio_areas.areas_de_usuario(uid)
+    return reservo_bases.presentar_areas(servicio_areas.areas_de_usuario(uid))
 
 
 def crear_area(body: AreaIn, sesion: dict = Depends(solo_admin)):
@@ -5984,6 +5985,9 @@ def guardar_base_reservo(job_id: int, body: ReservoBaseIn,
     try:
         base = reservo_pacientes.guardar_base_contactos(
             job_id, body.nombre_personalizado, sesion.get("usuario", ""))
+        reservo_bases.integrar_bases()
+        datos = next(f for f in reservo_bases.datos_por_area().values() if f['id'] == base['id'])
+        base.update(area_id=datos['area_id'], nombre_tabla_base=datos['nombre_tabla_base'])
     except LookupError as exc:
         raise HTTPException(404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -7197,7 +7201,8 @@ def _exigir_centro_envio(codigo: str | None) -> dict:
     return canal
 
 
-def _exigir_emisor_de_plantilla(plantilla: dict, centro_codigo: str | None) -> None:
+def _exigir_emisor_de_plantilla(plantilla: dict, centro_codigo: str | None,
+                               area_id: int | None = None) -> None:
     """Una plantilla aprobada en una clínica solo sale desde su emisor."""
     asignado = plantilla.get("centro_codigo")
     if not asignado:
@@ -7208,6 +7213,10 @@ def _exigir_emisor_de_plantilla(plantilla: dict, centro_codigo: str | None) -> N
         raise HTTPException(422, detail=(
             "El centro emisor debe ser el de la plantilla. Selecciona una plantilla "
             "de este centro o usa su número asociado."))
+    if area_id is not None:
+        base = reservo_bases.datos_por_area().get(int(area_id))
+        if base and not mismo_centro(base['clinica_codigo'], centro_codigo):
+            raise HTTPException(422, detail="La base solo puede enviarse desde su clínica.")
 
 
 def _emisor_vigente(emisor: dict | None) -> bool:
@@ -7679,7 +7688,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
             variables_del_cuerpo(plantilla.get("texto") or "")):
         raise HTTPException(400, detail="Esta plantilla usa datos del CSV de reagendamiento; "
                             "asígnala en Configuración → Citas atendidas.")
-    _exigir_emisor_de_plantilla(plantilla, emisor["codigo"])
+    _exigir_emisor_de_plantilla(plantilla, emisor["codigo"], body.area_id)
     if plantilla.get("especial"):
         raise HTTPException(
             400,
@@ -8232,7 +8241,7 @@ def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensaj
                                   if p["id"] == body.plantilla_id), None)
         if plantilla_preview is None:
             raise HTTPException(404, detail="Plantilla no encontrada")
-        _exigir_emisor_de_plantilla(plantilla_preview, body.centro)
+        _exigir_emisor_de_plantilla(plantilla_preview, body.centro, body.area_id)
         if lista_reservo and not mismo_centro(body.centro, lista_reservo["clinica_codigo"]):
             raise HTTPException(422, detail="La lista solo puede enviarse desde el número de su clínica.")
 
@@ -8717,6 +8726,8 @@ def _validar_plantilla_programable(plantilla: dict | None, area_id: int | None,
     tpl_esp = plantilla.get("area_id")
     if tpl_esp is not None and not lista_reservo and area_id != tpl_esp:
         raise HTTPException(400, detail="Esta plantilla pertenece a otra área.")
+    if area_id is not None:
+        _exigir_emisor_de_plantilla(plantilla, plantilla.get('centro_codigo'), area_id)
     return plantilla
 
 
@@ -8929,7 +8940,7 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
     plantilla = _validar_plantilla_programable(
         next((p for p in leer_plantillas() if p["id"] == body.plantilla_id), None),
         esp["id"] if esp else None, lista_reservo=bool(lista_reservo))
-    _exigir_emisor_de_plantilla(plantilla, emisor["codigo"])
+    _exigir_emisor_de_plantilla(plantilla, emisor["codigo"], body.area_id)
     if lista_reservo and not mismo_centro(plantilla.get("centro_codigo"), lista_reservo["clinica_codigo"]):
         raise HTTPException(422, detail="La clínica de la plantilla y la lista Reservo no coincide.")
     # La muestra de Meta (hello_world) solo se puede probar en desarrollo.
@@ -9751,6 +9762,8 @@ async def _loop_retencion_datos() -> None:
 @app.on_event("startup")
 async def _arrancar_scheduler_programados() -> None:
     instalar_registro_errores()
+    if await asyncio.to_thread(reservo_pacientes.tablas_disponibles):
+        await asyncio.to_thread(reservo_bases.integrar_bases)
     # El backfill debe terminar antes de habilitar los workers de envío y
     # sincronización de Reservo; varias instancias se coordinan en MySQL.
     await asyncio.to_thread(asegurar_tabla_supresion)

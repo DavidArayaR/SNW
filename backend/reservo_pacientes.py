@@ -782,16 +782,22 @@ def guardar_base_contactos(job_id: int, nombre_personalizado: str, creado_por: s
 def listar_bases_contacto() -> list[dict]:
     with _db() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT b.id,b.nombre,b.nombre_personalizado,b.clinica_codigo,b.origen,"
+            "SELECT b.id,b.nombre,b.area_id,b.nombre_personalizado,b.clinica_codigo,b.origen,"
             "b.sync_job_id,b.tratamientos_json,b.fecha_desde,b.fecha_hasta,b.creado_por,b.creado_en,"
             "COUNT(p.id) AS total,"
             "SUM(CASE WHEN p.telefono_valido=1 THEN 1 ELSE 0 END) AS telefonos_validos,"
             "SUM(CASE WHEN p.telefono_valido=0 THEN 1 ELSE 0 END) AS telefonos_invalidos "
             "FROM reservo_bases_contacto b LEFT JOIN reservo_lista_pacientes p ON p.lista_id=b.id "
+            "WHERE b.area_id IS NULL OR EXISTS (SELECT 1 FROM areas a WHERE a.id=b.area_id) "
             "GROUP BY b.id ORDER BY b.creado_en DESC,b.id DESC"
         )
         items = cur.fetchall()
     for item in items:
+        if item.get('area_id'):
+            import servicio_areas
+            area = servicio_areas.obtener_area(item['area_id'])
+            item['nombre_tabla_base'] = (area or {}).get('nombre_tabla_base')
+            item['total'] = (area or {}).get('total_pacientes', 0)
         tratamientos, nombres = _detalle_tratamientos({"tratamientos_json": item.pop("tratamientos_json")})
         item["tratamientos"] = tratamientos
         item["tratamiento_nombre"] = nombres or "Tratamiento histórico"

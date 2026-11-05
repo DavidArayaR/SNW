@@ -75,8 +75,8 @@ function opcionesBasesReservo(codigoCentro) {
   const items = basesReservo.filter((base) =>
     codigoCentroCanonico(base.clinica_codigo) === centroCanonico);
   if (!items.length) return "";
-  return `<optgroup label="Bases de Reservo">` + items.map((base) =>
-    `<option value="reservo:${Number(base.id)}">${escaparHtml(base.nombre)}</option>`
+  return `<optgroup label="Bases de datos de la clínica">` + items.map((base) =>
+    `<option value="${base.area_id ? `esp:${Number(base.area_id)}` : `reservo:${Number(base.id)}`}">${escaparHtml(base.nombre)}</option>`
   ).join("") + `</optgroup>`;
 }
 
@@ -772,7 +772,7 @@ function construirOpcionesBaseConf(forzarEspId) {
       `</optgroup>`;
     if (misAreas.length && !usuarioRestringidoADesarrollo()) {
       html += `<optgroup label="Bases de datos de áreas">` +
-        misAreas.map((e) => `<option value="esp:${e.id}">${escaparHtml(e.nombre_tabla_base)}</option>`).join("") +
+        misAreas.filter((e) => !e.origen_reservo || !window.snwEsPrivilegiado).map((e) => `<option value="esp:${e.id}">${escaparHtml(e.nombre_visible || e.nombre_tabla_base)}</option>`).join("") +
         `</optgroup>`;
     }
   }
@@ -1070,7 +1070,7 @@ function actualizarProgPlantilla() {
         `</optgroup>` +
         (areas.length && !usuarioRestringidoADesarrollo()
           ? `<optgroup label="Bases de datos de áreas">` +
-              areas.map((area) => `<option value="esp:${area.id}">${escaparHtml(area.nombre_tabla_base)}</option>`).join("") +
+              areas.filter((area) => !area.origen_reservo || !window.snwEsPrivilegiado).map((area) => `<option value="esp:${area.id}">${escaparHtml(area.nombre_visible || area.nombre_tabla_base)}</option>`).join("") +
             `</optgroup>`
           : "");
     }

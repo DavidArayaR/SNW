@@ -353,6 +353,7 @@ async function cargarBasesHist() {
     }
   }
   for (const base of listasReservo) {
+    if (base.area_id) continue;
     if (base.nombre) basesHist.push({
       tabla: base.nombre,
       nombre: `${base.nombre} · ${base.clinica_nombre || base.clinica_codigo} (${Number(base.total || 0)} pacientes)`,

@@ -170,7 +170,9 @@ function renderSelectorBasesPac() {
     if (!opcion.value) return false;
     const base = opcion.value.startsWith("reservo:")
       ? basesReservo.find((item) => Number(item.id) === Number(opcion.value.slice(8))) : null;
-    const codigo = base?.clinica_codigo || "sin_clinica";
+    const area = opcion.value.startsWith("esp:")
+      ? areas.find((item) => Number(item.id) === Number(opcion.value.slice(4))) : null;
+    const codigo = base?.clinica_codigo || area?.clinica_codigo || "sin_clinica";
     return clinica === "todas" || clinica === codigo;
   });
   if (!opciones.length) {
@@ -224,7 +226,7 @@ async function cargarBasesPac() {
       ? `<option value="prod">pacientes_prod</option>` : "") +
     areas.map((e) => `<option value="esp:${e.id}">${escaparHtml(e.nombre_visible || e.nombre_tabla_base)}</option>`).join("") +
     (basesReservo.length
-      ? `<optgroup label="Bases de Reservo">${basesReservo.map((base) =>
+      ? `<optgroup label="Bases de datos">${basesReservo.filter((base) => !base.area_id).map((base) =>
         `<option value="reservo:${Number(base.id)}">${escaparHtml(base.nombre)}</option>`
       ).join("")}</optgroup>` : "") +
     (!PUEDE_GESTIONAR_PAC && !areas.length
