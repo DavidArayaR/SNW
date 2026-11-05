@@ -56,6 +56,7 @@ from db import (
 from motor_envio import (obtener_canal, MotorApiOficial, ResultadoEnvioIncierto,
                          FalloInfraestructuraDespacho)
 from whatsapp_channels import (CENTROS, catalogo_centros, claves_centro, credenciales_centro,
+                               mismo_centro,
                                app_id_centro, listar_canales, resolver_centro, resolver_phone_id,
                                emisor_webhook_actual)
 from whatsapp_channel_verification import verificar_canal_meta
@@ -2991,7 +2992,8 @@ def _enviar_derivacion_consulta(derivacion_id: int) -> None:
             if not d or d["estado"] != "pendiente" or esta_suprimido(d["telefono"]):
                 return
             pacientes = WhatsAppService()._pacientes_con_tel(cur, d["telefono"])
-            pac = next((p for p in pacientes if p["tabla"] == d["base_datos"]), None)
+            pac = next((p for p in pacientes if p["tabla"] == d["base_datos"]
+                        and p["id"] == d["paciente_id"]), None)
             if not pac:
                 cur.execute("UPDATE call_center_derivaciones SET estado = 'error' WHERE id = %s",
                             (derivacion_id,))
@@ -3056,6 +3058,10 @@ def _registrar_derivacion_consulta(telefono: str, texto: str, mensaje_id: str,
                 nueva = True
         else:
             pacientes = WhatsAppService()._pacientes_con_tel(cur, tel)
+            if emisor:
+                pacientes = [p for p in pacientes
+                             if p["tabla"] != reservo_pacientes.TABLA_LISTA_RESERVO
+                             or mismo_centro(p.get("clinica_codigo"), emisor.get("codigo"))]
             if not pacientes:
                 return "sin_paciente"
             tabla_origen = tabla_preferida or (_tabla_ultimo_envio_emisor(tel) if emisor else None)
@@ -3589,14 +3595,25 @@ def _enviar_mensaje_directo(telefono_evento: str, texto: str, clave_log: str,
         objetivos = [("produccion", tabla_pacientes("produccion"), None)]
         objetivos += [("produccion", a["nombre_tabla_base"], a["id"])
                       for a in servicio_areas.listar_tablas_areas()]
+        objetivos.append(("produccion", reservo_pacientes.TABLA_LISTA_RESERVO, None))
         objetivos.append(("desarrollo", tabla_pacientes("desarrollo"), None))
     if tabla_preferida:
         objetivos.sort(key=lambda objetivo: objetivo[1] != tabla_preferida)
     for amb, t, area_id in objetivos:
         try:
             with conectar(amb) as conn, conn.cursor() as cur:
-                cur.execute(f"SELECT * FROM {t} WHERE {match} LIMIT 1", (tel,))
-                pac = cur.fetchone()
+                if t == reservo_pacientes.TABLA_LISTA_RESERVO:
+                    emisor_actual = emisor_webhook_actual()
+                    cur.execute(
+                        "SELECT p.*, b.clinica_codigo FROM reservo_lista_pacientes p"
+                        " JOIN reservo_bases_contacto b ON b.id=p.lista_id"
+                        f" WHERE {match.replace('telefono,', 'p.telefono,')} ORDER BY p.id DESC", (tel,))
+                    pac = next((p for p in cur.fetchall()
+                                if emisor_actual and mismo_centro(
+                                    p.get("clinica_codigo"), emisor_actual.get("codigo"))), None)
+                else:
+                    cur.execute(f"SELECT * FROM {t} WHERE {match} LIMIT 1", (tel,))
+                    pac = cur.fetchone()
             if not pac:
                 continue
             cfg = leer_config(amb)
@@ -7602,7 +7619,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
             lista_reservo = cur.fetchone()
         if not lista_reservo:
             raise HTTPException(404, detail="La base de Reservo no existe.")
-        if emisor["codigo"] != lista_reservo["clinica_codigo"]:
+        if not mismo_centro(emisor["codigo"], lista_reservo["clinica_codigo"]):
             raise HTTPException(422, detail="La base de Reservo solo puede enviarse desde el número de su clínica.")
         t_esp = reservo_pacientes.TABLA_LISTA_RESERVO
         esp = None
@@ -8216,7 +8233,7 @@ def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensaj
         if plantilla_preview is None:
             raise HTTPException(404, detail="Plantilla no encontrada")
         _exigir_emisor_de_plantilla(plantilla_preview, body.centro)
-        if lista_reservo and body.centro != lista_reservo["clinica_codigo"]:
+        if lista_reservo and not mismo_centro(body.centro, lista_reservo["clinica_codigo"]):
             raise HTTPException(422, detail="La lista solo puede enviarse desde el número de su clínica.")
 
     esp = None
@@ -8838,7 +8855,7 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
             lista_reservo = cur.fetchone()
         if not lista_reservo:
             raise HTTPException(404, detail="La base de Reservo no existe.")
-        if emisor["codigo"] != lista_reservo["clinica_codigo"]:
+        if not mismo_centro(emisor["codigo"], lista_reservo["clinica_codigo"]):
             raise HTTPException(422, detail="La lista solo puede enviarse desde el número de su clínica.")
     elif body.area_id is not None:
         esp = _exigir_area(sesion, body.area_id)  # 404/403 (usuario: solo sus areas)
@@ -8913,7 +8930,7 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
         next((p for p in leer_plantillas() if p["id"] == body.plantilla_id), None),
         esp["id"] if esp else None, lista_reservo=bool(lista_reservo))
     _exigir_emisor_de_plantilla(plantilla, emisor["codigo"])
-    if lista_reservo and plantilla.get("centro_codigo") != lista_reservo["clinica_codigo"]:
+    if lista_reservo and not mismo_centro(plantilla.get("centro_codigo"), lista_reservo["clinica_codigo"]):
         raise HTTPException(422, detail="La clínica de la plantilla y la lista Reservo no coincide.")
     # La muestra de Meta (hello_world) solo se puede probar en desarrollo.
     if _es_plantilla_protegida(plantilla) and (esp is not None or amb != "desarrollo"):
@@ -9430,8 +9447,8 @@ def _ejecutar_programado(f: dict) -> None:
                 cur.execute("SELECT clinica_codigo FROM reservo_bases_contacto WHERE id=%s",
                             (f["reservo_lista_id"],))
                 lista_actual = cur.fetchone()
-            if not lista_actual or not plantilla or lista_actual["clinica_codigo"] != emisor["codigo"] \
-                    or plantilla.get("centro_codigo") != emisor["codigo"]:
+            if not lista_actual or not plantilla or not mismo_centro(lista_actual["clinica_codigo"], emisor["codigo"]) \
+                    or not mismo_centro(plantilla.get("centro_codigo"), emisor["codigo"]):
                 raise HTTPException(422, detail="La clínica de la base, la plantilla y el emisor debe coincidir.")
         _validar_plantilla_programable(plantilla, f.get("area_id"),
                                       lista_reservo=bool(f.get("reservo_lista_id")))

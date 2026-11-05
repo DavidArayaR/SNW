@@ -64,9 +64,16 @@ function idListaReservo(valor) {
   return coincidencia ? Number(coincidencia[1]) : null;
 }
 
+function codigoCentroCanonico(codigo) {
+  const valor = String(codigo || "").trim().toUpperCase();
+  return valor === "MVYS" ? "VS" : valor;
+}
+
 function opcionesBasesReservo(codigoCentro) {
   if (!window.snwEsPrivilegiado || entornoGlobal !== "produccion" || !codigoCentro) return "";
-  const items = basesReservo.filter((base) => base.clinica_codigo === codigoCentro);
+  const centroCanonico = codigoCentroCanonico(codigoCentro);
+  const items = basesReservo.filter((base) =>
+    codigoCentroCanonico(base.clinica_codigo) === centroCanonico);
   if (!items.length) return "";
   return `<optgroup label="Bases de Reservo">` + items.map((base) =>
     `<option value="reservo:${Number(base.id)}">${escaparHtml(base.nombre)}</option>`

@@ -1814,10 +1814,17 @@ class WhatsAppService:
         for t in self._tablas_pac():
             try:
                 limite = "" if t == "reservo_lista_pacientes" else " LIMIT 1"
-                cur.execute(
-                    f"SELECT id, nombre, telefono, whatsapp_opt_out FROM {t} WHERE {match}{limite}",
-                    (telefono,),
-                )
+                if t == "reservo_lista_pacientes":
+                    cur.execute(
+                        "SELECT p.id, p.nombre, p.telefono, p.whatsapp_opt_out, p.lista_id,"
+                        " b.clinica_codigo FROM reservo_lista_pacientes p"
+                        " JOIN reservo_bases_contacto b ON b.id=p.lista_id"
+                        f" WHERE {_TEL_MATCH.format(col='p.telefono')}", (telefono,))
+                else:
+                    cur.execute(
+                        f"SELECT id, nombre, telefono, whatsapp_opt_out FROM {t} WHERE {match}{limite}",
+                        (telefono,),
+                    )
             except Exception as exc:
                 # Una tabla opcional puede no existir; otros fallos deben quedar
                 # visibles y no confundirse con un teléfono inexistente.

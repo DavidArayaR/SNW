@@ -12,6 +12,20 @@ CENTROS = {
     "VS": "VIDA Y SALUD",
 }
 
+# Reservo conserva el código MVYS para «Más Vida y Salud», mientras que el
+# número emisor compartido de «Vida y Salud» está registrado como VS en SNW.
+_ALIAS_CENTRO = {"MVYS": "VS"}
+
+
+def codigo_centro_canonico(codigo: str | None) -> str:
+    valor = str(codigo or "").strip().upper()
+    return _ALIAS_CENTRO.get(valor, valor)
+
+
+def mismo_centro(codigo_a: str | None, codigo_b: str | None) -> bool:
+    canonico_a = codigo_centro_canonico(codigo_a)
+    return bool(canonico_a) and canonico_a == codigo_centro_canonico(codigo_b)
+
 # Contexto aislado por solicitud de webhook; los callbacks diferidos copian el
 # contexto antes de arrancar su hilo para conservar el emisor de la respuesta.
 EMISOR_WEBHOOK: ContextVar[dict | None] = ContextVar("emisor_webhook", default=None)
