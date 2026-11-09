@@ -287,6 +287,28 @@ def esta_bloqueado_para_envio(telefono: str, *, permitir_aviso_baja: bool = Fals
         return True
 
 
+def telefonos_bloqueados_para_envio(telefonos: set[str]) -> set[str]:
+    """Consulta un lote de teléfonos normalizados con las reglas de bloqueo de envío."""
+    bloqueados = set()
+    por_huella = {huella_telefono(tel): tel for tel in telefonos}
+    huellas = list(por_huella)
+    with conectar() as conn, conn.cursor() as cur:
+        for inicio in range(0, len(huellas), 250):
+            lote = huellas[inicio:inicio + 250]
+            marcas = ",".join(["%s"] * len(lote))
+            cur.execute(f"SELECT huella FROM supresion_telefonos WHERE huella IN ({marcas})"
+                        " AND estado <> 'exento' UNION ALL"
+                        f" SELECT huella FROM pacientes_baja_huellas WHERE huella IN ({marcas}) AND activo=1",
+                        (*lote, *lote))
+            bloqueados.update(por_huella[fila["huella"]] for fila in cur.fetchall())
+            cur.execute(f"SELECT telefono FROM whatsapp_avisos_unicos WHERE telefono IN ({marcas})"
+                        " AND tipo='eliminacion_simulada'", tuple(por_huella[h] for h in lote))
+            bloqueados.update(fila["telefono"] for fila in cur.fetchall())
+        if huellas and not _migracion_huellas_completa_cur(cur):
+            bloqueados.update(tel for tel in telefonos - bloqueados if _baja_legacy_activa_cur(cur, tel))
+    return bloqueados
+
+
 def migrar_huellas_baja_existentes() -> int:
     """Migra una sola vez las bajas presentes en las tablas antes de esta versión.
 

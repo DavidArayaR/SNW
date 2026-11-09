@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 from calendar import monthrange
+from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -16,7 +17,9 @@ from reservo_catalogo import (RESERVO_CLINICAS, clave_umbral_recuperacion as cla
                              clave_cobertura_recuperacion as clave_cobertura,
                              clave_token, clave_estado_atendido, clave_estado_verificado)
 from reservo_pacientes import (ClienteReservo, ReservoError, codigo_estado, dividir_periodo,
-                               fecha_atencion_utc, normalizar_cliente_uuid)
+                               fecha_atencion_utc, generar_nombre_base, normalizar_cliente_uuid)
+from supresion import telefonos_bloqueados_para_envio
+from telefono import normalizar_telefono
 
 
 RUTA = "/api/v1/recuperacion-pacientes"
@@ -203,6 +206,61 @@ def fecha_umbral(referencia: date, meses: int) -> date:
     anio, indice_mes = divmod(referencia.year * 12 + referencia.month - 1 - meses, 12)
     mes = indice_mes + 1
     return date(anio, mes, min(referencia.day, monthrange(anio, mes)[1]))
+
+
+def revisar_contactos(usuario, solicitud_id):
+    """Revisión operativa preliminar a partir de contactos locales."""
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("SELECT id,estado,clinica_codigo,anio,mes,fecha_referencia,meses_inactividad"
+                    " FROM recuperacion_solicitudes WHERE usuario=%s AND solicitud_id=%s",
+                    (usuario, solicitud_id))
+        solicitud = cur.fetchone()
+        if not solicitud:
+            raise HTTPException(404, detail="Solicitud no disponible.")
+        if solicitud["estado"] != "ANALIZADA":
+            raise HTTPException(409, detail="La revisión requiere un análisis terminado.")
+        origen = CLINICAS[solicitud["clinica_codigo"]]
+        limite = fecha_umbral(solicitud["fecha_referencia"], solicitud["meses_inactividad"])
+        cur.execute(
+            "SELECT p.id AS ficha_id,p.paciente_telefono,c.ultima_atencion<=%s AS inactivo"
+            " FROM recuperacion_cohorte c"
+            " LEFT JOIN reservo_pacientes p ON p.clinica_codigo=%s"
+            " AND BINARY p.cliente_uuid=c.cliente_uuid"
+            " WHERE c.solicitud=%s",
+            (limite, origen, solicitud["id"]),
+        )
+        filas = cur.fetchall()
+    inactivos = sin_ficha = invalidos = 0
+    frecuencias = Counter()
+    candidatos = Counter()
+    for fila in filas:
+        tel = normalizar_telefono(fila["paciente_telefono"] or "")
+        if tel:
+            frecuencias[tel] += 1
+        if not fila["inactivo"]:
+            continue
+        inactivos += 1
+        if fila["ficha_id"] is None:
+            sin_ficha += 1
+        elif tel:
+            candidatos[tel] += 1
+        else:
+            invalidos += 1
+    compartidos = sum(total for tel, total in candidatos.items() if frecuencias[tel] > 1)
+    unicos = {tel for tel in candidatos if frecuencias[tel] == 1}
+    bloqueados = telefonos_bloqueados_para_envio(unicos) if unicos else set()
+    nombre = generar_nombre_base(origen, "pacientes_inactivos",
+                                 fecha_periodo=date(solicitud["anio"], solicitud["mes"], 1))
+    return {
+        "solicitud_id": solicitud_id, "nombre_propuesto": nombre["nombre"],
+        "fuente_contactos": "fichas_reservo_sincronizadas",
+        "conteos": {"pacientes_inactivos": inactivos, "sin_ficha_local": sin_ficha,
+                    "telefonos_invalidos": invalidos, "telefonos_compartidos": compartidos,
+                    "bloqueados": len(bloqueados),
+                    "contactos_sin_bloqueo": len(unicos - bloqueados)},
+        "publicacion_disponible": False,
+        "motivo": "La publicación requiere integrar las membresías compartidas al flujo de bases normales.",
+    }
 
 
 def _leer_tramo(cliente, desde, hasta, atendido, instante):
