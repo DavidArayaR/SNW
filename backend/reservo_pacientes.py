@@ -914,30 +914,54 @@ def crear_sincronizacion(codigo: str, desde: dt.date, hasta: dt.date,
     return obtener_sincronizacion(job_id)
 
 
+_SELECT_SINCRONIZACIONES = (
+    "SELECT id,clinica_codigo,tratamiento_uuid,estado_atendido_codigo,fecha_desde,fecha_hasta,estado,"
+    "periodos_total,periodos_completados,paginas_consultadas,citas_recibidas,"
+    "citas_atendidas,citas_tratamiento,pacientes_unicos,pacientes_nuevos,"
+    "pacientes_actualizados,pacientes_descartados,pacientes_duplicados,"
+    "pacientes_revertidos,errores,"
+    "ultimo_error,creado_por,creado_en,iniciado_en,terminado_en,heartbeat_en,tratamientos_json "
+    "FROM reservo_sincronizaciones"
+)
+
+
 def obtener_sincronizacion(job_id: int) -> dict | None:
     with _db() as conn, conn.cursor() as cur:
-        cur.execute("SELECT id,clinica_codigo,tratamiento_uuid,estado_atendido_codigo,fecha_desde,fecha_hasta,estado,"
-                    "periodos_total,periodos_completados,paginas_consultadas,citas_recibidas,"
-                    "citas_atendidas,citas_tratamiento,pacientes_unicos,pacientes_nuevos,"
-                    "pacientes_actualizados,pacientes_descartados,pacientes_duplicados,"
-                    "pacientes_revertidos,errores,"
-                    "ultimo_error,creado_por,creado_en,iniciado_en,terminado_en,heartbeat_en,tratamientos_json "
-                    "FROM reservo_sincronizaciones WHERE id=%s", (job_id,))
+        cur.execute(_SELECT_SINCRONIZACIONES + " WHERE id=%s", (job_id,))
         fila = cur.fetchone()
-    if fila:
-        fila["clinica_nombre"] = RESERVO_CLINICAS.get(fila["clinica_codigo"], fila["clinica_codigo"])
-        fila["tratamientos"] = tratamientos_del_trabajo(fila)
-        fila["tratamiento_nombre"] = ", ".join(
-            item["nombre"] for item in fila["tratamientos"] if item.get("nombre")
-        ) or "Tratamiento histórico"
+    return _presentar_sincronizacion(fila) if fila else None
+
+
+def _presentar_sincronizacion(fila: dict) -> dict:
+    fila["clinica_nombre"] = RESERVO_CLINICAS.get(fila["clinica_codigo"], fila["clinica_codigo"])
+    fila["tratamientos"] = tratamientos_del_trabajo(fila)
+    fila["tratamiento_nombre"] = ", ".join(
+        item["nombre"] for item in fila["tratamientos"] if item.get("nombre")
+    ) or "Tratamiento histórico"
     return fila
 
 
 def listar_sincronizaciones(limite: int = 50) -> list[dict]:
     with _db() as conn, conn.cursor() as cur:
-        cur.execute("SELECT id FROM reservo_sincronizaciones ORDER BY id DESC LIMIT %s", (limite,))
-        ids = [int(fila["id"]) for fila in cur.fetchall()]
-    return [fila for job_id in ids if (fila := obtener_sincronizacion(job_id))]
+        cur.execute(_SELECT_SINCRONIZACIONES + " ORDER BY id DESC LIMIT %s", (limite,))
+        return [_presentar_sincronizacion(fila) for fila in cur.fetchall()]
+
+
+def paginar_sincronizaciones(pagina: int, limite: int) -> dict:
+    with _db() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT COUNT(*) AS total, COALESCE(MAX(estado IN ('pendiente','ejecutando')),0) AS activo"
+            " FROM reservo_sincronizaciones"
+        )
+        resumen = cur.fetchone()
+        total = int(resumen["total"])
+        paginas = max(1, (total + limite - 1) // limite)
+        pagina = min(pagina, paginas)
+        cur.execute(_SELECT_SINCRONIZACIONES + " ORDER BY id DESC LIMIT %s OFFSET %s",
+                    (limite, (pagina - 1) * limite))
+        items = [_presentar_sincronizacion(fila) for fila in cur.fetchall()]
+    return {"items": items, "total": total, "pagina": pagina, "paginas": paginas,
+            "por_pagina": limite, "activo": bool(resumen["activo"])}
 
 
 def reintentar_sincronizacion(job_id: int, usuario: str, config: dict) -> dict:

@@ -94,6 +94,18 @@
               <tbody id="reservoSincronizaciones"><tr><td colspan="6" class="reservo-vacio">Cargando historial…</td></tr></tbody>
             </table>
           </div>
+          <div class="reservo-paginacion" role="group" aria-label="Paginación del historial">
+            <label for="reservoHistPorPagina">Filas</label>
+            <select id="reservoHistPorPagina"><option>10</option><option selected>25</option><option>50</option><option>100</option></select>
+            <span id="reservoHistPaginaInfo" class="pag-info" aria-live="polite"></span>
+            <div class="pag-grupo">
+              <button type="button" class="btn btn--ghost" id="reservoHistPrimera" aria-label="Primera página del historial" disabled><i class="fa-solid fa-angles-left" aria-hidden="true"></i></button>
+              <button type="button" class="btn btn--ghost" id="reservoHistAnterior" aria-label="Página anterior del historial" disabled><i class="fa-solid fa-angle-left" aria-hidden="true"></i></button>
+              <input type="number" id="reservoHistPaginaIr" min="1" max="1" value="1" aria-label="Ir a la página del historial">
+              <button type="button" class="btn btn--ghost" id="reservoHistSiguiente" aria-label="Página siguiente del historial" disabled><i class="fa-solid fa-angle-right" aria-hidden="true"></i></button>
+              <button type="button" class="btn btn--ghost" id="reservoHistUltima" aria-label="Última página del historial" disabled><i class="fa-solid fa-angles-right" aria-hidden="true"></i></button>
+            </div>
+          </div>
         </section>
 
         <section class="panel reservo-panel">
@@ -146,7 +158,7 @@
     </section>
   </div>
   <script src="js/layout.js?v=reservo-nav2"></script>
-  <script src="js/pacientes-reservo.js?v=descargar-csv-consulta1"></script>
+  <script src="js/pacientes-reservo.js?v=historial-paginado1"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>

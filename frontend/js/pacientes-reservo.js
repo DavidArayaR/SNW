@@ -22,10 +22,15 @@
     clinicFilter: $("#filtroReservoClinica"), treatmentFilter: $("#filtroReservoTratamiento"),
     fromFilter: $("#filtroReservoDesde"), toFilter: $("#filtroReservoHasta"), search: $("#filtroReservoBuscar"),
     pageSize: $("#reservoPorPagina"), page: $("#reservoPaginaIr"), pageInfo: $("#reservoPaginaInfo"),
+    syncPageSize: $("#reservoHistPorPagina"), syncPage: $("#reservoHistPaginaIr"),
+    syncPageInfo: $("#reservoHistPaginaInfo"),
   };
   let clinics = [];
   let page = 1;
   let pages = 1;
+  let syncPage = 1;
+  let syncPages = 1;
+  let syncRequest = 0;
   let selectedSyncId = null;
   let pollTimer = null;
   let searchTimer = null;
@@ -311,12 +316,26 @@
   }
 
   async function cargarSincronizaciones() {
-    const data = await request("api/reservo/sincronizaciones?limite=50");
+    const secuencia = ++syncRequest;
+    const params = new URLSearchParams({ pagina: String(syncPage), limite: ui.syncPageSize.value });
+    const data = await request(`api/reservo/sincronizaciones?${params}`);
+    if (secuencia !== syncRequest) return null;
+    syncPage = data.pagina;
+    syncPages = data.paginas;
+    if (document.activeElement !== ui.syncPage) ui.syncPage.value = String(syncPage);
+    ui.syncPage.max = String(syncPages);
+    const primero = (syncPage - 1) * data.por_pagina + 1;
+    const ultimo = Math.min(syncPage * data.por_pagina, data.total);
+    const info = data.total ? `${primero}–${ultimo} de ${data.total.toLocaleString("es-CL")}` : "Sin sincronizaciones";
+    if (ui.syncPageInfo.textContent !== info) ui.syncPageInfo.textContent = info;
+    $("#reservoHistPrimera").disabled = $("#reservoHistAnterior").disabled = syncPage <= 1;
+    $("#reservoHistSiguiente").disabled = $("#reservoHistUltima").disabled = syncPage >= syncPages;
+    if (data.activo) iniciarSondeo();
     cerrarConfirmacion(false);
     const filas = data.items || [];
     if (!filas.length) {
       ui.syncs.innerHTML = '<tr><td colspan="6" class="reservo-vacio">Todavía no hay sincronizaciones.</td></tr>';
-      return false;
+      return data.activo;
     }
     ui.syncs.innerHTML = filas.map((item) => {
       const periodo = `${escapar(item.fecha_desde)} – ${escapar(item.fecha_hasta)}`;
@@ -374,7 +393,13 @@
           boton.disabled = false;
         }
       }));
-    return filas.some((item) => ["pendiente", "ejecutando"].includes(item.estado));
+    return data.activo;
+  }
+
+  function irPaginaHistorial(destino) {
+    syncPage = destino;
+    ui.syncPage.value = String(destino);
+    cargarSincronizaciones().catch((error) => mostrarAviso(error.message, "error"));
   }
 
   function iniciarSondeo() {
@@ -382,7 +407,7 @@
     pollTimer = setInterval(async () => {
       try {
         const activo = await cargarSincronizaciones();
-        if (!activo) {
+        if (activo === false) {
           clearInterval(pollTimer);
           pollTimer = null;
           await cargarPacientes();
@@ -484,6 +509,7 @@
       ui.toFilter.value = "";
       ui.search.value = "";
       page = 1;
+      syncPage = 1;
       await cargarSincronizaciones();
       await cargarPacientes();
       mostrarAviso("Consulta iniciada. El progreso se actualizará aquí; no se enviará ningún WhatsApp.", "success");
@@ -510,6 +536,15 @@
     searchTimer = setTimeout(() => { page = 1; cargarPacientes(); }, 350);
   });
   ui.pageSize.addEventListener("change", () => { page = 1; cargarPacientes(); });
+  ui.syncPageSize.addEventListener("change", () => irPaginaHistorial(1));
+  $("#reservoHistPrimera").addEventListener("click", () => irPaginaHistorial(1));
+  $("#reservoHistAnterior").addEventListener("click", () => irPaginaHistorial(Math.max(1, syncPage - 1)));
+  $("#reservoHistSiguiente").addEventListener("click", () => irPaginaHistorial(Math.min(syncPages, syncPage + 1)));
+  $("#reservoHistUltima").addEventListener("click", () => irPaginaHistorial(syncPages));
+  ui.syncPage.addEventListener("change", () => {
+    const destino = Number.parseInt(ui.syncPage.value, 10);
+    irPaginaHistorial(Number.isFinite(destino) ? Math.min(syncPages, Math.max(1, destino)) : syncPage);
+  });
   $("#reservoPrimera").addEventListener("click", () => { page = 1; cargarPacientes(); });
   $("#reservoAnterior").addEventListener("click", () => { page = Math.max(1, page - 1); cargarPacientes(); });
   $("#reservoSiguiente").addEventListener("click", () => { page = Math.min(pages, page + 1); cargarPacientes(); });
@@ -535,7 +570,6 @@
     try {
       await cargarConfiguracion();
       await Promise.all([cargarSincronizaciones(), cargarPacientes()]);
-      if (ui.syncs.querySelector(".reservo-estado--proceso")) iniciarSondeo();
     } catch (error) {
       mostrarAviso(error.message || "No se pudo cargar Pacientes Reservo.", "error");
     }

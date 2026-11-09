@@ -5962,7 +5962,10 @@ def iniciar_sincronizacion_reservo(body: ReservoSincronizarIn,
 
 
 def listar_sincronizaciones_reservo(limite: int = Query(50, ge=1, le=100),
+                                   pagina: int | None = Query(None, ge=1),
                                      sesion: dict = Depends(solo_admin)):
+    if pagina is not None:
+        return reservo_pacientes.paginar_sincronizaciones(pagina, limite)
     return {"items": reservo_pacientes.listar_sincronizaciones(limite)}
 
 
