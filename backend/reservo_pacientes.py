@@ -37,8 +37,9 @@ _MESES_ES = ("enero", "febrero", "marzo", "abril", "mayo", "junio",
 
 
 def generar_nombre_base(codigo: str, nombre_personalizado: str,
-                        ahora: dt.datetime | None = None) -> dict[str, str]:
-    """Normaliza el nombre lógico de una lista y calcula su sufijo chileno."""
+                        ahora: dt.datetime | None = None, *,
+                        fecha_periodo: dt.date | str | None = None) -> dict[str, str]:
+    """Usa el mes inicial del período consultado cuando está disponible."""
     codigo = str(codigo or "").strip().upper()
     if codigo not in RESERVO_CLINICAS:
         raise ValueError("La clínica Reservo no es válida.")
@@ -56,12 +57,16 @@ def generar_nombre_base(codigo: str, nombre_personalizado: str,
     ).rstrip("_")
     if not nombre:
         raise ValueError("El nombre personalizado debe contener letras o números.")
-    ahora = ahora or dt.datetime.now(ZoneInfo("America/Santiago"))
-    if ahora.tzinfo is None:
-        ahora = ahora.replace(tzinfo=ZoneInfo("America/Santiago"))
-    ahora = ahora.astimezone(ZoneInfo("America/Santiago"))
-    mes = _MESES_ES[ahora.month - 1]
-    sufijo = f"_{mes}_{ahora.year}"
+    if fecha_periodo is not None:
+        fecha = (dt.date.fromisoformat(fecha_periodo) if isinstance(fecha_periodo, str)
+                 else fecha_periodo)
+    else:
+        ahora = ahora or dt.datetime.now(ZoneInfo("America/Santiago"))
+        if ahora.tzinfo is None:
+            ahora = ahora.replace(tzinfo=ZoneInfo("America/Santiago"))
+        fecha = ahora.astimezone(ZoneInfo("America/Santiago"))
+    mes = _MESES_ES[fecha.month - 1]
+    sufijo = f"_{mes}_{fecha.year}"
     prefijo = f"{codigo}_"
     # La columna del nombre editable admite 100 caracteres. Limitar también
     # por el nombre completo evita que una lista válida falle al persistirse.
@@ -69,7 +74,7 @@ def generar_nombre_base(codigo: str, nombre_personalizado: str,
     nombre = nombre[:max_personalizado].strip("_")
     if not nombre:
         raise ValueError("El nombre personalizado es demasiado largo.")
-    return {"nombre_personalizado": nombre, "mes": mes, "anio": str(ahora.year),
+    return {"nombre_personalizado": nombre, "mes": mes, "anio": str(fecha.year),
             "nombre": f"{prefijo}{nombre}{sufijo}"}
 
 
@@ -683,7 +688,8 @@ def previsualizar_base_contactos(job_id: int, nombre_personalizado: str,
 
     with _db() as conn, conn.cursor() as cur:
         job = _obtener_job_base(cur, job_id)
-        nombre = generar_nombre_base(job["clinica_codigo"], nombre_personalizado, ahora)
+        nombre = generar_nombre_base(job["clinica_codigo"], nombre_personalizado, ahora,
+                                     fecha_periodo=job["fecha_desde"])
         cur.execute(
             "SELECT p.paciente_telefono FROM reservo_sincronizacion_pacientes sp"
             " JOIN reservo_pacientes p ON p.id=sp.paciente_id"
@@ -717,7 +723,8 @@ def guardar_base_contactos(job_id: int, nombre_personalizado: str, creado_por: s
             raise RuntimeError("Hay otra lista de Reservo guardándose. Inténtalo nuevamente.")
         try:
             job = _obtener_job_base(cur, job_id, bloquear=True)
-            nombre = generar_nombre_base(job["clinica_codigo"], nombre_personalizado, ahora)
+            nombre = generar_nombre_base(job["clinica_codigo"], nombre_personalizado, ahora,
+                                         fecha_periodo=job["fecha_desde"])
             tratamientos, _ = _detalle_tratamientos(job)
             if not tratamientos:
                 raise ValueError("La sincronización no conserva los tratamientos seleccionados.")
