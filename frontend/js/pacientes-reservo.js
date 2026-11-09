@@ -572,6 +572,7 @@
     const clinica = $("#recuperacionClinica");
     const anio = $("#recuperacionAnio");
     const mes = $("#recuperacionMes");
+    const mesesInactividad = $("#recuperacionMeses");
     const procesar = $("#recuperacionProcesar");
     const aviso = $("#recuperacionAviso");
     const historial = $("#recuperacionSolicitudes");
@@ -620,10 +621,9 @@
     function validarFormulario() {
       const centro = centros.find((c) => c.clinica_codigo === clinica.value);
       const historico = anio.checkValidity() && Number(anio.value) * 12 + Number(mes.value) < periodoActual();
-      $("#recuperacionUmbral").textContent = !centro ? "Selecciona una clínica."
-        : !centro.meses_inactividad ? "Configura el umbral de recuperación en Configuración → Reservo."
-          : historico ? `Inactividad mínima: ${centro.meses_inactividad} meses.` : "Selecciona un mes histórico completo.";
-      procesar.disabled = enviando || !historico || !centro?.meses_inactividad;
+      $("#recuperacionUmbral").textContent = !historico ? "Selecciona un mes histórico completo."
+        : "Ingresa entre 1 y 120 meses de inactividad.";
+      procesar.disabled = enviando || !historico || !centro || !mesesInactividad.checkValidity();
     }
 
     function conteos(id, datos, campos) {
@@ -738,7 +738,8 @@
       evento.preventDefault();
       validarFormulario();
       if (procesar.disabled) return;
-      const body = JSON.stringify({ clinica_codigo: clinica.value, anio: Number(anio.value), mes: Number(mes.value) });
+      const body = JSON.stringify({ clinica_codigo: clinica.value, anio: Number(anio.value),
+        mes: Number(mes.value), meses_inactividad: Number(mesesInactividad.value) });
       if (!intentos.has(body)) {
         const bytes = crypto.getRandomValues(new Uint8Array(16));
         intentos.set(body, Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join(""));

@@ -49,10 +49,11 @@
             <label class="field"><span>Clínica</span><select id="recuperacionClinica" required></select></label>
             <label class="field"><span>Año</span><input id="recuperacionAnio" type="number" min="1000" max="9999" required></label>
             <label class="field"><span>Mes histórico</span><select id="recuperacionMes" required></select></label>
-            <div class="reservo-form__accion">
+            <label class="field"><span>Meses de inactividad</span><input id="recuperacionMeses" type="number" min="1" max="120" step="1" required aria-describedby="recuperacionUmbral"></label>
+            <div class="reservo-form__accion reservo-form__accion--final">
+              <span class="field__hint" id="recuperacionUmbral">Ingresa entre 1 y 120 meses.</span>
               <button id="recuperacionProcesar" class="btn btn--primary" type="submit" disabled>Procesar</button>
             </div>
-            <p class="reservo-form__paso field__hint" id="recuperacionUmbral"></p>
           </form>
           <p id="recuperacionAviso" class="reservo-aviso" role="status" aria-live="polite"></p>
           <div class="reservo-tabla-wrap">
@@ -197,7 +198,7 @@
     </section>
   </div>
   <script src="js/layout.js?v=reservo-nav2"></script>
-  <script src="js/pacientes-reservo.js?v=recuperacion1"></script>
+  <script src="js/pacientes-reservo.js?v=recuperacion-umbral1"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>

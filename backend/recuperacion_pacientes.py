@@ -35,6 +35,7 @@ class SolicitudRecuperacionIn(BaseModel):
     clinica_codigo: str
     anio: int = Field(ge=1000, le=9999)
     mes: int = Field(ge=1, le=12)
+    meses_inactividad: int | None = Field(default=None, ge=1, le=120, strict=True)
 
 
 def configurar_tablas(cur):
@@ -114,7 +115,6 @@ def registrar(usuario, clave, body):
     clave = clave.encode("ascii")
     codigo = _clinica(body.clinica_codigo)
     parametros = (codigo, body.anio, body.mes)
-    cfg = config_all()
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(f"SELECT {_CAMPOS} FROM recuperacion_solicitudes"
                     " WHERE usuario=%s AND clave_idempotencia=%s", (usuario, clave))
@@ -124,9 +124,12 @@ def registrar(usuario, clave, body):
             ahora = datetime.now(ZoneInfo("America/Santiago"))
             if (body.anio, body.mes) >= (ahora.year, ahora.month):
                 raise HTTPException(422, detail="Selecciona un mes histórico completo.")
-            valor = cfg.get(clave_umbral(CLINICAS[codigo]), "")
-            if not umbral_valido(valor):
-                raise HTTPException(503, detail="Configura el umbral de recuperación de esta clínica.")
+            meses = body.meses_inactividad
+            if meses is None:
+                valor = config_all().get(clave_umbral(CLINICAS[codigo]), "")
+                if not umbral_valido(valor):
+                    raise HTTPException(503, detail="Indica los meses de inactividad.")
+                meses = int(valor)
             solicitud_id = uuid4().hex
             cur.execute(
                 "INSERT INTO recuperacion_solicitudes"
@@ -134,12 +137,14 @@ def registrar(usuario, clave, body):
                 " meses_inactividad,fecha_referencia,creado_en)"
                 " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)"
                 " ON DUPLICATE KEY UPDATE id=id",
-                (solicitud_id, usuario, clave, *parametros, int(valor), ahora.date(),
+                (solicitud_id, usuario, clave, *parametros, meses, ahora.date(),
                  ahora.astimezone(timezone.utc).replace(tzinfo=None)),
             )
             fila = _buscar_clave(cur, usuario, clave)
             nueva = fila["solicitud_id"] == solicitud_id
-        if (fila["clinica_codigo"], fila["anio"], fila["mes"]) != parametros:
+        if ((fila["clinica_codigo"], fila["anio"], fila["mes"]) != parametros
+                or (body.meses_inactividad is not None
+                    and fila["meses_inactividad"] != body.meses_inactividad)):
             raise HTTPException(409, detail="La clave ya se usó con otros parámetros.")
         conn.commit()
         return _publica(fila), nueva
