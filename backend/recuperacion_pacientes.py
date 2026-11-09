@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import json
 from calendar import monthrange
 from collections import Counter
 from datetime import date, datetime, timedelta, timezone
@@ -18,7 +19,7 @@ from reservo_catalogo import (RESERVO_CLINICAS, clave_umbral_recuperacion as cla
                              clave_token, clave_estado_atendido, clave_estado_verificado)
 from reservo_pacientes import (ClienteReservo, ReservoError, codigo_estado, dividir_periodo,
                                fecha_atencion_utc, generar_nombre_base, normalizar_cliente_uuid,
-                               cliente_valido, _guardar_paciente_cursor)
+                               cliente_valido, _guardar_paciente_cursor, tratamientos_cita, validar_uuid)
 from supresion import (bloquear_huella_baja, limpiar_cerrojos_baja_inactivos,
                        telefonos_bloqueados_para_envio)
 from telefono import normalizar_telefono
@@ -29,7 +30,7 @@ ZONA = ZoneInfo("America/Santiago")
 CLINICAS = {("VS" if codigo == "MVYS" else codigo): codigo for codigo in RESERVO_CLINICAS}
 _CAMPOS = (
     "id, solicitud_id, clinica_codigo, anio, mes, meses_inactividad, "
-    "fecha_referencia, estado, version, creado_en"
+    "fecha_referencia, estado, version, creado_en, tratamientos_json"
 )
 
 
@@ -38,6 +39,7 @@ class SolicitudRecuperacionIn(BaseModel):
     anio: int = Field(ge=1000, le=9999)
     mes: int = Field(ge=1, le=12)
     meses_inactividad: int | None = Field(default=None, ge=1, le=120, strict=True)
+    tratamientos: list[str] = Field(default_factory=list, max_length=50)
 
 
 def configurar_tablas(cur):
@@ -60,6 +62,9 @@ def configurar_tablas(cur):
         " KEY idx_rec_estado_id (estado, id)"
         ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
     )
+    cur.execute("SHOW COLUMNS FROM recuperacion_solicitudes LIKE 'tratamientos_json'")
+    if not cur.fetchone():
+        cur.execute("ALTER TABLE recuperacion_solicitudes ADD tratamientos_json TEXT NULL")
     cur.execute(
         "CREATE TABLE IF NOT EXISTS recuperacion_publicaciones ("
         " solicitud BIGINT UNSIGNED PRIMARY KEY, base_id INT NULL UNIQUE,"
@@ -86,6 +91,13 @@ def configurar_tablas(cur):
         " FOREIGN KEY (solicitud) REFERENCES recuperacion_solicitudes(id) ON DELETE CASCADE"
         ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
     )
+    cur.execute("SHOW COLUMNS FROM recuperacion_cohorte LIKE 'ultima_atencion_utc'")
+    if not cur.fetchone():
+        cur.execute("ALTER TABLE recuperacion_cohorte ADD ultima_atencion_utc DATETIME(6) NULL,"
+                    " ADD coincide_tratamiento TINYINT(1) NOT NULL DEFAULT 1")
+    cur.execute("SHOW COLUMNS FROM recuperacion_cohorte LIKE 'tratamiento_ultima_atencion'")
+    if not cur.fetchone():
+        cur.execute("ALTER TABLE recuperacion_cohorte ADD tratamiento_ultima_atencion TEXT NULL")
 
 
 def umbral_valido(valor):
@@ -112,6 +124,7 @@ def listar_clinicas():
 
 def _publica(fila):
     publica = {k: v for k, v in fila.items() if k != "id"}
+    publica["tratamientos"] = json.loads(publica.pop("tratamientos_json", None) or "[]")
     publica["creado_en"] = fila["creado_en"].replace(tzinfo=timezone.utc)
     return publica
 
@@ -127,6 +140,10 @@ def registrar(usuario, clave, body):
         raise HTTPException(422, detail="La clave de idempotencia no es válida.")
     clave = clave.encode("ascii")
     codigo = _clinica(body.clinica_codigo)
+    try:
+        tratamientos = sorted({validar_uuid(uuid).replace("-", "") for uuid in body.tratamientos})
+    except ValueError as exc:
+        raise HTTPException(422, detail="Selecciona tratamientos válidos de Reservo.") from exc
     parametros = (codigo, body.anio, body.mes)
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(f"SELECT {_CAMPOS} FROM recuperacion_solicitudes"
@@ -147,15 +164,16 @@ def registrar(usuario, clave, body):
             cur.execute(
                 "INSERT INTO recuperacion_solicitudes"
                 " (solicitud_id,usuario,clave_idempotencia,clinica_codigo,anio,mes,"
-                " meses_inactividad,fecha_referencia,creado_en)"
-                " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+                " meses_inactividad,fecha_referencia,creado_en,tratamientos_json)"
+                " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
                 " ON DUPLICATE KEY UPDATE id=id",
                 (solicitud_id, usuario, clave, *parametros, meses, ahora.date(),
-                 ahora.astimezone(timezone.utc).replace(tzinfo=None)),
+                 ahora.astimezone(timezone.utc).replace(tzinfo=None), json.dumps(tratamientos)),
             )
             fila = _buscar_clave(cur, usuario, clave)
             nueva = fila["solicitud_id"] == solicitud_id
         if ((fila["clinica_codigo"], fila["anio"], fila["mes"]) != parametros
+                or json.loads(fila["tratamientos_json"] or "[]") != tratamientos
                 or (body.meses_inactividad is not None
                     and fila["meses_inactividad"] != body.meses_inactividad)):
             raise HTTPException(409, detail="La clave ya se usó con otros parámetros.")
@@ -229,7 +247,8 @@ def fecha_umbral(referencia: date, meses: int) -> date:
 
 
 def _solicitud_contactos(cur, usuario, solicitud_id, *, bloquear=False):
-    cur.execute("SELECT id,solicitud_id,usuario,estado,clinica_codigo,anio,mes,fecha_referencia,meses_inactividad,creado_en"
+    cur.execute("SELECT id,solicitud_id,usuario,estado,clinica_codigo,anio,mes,fecha_referencia,"
+                " meses_inactividad,creado_en,tratamientos_json"
                 " FROM recuperacion_solicitudes WHERE usuario=%s AND solicitud_id=%s"
                 + (" FOR UPDATE" if bloquear else ""), (usuario, solicitud_id))
     solicitud = cur.fetchone()
@@ -243,10 +262,12 @@ def _contactos(cur, solicitud, *, bloquear=False):
         raise HTTPException(409, detail="La revisión requiere un análisis terminado.")
     origen = CLINICAS[solicitud["clinica_codigo"]]
     limite = fecha_umbral(solicitud["fecha_referencia"], solicitud["meses_inactividad"])
+    filtra_tratamientos = bool(json.loads(solicitud["tratamientos_json"] or "[]"))
     cur.execute(
         "SELECT p.id AS ficha_id,p.paciente_telefono,p.paciente_nombre,p.paciente_apellido,"
         " p.cliente_uuid,p.fecha_ultima_atencion AS ultima_local,c.ultima_atencion,"
-        " c.ultima_atencion<=%s AS inactivo"
+        " c.ultima_atencion_utc,c.tratamiento_ultima_atencion,"
+        " c.ultima_atencion<=%s AND c.coincide_tratamiento=1 AS inactivo"
         " FROM recuperacion_cohorte c"
         " LEFT JOIN reservo_pacientes p ON p.clinica_codigo=%s"
         " AND BINARY p.cliente_uuid=c.cliente_uuid WHERE c.solicitud=%s"
@@ -265,6 +286,9 @@ def _contactos(cur, solicitud, *, bloquear=False):
         if fila["ficha_id"] is None:
             sin_ficha += 1
         elif fila["ultima_local"] and fila["ultima_local"].replace(tzinfo=timezone.utc).astimezone(ZONA).date() > limite:
+            activos_recientes += 1
+        elif (filtra_tratamientos and fila["ultima_local"] and fila["ultima_atencion_utc"]
+              and fila["ultima_local"] > fila["ultima_atencion_utc"]):
             activos_recientes += 1
         elif tel:
             candidatos.setdefault(tel, []).append(fila)
@@ -311,7 +335,7 @@ def _completar_fichas(solicitud):
     cliente = ClienteReservo(token)
     try:
         for desde, hasta in dividir_periodo(inicio, fin, dias_por_tramo=7):
-            _, _, _, contactos = _leer_tramo(cliente, desde, hasta, atendido, solicitud["creado_en"])
+            _, _, _, contactos = _leer_tramo(cliente, desde, hasta, atendido, solicitud["creado_en"], set())
             if not contactos:
                 continue
             with conectar() as conn, conn.cursor() as cur:
@@ -367,7 +391,8 @@ def publicar_base(usuario, solicitud_id):
                     continue
                 fila = candidatos[tel]
                 filas.append((fila["ficha_id"], fila["cliente_uuid"], fila["paciente_nombre"],
-                              fila["paciente_apellido"], tel, fila["ultima_atencion"]))
+                              fila["paciente_apellido"], tel, fila["ultima_atencion"],
+                              fila["tratamiento_ultima_atencion"]))
             if not filas:
                 raise HTTPException(409, detail="La solicitud no tiene contactos disponibles para publicar.")
             desde = date(solicitud["anio"], solicitud["mes"], 1)
@@ -393,8 +418,9 @@ def publicar_base(usuario, solicitud_id):
             for inicio in range(0, len(filas), 500):
                 cur.executemany(
                     "INSERT INTO reservo_lista_pacientes (lista_id,paciente_id,cliente_uuid,"
-                    " nombre,apellido,telefono,fecha_ultima_atencion,telefono_valido,consentimiento_verificado)"
-                    " VALUES (%s,%s,%s,%s,%s,%s,%s,1,1)",
+                    " nombre,apellido,telefono,fecha_ultima_atencion,tratamiento_ultima_atencion,"
+                    " telefono_valido,consentimiento_verificado)"
+                    " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,1,1)",
                     [(base_id, *fila) for fila in filas[inicio:inicio + 500]],
                 )
             cur.execute("INSERT INTO recuperacion_publicaciones (solicitud,base_id,contactos)"
@@ -411,7 +437,7 @@ def publicar_base(usuario, solicitud_id):
             cur.execute("SELECT RELEASE_LOCK('snw-reservo-listas')")
 
 
-def _leer_tramo(cliente, desde, hasta, atendido, instante):
+def _leer_tramo(cliente, desde, hasta, atendido, instante, seleccionados):
     """Consolida un tramo completo antes de confirmar su checkpoint."""
     ultimas = {}
     contactos = {}
@@ -437,17 +463,31 @@ def _leer_tramo(cliente, desde, hasta, atendido, instante):
                 sin_uuid += 1
                 continue
             uuid = normalizar_cliente_uuid(uuid).encode("utf-8")
-            ultimas[uuid] = max(dia, ultimas.get(uuid, dia))
+            tratamientos = tratamientos_cita(cita)
+            nombres = {tratamiento["nombre"] for tratamiento in tratamientos}
+            coincide = not seleccionados or any(
+                tratamiento["uuid"].replace("-", "") in seleccionados
+                for tratamiento in tratamientos
+            )
+            anterior = ultimas.get(uuid)
+            if anterior is None or inicio > anterior[1]:
+                ultimas[uuid] = (dia, inicio, coincide, nombres)
+            elif inicio == anterior[1]:
+                ultimas[uuid] = (dia, inicio, coincide or anterior[2], nombres | anterior[3])
             valido = cliente_valido(cita)
             if valido and (uuid not in contactos or inicio > contactos[uuid][1]):
                 contactos[uuid] = (valido, inicio)
     if not paginas:
         raise ReservoError("No se recibió ninguna página del tramo.")
-    return ultimas, paginas, sin_uuid, contactos
+    return {
+        uuid: (dia, inicio, coincide, ", ".join(sorted(nombres)) or None)
+        for uuid, (dia, inicio, coincide, nombres) in ultimas.items()
+    }, paginas, sin_uuid, contactos
 
 
 def _procesar(conn, cur, job):
     identificador = job["id"]
+    seleccionados = set(json.loads(job["tratamientos_json"] or "[]"))
     origen = CLINICAS[job["clinica_codigo"]]
     cfg = config_all(refresh=True)
     token = cfg.get(clave_token(origen), "").strip()
@@ -474,21 +514,28 @@ def _procesar(conn, cur, job):
             if desde > ultimo:
                 continue
             for a, b in dividir_periodo(desde, ultimo, dias_por_tramo=7):
-                filas, paginas, sin_uuid, contactos = _leer_tramo(cliente, a, b, atendido, job["creado_en"])
+                filas, paginas, sin_uuid, contactos = _leer_tramo(
+                    cliente, a, b, atendido, job["creado_en"], seleccionados,
+                )
                 if b > fin_cohorte and sin_uuid:
                     raise ReservoError("El historial posterior contiene atenciones sin identidad verificable.")
                 if filas and b <= fin_cohorte:
                     cur.executemany(
-                        "INSERT INTO recuperacion_cohorte (solicitud,cliente_uuid,ultima_atencion)"
-                        " VALUES (%s,%s,%s) ON DUPLICATE KEY UPDATE"
-                        " ultima_atencion=GREATEST(ultima_atencion,VALUES(ultima_atencion))",
-                        [(identificador, uuid, dia) for uuid, dia in filas.items()],
+                        "INSERT INTO recuperacion_cohorte (solicitud,cliente_uuid,ultima_atencion,"
+                        " ultima_atencion_utc,coincide_tratamiento,tratamiento_ultima_atencion)"
+                        " VALUES (%s,%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE"
+                        " ultima_atencion=VALUES(ultima_atencion),"
+                        " ultima_atencion_utc=VALUES(ultima_atencion_utc),"
+                        " coincide_tratamiento=VALUES(coincide_tratamiento),"
+                        " tratamiento_ultima_atencion=VALUES(tratamiento_ultima_atencion)",
+                        [(identificador, uuid, *ultima) for uuid, ultima in filas.items()],
                     )
                 elif filas:
                     cur.executemany(
-                        "UPDATE recuperacion_cohorte SET ultima_atencion=GREATEST(ultima_atencion,%s)"
+                        "UPDATE recuperacion_cohorte SET ultima_atencion=%s, ultima_atencion_utc=%s,"
+                        " coincide_tratamiento=%s, tratamiento_ultima_atencion=%s"
                         " WHERE solicitud=%s AND cliente_uuid=%s",
-                        [(dia, identificador, uuid) for uuid, dia in filas.items()],
+                        [(*ultima, identificador, uuid) for uuid, ultima in filas.items()],
                     )
                 if contactos:
                     cur.execute("SELECT cliente_uuid FROM recuperacion_cohorte WHERE solicitud=%s",
@@ -516,7 +563,8 @@ def _procesar(conn, cur, job):
     finally:
         cliente.close()
     limite = fecha_umbral(job["fecha_referencia"], job["meses_inactividad"])
-    cur.execute("SELECT COUNT(*) AS total, COALESCE(SUM(ultima_atencion<=%s),0) AS inactivos"
+    cur.execute("SELECT COUNT(*) AS total,"
+                " COALESCE(SUM(ultima_atencion<=%s AND coincide_tratamiento=1),0) AS inactivos"
                 " FROM recuperacion_cohorte WHERE solicitud=%s", (limite, identificador))
     conteos = cur.fetchone()
     cur.execute("UPDATE recuperacion_analisis SET pacientes_analizados=%s,pacientes_inactivos=%s,"
