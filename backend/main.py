@@ -5838,6 +5838,11 @@ def revisar_contactos_recuperacion(solicitud_id: str, sesion: dict = Depends(sol
 def publicar_base_recuperacion(solicitud_id: str, sesion: dict = Depends(solo_admin)):
     usuario = sesion["usuario"]
     base, nueva = recuperacion_pacientes.publicar_base(usuario, solicitud_id)
+    try:
+        reservo_bases.integrar_bases(base["lista_generada_id"])
+    except Exception as exc:
+        log_error("integrar base de recuperación", exc, solo_tipo=True)
+        raise HTTPException(503, detail="No se pudo habilitar la base. Vuelve a intentar publicar.") from exc
     if nueva:
         auditoria_registrar(usuario, "recuperacion_publicada", solicitud_id,
                             str(base["lista_generada_id"]))
@@ -7802,7 +7807,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         if lista_id is not None:
             cond.extend(("p.lista_id=%(lista_id)s", "p.telefono_valido=1"))
             params["lista_id"] = lista_id
-            _filtrar_tratamientos_reservo(cond, params, body.tratamientos)
+        _filtrar_tratamientos_reservo(cond, params, body.tratamientos, tabla=t, ambiente=amb_q)
         if amb_q != "desarrollo":
             if tiene_estado:
                 cond.append("p.estado <> 'error'")
@@ -8237,7 +8242,9 @@ class DestinosIn(BaseModel):
     tratamientos: list[str] = Field(default_factory=list, max_length=50)
 
 
-def _filtrar_tratamientos_reservo(condiciones, parametros, tratamientos):
+def _filtrar_tratamientos_reservo(condiciones, parametros, tratamientos, *, tabla, ambiente):
+    if tratamientos and not columna_existe(tabla, "tratamiento_ultima_atencion", ambiente):
+        raise HTTPException(422, detail="Esta base no admite el filtro de tratamientos.")
     filtros = []
     for indice, nombre in enumerate(tratamientos):
         clave = f"tratamiento_{indice}"
@@ -8275,8 +8282,7 @@ def _contar_elegibles_tabla(t: str, amb_q: str, amb: str,
         if lista_reservo:
             conds.insert(0, "p.lista_id=%(lista_id)s")
         parametros = {**_parametros_espera(emisor, fecha), "lista_id": reservo_lista_id}
-        if lista_reservo:
-            _filtrar_tratamientos_reservo(conds, parametros, tratamientos)
+        _filtrar_tratamientos_reservo(conds, parametros, tratamientos, tabla=t, ambiente=amb_q)
         cur.execute(
             f"SELECT p.telefono FROM {t} p"
             + (" WHERE " + " AND ".join(conds) if conds else ""),
@@ -8384,7 +8390,8 @@ def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensaj
         "base_datos": ((lista_reservo or {}).get("nombre") if lista_reservo
                        else t if esp else nombre_base(amb)),
         "reservo_lista_id": lista_id,
-        "tratamientos": reservo_pacientes.tratamientos_base(lista_id) if lista_id is not None else [],
+        "tratamientos": (reservo_pacientes.tratamientos_base(lista_id, tabla=t)
+                         if columna_existe(t, "tratamiento_ultima_atencion", amb_q) else []),
         "area_id": (esp["id"] if esp else None),
         "costo": costo,
         "limite_mensajeria": info_limite,
@@ -8636,12 +8643,11 @@ def _contar_reservados_prog(t: str, amb: str, amb_q: str,
         condiciones = []
         if reservo_lista_id is not None:
             condiciones.append("ep.reservo_lista_id=%(lista)s")
-            _filtrar_tratamientos_reservo(condiciones, parametros, tratamientos)
+        _filtrar_tratamientos_reservo(condiciones, parametros, tratamientos, tabla=t, ambiente=amb_q)
         cur.execute(
             "SELECT DISTINCT pd.paciente_id, pd.telefono FROM programado_destinatarios pd"
             " JOIN envios_programados ep ON ep.id = pd.prog_id"
-            + (" JOIN reservo_lista_pacientes p ON p.id=pd.paciente_id AND p.lista_id=ep.reservo_lista_id"
-               if reservo_lista_id is not None and tratamientos else "")
+            + (f" JOIN {t} p ON p.id=pd.paciente_id" if tratamientos else "")
             + " WHERE ep.tabla = %(tabla)s AND ep.ambiente = %(ambiente)s AND ep.estado IN"
             " ('pendiente', 'aprobado', 'enviando')"
             + (" AND " + " AND ".join(condiciones) if condiciones else ""),
@@ -8691,8 +8697,7 @@ def _preelegir_pacientes_prog(t: str, amb: str, amb_q: str, n: int, cur=None,
         + (" AND ep.reservo_lista_id = %(lista_id)s" if lista_reservo else "") + ")"
     )
     params = {"t": t, "amb": amb_q, **_parametros_espera(emisor, fecha)}
-    if lista_reservo:
-        _filtrar_tratamientos_reservo(cond, params, tratamientos)
+    _filtrar_tratamientos_reservo(cond, params, tratamientos, tabla=t, ambiente=amb_q)
     where = (" WHERE " + " AND ".join(cond)) if cond else ""
     sql = (f"SELECT p.id, p.nombre, p.apellido, p.telefono FROM {t} p{where}"
            " ORDER BY p.id" + ("" if solo_pruebas else " LIMIT %(n)s")

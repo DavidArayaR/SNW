@@ -208,8 +208,10 @@ async function cargarBasesPac() {
     areas = [];
     basesReservo = [];
   }
+  const baseEnlace = basesReservo.find((base) => String(base.id) === baseReservoEnlace);
   const anterior = baseElegidaSesion ? selBasePac.value
-    : baseReservoEnlace ? `reservo:${baseReservoEnlace}` : "";
+    : baseEnlace?.area_id ? `esp:${baseEnlace.area_id}`
+    : baseEnlace ? `reservo:${baseEnlace.id}` : "";
   baseReservoEnlace = null;
   if (filtroClinicaBases) {
     const previo = filtroClinicaBases.value || "todas";

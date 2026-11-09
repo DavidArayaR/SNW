@@ -3047,13 +3047,12 @@ async function actualizarResumenConf() {
 
   try {
     const espId = areaEnvioId();
-    const cuerpoEnvio = { plantilla_id: confPlantillaId, ambiente: ambienteEnvioConf() };
+    const cuerpoEnvio = { plantilla_id: confPlantillaId, ambiente: ambienteEnvioConf(), tratamientos };
     cuerpoEnvio.centro = $("#selCentroConf")?.value || null;
     if (espId != null) cuerpoEnvio.area_id = espId;
     const listaReservoId = idListaReservo(baseSeleccionadaConf());
     if (listaReservoId != null) {
       cuerpoEnvio.reservo_lista_id = listaReservoId;
-      cuerpoEnvio.tratamientos = tratamientos;
     }
     const res = await fetch("api/notificaciones/destinatarios", {
       method: "POST",
@@ -3257,8 +3256,8 @@ $("#btnConfirmarIniciarConf").addEventListener("click", async () => {
     const listaReservoLanzar = idListaReservo(baseSeleccionadaConf());
     if (listaReservoLanzar != null) {
       cuerpo.lista_reservo_id = listaReservoLanzar;
-      cuerpo.tratamientos = tratamientosEnvio("#tratamientosConf", baseSeleccionadaConf());
     }
+    cuerpo.tratamientos = tratamientosEnvio("#tratamientosConf", baseSeleccionadaConf());
     cuerpo.limite = limiteSeleccionado;
     const res = await fetch("api/notificaciones/enviar", {
       method: "POST",
@@ -3966,12 +3965,11 @@ async function cargarCupoProg(forzar = false) {
   actualizarPasosProg();
   if (!base) return;
   try {
-    const cuerpo = { ambiente, prevision_programado: true };
+    const cuerpo = { ambiente, prevision_programado: true, tratamientos };
     cuerpo.centro = $("#selProgCentro")?.value || null;
     if (areaId) cuerpo.area_id = areaId;
     if (listaReservoId != null) {
       cuerpo.reservo_lista_id = listaReservoId;
-      cuerpo.tratamientos = tratamientos;
     }
     if (fecha) cuerpo.fecha = fecha;
     if (fechaHora && fechaHora.length >= 16) cuerpo.programado_para = fechaHora.slice(0, 16);
@@ -4557,8 +4555,8 @@ async function programarEnvio() {
       method: "POST",
       headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ ambiente, ...(areaId != null ? { area_id: areaId } : {}),
-        ...(listaReservoId != null ? { reservo_lista_id: listaReservoId,
-          tratamientos: tratamientosEnvio("#tratamientosProg", base) } : {}),
+        ...(listaReservoId != null ? { reservo_lista_id: listaReservoId } : {}),
+        tratamientos: tratamientosEnvio("#tratamientosProg", base),
         plantilla_id: tpl.id, centro: centro.codigo, programado_para: inpF.value, limite }),
     });
     const data = await res.json().catch(() => ({}));

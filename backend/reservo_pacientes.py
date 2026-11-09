@@ -818,12 +818,17 @@ def listar_bases_contacto() -> list[dict]:
     return items
 
 
-def tratamientos_base(lista_id: int) -> list[str]:
+def tratamientos_base(lista_id: int | None, *, tabla: str = TABLA_LISTA_RESERVO) -> list[str]:
+    if tabla != TABLA_LISTA_RESERVO:
+        import servicio_areas
+        if not servicio_areas.tabla_valida(tabla):
+            return []
     with _db() as conn, conn.cursor() as cur:
+        filtro_lista = " AND lista_id=%s" if tabla == TABLA_LISTA_RESERVO else ""
         cur.execute(
             "SELECT DISTINCT tratamiento_ultima_atencion AS tratamientos"
-            " FROM reservo_lista_pacientes WHERE lista_id=%s AND tratamiento_ultima_atencion IS NOT NULL",
-            (lista_id,),
+            f" FROM {tabla} WHERE tratamiento_ultima_atencion IS NOT NULL" + filtro_lista,
+            (lista_id,) if filtro_lista else (),
         )
         nombres = {
             nombre for fila in cur.fetchall()

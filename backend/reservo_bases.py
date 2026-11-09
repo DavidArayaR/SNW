@@ -7,7 +7,7 @@ from db import conectar
 import servicio_areas
 
 
-def integrar_bases():
+def integrar_bases(base_id: int | None = None):
     with conectar() as conn, conn.cursor() as cur:
         cur.execute("SELECT GET_LOCK('snw-reservo-listas', 30) AS adquirido")
         if not (cur.fetchone() or {}).get('adquirido'):
@@ -17,7 +17,8 @@ def integrar_bases():
             if not cur.fetchone():
                 cur.execute('ALTER TABLE reservo_bases_contacto ADD COLUMN area_id INT NULL')
             cur.execute("SELECT id,nombre,area_id FROM reservo_bases_contacto"
-                        " WHERE origen <> 'RECUPERACION' ORDER BY id")
+                        " WHERE area_id IS NULL" + (" AND id=%s" if base_id is not None else "")
+                        + " ORDER BY id", (base_id,) if base_id is not None else ())
             bases = list(cur.fetchall())
             for base in bases:
                 if base.get('area_id'):
