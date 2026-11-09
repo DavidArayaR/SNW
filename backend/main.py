@@ -9768,8 +9768,10 @@ async def _procesar_cita_reagendar(cita: dict, plantillas_por_centro: dict) -> N
             if not cur.fetchone():
                 return
             cur.execute("SELECT 1 FROM log_envios le JOIN envios e ON e.id=le.envio_id"
-                        " WHERE le.numero_telefono=%s AND e.base_datos='paciente_reagendar'"
-                        " AND le.estado_whatsapp IN ('delivered','read') LIMIT 1", (telefono,))
+                        " JOIN reagendar_batches b ON b.envio_id=e.id"
+                        " WHERE le.numero_telefono=%s AND b.lote_id=%s AND e.base_datos='paciente_reagendar'"
+                        " AND le.estado_whatsapp IN ('delivered','read') LIMIT 1",
+                        (telefono, cita["lote_id"]))
             if cur.fetchone():
                 paciente_reagendar.marcar_fallo(cita, "YA_ENTREGADO")
                 return
@@ -9800,6 +9802,7 @@ async def _procesar_cita_reagendar(cita: dict, plantillas_por_centro: dict) -> N
 
 async def _loop_reagendar() -> None:
     agrupado = False
+    lote_actual = None
     while True:
         try:
             if not agrupado:
@@ -9825,8 +9828,12 @@ async def _loop_reagendar() -> None:
                                  or p.get("encabezado_meta_registrado"))):
                         disponibles[codigo] = p
                 cita = await asyncio.to_thread(
-                    paciente_reagendar.reclamar_pendiente, list(disponibles))
+                    paciente_reagendar.reclamar_pendiente, list(disponibles), lote_id=lote_actual)
+                if not cita and lote_actual is not None:
+                    lote_actual = None
+                    cita = await asyncio.to_thread(paciente_reagendar.reclamar_pendiente, list(disponibles))
                 if cita:
+                    lote_actual = cita["lote_id"]
                     with accion_de_error("procesar envío de reagendamiento"):
                         await _procesar_cita_reagendar(cita, disponibles)
                     continue

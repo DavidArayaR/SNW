@@ -774,18 +774,30 @@ def asegurar_tabla_config() -> None:
                 "CREATE TABLE IF NOT EXISTS reagendar_destinatarios ("
                 " telefono VARCHAR(20) NOT NULL,"
                 " modo_prueba TINYINT(1) NOT NULL DEFAULT 0,"
+                " lote_clave BIGINT UNSIGNED NOT NULL DEFAULT 0,"
                 " cita_id BIGINT UNSIGNED NOT NULL,"
                 " estado VARCHAR(20) NOT NULL DEFAULT 'PENDIENTE',"
-                " PRIMARY KEY (telefono, modo_prueba),"
+                " PRIMARY KEY (telefono, modo_prueba, lote_clave),"
                 " KEY idx_reagendar_destinatario_cita (cita_id)"
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
             )
-            # Conserva la primera cita enviada si existían duplicados anteriores.
-            # La clave única impide nuevos destinatarios duplicados entre instancias.
+            cur.execute("SHOW COLUMNS FROM paciente_reagendar LIKE 'lote_clave'")
+            if not cur.fetchone():
+                cur.execute("ALTER TABLE paciente_reagendar DROP INDEX uq_paciente_reagendar_cita,"
+                            " ADD lote_clave BIGINT UNSIGNED GENERATED ALWAYS AS (COALESCE(lote_id,0)) STORED,"
+                            " ADD UNIQUE KEY uq_reagendar_cita_lote (lote_clave,reservo_cita_uuid)")
+            cur.execute("SHOW COLUMNS FROM reagendar_destinatarios LIKE 'lote_clave'")
+            if not cur.fetchone():
+                cur.execute("ALTER TABLE reagendar_destinatarios DROP PRIMARY KEY,"
+                            " ADD lote_clave BIGINT UNSIGNED NOT NULL DEFAULT 0,"
+                            " ADD PRIMARY KEY (telefono,modo_prueba,lote_clave)")
+            cur.execute("UPDATE reagendar_destinatarios d JOIN paciente_reagendar r ON r.id=d.cita_id"
+                        " SET d.lote_clave=r.lote_clave WHERE d.lote_clave=0 AND r.lote_clave<>0")
+            # Se reserva un único destinatario por teléfono dentro de cada carga.
             cur.execute(
                 "INSERT IGNORE INTO reagendar_destinatarios"
-                " (telefono, modo_prueba, cita_id, estado)"
-                " SELECT paciente_telefono_normalizado, modo_prueba, id,"
+                " (telefono, modo_prueba, lote_clave, cita_id, estado)"
+                " SELECT paciente_telefono_normalizado, modo_prueba, lote_clave, id,"
                 " CASE WHEN estado_envio='ENVIADO' THEN 'ENVIADO' ELSE 'PENDIENTE' END"
                 " FROM paciente_reagendar"
                 " WHERE paciente_telefono_normalizado IS NOT NULL"
@@ -798,6 +810,7 @@ def asegurar_tabla_config() -> None:
                 "UPDATE paciente_reagendar r JOIN reagendar_destinatarios d"
                 " ON d.telefono=r.paciente_telefono_normalizado"
                 " AND d.modo_prueba=r.modo_prueba"
+                " AND d.lote_clave=r.lote_clave"
                 " SET r.estado_envio='OMITIDO',"
                 " r.ultimo_error_codigo='PACIENTE_DUPLICADO'"
                 " WHERE r.id<>d.cita_id"
@@ -805,13 +818,14 @@ def asegurar_tabla_config() -> None:
             )
             cur.execute(
                 "UPDATE reagendar_destinatarios d JOIN ("
-                " SELECT paciente_telefono_normalizado AS telefono, modo_prueba,"
+                " SELECT paciente_telefono_normalizado AS telefono, modo_prueba, lote_clave,"
                 " MIN(id) AS cita_id FROM paciente_reagendar"
                 " WHERE estado_envio='ENVIADO'"
                 " AND paciente_telefono_normalizado IS NOT NULL"
-                " GROUP BY paciente_telefono_normalizado, modo_prueba"
+                " GROUP BY paciente_telefono_normalizado, modo_prueba, lote_clave"
                 " ) enviados ON enviados.telefono=d.telefono"
                 " AND enviados.modo_prueba=d.modo_prueba"
+                " AND enviados.lote_clave=d.lote_clave"
                 " SET d.estado='ENVIADO', d.cita_id=enviados.cita_id"
                 " WHERE d.estado<>'ENVIADO'"
             )

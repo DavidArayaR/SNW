@@ -305,10 +305,11 @@ def importar_por_partes(datos: bytes, cfg: dict, *, modo_prueba: bool = False) -
     resumen["omittedReasons"] = {}
     ids_lote, estados, horarios, errores, resultados = [], [], [], [], []
     ids_elegibles = []
+    lote_archivo = None
     for indice, (bloque, fila_inicial) in enumerate(partes, 1):
         # Los lotes parciales quedan en revisión hasta terminar todo el archivo.
         resultado = importar(bloque, cfg, recibido=recibido, modo_prueba=modo_prueba,
-                             programar_automaticamente=False)
+                             programar_automaticamente=False, lote_existente=lote_archivo)
         parcial = resultado["summary"]
         for clave in ("received", "inserted", "recovered", "eligible", "alreadyExists",
                       "alreadySent", "rejected"):
@@ -316,9 +317,11 @@ def importar_por_partes(datos: bytes, cfg: dict, *, modo_prueba: bool = False) -
         for motivo, cantidad in (parcial.get("omittedReasons") or {}).items():
             resumen["omittedReasons"][motivo] = resumen["omittedReasons"].get(motivo, 0) + cantidad
         if parcial.get("batchId") is not None:
-            ids_lote.append(parcial["batchId"])
-            if parcial.get("eligible") and not modo_prueba:
-                ids_elegibles.append(parcial["batchId"])
+            lote_archivo = parcial["batchId"]
+            if not ids_lote:
+                ids_lote.append(lote_archivo)
+            if parcial.get("eligible") and not ids_elegibles:
+                ids_elegibles.append(lote_archivo)
         if parcial.get("batchStatus"):
             estados.append(parcial["batchStatus"])
         if parcial.get("scheduledAtUtc"):
@@ -340,6 +343,15 @@ def importar_por_partes(datos: bytes, cfg: dict, *, modo_prueba: bool = False) -
                     parcial["scheduledAtUtc"] = horario_texto
             estados = [r["summary"]["batchStatus"] for r in resultados]
             horarios = [horario_texto]
+    if lote_archivo is not None and not (resumen["inserted"] or resumen["recovered"]):
+        with conectar() as conn, conn.cursor() as cur:
+            cur.execute("UPDATE reagendar_lotes SET estado='COMPLETADO'"
+                        " WHERE id=%s AND estado='REVISION' AND creados=0", (lote_archivo,))
+            conn.commit()
+        for resultado in resultados:
+            if resultado["summary"].get("batchId") == lote_archivo:
+                resultado["summary"]["batchStatus"] = "COMPLETADO"
+        estados = ["COMPLETADO"]
     resumen.update({"parts": len(partes), "batchIds": ids_lote,
                     "batchId": ids_lote[0] if len(ids_lote) == 1 else None,
                     "batchStatus": (estados[0] if estados and len(set(estados)) == 1
@@ -367,7 +379,8 @@ _COLUMNAS = ("fecha", "ventana", "clinica_id", "clinica_nombre", "reservo_cita_u
 
 
 def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None,
-            modo_prueba: bool = False, programar_automaticamente: bool = True) -> dict:
+            modo_prueba: bool = False, programar_automaticamente: bool = True,
+            lote_existente: int | None = None) -> dict:
     registros, errores, recibidas = analizar_csv(datos, cfg)
     if modo_prueba and recibidas != 1:
         raise CsvInvalido("El modo de prueba requiere un CSV de una sola cita.")
@@ -389,8 +402,13 @@ def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None,
     from supresion import bloquear_huella_baja, limpiar_cerrojos_baja_inactivos, huella_telefono
     huellas_baja_inactivas: list[str] = []
     with conectar() as conn, conn.cursor() as cur:
-        lote_id = None
-        if not modo_prueba:
+        lote_id = lote_existente
+        if lote_id is not None:
+            cur.execute("SELECT id FROM reagendar_lotes WHERE id=%s AND fecha=%s AND ventana=%s"
+                        " AND estado='REVISION' FOR UPDATE", (lote_id, fecha, ventana))
+            if not cur.fetchone():
+                raise RuntimeError("La carga de este CSV ya no está disponible para importar.")
+        elif not modo_prueba:
             cur.execute(
                 "INSERT INTO reagendar_lotes (fecha, ventana, recibido_en, estado)"
                 " VALUES (%s, %s, %s, 'REVISION')",
@@ -418,61 +436,11 @@ def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None,
                     motivos_omitidos["PACIENTE_DE_BAJA"] = (
                         motivos_omitidos.get("PACIENTE_DE_BAJA", 0) + 1)
                     continue
-            cur.execute("SELECT id, lote_id, fecha, ventana, clinica_nombre, modo_prueba,"
-                        " estado_envio, ultimo_error_codigo,"
-                        " paciente_telefono_normalizado, whatsapp_opt_out, intentos_envio,"
-                        " reserva_token, ultimo_intento_en, envio_id, log_envio_id,"
-                        " whatsapp_message_id FROM paciente_reagendar"
-                        " WHERE reservo_cita_uuid=%s FOR UPDATE", (registro["reservo_cita_uuid"],))
+            cur.execute("SELECT estado_envio FROM paciente_reagendar"
+                        " WHERE reservo_cita_uuid=%s AND lote_clave=%s FOR UPDATE",
+                        (registro["reservo_cita_uuid"], lote_id or 0))
             existente = cur.fetchone()
             if existente:
-                if bool(existente["modo_prueba"]) != modo_prueba:
-                    raise ModoImportacionIncompatible(
-                        "El identificador de cita ya pertenece a otro modo de importación.")
-                # Solo una nueva importación explícita puede recuperar una cita
-                # omitida por el nombre de la clínica. Nunca reactiva envíos
-                # intentados, bajas ni un teléfono reservado por otra cita.
-                if (not modo_prueba and telefono and not registro["ultimo_error_codigo"]
-                        and existente["fecha"] == registro["fecha"]
-                        and existente["ventana"] == registro["ventana"]
-                        and _normalizar_nombre(existente["clinica_nombre"])
-                        == _normalizar_nombre(registro["clinica_nombre"])
-                        and existente["estado_envio"] == "OMITIDO"
-                        and existente["ultimo_error_codigo"] == "CLINICA_DESCONOCIDA"
-                        and existente["paciente_telefono_normalizado"] == telefono
-                        and not any(existente[clave] for clave in (
-                            "whatsapp_opt_out", "intentos_envio", "reserva_token",
-                            "ultimo_intento_en", "envio_id", "log_envio_id",
-                            "whatsapp_message_id"))):
-                    cur.execute("SELECT 1 FROM supresion_telefonos"
-                                " WHERE huella=%s AND estado <> 'exento' FOR UPDATE",
-                                (huella_telefono(telefono),))
-                    suprimido = cur.fetchone()
-                    cur.execute("SELECT 1 FROM paciente_reagendar"
-                                " WHERE paciente_telefono_normalizado=%s"
-                                " AND whatsapp_opt_out=1 LIMIT 1", (telefono,))
-                    baja = cur.fetchone()
-                    cur.execute("SELECT cita_id, estado FROM reagendar_destinatarios"
-                                " WHERE telefono=%s AND modo_prueba=0 FOR UPDATE", (telefono,))
-                    destino = cur.fetchone()
-                    if (not suprimido and not baja and destino
-                            and destino["cita_id"] == existente["id"]
-                            and destino["estado"] == "PENDIENTE"):
-                        cur.execute("UPDATE paciente_reagendar SET lote_id=%s,"
-                                    " centro_codigo=%s, estado_envio='PENDIENTE',"
-                                    " ultimo_error_codigo=NULL WHERE id=%s"
-                                    " AND estado_envio='OMITIDO'"
-                                    " AND ultimo_error_codigo='CLINICA_DESCONOCIDA'"
-                                    " AND intentos_envio=0 AND whatsapp_opt_out=0",
-                                    (lote_id, registro["centro_codigo"], existente["id"]))
-                        if cur.rowcount == 1:
-                            if existente["lote_id"] is not None:
-                                cur.execute("UPDATE reagendar_lotes"
-                                            " SET creados=GREATEST(0, creados-1) WHERE id=%s",
-                                            (existente["lote_id"],))
-                            recuperados += 1
-                            elegibles += 1
-                            continue
                 duplicados += 1
                 ya_enviados += int(existente["estado_envio"] == "ENVIADO")
                 continue
@@ -493,22 +461,9 @@ def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None,
                 cur.execute("SELECT d.estado, r.estado_envio AS envio_estado"
                             " FROM reagendar_destinatarios d"
                             " LEFT JOIN paciente_reagendar r ON r.id=d.cita_id"
-                            " WHERE d.telefono=%s AND d.modo_prueba=%s FOR UPDATE",
-                            (telefono, int(modo_prueba)))
+                            " WHERE d.telefono=%s AND d.modo_prueba=%s AND d.lote_clave=%s FOR UPDATE",
+                            (telefono, int(modo_prueba), lote_id or 0))
                 destinatario = cur.fetchone()
-                if not destinatario and not modo_prueba:
-                    # Se consulta después de bloquear el marcador en claro.
-                    # Así una importación concurrente espera a la limpieza de
-                    # vencidos y luego ve la huella creada en esa transacción.
-                    cur.execute(
-                        "SELECT 1 FROM reagendar_destinatarios_huellas"
-                        " WHERE huella=%s FOR UPDATE",
-                        (huella_telefono(telefono),),
-                    )
-                    if cur.fetchone():
-                        duplicados += 1
-                        ya_enviados += 1
-                        continue
                 if destinatario:
                     duplicados += 1
                     enviado = (destinatario["estado"] == "ENVIADO"
@@ -516,14 +471,14 @@ def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None,
                     ya_enviados += int(enviado)
                     if enviado and destinatario["estado"] != "ENVIADO":
                         cur.execute("UPDATE reagendar_destinatarios SET estado='ENVIADO'"
-                                    " WHERE telefono=%s AND modo_prueba=%s",
-                                    (telefono, int(modo_prueba)))
+                                    " WHERE telefono=%s AND modo_prueba=%s AND lote_clave=%s",
+                                    (telefono, int(modo_prueba), lote_id or 0))
                     continue
                 # Se reserva antes de insertar la cita: la clave única serializa
                 # importaciones concurrentes del mismo teléfono en MySQL.
                 cur.execute("INSERT IGNORE INTO reagendar_destinatarios"
-                            " (telefono, modo_prueba, cita_id) VALUES (%s, %s, 0)",
-                            (telefono, int(modo_prueba)))
+                            " (telefono, modo_prueba, lote_clave, cita_id) VALUES (%s, %s, %s, 0)",
+                            (telefono, int(modo_prueba), lote_id or 0))
                 if not cur.rowcount:
                     duplicados += 1
                     continue
@@ -536,8 +491,8 @@ def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None,
                 cita_id = cur.lastrowid
                 if telefono:
                     cur.execute("UPDATE reagendar_destinatarios SET cita_id=%s"
-                                " WHERE telefono=%s AND modo_prueba=%s",
-                                (cita_id, telefono, int(modo_prueba)))
+                                " WHERE telefono=%s AND modo_prueba=%s AND lote_clave=%s",
+                                (cita_id, telefono, int(modo_prueba), lote_id or 0))
                 if registro["ultimo_error_codigo"] or modo_prueba:
                     cur.execute("UPDATE paciente_reagendar SET estado_envio='OMITIDO'"
                                 " WHERE id=%s", (cita_id,))
@@ -552,10 +507,11 @@ def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None,
                     raise
                 if telefono:
                     cur.execute("DELETE FROM reagendar_destinatarios"
-                                " WHERE telefono=%s AND modo_prueba=%s AND cita_id=0",
-                                (telefono, int(modo_prueba)))
+                                " WHERE telefono=%s AND modo_prueba=%s AND lote_clave=%s AND cita_id=0",
+                                (telefono, int(modo_prueba), lote_id or 0))
                 cur.execute("SELECT modo_prueba FROM paciente_reagendar"
-                            " WHERE reservo_cita_uuid=%s", (registro["reservo_cita_uuid"],))
+                            " WHERE reservo_cita_uuid=%s AND lote_clave=%s",
+                            (registro["reservo_cita_uuid"], lote_id or 0))
                 existente = cur.fetchone()
                 if existente is None or bool(existente["modo_prueba"]) != modo_prueba:
                     raise ModoImportacionIncompatible(
@@ -569,10 +525,12 @@ def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None,
             if programar_automaticamente:
                 programado = programacion_tras_carga(programado, dt.datetime.now(UTC))
             vigente = elegibles > 0 and programado is not None and programar_automaticamente
-            estado = "PROGRAMADO" if vigente else "REVISION" if insertados + recuperados else "COMPLETADO"
+            estado = ("PROGRAMADO" if vigente else "REVISION"
+                      if insertados + recuperados or not programar_automaticamente else "COMPLETADO")
             cur.execute(
                 "UPDATE reagendar_lotes SET estado=%s, programado_para=%s,"
-                " creados=%s, rechazados=%s, repetidos=%s, recibidos=%s WHERE id=%s",
+                " creados=creados+%s, rechazados=rechazados+%s,"
+                " repetidos=repetidos+%s, recibidos=recibidos+%s WHERE id=%s",
                 (estado, programado if vigente else None, insertados + recuperados, len(errores),
                  duplicados, recibidas, lote_id))
         limpiar_cerrojos_baja_inactivos(cur, huellas_baja_inactivas)
@@ -604,7 +562,7 @@ def consumir_cuota(actor: str, maximo: int, ventana_s: int = 900) -> bool:
     return permitido
 
 
-def reclamar_pendiente(centros: list[str]) -> dict | None:
+def reclamar_pendiente(centros: list[str], *, lote_id: int | None = None) -> dict | None:
     """Reserva atómica compartida entre workers; sin HTTP dentro de la transacción."""
     if not centros:
         return None
@@ -621,16 +579,19 @@ def reclamar_pendiente(centros: list[str]) -> dict | None:
             " AND l.estado IN ('PROGRAMADO','APLAZADO','EN_CURSO')"
             " AND l.programado_para <= UTC_TIMESTAMP()"
             " AND (r.proximo_reintento_en IS NULL OR r.proximo_reintento_en <= UTC_TIMESTAMP())"
-            " ORDER BY r.id LIMIT 1 FOR UPDATE", tuple(centros))
+            + (" AND r.lote_id=%s" if lote_id is not None else "")
+            + " ORDER BY l.programado_para, l.id, r.id LIMIT 1 FOR UPDATE",
+            (*centros, lote_id) if lote_id is not None else tuple(centros))
         fila = cur.fetchone()
         if not fila:
             return None
         telefono = fila["paciente_telefono_normalizado"]
         cur.execute("INSERT IGNORE INTO reagendar_destinatarios"
-                    " (telefono, modo_prueba, cita_id) VALUES (%s, 0, %s)",
-                    (telefono, fila["id"]))
+                    " (telefono, modo_prueba, lote_clave, cita_id) VALUES (%s, 0, %s, %s)",
+                    (telefono, fila["lote_id"], fila["id"]))
         cur.execute("SELECT cita_id, estado FROM reagendar_destinatarios"
-                    " WHERE telefono=%s AND modo_prueba=0 FOR UPDATE", (telefono,))
+                    " WHERE telefono=%s AND modo_prueba=0 AND lote_clave=%s FOR UPDATE",
+                    (telefono, fila["lote_id"]))
         destinatario = cur.fetchone()
         if (destinatario["cita_id"] != fila["id"]
                 or destinatario["estado"] in ("ENVIADO", "ERROR")):
@@ -643,7 +604,7 @@ def reclamar_pendiente(centros: list[str]) -> dict | None:
             return None
         token = secrets.token_hex(16)
         cur.execute("UPDATE reagendar_destinatarios SET estado='PROCESANDO'"
-                    " WHERE telefono=%s AND modo_prueba=0", (telefono,))
+                    " WHERE telefono=%s AND modo_prueba=0 AND lote_clave=%s", (telefono, fila["lote_id"]))
         cur.execute(
             "UPDATE paciente_reagendar SET estado_envio='PROCESANDO', reserva_token=%s,"
             " reservado_en=UTC_TIMESTAMP(), ultimo_intento_en=UTC_TIMESTAMP(),"
@@ -706,12 +667,14 @@ def preparar_reintentos_manuales(ids: list[int], validar_cita, *, permitir_incie
             if cur.fetchone():
                 raise ValueError("La selección incluye un paciente dado de baja.")
             cur.execute("SELECT 1 FROM log_envios le JOIN envios e ON e.id=le.envio_id"
-                        " WHERE le.numero_telefono=%s AND e.base_datos='paciente_reagendar'"
-                        " AND le.estado_whatsapp IN ('delivered','read') LIMIT 1", (telefono,))
+                        " JOIN reagendar_batches b ON b.envio_id=e.id"
+                        " WHERE le.numero_telefono=%s AND b.lote_id=%s AND e.base_datos='paciente_reagendar'"
+                        " AND le.estado_whatsapp IN ('delivered','read') LIMIT 1", (telefono, cita["lote_id"]))
             if cur.fetchone():
                 raise ValueError("Un paciente seleccionado ya recibió un reagendamiento.")
             cur.execute("SELECT cita_id, estado FROM reagendar_destinatarios"
-                        " WHERE telefono=%s AND modo_prueba=0 FOR UPDATE", (telefono,))
+                        " WHERE telefono=%s AND modo_prueba=0 AND lote_clave=%s FOR UPDATE",
+                        (telefono, cita["lote_id"]))
             destino = cur.fetchone()
             if not destino or destino["cita_id"] != cita["id"] or destino["estado"] == "PROCESANDO":
                 raise ValueError("Un destinatario está ocupado por otro envío. Actualiza la lista.")
