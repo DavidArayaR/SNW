@@ -28,4 +28,8 @@ def clave_umbral_recuperacion(codigo: str) -> str:
     return f"{codigo}_RESERVO_RECUPERACION_MESES"
 
 
+def clave_cobertura_recuperacion(codigo: str) -> str:
+    return f"{codigo}_RESERVO_RECUPERACION_COBERTURA"
+
+
 CLAVES_TOKEN = {clave_token(codigo) for codigo in RESERVO_CLINICAS}

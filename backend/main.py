@@ -5630,6 +5630,9 @@ for _codigo_reservo, _nombre_reservo in RESERVO_CLINICAS.items():
             {"clave": recuperacion_pacientes.clave_umbral(_codigo_reservo),
              "etiqueta": "Meses mínimos de inactividad", "tipo": "number",
              "ayuda": "Entre 1 y 120 meses. Vacío deshabilita nuevas solicitudes de recuperación para esta clínica."},
+            {"clave": recuperacion_pacientes.clave_cobertura(_codigo_reservo), "tipo": "bool",
+             "etiqueta": "Cobertura histórica de Reservo verificada",
+             "ayuda": "Activa solo si confirmaste que el token cubre todas las sedes requeridas, el historial solicitado y la paginación completa."},
             {"tipo": "accion_reservo", "codigo": _codigo_reservo,
              "etiqueta": "Probar conexión", "icono": "fa-plug",
              "ayuda": "Consulta una página de la fecha indicada (o de hoy si se deja vacía). No guarda pacientes; muestra estados y nombres de tratamientos observados."},
@@ -5828,8 +5831,7 @@ def obtener_solicitud_recuperacion(solicitud_id: str, sesion: dict = Depends(sol
 
 
 def obtener_resultado_recuperacion(solicitud_id: str, sesion: dict = Depends(solo_admin)):
-    recuperacion_pacientes.obtener(sesion["usuario"], solicitud_id)
-    raise HTTPException(409, detail="La solicitud todavía no tiene un resultado.")
+    return recuperacion_pacientes.obtener_resultado(sesion["usuario"], solicitud_id)
 
 
 def listar_configuracion_reservo(sesion: dict = Depends(solo_admin)):
@@ -6353,6 +6355,7 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
     catalogo = catalogo_centros(incluir_desactivadas=True)
     claves_estado_reservo = {clave_estado_atendido_reservo(c) for c in RESERVO_CLINICAS}
     claves_verificado_reservo = {clave_estado_verificado_reservo(c) for c in RESERVO_CLINICAS}
+    claves_verificado_reservo.update(recuperacion_pacientes.clave_cobertura(c) for c in RESERVO_CLINICAS)
     claves_umbral = {recuperacion_pacientes.clave_umbral(c) for c in RESERVO_CLINICAS}
     claves_clinicas = {c["clave"] for codigo, nombre in catalogo.items()
                        for c in _seccion_centro(codigo, nombre)["campos"] if "clave" in c}
@@ -9831,6 +9834,7 @@ async def _arrancar_scheduler_programados() -> None:
     else:
         if esquema_reservo_listo:
             asyncio.create_task(reservo_pacientes.loop_trabajos())
+            asyncio.create_task(recuperacion_pacientes.loop_trabajos())
         else:
             print("[RESERVO] Worker inactivo: falta instalar el esquema de Pacientes Reservo.",
                   flush=True)

@@ -21,6 +21,7 @@ from telefono import normalizar_telefono
 from whatsapp_channels import CENTROS, claves_centro
 from reservo_catalogo import (
     RESERVO_CLINICAS, clave_estado_atendido, clave_estado_verificado, clave_umbral_recuperacion,
+    clave_cobertura_recuperacion,
     clave_token,
 )
 
@@ -540,6 +541,7 @@ for _codigo_reservo in RESERVO_CLINICAS:
     CONFIG_DEFAULTS[clave_estado_atendido(_codigo_reservo)] = ""
     CONFIG_DEFAULTS[clave_estado_verificado(_codigo_reservo)] = "false"
     CONFIG_DEFAULTS[clave_umbral_recuperacion(_codigo_reservo)] = ""
+    CONFIG_DEFAULTS[clave_cobertura_recuperacion(_codigo_reservo)] = "false"
 
 _CLAVES_CENTRO_ANTIGUAS = {
     "SMPT_WSP_PHONE_NUMER": "SMPT_WSP_PHONE_NUMBER",

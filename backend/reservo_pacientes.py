@@ -582,7 +582,8 @@ class ClienteReservo:
             return datos
         raise ReservoError("No se pudo completar la consulta a Reservo.")
 
-    def iterar_citas(self, desde: dt.date, hasta: dt.date, *, dias_por_tramo: int = 31):
+    def iterar_citas(self, desde: dt.date, hasta: dt.date, *, dias_por_tramo: int = 31,
+                    exigir_cobertura: bool = False):
         for inicio, fin in dividir_periodo(desde, hasta, dias_por_tramo=dias_por_tramo):
             pagina = 1
             visitadas = set()
@@ -591,8 +592,13 @@ class ClienteReservo:
                     raise ReservoError("La paginación de Reservo no terminó correctamente.")
                 visitadas.add(pagina)
                 datos = self.obtener_pagina(inicio, fin, pagina)
+                if exigir_cobertura and "pagina_siguiente" not in datos:
+                    raise ReservoError("Reservo no confirmó el fin o la continuación de la paginación.")
+                siguiente = self._pagina_siguiente(datos.get("pagina_siguiente"), pagina)
+                if exigir_cobertura and siguiente is not None and siguiente != pagina + 1:
+                    raise ReservoError("La paginación de Reservo contiene un salto.")
                 yield inicio, fin, pagina, datos["resultados"]
-                pagina = self._pagina_siguiente(datos.get("pagina_siguiente"), pagina)
+                pagina = siguiente
 
     def listar_tratamientos(self, desde: dt.date, hasta: dt.date, *, al_recibir_pagina=None) -> list[dict]:
         """Consulta citas y devuelve solo el catálogo de tratamientos observado."""
