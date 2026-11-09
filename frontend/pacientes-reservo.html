@@ -44,24 +44,44 @@
             <h2 id="recuperacionTitulo"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> Recuperación de pacientes</h2>
             <button class="btn btn--ghost" id="recuperacionActualizar" type="button">Actualizar solicitudes</button>
           </div>
-          <p class="field__hint">Elige el mes de atención inicial. SNW revisará las atenciones posteriores para calcular la inactividad.</p>
           <form id="formRecuperacion" class="reservo-form">
+            <div class="reservo-form__paso"><span aria-hidden="true">1</span><strong>Elige la clínica y el período</strong></div>
             <label class="field"><span>Clínica</span><select id="recuperacionClinica" required></select></label>
             <label class="field"><span>Año</span><input id="recuperacionAnio" type="number" min="1000" max="9999" required></label>
             <label class="field"><span>Mes histórico</span><select id="recuperacionMes" required></select></label>
             <label class="field"><span>Meses de inactividad</span><input id="recuperacionMeses" type="number" min="1" max="120" step="1" required aria-describedby="recuperacionUmbral"></label>
-            <fieldset class="field reservo-form__tratamientos">
-              <legend>Tratamientos de la última atención</legend>
+            <div class="field reservo-form__tratamientos" role="group" aria-labelledby="recuperacionTratamientosTitulo">
+              <div class="reservo-form__paso"><span aria-hidden="true">2</span><strong id="recuperacionTratamientosTitulo">Consulta y elige los tratamientos</strong><small id="recuperacionTratamientosSeleccion" aria-live="polite"></small></div>
               <button id="recuperacionConsultarTratamientos" class="btn btn--ghost" type="button" disabled>Consultar tratamientos</button>
-              <div id="recuperacionTratamientos" class="reservo-tratamientos" aria-live="polite">Consulta los tratamientos de la clínica y el mes elegidos.</div>
-              <span class="field__hint">Marca hasta 50 tratamientos. Si no marcas ninguno, se incluyen todos.</span>
-            </fieldset>
+              <div id="recuperacionTratamientosHerramientas" class="reservo-tratamientos__herramientas" hidden>
+                <input id="recuperacionBuscarTratamiento" type="search" placeholder="Buscar por nombre" aria-label="Buscar tratamiento de recuperación">
+                <button id="recuperacionLimpiarTratamientos" class="btn btn--ghost" type="button">Limpiar selección</button>
+              </div>
+              <div id="recuperacionTratamientos" class="reservo-tratamientos" aria-live="polite">Primero elige la clínica y el período.</div>
+              <span class="field__hint">La selección se aplica a la última atención. Puedes marcar hasta 50 tratamientos.</span>
+            </div>
             <div class="reservo-form__accion reservo-form__accion--final">
-              <span class="field__hint" id="recuperacionUmbral">Ingresa entre 1 y 120 meses.</span>
-              <button id="recuperacionProcesar" class="btn btn--primary" type="submit" disabled>Procesar</button>
+              <div>
+                <div class="reservo-form__paso"><span aria-hidden="true">3</span><strong>Analiza y publica la base</strong></div>
+                <span class="field__hint" id="recuperacionUmbral">Ingresa entre 1 y 120 meses.</span>
+                <p id="recuperacionSiguientePaso" class="field__hint" aria-live="polite"></p>
+              </div>
+              <button id="recuperacionProcesar" class="btn btn--primary" type="submit" disabled>Analizar pacientes</button>
             </div>
           </form>
           <p id="recuperacionAviso" class="reservo-aviso" role="status" aria-live="polite"></p>
+          <section id="recuperacionDetalle" class="reservo-filtro-actual" aria-label="Resultado de recuperación" hidden>
+            <div>
+              <h3 id="recuperacionDetalleTitulo" tabindex="-1"></h3>
+              <p id="recuperacionEstado" role="status" aria-live="polite"></p>
+              <ul id="recuperacionConteos"></ul>
+              <button id="recuperacionRevisar" class="btn btn--ghost" type="button" hidden>Comprobar contactos</button>
+              <p id="recuperacionContactosAviso" role="status" aria-live="polite"></p>
+              <ul id="recuperacionContactos"></ul>
+              <button id="recuperacionPublicar" class="btn btn--primary" type="button" hidden>Publicar base de pacientes</button>
+              <a id="recuperacionAbrirBase" class="btn btn--ghost" hidden>Ver base en Pacientes</a>
+            </div>
+          </section>
           <div class="reservo-tabla-wrap">
             <table class="table reservo-tabla" aria-label="Historial de solicitudes de recuperación">
               <thead><tr><th scope="col">Clínica</th><th scope="col">Período</th><th scope="col">Umbral</th><th scope="col">Estado</th><th scope="col">Detalle</th></tr></thead>
@@ -73,18 +93,6 @@
             <span id="recuperacionPagina" class="pag-info" aria-live="polite">Página 1</span>
             <button id="recuperacionSiguiente" class="btn btn--ghost" type="button" disabled>Siguiente</button>
           </div>
-          <section id="recuperacionDetalle" class="reservo-filtro-actual" aria-label="Detalle de la solicitud" hidden>
-            <div>
-              <h3 id="recuperacionDetalleTitulo" tabindex="-1"></h3>
-              <p id="recuperacionEstado" role="status" aria-live="polite"></p>
-              <ul id="recuperacionConteos"></ul>
-              <button id="recuperacionRevisar" class="btn btn--ghost" type="button" hidden>Revisar contactos</button>
-              <p id="recuperacionContactosAviso" role="status" aria-live="polite"></p>
-              <ul id="recuperacionContactos"></ul>
-              <button id="recuperacionPublicar" class="btn" type="button" hidden>Publicar base de pacientes</button>
-              <a id="recuperacionAbrirBase" class="btn btn--ghost" hidden>Ver base en Pacientes</a>
-            </div>
-          </section>
         </section>
 
         <section class="panel reservo-panel">
@@ -206,7 +214,7 @@
     </section>
   </div>
   <script src="js/layout.js?v=reservo-nav2"></script>
-  <script src="js/pacientes-reservo.js?v=recuperacion-tratamientos3"></script>
+  <script src="js/pacientes-reservo.js?v=recuperacion-pasos1"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>

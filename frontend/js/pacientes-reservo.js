@@ -575,6 +575,8 @@
     const mesesInactividad = $("#recuperacionMeses");
     const consultarTratamientosRec = $("#recuperacionConsultarTratamientos");
     const tratamientosRec = $("#recuperacionTratamientos");
+    const herramientasRec = $("#recuperacionTratamientosHerramientas");
+    const buscarTratamientoRec = $("#recuperacionBuscarTratamiento");
     const procesar = $("#recuperacionProcesar");
     const aviso = $("#recuperacionAviso");
     const historial = $("#recuperacionSolicitudes");
@@ -630,9 +632,18 @@
       const historico = anio.checkValidity() && Number(anio.value) * 12 + Number(mes.value) < periodoActual();
       $("#recuperacionUmbral").textContent = !historico ? "Selecciona un mes histórico completo."
         : "Ingresa entre 1 y 120 meses de inactividad.";
-      consultarTratamientosRec.disabled = enviando || consultandoTratamientos || !historico || !centro;
-      procesar.disabled = enviando || consultandoTratamientos || !tratamientosConsultados || !historico || !centro
-        || !mesesInactividad.checkValidity() || tratamientosElegidos().length > 50;
+      const criteriosValidos = historico && centro && mesesInactividad.checkValidity();
+      const cantidad = tratamientosElegidos().length;
+      consultarTratamientosRec.disabled = enviando || consultandoTratamientos || !criteriosValidos;
+      procesar.disabled = enviando || consultandoTratamientos || !tratamientosConsultados || !criteriosValidos
+        || cantidad > 50;
+      $("#recuperacionTratamientosSeleccion").textContent = tratamientosConsultados
+        ? (cantidad ? `${cantidad} seleccionados` : "Todos los tratamientos") : "";
+      $("#recuperacionSiguientePaso").textContent = !criteriosValidos ? "Completa los datos del paso 1."
+        : consultandoTratamientos ? "Esperando la consulta de Reservo."
+        : !tratamientosConsultados ? "Consulta los tratamientos para continuar."
+        : cantidad > 50 ? "Selecciona como máximo 50 tratamientos."
+        : "Cuando termine el análisis podrás revisar cuántos pacientes se pueden publicar.";
     }
 
     function tratamientosElegidos() {
@@ -644,6 +655,8 @@
         versionTratamientos++;
         consultandoTratamientos = false;
         tratamientosConsultados = false;
+        herramientasRec.hidden = true;
+        buscarTratamientoRec.value = "";
         tratamientosRec.textContent = "Consulta los tratamientos nuevamente.";
       });
     }
@@ -656,6 +669,8 @@
       fin.setUTCFullYear(Number(anio.value), Number(mes.value), 0);
       consultandoTratamientos = true;
       tratamientosConsultados = false;
+      herramientasRec.hidden = true;
+      buscarTratamientoRec.value = "";
       validarFormulario();
       tratamientosRec.textContent = "Consultando tratamientos en Reservo…";
       try {
@@ -677,6 +692,7 @@
         });
         tratamientosRec.replaceChildren(...opciones);
         tratamientosConsultados = true;
+        herramientasRec.hidden = !opciones.length;
         if (!opciones.length) tratamientosRec.textContent = "No hay tratamientos para este período.";
       } catch (error) {
         if (version === versionTratamientos) tratamientosRec.textContent = error.message;
@@ -686,6 +702,17 @@
           validarFormulario();
         }
       }
+    });
+
+    buscarTratamientoRec.addEventListener("input", () => {
+      const termino = buscarTratamientoRec.value.trim().toLocaleLowerCase("es");
+      for (const opcion of tratamientosRec.querySelectorAll("label")) {
+        opcion.hidden = !opcion.textContent.toLocaleLowerCase("es").includes(termino);
+      }
+    });
+    $("#recuperacionLimpiarTratamientos").addEventListener("click", () => {
+      for (const casilla of tratamientosRec.querySelectorAll("input:checked")) casilla.checked = false;
+      validarFormulario();
     });
 
     function conteos(id, datos, campos) {
@@ -723,7 +750,7 @@
       }
     }
 
-    async function consultarDetalle(id, enfocar = false, reintentos = 0) {
+    async function consultarDetalle(id, enfocar = false, reintentos = 0, comprobar = false) {
       const version = secuencia;
       const url = `${ruta}/solicitudes/${encodeURIComponent(id)}`;
       try {
@@ -740,7 +767,7 @@
             etiquetas[fila.estado] || fila.estado;
         }
         if (activa(fila.estado)) {
-          temporizador = setTimeout(() => consultarDetalle(id), 5000);
+          temporizador = setTimeout(() => consultarDetalle(id, false, 0, comprobar), 5000);
           return;
         }
         const resultado = await request(`${url}/resultado`);
@@ -749,6 +776,7 @@
         conteos("#recuperacionConteos", resultado.conteos, { pacientes_analizados: "Pacientes analizados",
           pacientes_inactivos: "Pacientes inactivos", citas_sin_uuid: "Citas sin identificador" });
         revisar.hidden = fila.estado !== "ANALIZADA";
+        if (comprobar && fila.estado === "ANALIZADA") revisarContactos();
         if (resultado.lista_generada_id) {
           abrirBase.href = `pacientes.html?base_reservo=${encodeURIComponent(resultado.lista_generada_id)}`;
           abrirBase.hidden = false;
@@ -760,13 +788,13 @@
         if (version !== secuencia) return;
         estado.textContent = error.message;
         if (!enfocar && reintentos < 3 && error.message !== "La sesión expiró.") {
-          temporizador = setTimeout(() => consultarDetalle(id, false, reintentos + 1),
+          temporizador = setTimeout(() => consultarDetalle(id, false, reintentos + 1, comprobar),
             5000 * 2 ** (reintentos + 1));
         }
       }
     }
 
-    function abrirSolicitud(id) {
+    function abrirSolicitud(id, comprobar = false) {
       clearTimeout(temporizador);
       secuencia++;
       seleccion = id;
@@ -782,10 +810,10 @@
       publicar.disabled = false;
       abrirBase.hidden = true;
       abrirBase.removeAttribute("href");
-      consultarDetalle(id, true);
+      consultarDetalle(id, true, 0, comprobar);
     }
 
-    revisar.addEventListener("click", async () => {
+    async function revisarContactos() {
       const version = secuencia;
       revisar.disabled = true;
       publicar.hidden = true;
@@ -795,7 +823,8 @@
         const datos = await request(`${ruta}/solicitudes/${encodeURIComponent(seleccion)}/revision-contactos`);
         if (version !== secuencia) return;
         publicar.hidden = !datos.publicacion_disponible;
-        contactoAviso.textContent = datos.publicacion_disponible ? `Nombre propuesto: ${datos.nombre_propuesto}`
+        contactoAviso.textContent = datos.publicacion_disponible
+          ? `Puedes publicar ${Number(datos.conteos.contactos_sin_bloqueo).toLocaleString("es-CL")} pacientes en ${datos.nombre_propuesto}.`
           : "No hay contactos disponibles para publicar.";
         conteos("#recuperacionContactos", datos.conteos, { pacientes_inactivos: "Pacientes inactivos",
           sin_ficha_local: "Sin ficha local", telefonos_invalidos: "Teléfonos inválidos",
@@ -807,7 +836,8 @@
       } finally {
         if (version === secuencia) revisar.disabled = false;
       }
-    });
+    }
+    revisar.addEventListener("click", revisarContactos);
 
     publicar.addEventListener("click", async () => {
       if (!seleccion || publicar.disabled) return;
@@ -847,7 +877,7 @@
           headers: { "Content-Type": "application/json", "Idempotency-Key": intentos.get(body) } });
         intentos.delete(body);
         avisar("Solicitud registrada.", "success");
-        abrirSolicitud(fila.solicitud_id);
+        abrirSolicitud(fila.solicitud_id, true);
         await cargarHistorial([null]);
       } catch (error) {
         avisar(error.message, "error");
