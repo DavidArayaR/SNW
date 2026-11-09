@@ -58,6 +58,7 @@ class EnvioIn(BaseModel):
     area_id: int | None = None
     centro: str | None = None
     lista_reservo_id: int | None = None
+    tratamientos: list[str] = Field(default_factory=list, max_length=50)
 
 
 class ConfigIn(BaseModel):

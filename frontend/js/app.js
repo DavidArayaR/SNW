@@ -2978,10 +2978,55 @@ function mostrarAvisoLimiteConf(lim) {
     `${lim.usados_24h} usuarios únicos (límite ${lim.tier}).`;
 }
 
+function tratamientosEnvio(selector, base) {
+  const panel = $(selector);
+  if (!panel) return [];
+  if (panel.dataset.base !== base) {
+    panel.dataset.base = base;
+    panel.hidden = true;
+    panel.open = false;
+    panel.querySelector("div").replaceChildren();
+  }
+  return [...panel.querySelectorAll("input:checked")].map((campo) => campo.value);
+}
+
+function mostrarTratamientosEnvio(selector, base, nombres, actualizar) {
+  const panel = $(selector);
+  if (!panel) return;
+  const seleccionados = new Set(tratamientosEnvio(selector, base));
+  nombres = [...new Set([...nombres, ...seleccionados])];
+  panel.hidden = !nombres.length;
+  const actuales = [...panel.querySelectorAll("input")];
+  if (actuales.length === nombres.length && actuales.every((campo, indice) => campo.value === nombres[indice])) {
+    return;
+  }
+  const opciones = nombres.map((nombre) => {
+    const fila = document.createElement("div");
+    const etiqueta = document.createElement("label");
+    const campo = document.createElement("input");
+    campo.type = "checkbox";
+    campo.value = nombre;
+    campo.checked = seleccionados.has(nombre);
+    campo.addEventListener("change", () => {
+      if (tratamientosEnvio(selector, base).length > 50) {
+        campo.checked = false;
+        return;
+      }
+      actualizar();
+    });
+    etiqueta.append(campo, document.createTextNode(` ${nombre}`));
+    fila.append(etiqueta);
+    return fila;
+  });
+  panel.querySelector("div").replaceChildren(...opciones);
+}
+
 async function actualizarResumenConf() {
   const dd = $("#confDestinatarios");
   const filaCosto = $("#filaCostoConf");
   const consulta = ++consultaManualConf;
+  const base = baseSeleccionadaConf();
+  const tratamientos = tratamientosEnvio("#tratamientosConf", base);
   dd.textContent = "Contando pacientes...";
   filaCosto.hidden = true;
   maxManualConf = 0;
@@ -3006,7 +3051,10 @@ async function actualizarResumenConf() {
     cuerpoEnvio.centro = $("#selCentroConf")?.value || null;
     if (espId != null) cuerpoEnvio.area_id = espId;
     const listaReservoId = idListaReservo(baseSeleccionadaConf());
-    if (listaReservoId != null) cuerpoEnvio.reservo_lista_id = listaReservoId;
+    if (listaReservoId != null) {
+      cuerpoEnvio.reservo_lista_id = listaReservoId;
+      cuerpoEnvio.tratamientos = tratamientos;
+    }
     const res = await fetch("api/notificaciones/destinatarios", {
       method: "POST",
       headers: authHeaders({ "Content-Type": "application/json" }),
@@ -3016,6 +3064,7 @@ async function actualizarResumenConf() {
     if (!res.ok) throw new Error("No se pudieron contar los pacientes.");
     const data = await res.json();
     if (consulta !== consultaManualConf) return;
+    mostrarTratamientosEnvio("#tratamientosConf", base, data.tratamientos || [], actualizarResumenConf);
     const lim = data.limite_mensajeria || null;
     const esProd = baseSeleccionadaConf() === "produccion" || espId != null || listaReservoId != null;
     const limAplicable = esProd ? lim : null;
@@ -3206,7 +3255,10 @@ $("#btnConfirmarIniciarConf").addEventListener("click", async () => {
     const espIdLanzar = areaEnvioId();
     if (espIdLanzar != null) cuerpo.area_id = espIdLanzar;
     const listaReservoLanzar = idListaReservo(baseSeleccionadaConf());
-    if (listaReservoLanzar != null) cuerpo.lista_reservo_id = listaReservoLanzar;
+    if (listaReservoLanzar != null) {
+      cuerpo.lista_reservo_id = listaReservoLanzar;
+      cuerpo.tratamientos = tratamientosEnvio("#tratamientosConf", baseSeleccionadaConf());
+    }
     cuerpo.limite = limiteSeleccionado;
     const res = await fetch("api/notificaciones/enviar", {
       method: "POST",
@@ -3899,6 +3951,7 @@ async function cargarCupoProg(forzar = false) {
   const selBase = $("#selProgBase");
   if (!selBase) return;
   const base = selBase.value || "";
+  const tratamientos = tratamientosEnvio("#tratamientosProg", base);
   const listaReservoId = idListaReservo(base);
   const areaId = base.startsWith("esp:") ? Number(base.slice(4)) : "";
   const ambiente = areaId || listaReservoId != null ? "produccion" : base;
@@ -3916,7 +3969,10 @@ async function cargarCupoProg(forzar = false) {
     const cuerpo = { ambiente, prevision_programado: true };
     cuerpo.centro = $("#selProgCentro")?.value || null;
     if (areaId) cuerpo.area_id = areaId;
-    if (listaReservoId != null) cuerpo.reservo_lista_id = listaReservoId;
+    if (listaReservoId != null) {
+      cuerpo.reservo_lista_id = listaReservoId;
+      cuerpo.tratamientos = tratamientos;
+    }
     if (fecha) cuerpo.fecha = fecha;
     if (fechaHora && fechaHora.length >= 16) cuerpo.programado_para = fechaHora.slice(0, 16);
     if (tplSelId) cuerpo.plantilla_id = tplSelId;
@@ -3929,6 +3985,7 @@ async function cargarCupoProg(forzar = false) {
     if (!res.ok) throw new Error();
     const d = await res.json();
     if (consulta !== progCupoConsulta) return;
+    mostrarTratamientosEnvio("#tratamientosProg", base, d.tratamientos || [], () => cargarCupoProg(true));
     const lim = d.limite_mensajeria || null;
     progCupo = {
       pendientes: Number(d.pendientes) || 0,
@@ -4500,7 +4557,8 @@ async function programarEnvio() {
       method: "POST",
       headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ ambiente, ...(areaId != null ? { area_id: areaId } : {}),
-        ...(listaReservoId != null ? { reservo_lista_id: listaReservoId } : {}),
+        ...(listaReservoId != null ? { reservo_lista_id: listaReservoId,
+          tratamientos: tratamientosEnvio("#tratamientosProg", base) } : {}),
         plantilla_id: tpl.id, centro: centro.codigo, programado_para: inpF.value, limite }),
     });
     const data = await res.json().catch(() => ({}));

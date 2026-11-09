@@ -818,6 +818,20 @@ def listar_bases_contacto() -> list[dict]:
     return items
 
 
+def tratamientos_base(lista_id: int) -> list[str]:
+    with _db() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT DISTINCT tratamiento_ultima_atencion AS tratamientos"
+            " FROM reservo_lista_pacientes WHERE lista_id=%s AND tratamiento_ultima_atencion IS NOT NULL",
+            (lista_id,),
+        )
+        nombres = {
+            nombre for fila in cur.fetchall()
+            for nombre in fila["tratamientos"].split(", ") if nombre
+        }
+    return sorted(nombres, key=str.casefold)
+
+
 def listar_pacientes_base_contacto(lista_id: int, pagina: int = 1,
                                    por_pagina: int = 25, q: str = "",
                                    estado: str = "todos", respuesta: str = "todas",

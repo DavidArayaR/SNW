@@ -7802,6 +7802,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         if lista_id is not None:
             cond.extend(("p.lista_id=%(lista_id)s", "p.telefono_valido=1"))
             params["lista_id"] = lista_id
+            _filtrar_tratamientos_reservo(cond, params, body.tratamientos)
         if amb_q != "desarrollo":
             if tiene_estado:
                 cond.append("p.estado <> 'error'")
@@ -8233,10 +8234,22 @@ class DestinosIn(BaseModel):
     programado_para: str | None = None
     centro: str | None = None
     reservo_lista_id: int | None = None
+    tratamientos: list[str] = Field(default_factory=list, max_length=50)
+
+
+def _filtrar_tratamientos_reservo(condiciones, parametros, tratamientos):
+    filtros = []
+    for indice, nombre in enumerate(tratamientos):
+        clave = f"tratamiento_{indice}"
+        parametros[clave] = f", {nombre}, "
+        filtros.append(f"LOCATE(%({clave})s, CONCAT(', ', p.tratamiento_ultima_atencion, ', ')) > 0")
+    if filtros:
+        condiciones.append("(" + " OR ".join(filtros) + ")")
 
 
 def _contar_elegibles_tabla(t: str, amb_q: str, amb: str,
-                            reservo_lista_id: int | None = None, emisor: dict | None = None, fecha=None) -> tuple[int, int]:
+                            reservo_lista_id: int | None = None, emisor: dict | None = None,
+                            fecha=None, tratamientos=()) -> tuple[int, int]:
     """(total, elegibles) de una tabla. Producción respeta errores y la espera;
     desarrollo permite reenviar sin importar estado, siempre entre números de prueba."""
     with conectar(amb) as conn, conn.cursor() as cur:
@@ -8261,10 +8274,13 @@ def _contar_elegibles_tabla(t: str, amb_q: str, amb: str,
             conds.append("(p.respuesta IS NULL OR p.respuesta <> 'baja')")
         if lista_reservo:
             conds.insert(0, "p.lista_id=%(lista_id)s")
+        parametros = {**_parametros_espera(emisor, fecha), "lista_id": reservo_lista_id}
+        if lista_reservo:
+            _filtrar_tratamientos_reservo(conds, parametros, tratamientos)
         cur.execute(
             f"SELECT p.telefono FROM {t} p"
             + (" WHERE " + " AND ".join(conds) if conds else ""),
-            {**_parametros_espera(emisor, fecha), "lista_id": reservo_lista_id},
+            parametros,
         )
         telefonos = [r.get("telefono") or "" for r in cur.fetchall()]
         if es_desarrollo:
@@ -8325,11 +8341,12 @@ def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensaj
         except ValueError:
             raise HTTPException(422, detail="Fecha y hora de envío inválidas.")
     emisor_elegibilidad = resolver_centro(body.centro) if body.centro in catalogo_centros() else None
-    total, elegibles = _contar_elegibles_tabla(t, amb_q, amb, lista_id, emisor_elegibilidad, fecha_elegibilidad)
+    total, elegibles = _contar_elegibles_tabla(
+        t, amb_q, amb, lista_id, emisor_elegibilidad, fecha_elegibilidad, body.tratamientos)
     # Los que ya están tomados por un programado activo no se pueden preelegir
     # de nuevo: son los que quedan libres para este envío/horario.
     try:
-        reservados = _contar_reservados_prog(t, amb, amb_q, lista_id)
+        reservados = _contar_reservados_prog(t, amb, amb_q, lista_id, body.tratamientos)
     except Exception as e:
         log_error("contar_reservados_prog", e)
         reservados = 0
@@ -8367,6 +8384,7 @@ def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensaj
         "base_datos": ((lista_reservo or {}).get("nombre") if lista_reservo
                        else t if esp else nombre_base(amb)),
         "reservo_lista_id": lista_id,
+        "tratamientos": reservo_pacientes.tratamientos_base(lista_id) if lista_id is not None else [],
         "area_id": (esp["id"] if esp else None),
         "costo": costo,
         "limite_mensajeria": info_limite,
@@ -8596,6 +8614,7 @@ class ProgCrearIn(BaseModel):
     limite: int
     centro: str | None = None
     reservo_lista_id: int | None = None
+    tratamientos: list[str] = Field(default_factory=list, max_length=50)
 
 
 # --- Destinatarios preelegidos de cada programado ---------------------------
@@ -8610,16 +8629,23 @@ _ESTADOS_PROG_RESERVAN = ("pendiente", "aprobado", "enviando")
 
 
 def _contar_reservados_prog(t: str, amb: str, amb_q: str,
-                            reservo_lista_id: int | None = None) -> int:
+                            reservo_lista_id: int | None = None, tratamientos=()) -> int:
     """Pacientes de la base que ya están tomados por otro programado activo."""
     with conectar(amb) as conn, conn.cursor() as cur:
+        parametros = {"tabla": t, "ambiente": amb_q, "lista": reservo_lista_id}
+        condiciones = []
+        if reservo_lista_id is not None:
+            condiciones.append("ep.reservo_lista_id=%(lista)s")
+            _filtrar_tratamientos_reservo(condiciones, parametros, tratamientos)
         cur.execute(
             "SELECT DISTINCT pd.paciente_id, pd.telefono FROM programado_destinatarios pd"
             " JOIN envios_programados ep ON ep.id = pd.prog_id"
-            " WHERE ep.tabla = %s AND ep.ambiente = %s AND ep.estado IN"
+            + (" JOIN reservo_lista_pacientes p ON p.id=pd.paciente_id AND p.lista_id=ep.reservo_lista_id"
+               if reservo_lista_id is not None and tratamientos else "")
+            + " WHERE ep.tabla = %(tabla)s AND ep.ambiente = %(ambiente)s AND ep.estado IN"
             " ('pendiente', 'aprobado', 'enviando')"
-            + (" AND ep.reservo_lista_id=%s" if reservo_lista_id is not None else ""),
-            ((t, amb_q, reservo_lista_id) if reservo_lista_id is not None else (t, amb_q)),
+            + (" AND " + " AND ".join(condiciones) if condiciones else ""),
+            parametros,
         )
         filas = cur.fetchall()
     if amb_q == "desarrollo":
@@ -8630,7 +8656,8 @@ def _contar_reservados_prog(t: str, amb: str, amb_q: str,
 
 
 def _preelegir_pacientes_prog(t: str, amb: str, amb_q: str, n: int, cur=None,
-                              reservo_lista_id: int | None = None, emisor: dict | None = None, fecha=None) -> list[dict]:
+                              reservo_lista_id: int | None = None, emisor: dict | None = None,
+                              fecha=None, tratamientos=()) -> list[dict]:
     """Primeros N pacientes libres: sin opt-out ni baja y no preelegidos por
     otro programado activo. En desarrollo se permite cualquier estado; en
     producción respeta errores y la espera. Orden estable por id.
@@ -8663,11 +8690,13 @@ def _preelegir_pacientes_prog(t: str, amb: str, amb_q: str, n: int, cur=None,
         " ('pendiente', 'aprobado', 'enviando')"
         + (" AND ep.reservo_lista_id = %(lista_id)s" if lista_reservo else "") + ")"
     )
+    params = {"t": t, "amb": amb_q, **_parametros_espera(emisor, fecha)}
+    if lista_reservo:
+        _filtrar_tratamientos_reservo(cond, params, tratamientos)
     where = (" WHERE " + " AND ".join(cond)) if cond else ""
     sql = (f"SELECT p.id, p.nombre, p.apellido, p.telefono FROM {t} p{where}"
            " ORDER BY p.id" + ("" if solo_pruebas else " LIMIT %(n)s")
            + (" FOR UPDATE" if cur else ""))
-    params = {"t": t, "amb": amb_q, **_parametros_espera(emisor, fecha)}
     if lista_reservo:
         params["lista_id"] = int(reservo_lista_id)
     if not solo_pruebas:
@@ -8953,9 +8982,9 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
     # Tope real: elegibles libres (en desarrollo incluye todos los estados),
     # sin repetir destinatarios ya reservados ni superar el cupo de Meta.
     amb_q = "produccion" if esp is not None else amb
-    _, elegibles = _contar_elegibles_tabla(tabla, amb_q, amb, lista_id, emisor, cuando)
+    _, elegibles = _contar_elegibles_tabla(tabla, amb_q, amb, lista_id, emisor, cuando, body.tratamientos)
     try:
-        reservados = _contar_reservados_prog(tabla, amb, amb_q, lista_id)
+        reservados = _contar_reservados_prog(tabla, amb, amb_q, lista_id, body.tratamientos)
     except Exception as e:
         log_error("contar_reservados_prog", e)
         reservados = 0
@@ -9042,7 +9071,7 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
     with conectar() as conn, conn.cursor() as cur:
         preelegidos = _preelegir_pacientes_prog(
             tabla, amb, amb_q, n_preelegir, cur=cur, reservo_lista_id=lista_id,
-            emisor=emisor, fecha=cuando)
+            emisor=emisor, fecha=cuando, tratamientos=body.tratamientos)
         if not preelegidos:
             conn.rollback()
             raise HTTPException(422, detail=(
