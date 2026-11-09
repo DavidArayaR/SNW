@@ -24,4 +24,8 @@ def clave_estado_verificado(codigo: str) -> str:
     return f"{codigo}_RESERVO_ATENDIDO_VERIFICADO"
 
 
+def clave_umbral_recuperacion(codigo: str) -> str:
+    return f"{codigo}_RESERVO_RECUPERACION_MESES"
+
+
 CLAVES_TOKEN = {clave_token(codigo) for codigo in RESERVO_CLINICAS}

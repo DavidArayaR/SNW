@@ -1,6 +1,11 @@
 from ._registry import crear_router
 
 RUTAS = (
+    ("/api/v1/recuperacion-pacientes/clinicas", "GET", "clinicas_recuperacion", None),
+    ("/api/v1/recuperacion-pacientes/solicitudes", "POST", "registrar_solicitud_recuperacion", 202),
+    ("/api/v1/recuperacion-pacientes/solicitudes", "GET", "listar_solicitudes_recuperacion", None),
+    ("/api/v1/recuperacion-pacientes/solicitudes/{solicitud_id}", "GET", "obtener_solicitud_recuperacion", None),
+    ("/api/v1/recuperacion-pacientes/solicitudes/{solicitud_id}/resultado", "GET", "obtener_resultado_recuperacion", None),
     ("/api/reservo/configuracion", "GET", "listar_configuracion_reservo", None),
     ("/api/reservo/clinicas/{codigo}/probar", "POST", "probar_conexion_reservo", None),
     ("/api/reservo/tratamientos", "POST", "listar_tratamientos_reservo", None),

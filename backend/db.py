@@ -20,7 +20,7 @@ from legacy_config_secrets import leer_credencial_antigua
 from telefono import normalizar_telefono
 from whatsapp_channels import CENTROS, claves_centro
 from reservo_catalogo import (
-    RESERVO_CLINICAS, clave_estado_atendido, clave_estado_verificado,
+    RESERVO_CLINICAS, clave_estado_atendido, clave_estado_verificado, clave_umbral_recuperacion,
     clave_token,
 )
 
@@ -539,6 +539,7 @@ for _codigo_reservo in RESERVO_CLINICAS:
     CONFIG_DEFAULTS[clave_token(_codigo_reservo)] = ""
     CONFIG_DEFAULTS[clave_estado_atendido(_codigo_reservo)] = ""
     CONFIG_DEFAULTS[clave_estado_verificado(_codigo_reservo)] = "false"
+    CONFIG_DEFAULTS[clave_umbral_recuperacion(_codigo_reservo)] = ""
 
 _CLAVES_CENTRO_ANTIGUAS = {
     "SMPT_WSP_PHONE_NUMER": "SMPT_WSP_PHONE_NUMBER",
@@ -652,6 +653,8 @@ def asegurar_tabla_config() -> None:
             # enlazan con campañas ni bases de pacientes de WhatsApp.
             from reservo_pacientes import configurar_tablas as _configurar_tablas_reservo
             _configurar_tablas_reservo(cur)
+            from recuperacion_pacientes import configurar_tablas as _configurar_recuperacion
+            _configurar_recuperacion(cur)
             cur.execute(
                 "CREATE TABLE IF NOT EXISTS reagendar_lotes ("
                 " id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,"

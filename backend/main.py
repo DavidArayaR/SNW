@@ -30,7 +30,7 @@ import audio_transcripcion
 import estadisticas_envio
 import simulacion_envio
 import pymysql
-from fastapi import (BackgroundTasks, Depends, FastAPI, File, Form, HTTPException,
+from fastapi import (BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException,
                      Query, Request, UploadFile, status)
 from fastapi.responses import HTMLResponse, PlainTextResponse, FileResponse, Response, StreamingResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
@@ -90,6 +90,7 @@ import servicio_areas
 import paciente_reagendar
 import reagendar_batches
 import reservo_pacientes
+import recuperacion_pacientes
 import reservo_bases
 import retencion_datos
 from reservo_catalogo import (
@@ -5626,6 +5627,9 @@ for _codigo_reservo, _nombre_reservo in RESERVO_CLINICAS.items():
             {"clave": clave_estado_verificado_reservo(_codigo_reservo),
              "etiqueta": "Confirmo que verifiqué el código en una cita real atendida", "tipo": "bool",
              "ayuda": "La sincronización queda bloqueada hasta guardar el código y activar esta confirmación."},
+            {"clave": recuperacion_pacientes.clave_umbral(_codigo_reservo),
+             "etiqueta": "Meses mínimos de inactividad", "tipo": "number",
+             "ayuda": "Entre 1 y 120 meses. Vacío deshabilita nuevas solicitudes de recuperación para esta clínica."},
             {"tipo": "accion_reservo", "codigo": _codigo_reservo,
              "etiqueta": "Probar conexión", "icono": "fa-plug",
              "ayuda": "Consulta una página de la fecha indicada (o de hoy si se deja vacía). No guarda pacientes; muestra estados y nombres de tratamientos observados."},
@@ -5788,6 +5792,44 @@ def _config_reservo_publica(cfg: dict | None = None) -> dict:
             in ("true", "1", "si", "sí"),
         "token_disponible": bool(str(valores.get(clave_token_reservo(codigo)) or "").strip()),
     } for codigo, nombre in RESERVO_CLINICAS.items()]}
+
+
+def clinicas_recuperacion(sesion: dict = Depends(solo_admin)):
+    return recuperacion_pacientes.listar_clinicas()
+
+
+def registrar_solicitud_recuperacion(
+    body: recuperacion_pacientes.SolicitudRecuperacionIn,
+    response: Response,
+    clave: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
+    sesion: dict = Depends(solo_admin),
+):
+    usuario = sesion["usuario"]
+    solicitud, nueva = recuperacion_pacientes.registrar(usuario, clave, body)
+    response.status_code = 202 if nueva else 200
+    response.headers["Location"] = f"{recuperacion_pacientes.RUTA}/solicitudes/{solicitud['solicitud_id']}"
+    if nueva:
+        auditoria_registrar(usuario, "recuperacion_registrada", solicitud["solicitud_id"],
+                            solicitud["clinica_codigo"])
+    return solicitud
+
+
+def listar_solicitudes_recuperacion(
+    clinica_codigo: str | None = Query(None),
+    cursor: int | None = Query(None, ge=1, le=2**64 - 1),
+    limite: int = Query(25, ge=1, le=100),
+    sesion: dict = Depends(solo_admin),
+):
+    return recuperacion_pacientes.listar(sesion["usuario"], clinica_codigo, cursor, limite)
+
+
+def obtener_solicitud_recuperacion(solicitud_id: str, sesion: dict = Depends(solo_admin)):
+    return recuperacion_pacientes.obtener(sesion["usuario"], solicitud_id)
+
+
+def obtener_resultado_recuperacion(solicitud_id: str, sesion: dict = Depends(solo_admin)):
+    recuperacion_pacientes.obtener(sesion["usuario"], solicitud_id)
+    raise HTTPException(409, detail="La solicitud todavía no tiene un resultado.")
 
 
 def listar_configuracion_reservo(sesion: dict = Depends(solo_admin)):
@@ -6308,6 +6350,7 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
     catalogo = catalogo_centros(incluir_desactivadas=True)
     claves_estado_reservo = {clave_estado_atendido_reservo(c) for c in RESERVO_CLINICAS}
     claves_verificado_reservo = {clave_estado_verificado_reservo(c) for c in RESERVO_CLINICAS}
+    claves_umbral = {recuperacion_pacientes.clave_umbral(c) for c in RESERVO_CLINICAS}
     claves_clinicas = {c["clave"] for codigo, nombre in catalogo.items()
                        for c in _seccion_centro(codigo, nombre)["campos"] if "clave" in c}
     claves_respuestas = {_clave_respuesta_sistema(codigo, tipo): tipo
@@ -6321,6 +6364,8 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
                 and clave not in claves_respuestas:
             raise HTTPException(400, detail=f"Clave de configuración desconocida: «{clave}»")
         v = "" if valor is None else str(valor).strip()
+        if clave in claves_umbral and v and not recuperacion_pacientes.umbral_valido(v):
+            raise HTTPException(422, detail="El umbral de recuperación debe estar entre 1 y 120 meses.")
         if clave in CLAVES_TOKEN_RESERVO:
             # Un campo password vacío nunca reemplaza un token válido.
             if not v:
