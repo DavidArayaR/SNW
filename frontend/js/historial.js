@@ -750,7 +750,7 @@ function pintarDetalle() {
         : d.paciente_id && d.datos_completos
         ? `<button type="button" class="btn btn--sm btn--ghost" data-mensajes="${d.paciente_id}">Ver mensajes</button>` : "";
       const enviarCC = d.puede_enviar_callcenter
-        ? `<button type="button" class="btn btn--sm btn--ghost" data-callcenter-manual="${Number(d.id)}"${d.callcenter_ventana_abierta ? "" : ' disabled title="El paciente debe haber escrito a esta clínica en las últimas 24 horas"'}>Enviar botón de call center</button>` : "";
+        ? `<button type="button" class="btn btn--sm btn--ghost" data-callcenter-manual="${Number(d.id)}"${d.callcenter_ventana_abierta ? "" : ' disabled title="El paciente debe haber escrito a esta clínica en las últimas 24 horas"'}>${d.reagendamiento ? "Enviar botón de reagendamiento" : "Enviar botón de call center"}</button>` : "";
       const celdaMsgs = `<td class="hist-col-msgs">${verMensajes}${enviarCC || (!verMensajes ? "—" : "")}</td>`;
       const [claseEntrega, textoEntrega] = estadoEntrega(d);
       const motivo = d.codigo_error === "131042"

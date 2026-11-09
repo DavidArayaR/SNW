@@ -10297,7 +10297,12 @@ def _detalle_historial_reagendar(envio_id: int, sesion: dict) -> list[dict]:
         cur.execute(
             "SELECT le.id, le.nombre_paciente, le.numero_telefono, le.estado_envio,"
             " le.estado_whatsapp, le.mensaje AS mensaje_enviado, le.descripcion_error, le.fecha_hora,"
-            " r.whatsapp_opt_out,"
+            " r.whatsapp_opt_out, r.id AS cita_id, r.centro_codigo,"
+            " EXISTS (SELECT 1 FROM whatsapp_conversaciones_mensajes reciente"
+            " WHERE BINARY reciente.wa_phone_id=BINARY le.wa_phone_id"
+            " AND BINARY reciente.telefono_paciente=BINARY le.numero_telefono"
+            " AND reciente.recibido > DATE_SUB(NOW(), INTERVAL 24 HOUR)"
+            " AND reciente.recibido <= NOW()) AS callcenter_ventana_abierta,"
             " (SELECT i.accion FROM reagendar_interacciones i WHERE i.cita_id=r.id"
             " ORDER BY i.creado_en DESC, i.mensaje_id DESC LIMIT 1) AS ultima_accion,"
             " (SELECT COALESCE(NULLIF(cm.texto,''), CONCAT('[',cm.tipo,']'))"
@@ -10340,11 +10345,15 @@ def _detalle_historial_reagendar(envio_id: int, sesion: dict) -> list[dict]:
         interesado = not baja and not desinteres and (
             accion == "REAGENDAR" or paciente_reagendar.es_aceptacion_reagendar(mensaje)
             or es_mensaje_interes(mensaje))
+        puede_enviar = bool(fila.pop("cita_id", None) and not baja and tiene_permiso(sesion, "call_center"))
+        centro = fila.pop("centro_codigo", None)
         fila.update({"paciente_id": None, "reagendamiento": True,
                      "chat_disponible": fila["id"] > 0,
                      "datos_completos": completos, "interesado": bool(interesado),
                      "respuesta_interes": bool(interesado), "puede_marcar_pendiente": False,
-                     "puede_enviar_callcenter": False,
+                     "puede_enviar_callcenter": puede_enviar,
+                     "callcenter_ventana_abierta": bool(fila.get("callcenter_ventana_abierta")),
+                     "mensaje_callcenter": _respuesta_sistema("reagendar_derivacion", centro) if puede_enviar else None,
                      "respuesta": "baja" if baja else "no_interesado" if desinteres
                      else "respondio" if mensaje or accion else "pendiente"})
         fila["fecha"] = fila.pop("fecha_hora").strftime("%d-%m-%Y %H:%M")
@@ -10679,6 +10688,52 @@ class CallCenterManualIn(BaseModel):
     mensaje: str = Field(..., min_length=1, max_length=1000)
 
 
+def _enviar_callcenter_manual_reagendar(envio_id, registro_id, texto):
+    with conectar("produccion") as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT r.*, le.wa_phone_id AS emisor_original, le.numero_telefono AS telefono_original,"
+            " EXISTS (SELECT 1 FROM whatsapp_conversaciones_mensajes cm"
+            " WHERE BINARY cm.wa_phone_id=BINARY le.wa_phone_id"
+            " AND BINARY cm.telefono_paciente=BINARY le.numero_telefono"
+            " AND cm.recibido > DATE_SUB(NOW(), INTERVAL 24 HOUR) AND cm.recibido <= NOW()) AS ventana"
+            " FROM paciente_reagendar r JOIN log_envios le ON le.id=r.log_envio_id"
+            " JOIN envios e ON e.id=le.envio_id"
+            " WHERE e.id=%s AND le.id=%s AND e.base_datos='paciente_reagendar'",
+            (envio_id, registro_id),
+        )
+        cita = cur.fetchone()
+    if not cita or cita.get("whatsapp_opt_out"):
+        raise HTTPException(409, detail="La cita no está disponible o el paciente se dio de baja.")
+    telefono = normalizar_telefono(cita["paciente_telefono_normalizado"] or "")
+    if not telefono or telefono != normalizar_telefono(cita["telefono_original"] or ""):
+        raise HTTPException(409, detail="El teléfono del paciente cambió desde el envío.")
+    if not cita["ventana"]:
+        raise HTTPException(409, detail="El paciente debe haber escrito a esta clínica en las últimas 24 horas.")
+    cfg = config_all(refresh=True)
+    canal = resolver_phone_id(cita["emisor_original"], cfg)
+    if not canal or not canal["configured"] or canal["codigo"] != cita["centro_codigo"]:
+        raise HTTPException(409, detail="La clínica emisora no está disponible.")
+    if cfg.get("metodo_envio") != "api_oficial":
+        raise HTTPException(409, detail="Activa api_oficial para enviar este mensaje.")
+    if cfg.get("entorno") == "desarrollo" and telefono not in _numeros_prueba_editables("desarrollo"):
+        raise HTTPException(403, detail="En desarrollo solo puedes enviar a números de prueba.")
+    servicio = WhatsAppService(phone_number_id=canal["phoneNumberId"])
+    if esta_suprimido(telefono) or servicio._estaba_opt_out(telefono):
+        raise HTTPException(409, detail="El paciente está eliminado o dado de baja.")
+    numero = re.sub(r"\D", "", cfg.get(f"{canal['codigo']}_CRM_PHONE_NUMBER") or "")
+    if not re.fullmatch(r"[1-9]\d{7,14}", numero):
+        raise HTTPException(409, detail="Configura el número CRM de la clínica.")
+    preparado = paciente_reagendar.mensaje_preparado_reagendar(cita)
+    url = f"https://wa.me/{numero}?text={urllib.parse.quote(preparado, safe='')}"
+    ok, respuesta_id, error, _ = asyncio.run(servicio.enviar(
+        telefono, texto, plantilla={"cta": {"texto": "Ir a call center", "url": url}}))
+    registrar_historial(None, cita.get("paciente_nombre") or "", telefono, "reagendar_respuesta",
+                        texto, "enviado" if ok else "error", error, ambiente="produccion",
+                        whatsapp_message_id=respuesta_id, tabla_pacientes="paciente_reagendar", emisor=canal)
+    if not ok:
+        raise HTTPException(502, detail="Meta no aceptó el mensaje de reagendamiento.")
+
+
 def enviar_callcenter_manual(envio_id: int, registro_id: int, body: CallCenterManualIn,
                             ambiente: str = Query("produccion"),
                             sesion: dict = Depends(exigir("historial"))):
@@ -10689,8 +10744,17 @@ def enviar_callcenter_manual(envio_id: int, registro_id: int, body: CallCenterMa
         raise HTTPException(422, detail="Escribe el mensaje que acompañará al botón.")
     # Reutiliza la autorización por envío y área del historial.
     detalle = detalle_historial(str(envio_id), ambiente=ambiente, sesion=sesion)
-    if not any(f["id"] == registro_id for f in detalle):
+    fila = next((f for f in detalle if f["id"] == registro_id), None)
+    if fila is None:
         raise HTTPException(404, detail="Registro no encontrado en este envío.")
+    if fila.get("reagendamiento"):
+        _enviar_callcenter_manual_reagendar(envio_id, registro_id, texto)
+        try:
+            auditoria_registrar(sesion.get("usuario", ""), "callcenter_manual", str(registro_id),
+                               "Envió manualmente un botón de reagendamiento al CRM de la clínica")
+        except Exception as exc:
+            log_error("auditar envío manual de reagendamiento", exc, solo_tipo=True)
+        return {"ok": True, "mensaje": "Meta aceptó el mensaje con el botón de reagendamiento."}
     with conectar(ambiente) as conn, conn.cursor() as cur:
         cur.execute("SELECT l.paciente_id, l.numero_telefono, l.wa_phone_id,"
                     " COALESCE(l.tabla_pacientes, e.tabla_pacientes, e.base_datos) AS tabla,"
