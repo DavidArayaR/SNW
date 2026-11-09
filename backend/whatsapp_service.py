@@ -1318,6 +1318,9 @@ class WhatsAppService:
         exento = es_exento(telefono)
         numero_prueba = es_numero_prueba(telefono)
         if esta_suprimido(telefono):
+            centro = (EMISOR_WEBHOOK.get() or {}).get("codigo") or "desconocido"
+            print(f"[INFO] webhook (centro={centro}): mensaje entrante omitido por supresión del paciente.",
+                  flush=True)
             # Si el bloqueo externo sigue pendiente, reintenta sin responder.
             solicitar_eliminacion(telefono)
             return ["numero_suprimido"]
@@ -1888,8 +1891,22 @@ class WhatsAppService:
                 if not pacientes:
                     if referencia_meta_id and not gestionada_reagendar:
                         emisor_actual = EMISOR_WEBHOOK.get() or {}
-                        log_error("webhook: respuesta contextual sin paciente en bases"
-                                  f" (centro={emisor_actual.get('codigo') or 'desconocido'})")
+                        centro = emisor_actual.get("codigo") or "desconocido"
+                        if esta_suprimido(telefono):
+                            print(f"[INFO] webhook (centro={centro}): respuesta contextual omitida por supresión del paciente.",
+                                  flush=True)
+                            return "sin_cliente"
+                        cur.execute(
+                            "SELECT 1 FROM log_envios"
+                            " WHERE BINARY whatsapp_message_id=BINARY %s AND wa_phone_id=%s LIMIT 1",
+                            (referencia_meta_id, emisor_actual.get("phoneNumberId")),
+                        )
+                        referencia = ("El mensaje original está en el historial de esta clínica."
+                                      if cur.fetchone()
+                                      else "El mensaje original no se encontró en el historial de esta clínica.")
+                        log_error(f"webhook (centro={centro}): respuesta sin asociar. "
+                                  "El teléfono del remitente no coincide con una ficha en las bases consultadas "
+                                  f"y no tiene supresión activa registrada. {referencia}")
                     return "sin_cliente"
                 emisor = EMISOR_WEBHOOK.get()
                 if emisor:
