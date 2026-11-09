@@ -618,6 +618,27 @@ def reclamar_pendiente(centros: list[str], *, lote_id: int | None = None) -> dic
     return fila
 
 
+def reagendamiento_enviado_hoy(cur, telefono: str) -> bool:
+    """Verifica entregas y envíos aceptados durante el día calendario chileno."""
+    hoy = dt.datetime.now(ZONA_CHILE).date()
+    desde = dt.datetime.combine(hoy, dt.time.min, ZONA_CHILE)
+    hasta = dt.datetime.combine(hoy + dt.timedelta(days=1), dt.time.min, ZONA_CHILE)
+    # El webhook guarda entregado_en en hora local del servidor. La cita guarda enviado_en en UTC.
+    local = tuple(limite.astimezone().replace(tzinfo=None) for limite in (desde, hasta))
+    utc = tuple(limite.astimezone(UTC).replace(tzinfo=None) for limite in (desde, hasta))
+    cur.execute(
+        "SELECT 1 FROM log_envios le JOIN envios e ON e.id=le.envio_id"
+        " LEFT JOIN paciente_reagendar r ON r.log_envio_id=le.id"
+        " WHERE le.numero_telefono=%s AND e.base_datos='paciente_reagendar'"
+        " AND le.estado_whatsapp IN ('sent','delivered','read')"
+        " AND (le.entregado_en >= %s AND le.entregado_en < %s"
+        " OR r.enviado_en >= %s AND r.enviado_en < %s"
+        " OR r.enviado_en IS NULL AND le.fecha_hora >= %s AND le.fecha_hora < %s) LIMIT 1",
+        (telefono, *local, *utc, *local),
+    )
+    return cur.fetchone() is not None
+
+
 def motivo_no_reintentar(cita: dict, *, permitir_incierto: bool = False) -> str | None:
     """Los resultados inciertos requieren autorización manual explícita."""
     if cita.get("modo_prueba") or cita.get("whatsapp_opt_out"):
@@ -666,12 +687,8 @@ def preparar_reintentos_manuales(ids: list[int], validar_cita, *, permitir_incie
                         " AND whatsapp_opt_out=1 LIMIT 1", (telefono,))
             if cur.fetchone():
                 raise ValueError("La selección incluye un paciente dado de baja.")
-            cur.execute("SELECT 1 FROM log_envios le JOIN envios e ON e.id=le.envio_id"
-                        " JOIN reagendar_batches b ON b.envio_id=e.id"
-                        " WHERE le.numero_telefono=%s AND b.lote_id=%s AND e.base_datos='paciente_reagendar'"
-                        " AND le.estado_whatsapp IN ('delivered','read') LIMIT 1", (telefono, cita["lote_id"]))
-            if cur.fetchone():
-                raise ValueError("Un paciente seleccionado ya recibió un reagendamiento.")
+            if reagendamiento_enviado_hoy(cur, telefono):
+                raise ValueError("Un paciente seleccionado ya tiene un reagendamiento enviado hoy.")
             cur.execute("SELECT cita_id, estado FROM reagendar_destinatarios"
                         " WHERE telefono=%s AND modo_prueba=0 AND lote_clave=%s FOR UPDATE",
                         (telefono, cita["lote_id"]))
@@ -1139,6 +1156,8 @@ def registrar_lote(cita: dict, plantilla: dict, canal: dict) -> int:
 def marcar_fallo(cita: dict, codigo: str, *, reintentar: bool = False) -> None:
     """Los resultados inciertos nunca se reintentan automáticamente."""
     estado = "REINTENTO" if reintentar and cita["intentos_envio"] < 3 else "ERROR"
+    if codigo == "YA_ENVIADO_HOY":
+        estado = "OMITIDO"
     demora = min(3600, 60 * 2 ** max(0, cita["intentos_envio"] - 1))
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(
@@ -1154,7 +1173,8 @@ def marcar_fallo(cita: dict, codigo: str, *, reintentar: bool = False) -> None:
                         " AND estado='PROCESANDO'",
                         (estado, cita["paciente_telefono_normalizado"], cita["id"]))
         if cita.get("envio_id") and cur.rowcount:
-            cur.execute("UPDATE envios SET fallidos=fallidos+1 WHERE id=%s", (cita["envio_id"],))
+            contador = "invalidos" if estado == "OMITIDO" else "fallidos"
+            cur.execute(f"UPDATE envios SET {contador}={contador}+1 WHERE id=%s", (cita["envio_id"],))
         conn.commit()
 
 

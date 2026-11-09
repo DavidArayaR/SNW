@@ -9689,6 +9689,7 @@ async def _loop_supresion() -> None:
 
 async def _procesar_cita_reagendar(cita: dict, plantillas_por_centro: dict) -> None:
     """Despacha una cita reservada con el motor oficial y sin emisor alternativo."""
+    conexion_cerrojo = None
     try:
         if cita.get("modo_prueba"):
             paciente_reagendar.marcar_fallo(cita, "MODO_PRUEBA")
@@ -9760,20 +9761,21 @@ async def _procesar_cita_reagendar(cita: dict, plantillas_por_centro: dict) -> N
                 != plantilla.get("clave")):
             paciente_reagendar.marcar_fallo(cita, "ENVIO_DESACTIVADO")
             return
-        # El usuario puede retirar una cita de prueba incluso después del claim.
-        with conectar() as conn, conn.cursor() as cur:
+        # Serializa el chequeo y el envío del mismo teléfono entre workers.
+        conexion_cerrojo = conectar()
+        clave_cerrojo = "reagendar:" + hashlib.sha256(telefono.encode()).hexdigest()[:48]
+        with conexion_cerrojo.cursor() as cur:
+            cur.execute("SELECT GET_LOCK(%s,0) AS adquirido", (clave_cerrojo,))
+            if not cur.fetchone()["adquirido"]:
+                paciente_reagendar.marcar_fallo(cita, "DESTINATARIO_OCUPADO", reintentar=True)
+                return
             cur.execute("SELECT 1 FROM paciente_reagendar WHERE id=%s"
                         " AND reserva_token=%s AND estado_envio='PROCESANDO'",
                         (cita["id"], cita["reserva_token"]))
             if not cur.fetchone():
                 return
-            cur.execute("SELECT 1 FROM log_envios le JOIN envios e ON e.id=le.envio_id"
-                        " JOIN reagendar_batches b ON b.envio_id=e.id"
-                        " WHERE le.numero_telefono=%s AND b.lote_id=%s AND e.base_datos='paciente_reagendar'"
-                        " AND le.estado_whatsapp IN ('delivered','read') LIMIT 1",
-                        (telefono, cita["lote_id"]))
-            if cur.fetchone():
-                paciente_reagendar.marcar_fallo(cita, "YA_ENTREGADO")
+            if paciente_reagendar.reagendamiento_enviado_hoy(cur, telefono):
+                paciente_reagendar.marcar_fallo(cita, "YA_ENVIADO_HOY")
                 return
         precio = _precio_reagendamiento(plantilla)
         ok, message_id, _error, resultado = await servicio.enviar(
@@ -9795,6 +9797,8 @@ async def _procesar_cita_reagendar(cita: dict, plantillas_por_centro: dict) -> N
         log_error("reagendar: revisar envío", exc)
         paciente_reagendar.marcar_fallo(cita, "RESULTADO_INCIERTO")
     finally:
+        if conexion_cerrojo is not None:
+            conexion_cerrojo.close()
         if cita.get("lote_id"):
             await asyncio.to_thread(paciente_reagendar.completar_lote_si_corresponde,
                                     cita["lote_id"])
