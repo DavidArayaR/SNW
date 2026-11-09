@@ -18,7 +18,8 @@ from reservo_catalogo import (RESERVO_CLINICAS, clave_umbral_recuperacion as cla
                              clave_token, clave_estado_atendido, clave_estado_verificado)
 from reservo_pacientes import (ClienteReservo, ReservoError, codigo_estado, dividir_periodo,
                                fecha_atencion_utc, generar_nombre_base, normalizar_cliente_uuid)
-from supresion import telefonos_bloqueados_para_envio
+from supresion import (bloquear_huella_baja, limpiar_cerrojos_baja_inactivos,
+                       telefonos_bloqueados_para_envio)
 from telefono import normalizar_telefono
 
 
@@ -39,6 +40,9 @@ class SolicitudRecuperacionIn(BaseModel):
 
 
 def configurar_tablas(cur):
+    cur.execute("SHOW COLUMNS FROM reservo_bases_contacto LIKE 'sync_job_id'")
+    if cur.fetchone()["Null"] == "NO":
+        cur.execute("ALTER TABLE reservo_bases_contacto MODIFY sync_job_id BIGINT UNSIGNED NULL")
     cur.execute(
         "CREATE TABLE IF NOT EXISTS recuperacion_solicitudes ("
         " id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,"
@@ -53,6 +57,14 @@ def configurar_tablas(cur):
         " UNIQUE KEY uq_rec_usuario_clave (usuario, clave_idempotencia),"
         " KEY idx_rec_usuario_id (usuario, id),"
         " KEY idx_rec_estado_id (estado, id)"
+        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+    )
+    cur.execute(
+        "CREATE TABLE IF NOT EXISTS recuperacion_publicaciones ("
+        " solicitud BIGINT UNSIGNED PRIMARY KEY, base_id INT NULL UNIQUE,"
+        " contactos INT UNSIGNED NOT NULL,"
+        " FOREIGN KEY (solicitud) REFERENCES recuperacion_solicitudes(id) ON DELETE CASCADE,"
+        " FOREIGN KEY (base_id) REFERENCES reservo_bases_contacto(id) ON DELETE SET NULL"
         ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
     )
     cur.execute(
@@ -187,8 +199,9 @@ def obtener_resultado(usuario, solicitud_id):
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT s.solicitud_id,s.estado,s.version,a.finalizado_en,a.error,"
-            " a.pacientes_analizados,a.pacientes_inactivos,a.citas_sin_uuid"
+            " a.pacientes_analizados,a.pacientes_inactivos,a.citas_sin_uuid,p.base_id,p.contactos"
             " FROM recuperacion_solicitudes s LEFT JOIN recuperacion_analisis a ON a.solicitud=s.id"
+            " LEFT JOIN recuperacion_publicaciones p ON p.solicitud=s.id"
             " WHERE s.usuario=%s AND s.solicitud_id=%s", (usuario, solicitud_id),
         )
         fila = cur.fetchone()
@@ -202,7 +215,8 @@ def obtener_resultado(usuario, solicitud_id):
         if fila["finalizado_en"] else None,
         "conteos": {k: fila[k] for k in ("pacientes_analizados", "pacientes_inactivos", "citas_sin_uuid")}
         if fila["pacientes_analizados"] is not None else None,
-        "lista_generada_id": None,
+        "lista_generada_id": fila["base_id"],
+        "contactos_publicados": fila["contactos"],
         "error": {"codigo": "ANALISIS_RESERVO", "detalle": fila["error"]} if fila["error"] else None,
     }
 
@@ -213,32 +227,34 @@ def fecha_umbral(referencia: date, meses: int) -> date:
     return date(anio, mes, min(referencia.day, monthrange(anio, mes)[1]))
 
 
-def revisar_contactos(usuario, solicitud_id):
-    """Revisión operativa preliminar a partir de contactos locales."""
-    with conectar() as conn, conn.cursor() as cur:
-        cur.execute("SELECT id,estado,clinica_codigo,anio,mes,fecha_referencia,meses_inactividad"
-                    " FROM recuperacion_solicitudes WHERE usuario=%s AND solicitud_id=%s",
-                    (usuario, solicitud_id))
-        solicitud = cur.fetchone()
-        if not solicitud:
-            raise HTTPException(404, detail="Solicitud no disponible.")
-        if solicitud["estado"] != "ANALIZADA":
-            raise HTTPException(409, detail="La revisión requiere un análisis terminado.")
-        origen = CLINICAS[solicitud["clinica_codigo"]]
-        limite = fecha_umbral(solicitud["fecha_referencia"], solicitud["meses_inactividad"])
-        cur.execute(
-            "SELECT p.id AS ficha_id,p.paciente_telefono,c.ultima_atencion<=%s AS inactivo"
-            " FROM recuperacion_cohorte c"
-            " LEFT JOIN reservo_pacientes p ON p.clinica_codigo=%s"
-            " AND BINARY p.cliente_uuid=c.cliente_uuid"
-            " WHERE c.solicitud=%s",
-            (limite, origen, solicitud["id"]),
-        )
-        filas = cur.fetchall()
-    inactivos = sin_ficha = invalidos = 0
+def _solicitud_contactos(cur, usuario, solicitud_id, *, bloquear=False):
+    cur.execute("SELECT id,estado,clinica_codigo,anio,mes,fecha_referencia,meses_inactividad"
+                " FROM recuperacion_solicitudes WHERE usuario=%s AND solicitud_id=%s"
+                + (" FOR UPDATE" if bloquear else ""), (usuario, solicitud_id))
+    solicitud = cur.fetchone()
+    if not solicitud:
+        raise HTTPException(404, detail="Solicitud no disponible.")
+    return solicitud
+
+
+def _contactos(cur, solicitud, *, bloquear=False):
+    if solicitud["estado"] != "ANALIZADA":
+        raise HTTPException(409, detail="La revisión requiere un análisis terminado.")
+    origen = CLINICAS[solicitud["clinica_codigo"]]
+    limite = fecha_umbral(solicitud["fecha_referencia"], solicitud["meses_inactividad"])
+    cur.execute(
+        "SELECT p.id AS ficha_id,p.paciente_telefono,p.paciente_nombre,p.paciente_apellido,"
+        " p.cliente_uuid,p.fecha_ultima_atencion AS ultima_local,c.ultima_atencion,"
+        " c.ultima_atencion<=%s AS inactivo"
+        " FROM recuperacion_cohorte c"
+        " LEFT JOIN reservo_pacientes p ON p.clinica_codigo=%s"
+        " AND BINARY p.cliente_uuid=c.cliente_uuid WHERE c.solicitud=%s"
+        + (" FOR UPDATE" if bloquear else ""), (limite, origen, solicitud["id"]),
+    )
+    inactivos = sin_ficha = invalidos = activos_recientes = 0
     frecuencias = Counter()
-    candidatos = Counter()
-    for fila in filas:
+    candidatos = {}
+    for fila in cur.fetchall():
         tel = normalizar_telefono(fila["paciente_telefono"] or "")
         if tel:
             frecuencias[tel] += 1
@@ -247,25 +263,109 @@ def revisar_contactos(usuario, solicitud_id):
         inactivos += 1
         if fila["ficha_id"] is None:
             sin_ficha += 1
+        elif fila["ultima_local"] and fila["ultima_local"].replace(tzinfo=timezone.utc).astimezone(ZONA).date() > limite:
+            activos_recientes += 1
         elif tel:
-            candidatos[tel] += 1
+            candidatos.setdefault(tel, []).append(fila)
         else:
             invalidos += 1
-    compartidos = sum(total for tel, total in candidatos.items() if frecuencias[tel] > 1)
-    unicos = {tel for tel in candidatos if frecuencias[tel] == 1}
-    bloqueados = telefonos_bloqueados_para_envio(unicos) if unicos else set()
-    nombre = generar_nombre_base(origen, "pacientes_inactivos",
+    compartidos = sum(len(filas) for tel, filas in candidatos.items() if frecuencias[tel] > 1)
+    unicos = {tel: filas[0] for tel, filas in candidatos.items() if frecuencias[tel] == 1}
+    return unicos, {"pacientes_inactivos": inactivos, "sin_ficha_local": sin_ficha,
+                    "telefonos_invalidos": invalidos, "telefonos_compartidos": compartidos,
+                    "atenciones_recientes": activos_recientes}
+
+
+def revisar_contactos(usuario, solicitud_id):
+    with conectar() as conn, conn.cursor() as cur:
+        solicitud = _solicitud_contactos(cur, usuario, solicitud_id)
+        unicos, conteos = _contactos(cur, solicitud)
+    bloqueados = telefonos_bloqueados_para_envio(set(unicos)) if unicos else set()
+    disponibles = len(unicos.keys() - bloqueados)
+    nombre = generar_nombre_base(CLINICAS[solicitud["clinica_codigo"]], "pacientes_inactivos",
                                  fecha_periodo=date(solicitud["anio"], solicitud["mes"], 1))
     return {
         "solicitud_id": solicitud_id, "nombre_propuesto": nombre["nombre"],
         "fuente_contactos": "fichas_reservo_sincronizadas",
-        "conteos": {"pacientes_inactivos": inactivos, "sin_ficha_local": sin_ficha,
-                    "telefonos_invalidos": invalidos, "telefonos_compartidos": compartidos,
-                    "bloqueados": len(bloqueados),
-                    "contactos_sin_bloqueo": len(unicos - bloqueados)},
-        "publicacion_disponible": False,
-        "motivo": "La publicación requiere integrar las membresías compartidas al flujo de bases normales.",
+        "conteos": {**conteos, "bloqueados": len(bloqueados), "contactos_sin_bloqueo": disponibles},
+        "publicacion_disponible": bool(disponibles),
     }
+
+
+def publicar_base(usuario, solicitud_id):
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("SELECT GET_LOCK('snw-reservo-listas', 5) AS adquirido")
+        if not cur.fetchone()["adquirido"]:
+            raise HTTPException(409, detail="Hay otra base guardándose. Intenta nuevamente.")
+        try:
+            solicitud = _solicitud_contactos(cur, usuario, solicitud_id, bloquear=True)
+            cur.execute("SELECT base_id,contactos FROM recuperacion_publicaciones WHERE solicitud=%s",
+                        (solicitud["id"],))
+            existente = cur.fetchone()
+            if existente:
+                if existente["base_id"] is None:
+                    raise HTTPException(409, detail="La base de esta solicitud fue eliminada.")
+                return {"lista_generada_id": existente["base_id"], "contactos": existente["contactos"]}, False
+            candidatos, _ = _contactos(cur, solicitud, bloquear=True)
+            bloqueados = telefonos_bloqueados_para_envio(set(candidatos)) if candidatos else set()
+            filas, cerrojos = [], []
+            for tel in sorted(candidatos.keys() - bloqueados):
+                huella, baja = bloquear_huella_baja(cur, tel)
+                if baja:
+                    continue
+                cerrojos.append(huella)
+                cur.execute("SELECT estado FROM supresion_telefonos WHERE huella=%s FOR UPDATE", (huella,))
+                supresion = cur.fetchone()
+                if supresion and supresion["estado"] != "exento":
+                    continue
+                cur.execute("SELECT 1 FROM whatsapp_avisos_unicos WHERE telefono=%s"
+                            " AND tipo='eliminacion_simulada' FOR UPDATE", (tel,))
+                if cur.fetchone():
+                    continue
+                fila = candidatos[tel]
+                filas.append((fila["ficha_id"], fila["cliente_uuid"], fila["paciente_nombre"],
+                              fila["paciente_apellido"], tel, fila["ultima_atencion"]))
+            if not filas:
+                raise HTTPException(409, detail="La solicitud no tiene contactos disponibles para publicar.")
+            desde = date(solicitud["anio"], solicitud["mes"], 1)
+            hasta = desde.replace(day=monthrange(desde.year, desde.month)[1])
+            origen = CLINICAS[solicitud["clinica_codigo"]]
+            datos = generar_nombre_base(origen, "pacientes_inactivos", fecha_periodo=desde)
+            nombre = datos["nombre"]
+            sufijo = 1
+            while True:
+                cur.execute("SELECT id FROM reservo_bases_contacto WHERE nombre=%s", (nombre,))
+                if not cur.fetchone():
+                    break
+                sufijo += 1
+                nombre = f"{datos['nombre']}_{sufijo}"
+            cur.execute(
+                "INSERT INTO reservo_bases_contacto (nombre_personalizado,nombre,clinica_codigo,"
+                " origen,sync_job_id,tratamientos_json,fecha_desde,fecha_hasta,mes,anio,creado_por)"
+                " VALUES (%s,%s,%s,'RECUPERACION',NULL,'[]',%s,%s,%s,%s,%s)",
+                (datos["nombre_personalizado"], nombre, origen, desde, hasta,
+                 datos["mes"], solicitud["anio"], usuario),
+            )
+            base_id = cur.lastrowid
+            for inicio in range(0, len(filas), 500):
+                cur.executemany(
+                    "INSERT INTO reservo_lista_pacientes (lista_id,paciente_id,cliente_uuid,"
+                    " nombre,apellido,telefono,fecha_ultima_atencion,telefono_valido,consentimiento_verificado)"
+                    " VALUES (%s,%s,%s,%s,%s,%s,%s,1,1)",
+                    [(base_id, *fila) for fila in filas[inicio:inicio + 500]],
+                )
+            cur.execute("INSERT INTO recuperacion_publicaciones (solicitud,base_id,contactos)"
+                        " VALUES (%s,%s,%s)", (solicitud["id"], base_id, len(filas)))
+            cur.execute("UPDATE recuperacion_solicitudes SET estado='COMPLETADA',version=version+1 WHERE id=%s",
+                        (solicitud["id"],))
+            limpiar_cerrojos_baja_inactivos(cur, cerrojos)
+            conn.commit()
+            return {"lista_generada_id": base_id, "contactos": len(filas)}, True
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            cur.execute("SELECT RELEASE_LOCK('snw-reservo-listas')")
 
 
 def _leer_tramo(cliente, desde, hasta, atendido, instante):

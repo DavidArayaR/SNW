@@ -582,6 +582,8 @@
     const titulo = $("#recuperacionDetalleTitulo");
     const estado = $("#recuperacionEstado");
     const revisar = $("#recuperacionRevisar");
+    const publicar = $("#recuperacionPublicar");
+    const abrirBase = $("#recuperacionAbrirBase");
     const contactoAviso = $("#recuperacionContactosAviso");
     const nombresMes = new Intl.DateTimeFormat("es-CL", { month: "long", timeZone: "UTC" });
     const meses = Array.from({ length: 12 }, (_, i) => nombresMes.format(new Date(Date.UTC(2000, i, 1))));
@@ -687,6 +689,13 @@
         conteos("#recuperacionConteos", resultado.conteos, { pacientes_analizados: "Pacientes analizados",
           pacientes_inactivos: "Pacientes inactivos", citas_sin_uuid: "Citas sin identificador" });
         revisar.hidden = fila.estado !== "ANALIZADA";
+        if (resultado.lista_generada_id) {
+          abrirBase.href = `pacientes.html?base_reservo=${encodeURIComponent(resultado.lista_generada_id)}`;
+          abrirBase.hidden = false;
+          contactoAviso.textContent = `Base publicada con ${Number(resultado.contactos_publicados).toLocaleString("es-CL")} pacientes.`;
+        } else if (fila.estado === "COMPLETADA") {
+          contactoAviso.textContent = "La base publicada ya no está disponible.";
+        }
       } catch (error) {
         if (version !== secuencia) return;
         estado.textContent = error.message;
@@ -709,27 +718,52 @@
       $("#recuperacionContactos").replaceChildren();
       revisar.hidden = true;
       revisar.disabled = false;
+      publicar.hidden = true;
+      publicar.disabled = false;
+      abrirBase.hidden = true;
+      abrirBase.removeAttribute("href");
       consultarDetalle(id, true);
     }
 
     revisar.addEventListener("click", async () => {
       const version = secuencia;
       revisar.disabled = true;
+      publicar.hidden = true;
       contactoAviso.textContent = "Revisando contactos…";
       $("#recuperacionContactos").replaceChildren();
       try {
         const datos = await request(`${ruta}/solicitudes/${encodeURIComponent(seleccion)}/revision-contactos`);
         if (version !== secuencia) return;
-        contactoAviso.textContent = datos.publicacion_disponible ? datos.nombre_propuesto
-          : `${datos.nombre_propuesto} · La base aún no se puede publicar.`;
+        publicar.hidden = !datos.publicacion_disponible;
+        contactoAviso.textContent = datos.publicacion_disponible ? `Nombre propuesto: ${datos.nombre_propuesto}`
+          : "No hay contactos disponibles para publicar.";
         conteos("#recuperacionContactos", datos.conteos, { pacientes_inactivos: "Pacientes inactivos",
           sin_ficha_local: "Sin ficha local", telefonos_invalidos: "Teléfonos inválidos",
+          atenciones_recientes: "Con atención posterior al umbral",
           telefonos_compartidos: "Contactos con teléfono compartido", bloqueados: "Bloqueados",
           contactos_sin_bloqueo: "Contactos sin bloqueo" });
       } catch (error) {
         if (version === secuencia) contactoAviso.textContent = error.message;
       } finally {
         if (version === secuencia) revisar.disabled = false;
+      }
+    });
+
+    publicar.addEventListener("click", async () => {
+      if (!seleccion || publicar.disabled) return;
+      const id = seleccion;
+      const version = secuencia;
+      publicar.disabled = revisar.disabled = true;
+      contactoAviso.textContent = "Publicando base…";
+      try {
+        await request(`${ruta}/solicitudes/${encodeURIComponent(id)}/publicar`, { method: "POST" });
+        if (version !== secuencia) return;
+        abrirSolicitud(id);
+        cargarHistorial();
+      } catch (error) {
+        if (version !== secuencia) return;
+        contactoAviso.textContent = error.message;
+        publicar.disabled = revisar.disabled = false;
       }
     });
 

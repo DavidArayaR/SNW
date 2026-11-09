@@ -5835,6 +5835,15 @@ def revisar_contactos_recuperacion(solicitud_id: str, sesion: dict = Depends(sol
     return recuperacion_pacientes.revisar_contactos(sesion["usuario"], solicitud_id)
 
 
+def publicar_base_recuperacion(solicitud_id: str, sesion: dict = Depends(solo_admin)):
+    usuario = sesion["usuario"]
+    base, nueva = recuperacion_pacientes.publicar_base(usuario, solicitud_id)
+    if nueva:
+        auditoria_registrar(usuario, "recuperacion_publicada", solicitud_id,
+                            str(base["lista_generada_id"]))
+    return base
+
+
 def listar_configuracion_reservo(sesion: dict = Depends(solo_admin)):
     return _config_reservo_publica(config_all(refresh=True))
 

@@ -96,6 +96,7 @@ const selBasePac = $("#selBasePac");
 const tablaSelectorBases = $("#tablaSelectorBases");
 const filtroClinicaBases = $("#filtroClinicaBases");
 let baseElegidaSesion = false;
+let baseReservoEnlace = new URLSearchParams(location.search).get("base_reservo");
 
 // Solo lectura para cuentas sin permiso de gestión (el usuario normal ve su
 // base pero no la edita: sin checks, sin edición inline, sin CSV ni borrado;
@@ -207,7 +208,9 @@ async function cargarBasesPac() {
     areas = [];
     basesReservo = [];
   }
-  const anterior = baseElegidaSesion ? selBasePac.value : "";
+  const anterior = baseElegidaSesion ? selBasePac.value
+    : baseReservoEnlace ? `reservo:${baseReservoEnlace}` : "";
+  baseReservoEnlace = null;
   if (filtroClinicaBases) {
     const previo = filtroClinicaBases.value || "todas";
     const clinicas = new Map(basesReservo.filter((base) => base.clinica_codigo)
@@ -242,6 +245,8 @@ async function cargarBasesPac() {
     return;
   }
   selBasePac.value = elegido;
+  baseElegidaSesion = true;
+  mostrarBaseSeleccionada(true);
   localStorage.setItem("snw_base_pacientes_actual", elegido);
   if (elegido.startsWith("esp:")) {
     localStorage.setItem("snw_esp_pacientes", elegido.slice(4));

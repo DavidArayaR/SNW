@@ -16,7 +16,8 @@ def integrar_bases():
             cur.execute("SHOW COLUMNS FROM reservo_bases_contacto LIKE 'area_id'")
             if not cur.fetchone():
                 cur.execute('ALTER TABLE reservo_bases_contacto ADD COLUMN area_id INT NULL')
-            cur.execute('SELECT id,nombre,area_id FROM reservo_bases_contacto ORDER BY id')
+            cur.execute("SELECT id,nombre,area_id FROM reservo_bases_contacto"
+                        " WHERE origen <> 'RECUPERACION' ORDER BY id")
             bases = list(cur.fetchall())
             for base in bases:
                 if base.get('area_id'):
