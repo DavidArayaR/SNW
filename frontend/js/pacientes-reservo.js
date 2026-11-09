@@ -566,6 +566,223 @@
   document.addEventListener("keydown", (evento) => {
     if (evento.key === "Escape" && !ui.modal.hidden) cerrarModalGuardar();
   });
+  function iniciarRecuperacion() {
+    const ruta = "api/v1/recuperacion-pacientes";
+    const form = $("#formRecuperacion");
+    const clinica = $("#recuperacionClinica");
+    const anio = $("#recuperacionAnio");
+    const mes = $("#recuperacionMes");
+    const procesar = $("#recuperacionProcesar");
+    const aviso = $("#recuperacionAviso");
+    const historial = $("#recuperacionSolicitudes");
+    const anterior = $("#recuperacionAnterior");
+    const siguiente = $("#recuperacionSiguiente");
+    const detalle = $("#recuperacionDetalle");
+    const titulo = $("#recuperacionDetalleTitulo");
+    const estado = $("#recuperacionEstado");
+    const revisar = $("#recuperacionRevisar");
+    const contactoAviso = $("#recuperacionContactosAviso");
+    const nombresMes = new Intl.DateTimeFormat("es-CL", { month: "long", timeZone: "UTC" });
+    const meses = Array.from({ length: 12 }, (_, i) => nombresMes.format(new Date(Date.UTC(2000, i, 1))));
+    const etiquetas = { PENDIENTE: "Pendiente", PROCESANDO: "Procesando", ANALIZADA: "Analizada",
+      COMPLETADA: "Completada", SIN_RESULTADOS: "Sin resultados", ERROR: "Error", CANCELADA: "Cancelada" };
+    let centros = [];
+    let cursores = [null];
+    let cursorSiguiente = null;
+    let consultaHistorial = 0;
+    let enviando = false;
+    let seleccion = null;
+    let secuencia = 0;
+    let temporizador;
+    const intentos = new Map();
+
+    function periodoActual() {
+      const partes = new Intl.DateTimeFormat("en-CA", {
+        year: "numeric", month: "numeric", timeZone: "America/Santiago",
+      }).formatToParts(new Date());
+      return Number(partes.find((p) => p.type === "year").value) * 12
+        + Number(partes.find((p) => p.type === "month").value);
+    }
+
+    const ultimo = periodoActual() - 1;
+    anio.value = String(Math.floor((ultimo - 1) / 12));
+    anio.max = String(Math.floor((periodoActual() - 1) / 12));
+    mes.replaceChildren(...meses.map((nombre, i) => new Option(nombre, String(i + 1))));
+    mes.value = String((ultimo - 1) % 12 + 1);
+    const nombreClinica = (codigo) => centros.find((c) => c.clinica_codigo === codigo)?.nombre || codigo;
+    const periodo = (fila) => `${meses[fila.mes - 1]} de ${fila.anio}`;
+    const activa = (valor) => ["PENDIENTE", "PROCESANDO"].includes(valor);
+    const avisar = (texto, tipo = "info") => {
+      aviso.textContent = texto;
+      aviso.className = `reservo-aviso reservo-aviso--${tipo}`;
+    };
+
+    function validarFormulario() {
+      const centro = centros.find((c) => c.clinica_codigo === clinica.value);
+      const historico = anio.checkValidity() && Number(anio.value) * 12 + Number(mes.value) < periodoActual();
+      $("#recuperacionUmbral").textContent = !centro ? "Selecciona una clínica."
+        : !centro.meses_inactividad ? "Configura el umbral de recuperación en Configuración → Reservo."
+          : historico ? `Inactividad mínima: ${centro.meses_inactividad} meses.` : "Selecciona un mes histórico completo.";
+      procesar.disabled = enviando || !historico || !centro?.meses_inactividad;
+    }
+
+    function conteos(id, datos, campos) {
+      $(id).replaceChildren(...Object.entries(campos).filter(([clave]) => datos?.[clave] != null)
+        .map(([clave, nombre]) => {
+          const li = document.createElement("li");
+          li.textContent = `${nombre}: ${Number(datos[clave]).toLocaleString("es-CL")}`;
+          return li;
+        }));
+    }
+
+    async function cargarHistorial(navegacion = cursores) {
+      const consulta = ++consultaHistorial;
+      anterior.disabled = siguiente.disabled = true;
+      try {
+        const params = new URLSearchParams({ limite: "10" });
+        if (navegacion.at(-1)) params.set("cursor", navegacion.at(-1));
+        const data = await request(`${ruta}/solicitudes?${params}`);
+        if (consulta !== consultaHistorial) return;
+        cursores = navegacion;
+        cursorSiguiente = data.siguiente_cursor;
+        $("#recuperacionPagina").textContent = `Página ${cursores.length}`;
+        historial.innerHTML = (data.items || []).map((fila) =>
+          `<tr><td>${escapar(nombreClinica(fila.clinica_codigo))}</td><td>${escapar(periodo(fila))}</td>` +
+          `<td>${Number(fila.meses_inactividad)} meses</td><td data-rec-estado>${escapar(etiquetas[fila.estado] || fila.estado)}</td>` +
+          `<td><button class="btn btn--ghost" type="button" data-rec-id="${escapar(fila.solicitud_id)}">Ver detalle</button></td></tr>`
+        ).join("") || '<tr><td colspan="5" class="reservo-vacio">Todavía no hay solicitudes.</td></tr>';
+      } catch (error) {
+        if (consulta === consultaHistorial) avisar(error.message, "error");
+      } finally {
+        if (consulta === consultaHistorial) {
+          anterior.disabled = cursores.length < 2;
+          siguiente.disabled = !cursorSiguiente;
+        }
+      }
+    }
+
+    async function consultarDetalle(id, enfocar = false, reintentos = 0) {
+      const version = secuencia;
+      const url = `${ruta}/solicitudes/${encodeURIComponent(id)}`;
+      try {
+        const fila = await request(url);
+        if (version !== secuencia) return;
+        titulo.textContent = `${nombreClinica(fila.clinica_codigo)} · ${periodo(fila)}`;
+        if (enfocar) titulo.focus();
+        const avance = fila.progreso;
+        const resumen = `${etiquetas[fila.estado] || fila.estado} · Umbral de ${fila.meses_inactividad} meses`
+          + (avance ? ` · ${avance.tramos} tramos y ${avance.paginas} páginas revisadas` : "");
+        if (estado.textContent !== resumen) estado.textContent = resumen;
+        for (const boton of historial.querySelectorAll("[data-rec-id]")) {
+          if (boton.dataset.recId === id) boton.closest("tr").querySelector("[data-rec-estado]").textContent =
+            etiquetas[fila.estado] || fila.estado;
+        }
+        if (activa(fila.estado)) {
+          temporizador = setTimeout(() => consultarDetalle(id), 5000);
+          return;
+        }
+        const resultado = await request(`${url}/resultado`);
+        if (version !== secuencia) return;
+        if (resultado.error?.detalle) estado.textContent = resultado.error.detalle;
+        conteos("#recuperacionConteos", resultado.conteos, { pacientes_analizados: "Pacientes analizados",
+          pacientes_inactivos: "Pacientes inactivos", citas_sin_uuid: "Citas sin identificador" });
+        revisar.hidden = fila.estado !== "ANALIZADA";
+      } catch (error) {
+        if (version !== secuencia) return;
+        estado.textContent = error.message;
+        if (!enfocar && reintentos < 3 && error.message !== "La sesión expiró.") {
+          temporizador = setTimeout(() => consultarDetalle(id, false, reintentos + 1),
+            5000 * 2 ** (reintentos + 1));
+        }
+      }
+    }
+
+    function abrirSolicitud(id) {
+      clearTimeout(temporizador);
+      secuencia++;
+      seleccion = id;
+      detalle.hidden = false;
+      titulo.textContent = "Detalle de recuperación";
+      estado.textContent = "Consultando solicitud…";
+      contactoAviso.textContent = "";
+      $("#recuperacionConteos").replaceChildren();
+      $("#recuperacionContactos").replaceChildren();
+      revisar.hidden = true;
+      revisar.disabled = false;
+      consultarDetalle(id, true);
+    }
+
+    revisar.addEventListener("click", async () => {
+      const version = secuencia;
+      revisar.disabled = true;
+      contactoAviso.textContent = "Revisando contactos…";
+      $("#recuperacionContactos").replaceChildren();
+      try {
+        const datos = await request(`${ruta}/solicitudes/${encodeURIComponent(seleccion)}/revision-contactos`);
+        if (version !== secuencia) return;
+        contactoAviso.textContent = datos.publicacion_disponible ? datos.nombre_propuesto
+          : `${datos.nombre_propuesto} · La base aún no se puede publicar.`;
+        conteos("#recuperacionContactos", datos.conteos, { pacientes_inactivos: "Pacientes inactivos",
+          sin_ficha_local: "Sin ficha local", telefonos_invalidos: "Teléfonos inválidos",
+          telefonos_compartidos: "Contactos con teléfono compartido", bloqueados: "Bloqueados",
+          contactos_sin_bloqueo: "Contactos sin bloqueo" });
+      } catch (error) {
+        if (version === secuencia) contactoAviso.textContent = error.message;
+      } finally {
+        if (version === secuencia) revisar.disabled = false;
+      }
+    });
+
+    form.addEventListener("input", validarFormulario);
+    form.addEventListener("submit", async (evento) => {
+      evento.preventDefault();
+      validarFormulario();
+      if (procesar.disabled) return;
+      const body = JSON.stringify({ clinica_codigo: clinica.value, anio: Number(anio.value), mes: Number(mes.value) });
+      if (!intentos.has(body)) {
+        const bytes = crypto.getRandomValues(new Uint8Array(16));
+        intentos.set(body, Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join(""));
+      }
+      enviando = true;
+      validarFormulario();
+      avisar("Registrando solicitud…");
+      try {
+        const fila = await request(`${ruta}/solicitudes`, { method: "POST", body,
+          headers: { "Content-Type": "application/json", "Idempotency-Key": intentos.get(body) } });
+        intentos.delete(body);
+        avisar("Solicitud registrada.", "success");
+        abrirSolicitud(fila.solicitud_id);
+        await cargarHistorial([null]);
+      } catch (error) {
+        avisar(error.message, "error");
+      } finally {
+        enviando = false;
+        validarFormulario();
+      }
+    });
+    historial.addEventListener("click", (evento) => {
+      const boton = evento.target.closest("[data-rec-id]");
+      if (boton) abrirSolicitud(boton.dataset.recId);
+    });
+    anterior.addEventListener("click", () => cargarHistorial(cursores.slice(0, -1)));
+    siguiente.addEventListener("click", () => cargarHistorial([...cursores, cursorSiguiente]));
+    $("#recuperacionActualizar").addEventListener("click", () => {
+      cargarHistorial(cursores);
+      if (seleccion) abrirSolicitud(seleccion);
+    });
+    request(`${ruta}/clinicas`).then((data) => {
+      centros = data.items || [];
+      clinica.replaceChildren(new Option("Selecciona una clínica", ""),
+        ...centros.map((c) => new Option(c.nombre, c.clinica_codigo)));
+      validarFormulario();
+      return cargarHistorial();
+    }).catch((error) => {
+      avisar(error.message, "error");
+      historial.innerHTML = '<tr><td colspan="5" class="reservo-vacio">No se pudo cargar el historial.</td></tr>';
+    });
+  }
+
+  iniciarRecuperacion();
   (async function iniciar() {
     try {
       await cargarConfiguracion();

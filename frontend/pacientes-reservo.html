@@ -39,6 +39,45 @@
           </a>
         </section>
 
+        <section class="panel reservo-panel" aria-labelledby="recuperacionTitulo">
+          <div class="panel__head">
+            <h2 id="recuperacionTitulo"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> Recuperación de pacientes</h2>
+            <button class="btn btn--ghost" id="recuperacionActualizar" type="button">Actualizar solicitudes</button>
+          </div>
+          <p class="field__hint">Elige el mes de atención inicial. SNW revisará las atenciones posteriores para calcular la inactividad.</p>
+          <form id="formRecuperacion" class="reservo-form">
+            <label class="field"><span>Clínica</span><select id="recuperacionClinica" required></select></label>
+            <label class="field"><span>Año</span><input id="recuperacionAnio" type="number" min="1000" max="9999" required></label>
+            <label class="field"><span>Mes histórico</span><select id="recuperacionMes" required></select></label>
+            <div class="reservo-form__accion">
+              <button id="recuperacionProcesar" class="btn btn--primary" type="submit" disabled>Procesar</button>
+            </div>
+            <p class="reservo-form__paso field__hint" id="recuperacionUmbral"></p>
+          </form>
+          <p id="recuperacionAviso" class="reservo-aviso" role="status" aria-live="polite"></p>
+          <div class="reservo-tabla-wrap">
+            <table class="table reservo-tabla" aria-label="Historial de solicitudes de recuperación">
+              <thead><tr><th scope="col">Clínica</th><th scope="col">Período</th><th scope="col">Umbral</th><th scope="col">Estado</th><th scope="col">Detalle</th></tr></thead>
+              <tbody id="recuperacionSolicitudes"><tr><td colspan="5" class="reservo-vacio">Cargando solicitudes…</td></tr></tbody>
+            </table>
+          </div>
+          <div class="reservo-paginacion" role="group" aria-label="Paginación de solicitudes de recuperación">
+            <button id="recuperacionAnterior" class="btn btn--ghost" type="button" disabled>Anterior</button>
+            <span id="recuperacionPagina" class="pag-info" aria-live="polite">Página 1</span>
+            <button id="recuperacionSiguiente" class="btn btn--ghost" type="button" disabled>Siguiente</button>
+          </div>
+          <section id="recuperacionDetalle" class="reservo-filtro-actual" aria-label="Detalle de la solicitud" hidden>
+            <div>
+              <h3 id="recuperacionDetalleTitulo" tabindex="-1"></h3>
+              <p id="recuperacionEstado" role="status" aria-live="polite"></p>
+              <ul id="recuperacionConteos"></ul>
+              <button id="recuperacionRevisar" class="btn btn--ghost" type="button" hidden>Revisar contactos</button>
+              <p id="recuperacionContactosAviso" role="status" aria-live="polite"></p>
+              <ul id="recuperacionContactos"></ul>
+            </div>
+          </section>
+        </section>
+
         <section class="panel reservo-panel">
           <div class="panel__head">
             <h2><i class="fa-solid fa-cloud-arrow-down" aria-hidden="true"></i> Sincronizar desde Reservo</h2>
@@ -158,7 +197,7 @@
     </section>
   </div>
   <script src="js/layout.js?v=reservo-nav2"></script>
-  <script src="js/pacientes-reservo.js?v=historial-paginado1"></script>
+  <script src="js/pacientes-reservo.js?v=recuperacion1"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>
