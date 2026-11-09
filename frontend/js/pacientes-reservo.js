@@ -573,6 +573,8 @@
     const anio = $("#recuperacionAnio");
     const mes = $("#recuperacionMes");
     const mesesInactividad = $("#recuperacionMeses");
+    const consultarTratamientosRec = $("#recuperacionConsultarTratamientos");
+    const tratamientosRec = $("#recuperacionTratamientos");
     const procesar = $("#recuperacionProcesar");
     const aviso = $("#recuperacionAviso");
     const historial = $("#recuperacionSolicitudes");
@@ -594,6 +596,9 @@
     let cursorSiguiente = null;
     let consultaHistorial = 0;
     let enviando = false;
+    let consultandoTratamientos = false;
+    let tratamientosConsultados = false;
+    let versionTratamientos = 0;
     let seleccion = null;
     let secuencia = 0;
     let temporizador;
@@ -625,8 +630,63 @@
       const historico = anio.checkValidity() && Number(anio.value) * 12 + Number(mes.value) < periodoActual();
       $("#recuperacionUmbral").textContent = !historico ? "Selecciona un mes histórico completo."
         : "Ingresa entre 1 y 120 meses de inactividad.";
-      procesar.disabled = enviando || !historico || !centro || !mesesInactividad.checkValidity();
+      consultarTratamientosRec.disabled = enviando || consultandoTratamientos || !historico || !centro;
+      procesar.disabled = enviando || consultandoTratamientos || !tratamientosConsultados || !historico || !centro
+        || !mesesInactividad.checkValidity() || tratamientosElegidos().length > 50;
     }
+
+    function tratamientosElegidos() {
+      return [...tratamientosRec.querySelectorAll("input:checked")].map((opcion) => opcion.value);
+    }
+
+    for (const campo of [clinica, anio, mes, mesesInactividad]) {
+      campo.addEventListener("input", () => {
+        versionTratamientos++;
+        consultandoTratamientos = false;
+        tratamientosConsultados = false;
+        tratamientosRec.textContent = "Consulta los tratamientos nuevamente.";
+      });
+    }
+
+    consultarTratamientosRec.addEventListener("click", async () => {
+      const version = ++versionTratamientos;
+      const elegidos = new Set(tratamientosElegidos());
+      const prefijo = `${anio.value.padStart(4, "0")}-${mes.value.padStart(2, "0")}`;
+      const fin = new Date(0);
+      fin.setUTCFullYear(Number(anio.value), Number(mes.value), 0);
+      consultandoTratamientos = true;
+      tratamientosConsultados = false;
+      validarFormulario();
+      tratamientosRec.textContent = "Consultando tratamientos en Reservo…";
+      try {
+        const data = await request("api/reservo/tratamientos", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ clinica_codigo: clinica.value === "VS" ? "MVYS" : clinica.value,
+            fecha_desde: `${prefijo}-01`, fecha_hasta: `${prefijo}-${String(fin.getUTCDate()).padStart(2, "0")}` }),
+        });
+        if (version !== versionTratamientos) return;
+        const opciones = (data.items || []).map((item) => {
+          const etiqueta = document.createElement("label");
+          etiqueta.className = "reservo-tratamiento";
+          const casilla = document.createElement("input");
+          casilla.type = "checkbox";
+          casilla.value = item.uuid;
+          casilla.checked = elegidos.has(item.uuid);
+          etiqueta.append(casilla, document.createTextNode(item.nombre));
+          return etiqueta;
+        });
+        tratamientosRec.replaceChildren(...opciones);
+        tratamientosConsultados = true;
+        if (!opciones.length) tratamientosRec.textContent = "No hay tratamientos para este período.";
+      } catch (error) {
+        if (version === versionTratamientos) tratamientosRec.textContent = error.message;
+      } finally {
+        if (version === versionTratamientos) {
+          consultandoTratamientos = false;
+          validarFormulario();
+        }
+      }
+    });
 
     function conteos(id, datos, campos) {
       $(id).replaceChildren(...Object.entries(campos).filter(([clave]) => datos?.[clave] != null)
@@ -773,7 +833,8 @@
       validarFormulario();
       if (procesar.disabled) return;
       const body = JSON.stringify({ clinica_codigo: clinica.value, anio: Number(anio.value),
-        mes: Number(mes.value), meses_inactividad: Number(mesesInactividad.value) });
+        mes: Number(mes.value), meses_inactividad: Number(mesesInactividad.value),
+        tratamientos: tratamientosElegidos() });
       if (!intentos.has(body)) {
         const bytes = crypto.getRandomValues(new Uint8Array(16));
         intentos.set(body, Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join(""));

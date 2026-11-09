@@ -50,6 +50,12 @@
             <label class="field"><span>Año</span><input id="recuperacionAnio" type="number" min="1000" max="9999" required></label>
             <label class="field"><span>Mes histórico</span><select id="recuperacionMes" required></select></label>
             <label class="field"><span>Meses de inactividad</span><input id="recuperacionMeses" type="number" min="1" max="120" step="1" required aria-describedby="recuperacionUmbral"></label>
+            <fieldset class="field reservo-form__tratamientos">
+              <legend>Tratamientos de la última atención</legend>
+              <button id="recuperacionConsultarTratamientos" class="btn btn--ghost" type="button" disabled>Consultar tratamientos</button>
+              <div id="recuperacionTratamientos" class="reservo-tratamientos" aria-live="polite">Consulta los tratamientos de la clínica y el mes elegidos.</div>
+              <span class="field__hint">Marca hasta 50 tratamientos. Si no marcas ninguno, se incluyen todos.</span>
+            </fieldset>
             <div class="reservo-form__accion reservo-form__accion--final">
               <span class="field__hint" id="recuperacionUmbral">Ingresa entre 1 y 120 meses.</span>
               <button id="recuperacionProcesar" class="btn btn--primary" type="submit" disabled>Procesar</button>
@@ -200,7 +206,7 @@
     </section>
   </div>
   <script src="js/layout.js?v=reservo-nav2"></script>
-  <script src="js/pacientes-reservo.js?v=recuperacion-publicacion1"></script>
+  <script src="js/pacientes-reservo.js?v=recuperacion-tratamientos3"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>
