@@ -17,7 +17,8 @@ from reservo_catalogo import (RESERVO_CLINICAS, clave_umbral_recuperacion as cla
                              clave_cobertura_recuperacion as clave_cobertura,
                              clave_token, clave_estado_atendido, clave_estado_verificado)
 from reservo_pacientes import (ClienteReservo, ReservoError, codigo_estado, dividir_periodo,
-                               fecha_atencion_utc, generar_nombre_base, normalizar_cliente_uuid)
+                               fecha_atencion_utc, generar_nombre_base, normalizar_cliente_uuid,
+                               cliente_valido, _guardar_paciente_cursor)
 from supresion import (bloquear_huella_baja, limpiar_cerrojos_baja_inactivos,
                        telefonos_bloqueados_para_envio)
 from telefono import normalizar_telefono
@@ -228,7 +229,7 @@ def fecha_umbral(referencia: date, meses: int) -> date:
 
 
 def _solicitud_contactos(cur, usuario, solicitud_id, *, bloquear=False):
-    cur.execute("SELECT id,estado,clinica_codigo,anio,mes,fecha_referencia,meses_inactividad"
+    cur.execute("SELECT id,solicitud_id,usuario,estado,clinica_codigo,anio,mes,fecha_referencia,meses_inactividad,creado_en"
                 " FROM recuperacion_solicitudes WHERE usuario=%s AND solicitud_id=%s"
                 + (" FOR UPDATE" if bloquear else ""), (usuario, solicitud_id))
     solicitud = cur.fetchone()
@@ -280,6 +281,11 @@ def revisar_contactos(usuario, solicitud_id):
     with conectar() as conn, conn.cursor() as cur:
         solicitud = _solicitud_contactos(cur, usuario, solicitud_id)
         unicos, conteos = _contactos(cur, solicitud)
+    if conteos["sin_ficha_local"]:
+        _completar_fichas(solicitud)
+        with conectar() as conn, conn.cursor() as cur:
+            solicitud = _solicitud_contactos(cur, usuario, solicitud_id)
+            unicos, conteos = _contactos(cur, solicitud)
     bloqueados = telefonos_bloqueados_para_envio(set(unicos)) if unicos else set()
     disponibles = len(unicos.keys() - bloqueados)
     nombre = generar_nombre_base(CLINICAS[solicitud["clinica_codigo"]], "pacientes_inactivos",
@@ -290,6 +296,43 @@ def revisar_contactos(usuario, solicitud_id):
         "conteos": {**conteos, "bloqueados": len(bloqueados), "contactos_sin_bloqueo": disponibles},
         "publicacion_disponible": bool(disponibles),
     }
+
+
+def _completar_fichas(solicitud):
+    """Recupera contactos de análisis anteriores a la sincronización automática."""
+    origen = CLINICAS[solicitud["clinica_codigo"]]
+    cfg = config_all(refresh=True)
+    token = cfg.get(clave_token(origen), "").strip()
+    atendido = cfg.get(clave_estado_atendido(origen), "").strip()
+    if not token or not atendido or cfg.get(clave_estado_verificado(origen)) != "true":
+        raise HTTPException(503, detail="Revisa la configuración de Reservo de esta clínica.")
+    inicio = date(solicitud["anio"], solicitud["mes"], 1)
+    fin = inicio.replace(day=monthrange(inicio.year, inicio.month)[1])
+    cliente = ClienteReservo(token)
+    try:
+        for desde, hasta in dividir_periodo(inicio, fin, dias_por_tramo=7):
+            _, _, _, contactos = _leer_tramo(cliente, desde, hasta, atendido, solicitud["creado_en"])
+            if not contactos:
+                continue
+            with conectar() as conn, conn.cursor() as cur:
+                actual = _solicitud_contactos(cur, solicitud["usuario"], solicitud["solicitud_id"])
+                if actual["estado"] != "ANALIZADA":
+                    raise HTTPException(409, detail="La solicitud ya no está disponible para revisión.")
+                marcas = ",".join(["%s"] * len(contactos))
+                cur.execute("SELECT c.cliente_uuid FROM recuperacion_cohorte c"
+                            " LEFT JOIN reservo_pacientes p ON p.clinica_codigo=%s"
+                            " AND BINARY p.cliente_uuid=c.cliente_uuid"
+                            f" WHERE c.solicitud=%s AND p.id IS NULL AND c.cliente_uuid IN ({marcas})",
+                            (origen, solicitud["id"], *contactos))
+                faltantes = {fila["cliente_uuid"] for fila in cur.fetchall()}
+                cerrojos = []
+                for uuid in sorted(faltantes):
+                    paciente, fecha = contactos[uuid]
+                    _guardar_paciente_cursor(cur, origen, paciente, [], fecha, cerrojos)
+                limpiar_cerrojos_baja_inactivos(cur, cerrojos)
+                conn.commit()
+    finally:
+        cliente.close()
 
 
 def publicar_base(usuario, solicitud_id):
@@ -371,6 +414,7 @@ def publicar_base(usuario, solicitud_id):
 def _leer_tramo(cliente, desde, hasta, atendido, instante):
     """Consolida un tramo completo antes de confirmar su checkpoint."""
     ultimas = {}
+    contactos = {}
     sin_uuid = paginas = 0
     for _, _, _, citas in cliente.iterar_citas(desde, hasta, exigir_cobertura=True):
         paginas += 1
@@ -394,9 +438,12 @@ def _leer_tramo(cliente, desde, hasta, atendido, instante):
                 continue
             uuid = normalizar_cliente_uuid(uuid).encode("utf-8")
             ultimas[uuid] = max(dia, ultimas.get(uuid, dia))
+            valido = cliente_valido(cita)
+            if valido and (uuid not in contactos or inicio > contactos[uuid][1]):
+                contactos[uuid] = (valido, inicio)
     if not paginas:
         raise ReservoError("No se recibió ninguna página del tramo.")
-    return ultimas, paginas, sin_uuid
+    return ultimas, paginas, sin_uuid, contactos
 
 
 def _procesar(conn, cur, job):
@@ -427,7 +474,7 @@ def _procesar(conn, cur, job):
             if desde > ultimo:
                 continue
             for a, b in dividir_periodo(desde, ultimo, dias_por_tramo=7):
-                filas, paginas, sin_uuid = _leer_tramo(cliente, a, b, atendido, job["creado_en"])
+                filas, paginas, sin_uuid, contactos = _leer_tramo(cliente, a, b, atendido, job["creado_en"])
                 if b > fin_cohorte and sin_uuid:
                     raise ReservoError("El historial posterior contiene atenciones sin identidad verificable.")
                 if filas and b <= fin_cohorte:
@@ -443,6 +490,21 @@ def _procesar(conn, cur, job):
                         " WHERE solicitud=%s AND cliente_uuid=%s",
                         [(dia, identificador, uuid) for uuid, dia in filas.items()],
                     )
+                if contactos:
+                    cur.execute("SELECT cliente_uuid FROM recuperacion_cohorte WHERE solicitud=%s",
+                                (identificador,))
+                    incluidos = {fila["cliente_uuid"] for fila in cur.fetchall()}
+                    cerrojos = []
+                    for uuid in sorted(contactos.keys() & incluidos):
+                        paciente, fecha = contactos[uuid]
+                        cur.execute("SELECT fecha_ultima_atencion FROM reservo_pacientes"
+                                    " WHERE clinica_codigo=%s AND cliente_uuid=%s",
+                                    (origen, uuid.decode("utf-8")))
+                        previa = cur.fetchone()
+                        if previa and previa["fecha_ultima_atencion"] and previa["fecha_ultima_atencion"] > fecha:
+                            continue
+                        _guardar_paciente_cursor(cur, origen, paciente, [], fecha, cerrojos)
+                    limpiar_cerrojos_baja_inactivos(cur, cerrojos)
                 desde = b + timedelta(days=1)
                 cur.execute(
                     "UPDATE recuperacion_analisis SET siguiente_fecha=%s,tramos=tramos+1,"
