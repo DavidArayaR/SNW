@@ -22,6 +22,7 @@ from datetime import datetime
 from typing import Callable
 
 import httpx
+from pymysql.err import MySQLError, OperationalError
 
 from db import conectar, config_all, config_get, log_error, tabla_pacientes
 from whatsapp_channels import (CENTROS, EMISOR_WEBHOOK, catalogo_centros,
@@ -2238,9 +2239,25 @@ class WhatsAppService:
         """El paciente indicó (botón 'No me interesa') que esta oferta puntual
         no le interesa: a diferencia de una baja, sigue pudiendo recibir
         futuras plantillas (al cabo de una semana)."""
+        for intento in range(3):
+            try:
+                self._guardar_no_interes(telefono)
+                return
+            except OperationalError as exc:
+                if exc.args and exc.args[0] == 1213 and intento < 2:
+                    time.sleep(0.05 * (intento + 1))
+                    continue
+                codigo = exc.args[0] if exc.args else "desconocido"
+                log_error(f"webhook: no se pudo guardar «No me interesa» (MySQL {codigo})", exc, solo_tipo=True)
+                return
+            except Exception as exc:
+                log_error("webhook: no se pudo guardar «No me interesa»", exc, solo_tipo=True)
+                return
+
+    def _guardar_no_interes(self, telefono: str) -> None:
         match = _TEL_MATCH.format(col="telefono")
-        try:
-            with conectar() as conn, conn.cursor() as cur:
+        with conectar() as conn, conn.cursor() as cur:
+            try:
                 pacientes = self._pacientes_con_tel(cur, telefono)
                 if not pacientes:
                     return
@@ -2253,8 +2270,9 @@ class WhatsAppService:
                     ):
                         try:
                             cur.execute(sql, params)
-                        except Exception:
-                            pass  # esquema sin esa columna
+                        except MySQLError as exc:
+                            if not exc.args or exc.args[0] != 1054:
+                                raise
                 # Una sola fila descriptiva (log_envios no distingue ambiente;
                 # mismo criterio que _registrar_respuesta).
                 p0 = pacientes[0]
@@ -2271,8 +2289,9 @@ class WhatsAppService:
                 )
                 cur.execute("DELETE FROM campania_consultas WHERE telefono = %s", (telefono,))
                 conn.commit()
-        except Exception as e:
-            log_error(f"_registrar_no_interes({telefono})", e)
+            except Exception:
+                conn.rollback()
+                raise
 
     def _actualizar_estado(self, message_id: str, estado: str, detalle_error: str | None = None,
                            timestamp: str | None = None) -> None:
