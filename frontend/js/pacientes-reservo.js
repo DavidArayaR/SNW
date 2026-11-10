@@ -664,9 +664,6 @@
     consultarTratamientosRec.addEventListener("click", async () => {
       const version = ++versionTratamientos;
       const elegidos = new Set(tratamientosElegidos());
-      const prefijo = `${anio.value.padStart(4, "0")}-${mes.value.padStart(2, "0")}`;
-      const fin = new Date(0);
-      fin.setUTCFullYear(Number(anio.value), Number(mes.value), 0);
       consultandoTratamientos = true;
       tratamientosConsultados = false;
       herramientasRec.hidden = true;
@@ -674,11 +671,20 @@
       validarFormulario();
       tratamientosRec.textContent = "Consultando tratamientos en Reservo…";
       try {
-        const data = await request("api/reservo/tratamientos", {
+        const consulta = await request(`${ruta}/tratamientos`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ clinica_codigo: clinica.value === "VS" ? "MVYS" : clinica.value,
-            fecha_desde: `${prefijo}-01`, fecha_hasta: `${prefijo}-${String(fin.getUTCDate()).padStart(2, "0")}` }),
+          body: JSON.stringify({ clinica_codigo: clinica.value, anio: Number(anio.value), mes: Number(mes.value) }),
         });
+        let data;
+        while (version === versionTratamientos) {
+          data = await request(`${ruta}/tratamientos/${encodeURIComponent(consulta.id)}`);
+          if (version !== versionTratamientos) return;
+          if (data.estado === "ERROR") throw new Error(data.error || "La consulta de tratamientos falló.");
+          if (data.estado === "COMPLETADA") break;
+          tratamientosRec.textContent = data.estado === "PENDIENTE" ? "Consulta en cola…"
+            : `Consultando Reservo · ${data.paginas} páginas revisadas`;
+          await new Promise((resolver) => setTimeout(resolver, 3000));
+        }
         if (version !== versionTratamientos) return;
         const opciones = (data.items || []).map((item) => {
           const etiqueta = document.createElement("label");

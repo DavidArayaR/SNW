@@ -42,6 +42,12 @@ class SolicitudRecuperacionIn(BaseModel):
     tratamientos: list[str] = Field(default_factory=list, max_length=50)
 
 
+class ConsultaTratamientosIn(BaseModel):
+    clinica_codigo: str
+    anio: int = Field(ge=1000, le=9999)
+    mes: int = Field(ge=1, le=12)
+
+
 def configurar_tablas(cur):
     cur.execute("SHOW COLUMNS FROM reservo_bases_contacto LIKE 'sync_job_id'")
     if cur.fetchone()["Null"] == "NO":
@@ -98,6 +104,15 @@ def configurar_tablas(cur):
     cur.execute("SHOW COLUMNS FROM recuperacion_cohorte LIKE 'tratamiento_ultima_atencion'")
     if not cur.fetchone():
         cur.execute("ALTER TABLE recuperacion_cohorte ADD tratamiento_ultima_atencion TEXT NULL")
+    cur.execute(
+        "CREATE TABLE IF NOT EXISTS recuperacion_consultas_tratamientos ("
+        " id CHAR(32) PRIMARY KEY, usuario VARCHAR(150) NOT NULL, clinica_codigo VARCHAR(8) NOT NULL,"
+        " desde DATE NOT NULL, hasta DATE NOT NULL, creado_en DATETIME NOT NULL,"
+        " estado VARCHAR(16) NOT NULL DEFAULT 'PENDIENTE', paginas INT UNSIGNED NOT NULL DEFAULT 0,"
+        " resultado LONGTEXT NULL, error VARCHAR(255) NULL, finalizado_en DATETIME NULL,"
+        " KEY idx_rec_consultas_estado (estado,creado_en), KEY idx_rec_consultas_fin (finalizado_en)"
+        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+    )
 
 
 def umbral_valido(valor):
@@ -120,6 +135,103 @@ def listar_clinicas():
         items.append({"clinica_codigo": canonico, "nombre": RESERVO_CLINICAS[origen],
                       "meses_inactividad": int(valor) if umbral_valido(valor) else None})
     return {"items": items}
+
+
+def registrar_consulta_tratamientos(usuario, body):
+    codigo = _clinica(body.clinica_codigo)
+    desde = date(body.anio, body.mes, 1)
+    if desde >= datetime.now(ZONA).date().replace(day=1):
+        raise HTTPException(422, detail="Selecciona un mes histórico completo.")
+    hasta = desde.replace(day=monthrange(body.anio, body.mes)[1])
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT id FROM recuperacion_consultas_tratamientos WHERE usuario=%s AND clinica_codigo=%s"
+            " AND desde=%s AND (estado IN ('PENDIENTE','PROCESANDO')"
+            " OR (estado='COMPLETADA' AND finalizado_en>=UTC_TIMESTAMP()-INTERVAL 30 MINUTE))"
+            " ORDER BY creado_en DESC LIMIT 1", (usuario, codigo, desde),
+        )
+        anterior = cur.fetchone()
+        if anterior:
+            return anterior
+        cur.execute("DELETE FROM recuperacion_consultas_tratamientos"
+                    " WHERE finalizado_en < UTC_TIMESTAMP()-INTERVAL 1 DAY")
+        identificador = uuid4().hex
+        cur.execute("INSERT INTO recuperacion_consultas_tratamientos (id,usuario,clinica_codigo,desde,hasta,creado_en)"
+                    " VALUES (%s,%s,%s,%s,%s,UTC_TIMESTAMP())",
+                    (identificador, usuario, codigo, desde, hasta))
+        conn.commit()
+    return {"id": identificador}
+
+
+def obtener_consulta_tratamientos(usuario, identificador):
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("SELECT estado,paginas,resultado,error FROM recuperacion_consultas_tratamientos"
+                    " WHERE id=%s AND usuario=%s", (identificador, usuario))
+        fila = cur.fetchone()
+    if not fila:
+        raise HTTPException(404, detail="Consulta de tratamientos no disponible.")
+    fila["items"] = json.loads(fila.pop("resultado") or "[]")
+    return fila
+
+
+def procesar_consulta_tratamientos():
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("SELECT GET_LOCK('snw-recuperacion-tratamientos',0) AS adquirido")
+        if not cur.fetchone()["adquirido"]:
+            return False
+        cur.execute("SELECT id,clinica_codigo,desde,hasta FROM recuperacion_consultas_tratamientos"
+                    " WHERE estado IN ('PENDIENTE','PROCESANDO') ORDER BY creado_en,id LIMIT 1")
+        consulta = cur.fetchone()
+        if not consulta:
+            conn.commit()
+            return False
+        identificador = consulta["id"]
+        codigo = consulta["clinica_codigo"]
+        cur.execute("UPDATE recuperacion_consultas_tratamientos SET estado='PROCESANDO',paginas=0 WHERE id=%s",
+                    (identificador,))
+        conn.commit()
+
+        def registrar_pagina(*_):
+            cur.execute("UPDATE recuperacion_consultas_tratamientos SET paginas=paginas+1 WHERE id=%s",
+                        (identificador,))
+            conn.commit()
+
+        cliente = None
+        items, error = [], None
+        try:
+            token = config_all(refresh=True).get(clave_token(CLINICAS[codigo]), "").strip()
+            if not token:
+                raise ReservoError("Configura el token de Reservo de esta clínica.")
+            cliente = ClienteReservo(token)
+            items = cliente.listar_tratamientos(
+                consulta["desde"], consulta["hasta"], al_recibir_pagina=registrar_pagina,
+            )
+        except ReservoError as exc:
+            error = exc.categoria[:255]
+            log_error(f"consulta de tratamientos de recuperación ({codigo}, {identificador}): {error}")
+        except Exception as exc:
+            error = "No se pudieron consultar los tratamientos de Reservo."
+            log_error(f"consulta de tratamientos de recuperación ({codigo}, {identificador})", exc, solo_tipo=True)
+        finally:
+            if cliente:
+                cliente.close()
+        cur.execute(
+            "UPDATE recuperacion_consultas_tratamientos SET estado=%s,resultado=%s,error=%s,"
+            " finalizado_en=UTC_TIMESTAMP() WHERE id=%s",
+            ("ERROR" if error else "COMPLETADA", json.dumps(items), error, identificador),
+        )
+        conn.commit()
+        return True
+
+
+async def loop_consultas_tratamientos():
+    while True:
+        try:
+            if not await asyncio.to_thread(procesar_consulta_tratamientos):
+                await asyncio.sleep(5)
+        except Exception as exc:
+            log_error("worker de tratamientos de recuperación", exc, solo_tipo=True)
+            await asyncio.sleep(10)
 
 
 def _publica(fila):

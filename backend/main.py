@@ -5835,6 +5835,15 @@ def revisar_contactos_recuperacion(solicitud_id: str, sesion: dict = Depends(sol
     return recuperacion_pacientes.revisar_contactos(sesion["usuario"], solicitud_id)
 
 
+def consultar_tratamientos_recuperacion(body: recuperacion_pacientes.ConsultaTratamientosIn,
+                                       sesion: dict = Depends(solo_admin)):
+    return recuperacion_pacientes.registrar_consulta_tratamientos(sesion["usuario"], body)
+
+
+def estado_tratamientos_recuperacion(consulta_id: str, sesion: dict = Depends(solo_admin)):
+    return recuperacion_pacientes.obtener_consulta_tratamientos(sesion["usuario"], consulta_id)
+
+
 def publicar_base_recuperacion(solicitud_id: str, sesion: dict = Depends(solo_admin)):
     usuario = sesion["usuario"]
     base, nueva = recuperacion_pacientes.publicar_base(usuario, solicitud_id)
@@ -9890,6 +9899,7 @@ async def _arrancar_scheduler_programados() -> None:
         if esquema_reservo_listo:
             asyncio.create_task(reservo_pacientes.loop_trabajos())
             asyncio.create_task(recuperacion_pacientes.loop_trabajos())
+            asyncio.create_task(recuperacion_pacientes.loop_consultas_tratamientos())
         else:
             print("[RESERVO] Worker inactivo: falta instalar el esquema de Pacientes Reservo.",
                   flush=True)
