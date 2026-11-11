@@ -1338,24 +1338,22 @@ eliminada pierde la sesión.
   un correo de recuperación (se quitó el campo de «Mi cuenta» a pedido); solo queda
   disponible el endpoint `PUT /api/auth/correo-recuperacion` para fijarlo a mano si hiciera
   falta. Sin correo, ninguna de las dos cosas (aviso de cambio, «Olvidé mi contraseña») les
-  llega — la cuenta `dev` igual no se pierde: el sistema la garantiza en cada arranque.
+  llega. Configura un correo de recuperación desde la cuenta.
 - **Ningún rol (ni el desarrollador) puede cambiar la contraseña de otra cuenta.**
 - Los tokens viven en la tabla `password_resets`.
 
-**Cuenta de desarrollador:** el sistema garantiza `dev` / `dev123` (rol `desarrollador`)
-en cada arranque si no existe. **Solo puede haber 4 cuentas `desarrollador`**; al intentar
-promover una quinta el backend responde 409.
+**Primera cuenta de desarrollador.** Desde la consola del servidor, usa la configuración
+de MySQL de SNW y ejecuta:
 
-| Cuenta semilla | Contraseña | Rol |
-|---|---|---|
-| `admin` | `admin123` | administrador |
-| `usuario` | `usuario123` | usuario (`mensajeria`, `historial`) |
-| `dev` | `dev123` | desarrollador |
+```sh
+python backend/crear_primer_desarrollador.py correo@dominio.cl
+```
 
-`sql/snw_base.sql` crea la tabla y siembra estas tres cuentas. Si al primer arranque
-existía un `data/usuarios.json` antiguo, el backend lo importa a la tabla y lo archiva como
-`usuarios.json.migrado`. Las sesiones activas siguen en `data/sesiones.json`
-(token → `{usuario, rol, nombre, permisos, creada, actividad}`).
+El comando pide la contraseña sin mostrarla. Se usa cuando no hay un desarrollador activo.
+El arranque desactiva las credenciales predeterminadas de instalaciones antiguas. Las
+contraseñas ya cambiadas conservan acceso y sus verificadores antiguos se migran al iniciar
+sesión. El backend sigue importando un `data/usuarios.json` antiguo en instalaciones vacías.
+Las sesiones activas se guardan en `data/sesiones.json`.
 
 **Expiración por inactividad:** una sesión se cierra sola si pasan `sesion_expira_horas`
 (config; por defecto **5**) sin que esa cuenta haga ninguna petición autenticada; cualquier

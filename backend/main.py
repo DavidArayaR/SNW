@@ -37,7 +37,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from pydantic import BaseModel, Field
-from credenciales import es_hash_legacy, hash_clave, verificar_clave
+from credenciales import credencial_deshabilitada, es_hash_legacy, hash_clave, verificar_clave
 
 from db import (
     conectar, entorno_valido, log_error, instalar_registro_errores, accion_de_error, LOGS_DIR,
@@ -428,7 +428,7 @@ def sesion_actual(request: Request) -> dict:
     correo = str(sesion.get("usuario", "")).strip().lower()
     if correo:
         u = usuario_buscar(correo)
-        if u is None:
+        if u is None or not u.get("activo", True) or credencial_deshabilitada(u.get("clave_hash") or ""):
             SESIONES.pop(token, None)
             guardar_sesiones()
             raise HTTPException(401, detail="Tu cuenta ya no está disponible. Inicia sesión de nuevo.")

@@ -14,8 +14,7 @@
 --   - password_resets : enlaces temporales de "Olvidé mi contraseña" (2 h)
 --
 -- Es idempotente (IF NOT EXISTS / INSERT IGNORE): crea la estructura y
--- siembra los 2 números autorizados y las cuentas por defecto
--- (admin/admin123, usuario/usuario123, dev/dev123). Está pensado para
+-- siembra los números autorizados. Está pensado para
 -- ejecutarse una sola vez (INICIAR_SNW.bat lo omite si la base ya existe).
 -- ============================================================
 
@@ -357,16 +356,7 @@ CREATE TABLE IF NOT EXISTS usuario_area_roles (
   INDEX idx_uer_rol (rol_id)
 ) CHARACTER SET utf8mb4;
 
--- Cuentas por defecto (clave = SHA-256). El backend además garantiza `dev`
--- en cada arranque si falta. Máximo 4 cuentas de rol `desarrollador`.
--- admin/dev no tienen correo de recuperación: lo cargan desde «Mi cuenta».
-INSERT IGNORE INTO usuarios (usuario, nombre, rol, permisos, clave_hash) VALUES
-  ('admin', 'Administrador', 'administrador', '',
-   '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9'),
-  ('usuario', 'Usuario Final', 'usuario', 'mensajeria,historial,estadisticas,plantillas_editar',
-   'dfa7a2273567dcd1efffb9a46308e91c20fa13c44c3441bc69cd6a7869b3f7fd'),
-  ('dev', 'Desarrollador', 'desarrollador', '',
-   '87274af01876341455b32d805946f272871bb42effa6604dccf28bb027afa82b');
+-- El operador crea la primera cuenta con backend/crear_primer_desarrollador.py.
 
 -- Enlaces temporales de "Olvidé mi contraseña" (token de 2 horas).
 CREATE TABLE IF NOT EXISTS password_resets (

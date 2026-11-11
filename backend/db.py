@@ -1702,23 +1702,6 @@ PERMISOS_VALIDOS = (
 )
 PERMISOS_BASICOS = ["mensajeria", "historial", "plantillas_editar"]
 
-# Cuentas creadas automáticamente la primera vez (o si faltan). El hash es
-# SHA-256 de la contraseña indicada.
-_USUARIOS_SEMILLA = [
-    {"usuario": "admin", "nombre": "Administrador", "rol": "administrador",
-     "permisos": "", "clave_hash": "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9"},
-    {"usuario": "usuario", "nombre": "Usuario Final", "rol": "usuario",
-     "permisos": ",".join(PERMISOS_BASICOS),
-     "clave_hash": "dfa7a2273567dcd1efffb9a46308e91c20fa13c44c3441bc69cd6a7869b3f7fd"},
-]
-# Cuenta de desarrollador que el sistema garantiza en cada arranque (dev / dev123).
-_USUARIO_DEV = {
-    "usuario": "dev", "nombre": "Desarrollador", "rol": "desarrollador",
-    "permisos": "",
-    "clave_hash": "87274af01876341455b32d805946f272871bb42effa6604dccf28bb027afa82b",
-}
-
-
 def _permisos_csv(permisos) -> str:
     if isinstance(permisos, str):
         items = [p.strip() for p in permisos.split(",")]
@@ -1733,14 +1716,13 @@ def _permisos_csv(permisos) -> str:
 
 
 def _sembrar_usuarios(cur) -> None:
-    """Puebla la tabla `usuarios` la primera vez y garantiza la cuenta `dev`.
-
-    Se llama dentro de asegurar_tabla_config(), con la transacción abierta."""
+    """Importa las cuentas históricas y desactiva credenciales predeterminadas."""
+    from credenciales import HASHES_PREDETERMINADOS
     cur.execute("SELECT COUNT(*) AS n FROM usuarios")
     vacia = (cur.fetchone() or {}).get("n", 0) == 0
 
     if vacia:
-        # Migración: si existe data/usuarios.json se importa; si no, semillas.
+        # Migración de instalaciones que usaban un archivo local.
         importados = []
         try:
             if USUARIOS_JSON.exists():
@@ -1749,8 +1731,7 @@ def _sembrar_usuarios(cur) -> None:
                     importados = datos
         except Exception as e:
             log_error("_sembrar_usuarios: usuarios.json ilegible", e)
-        filas = importados or _USUARIOS_SEMILLA
-        for u in filas:
+        for u in importados:
             correo = str(u.get("usuario", "")).strip().lower()
             ch = str(u.get("clave_hash", "")).strip()
             if not correo or not ch:
@@ -1768,19 +1749,8 @@ def _sembrar_usuarios(cur) -> None:
             except Exception as e:
                 log_error("_sembrar_usuarios: no se pudo archivar usuarios.json", e)
 
-    # Garantiza la cuenta `dev` en cada arranque (respetando el tope de 4).
-    cur.execute("SELECT COUNT(*) AS n FROM usuarios WHERE usuario = 'dev'")
-    if (cur.fetchone() or {}).get("n", 0) == 0:
-        cur.execute("SELECT COUNT(*) AS n FROM usuarios WHERE rol = 'desarrollador'")
-        if (cur.fetchone() or {}).get("n", 0) < MAX_DESARROLLADORES:
-            cur.execute(
-                "INSERT IGNORE INTO usuarios (usuario, nombre, rol, permisos, clave_hash)"
-                " VALUES (%s, %s, %s, %s, %s)",
-                (_USUARIO_DEV["usuario"], _USUARIO_DEV["nombre"], _USUARIO_DEV["rol"],
-                 _USUARIO_DEV["permisos"], _USUARIO_DEV["clave_hash"]),
-            )
-        else:
-            log_error("_sembrar_usuarios: ya hay 4 desarrolladores; no se creó la cuenta 'dev'")
+    cur.execute("UPDATE usuarios SET activo=0, clave_hash='deshabilitada'"
+                " WHERE clave_hash IN (%s,%s,%s)", HASHES_PREDETERMINADOS)
 
 
 def _fila_usuario(row: dict) -> dict:
