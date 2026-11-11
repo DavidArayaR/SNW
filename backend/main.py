@@ -37,6 +37,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from pydantic import BaseModel, Field
+from credenciales import es_hash_legacy, hash_clave, verificar_clave
 
 from db import (
     conectar, entorno_valido, log_error, instalar_registro_errores, accion_de_error, LOGS_DIR,
@@ -124,6 +125,18 @@ app.include_router(whatsapp_router)
 _documentacion_basic = HTTPBasic(auto_error=False)
 
 
+def _migrar_clave_legacy(usuario: dict, clave: str, guardado: str) -> None:
+    if not es_hash_legacy(guardado):
+        return
+    nuevo = hash_clave(clave)
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("UPDATE usuarios SET clave_hash=%s WHERE usuario=%s AND activo=1 AND clave_hash=%s",
+                    (nuevo, usuario["usuario"], guardado))
+        if cur.rowcount != 1:
+            raise HTTPException(401, detail="Vuelve a iniciar sesión con tu contraseña actual.")
+        conn.commit()
+
+
 def exigir_desarrollador_documentacion(
         credenciales: HTTPBasicCredentials | None = Depends(_documentacion_basic)):
     """Protege Swagger, ReDoc y el esquema OpenAPI con credenciales dev."""
@@ -134,15 +147,15 @@ def exigir_desarrollador_documentacion(
             headers={"WWW-Authenticate": 'Basic realm="Documentación API"'},
         )
     usuario = usuario_buscar(credenciales.username.strip().lower())
-    clave_hash = hashlib.sha256(credenciales.password.encode("utf-8")).hexdigest()
-    hash_guardado = str((usuario or {}).get("clave_hash") or "")
+    guardado = (usuario or {}).get("clave_hash") or ""
     if (usuario is None or not usuario.get("activo", True)
             or usuario.get("rol") != "desarrollador"
-            or not secrets.compare_digest(hash_guardado, clave_hash)):
+            or not verificar_clave(credenciales.password, guardado)):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="La documentación es exclusiva de cuentas desarrollador activas.",
         )
+    _migrar_clave_legacy(usuario, credenciales.password, guardado)
     return usuario
 
 
@@ -687,12 +700,13 @@ def _areas_para_respuesta(sesion: dict) -> list[dict]:
 
 
 def login(body: LoginIn):
-    clave_hash = hashlib.sha256(body.clave.encode("utf-8")).hexdigest()
     usuario = usuario_buscar(body.usuario)
-    if usuario is None or usuario.get("clave_hash") != clave_hash:
+    guardado = (usuario or {}).get("clave_hash") or ""
+    if not verificar_clave(body.clave, guardado):
         raise HTTPException(401, detail="Usuario o contraseña incorrectos")
     if not usuario.get("activo", True):
         raise HTTPException(403, detail="Tu cuenta está desactivada. Contacta a un administrador.")
+    _migrar_clave_legacy(usuario, body.clave, guardado)
 
     token = uuid.uuid4().hex
     ahora = time.time()
@@ -730,13 +744,12 @@ def cambiar_clave_propia(body: ClavePropiaIn, sesion: dict = Depends(sesion_actu
     u = usuario_buscar(correo)
     if u is None:
         raise HTTPException(401, detail="Tu cuenta ya no está disponible. Inicia sesión de nuevo.")
-    actual_hash = hashlib.sha256(body.clave_actual.encode("utf-8")).hexdigest()
-    if u.get("clave_hash") != actual_hash:
+    if not verificar_clave(body.clave_actual, u.get("clave_hash") or ""):
         raise HTTPException(403, detail="La contraseña actual no es correcta.")
     err = validar_clave_segura(body.clave_nueva)
     if err:
         raise HTTPException(422, detail=err)
-    usuario_cambiar_clave(correo, hashlib.sha256(body.clave_nueva.encode("utf-8")).hexdigest())
+    usuario_cambiar_clave(correo, hash_clave(body.clave_nueva))
     destino = (u.get("correo_recuperacion") or "").strip()
     if destino:
         _enviar_correo(
@@ -840,7 +853,7 @@ def reset_aplicar(body: ResetIn):
     if err:
         raise HTTPException(422, detail=err)
     correo = str(est["usuario"]).strip().lower()
-    usuario_cambiar_clave(correo, hashlib.sha256(body.clave_nueva.encode("utf-8")).hexdigest())
+    usuario_cambiar_clave(correo, hash_clave(body.clave_nueva))
     reset_consumir(body.token)
     for tk, s in list(SESIONES.items()):
         if str(s.get("usuario", "")).strip().lower() == correo:
@@ -903,7 +916,7 @@ def activar_cuenta(body: ActivarCuentaIn):
         raise HTTPException(409, detail="Ya existe una cuenta con ese correo.")
     usuario_crear(
         correo, correo.split("@")[0], "usuario", list(PERMISOS_BASICOS),
-        hashlib.sha256(body.clave.encode("utf-8")).hexdigest(),
+        hash_clave(body.clave),
     )
     invite_consumir(body.token)
     invitador = est.get("invitado_por") or "invitación"

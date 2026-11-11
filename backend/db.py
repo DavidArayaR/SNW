@@ -1160,12 +1160,15 @@ def asegurar_tabla_config() -> None:
                 "  nombre VARCHAR(150) NOT NULL DEFAULT '',"
                 "  rol ENUM('usuario','supervisor','administrador','desarrollador') NOT NULL DEFAULT 'usuario',"
                 "  permisos VARCHAR(500) NOT NULL DEFAULT '',"
-                "  clave_hash CHAR(64) NOT NULL,"
+                "  clave_hash VARCHAR(255) NOT NULL,"
                 "  correo_recuperacion VARCHAR(150) NOT NULL DEFAULT '',"
                 "  creado DATETIME DEFAULT CURRENT_TIMESTAMP,"
                 "  UNIQUE KEY uq_usuario (usuario)"
                 ") CHARACTER SET utf8mb4"
             )
+            cur.execute("SHOW COLUMNS FROM usuarios LIKE 'clave_hash'")
+            if cur.fetchone()["Type"].lower() == "char(64)":
+                cur.execute("ALTER TABLE usuarios MODIFY clave_hash VARCHAR(255) NOT NULL")
             # Correo al que llega el enlace de «Olvidé mi contraseña». Para las
             # cuentas cuyo usuario ya es un correo se copia ahí; admin/dev lo
             # completan desde «Mi cuenta».

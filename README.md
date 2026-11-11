@@ -288,7 +288,7 @@ con la **WhatsApp Business Cloud API** de Meta (v26.0).
 | Backend / API | Python + FastAPI + Uvicorn |
 | Base de datos | MySQL / MariaDB (XAMPP, PyMySQL) — una sola base, `snw_base` |
 | Plantillas | Archivo JSON (`data/plantillas.json`) |
-| Usuarios | Tabla `usuarios` en `snw_base` (rol + permisos, clave SHA-256, correo de recuperación). Sesiones en `data/sesiones.json` |
+| Usuarios | Tabla `usuarios` en `snw_base` (rol + permisos, verificador scrypt, correo de recuperación). Sesiones en `data/sesiones.json` |
 | WhatsApp | WhatsApp Business Cloud API (Meta Graph API v26.0) o motor simulado |
 | Correo | SMTP (configurable en la tabla `configuracion`) — confirmación de envíos en producción y recuperación de contraseña |
 | Configuración | Tabla `configuracion` en MySQL (todo salvo credenciales de BD, que van en `.env`) |
@@ -494,7 +494,7 @@ tarifas_whatsapp, call_center_log, usuarios, password_resets). Al primer arranqu
 **backend añade dos tablas más** (`account_invites` y `usuarios_auditoria`, ver abajo) y
 migraciones menores sobre las existentes.
 La tabla **`usuarios`** guarda las cuentas de la app (`usuario` correo, `nombre`, `rol`,
-`permisos` CSV, `clave_hash` SHA-256, `correo_recuperacion`) y **`password_resets`** los
+`permisos` CSV, `clave_hash` scrypt, `correo_recuperacion`) y **`password_resets`** los
 enlaces de «Olvidé mi contraseña» (token de 2 h, un solo uso). Las demás:
 
 **`pacientes_dev` / `pacientes_prod`** — mismo esquema, una tabla por entorno
@@ -562,7 +562,7 @@ en Historial (permiso `call_center_registro`).
 
 **`usuarios`** — cuentas de la app. `usuario` (correo o nombre corto para las semilla, único),
 `nombre`, `rol` (`usuario`/`supervisor`/`administrador`/`desarrollador`), `permisos` (lista CSV, solo
-cuenta para los roles `usuario` y `supervisor`), `clave_hash` (SHA-256), `correo_recuperacion` (a dónde llega
+cuenta para los roles `usuario` y `supervisor`), `clave_hash` (scrypt), `correo_recuperacion` (a dónde llega
 el enlace de «Olvidé mi contraseña»; se rellena solo si el `usuario` ya es un correo).
 
 **`password_resets`** — enlaces de «Olvidé mi contraseña»: `token` (64 hex), `usuario`,
@@ -1242,7 +1242,7 @@ propagar como error 500.
 ## Usuarios, roles y permisos
 
 Las cuentas viven en la tabla **`usuarios`** de `snw_base` (`usuario` = correo,
-`clave_hash` SHA-256, `rol`, `permisos` como lista CSV, `correo_recuperacion`). No hay alta
+`clave_hash` scrypt, `rol`, `permisos` como lista CSV, `correo_recuperacion`). No hay alta
 pública: un administrador o desarrollador invita a una persona desde la pestaña **Usuarios** de
 **`administracion.html`** («Crear usuario», solo el correo); le llega un correo con un enlace de
 48 h a **`registro.html?token=`** donde elige su propia contraseña. La cuenta nace con rol

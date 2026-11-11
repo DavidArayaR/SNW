@@ -10,7 +10,7 @@
 --   - configuracion   : ajustes editables de la app (entorno, método de envío, etc.)
 --   - tarifas_whatsapp: rate card de Meta (tarifas por mensaje, para costos)
 --   - call_center_log : respuestas enviadas a pacientes interesados + número de call center asignado
---   - usuarios        : cuentas de la app (rol + permisos, clave SHA-256)
+--   - usuarios        : cuentas de la app (rol + permisos, verificador de contraseña)
 --   - password_resets : enlaces temporales de "Olvidé mi contraseña" (2 h)
 --
 -- Es idempotente (IF NOT EXISTS / INSERT IGNORE): crea la estructura y
@@ -322,7 +322,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
   nombre VARCHAR(150) NOT NULL DEFAULT '',
   rol ENUM('usuario','supervisor','administrador','desarrollador') NOT NULL DEFAULT 'usuario',
   permisos VARCHAR(500) NOT NULL DEFAULT '',
-  clave_hash CHAR(64) NOT NULL,
+  clave_hash VARCHAR(255) NOT NULL,
   correo_recuperacion VARCHAR(150) NOT NULL DEFAULT '',
   creado DATETIME DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_usuario (usuario)
