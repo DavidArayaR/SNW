@@ -3241,8 +3241,6 @@ $("#btnConfirmarIniciarConf").addEventListener("click", async () => {
     !(window.snwPuede && window.snwPuede("envio_manual_directo"));
   if (requiereSupervisorPrevisto && espera) {
     if (mensajeEspera) mensajeEspera.textContent = "Enviando la solicitud al supervisor...";
-    const linkEl = document.getElementById("linkConfirmacionEsperaMsg");
-    if (linkEl) linkEl.textContent = "";
     espera.hidden = false;
   }
 
@@ -3280,12 +3278,10 @@ $("#btnConfirmarIniciarConf").addEventListener("click", async () => {
     }
 
     if (data.requiere_confirmacion) {
-      if (mensajeEspera) mensajeEspera.innerHTML = "Se ha enviado un correo a <strong>supervisor</strong> solicitando confirmación.";
+      if (mensajeEspera) mensajeEspera.textContent = data.correo_enviado === false
+        ? "El envío quedó pendiente, pero no se pudo enviar el correo de confirmación."
+        : "Se envió un correo al supervisor para confirmar el envío.";
       espera.hidden = false;
-      const linkEl = document.getElementById("linkConfirmacionEsperaMsg");
-      if (linkEl && data.confirm_url && window.snwEsPrivilegiado) {
-        linkEl.innerHTML = `Para pruebas sin correo: <a href="${data.confirm_url}" target="_blank">Confirmar manualmente</a> · <a href="${data.confirm_url.replace('confirmar', 'rechazar')}" target="_blank" style="color:#b23b37;">Rechazar</a>`;
-      }
       const beforeUnload = (e) => { e.preventDefault(); e.returnValue = ""; return ""; };
       window.addEventListener("beforeunload", beforeUnload);
       const poll = setInterval(async () => {

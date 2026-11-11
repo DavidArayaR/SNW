@@ -7057,17 +7057,16 @@ def _enviar_correo_confirmacion(token: str, total: int, plantilla_nombre: str, p
             if d and d not in destinos:
                 destinos.append(d)
         if not destinos:
-            log_error(f"_enviar_correo_confirmacion sin supervisores (token {token})")
+            log_error("_enviar_correo_confirmacion sin supervisores")
             return False
         if not emisor:
-            print(f"[CORREO] Emisor no configurado. Token {token} -> {base}/api/notificaciones/confirmar/{token}")
+            log_error("correo de confirmación: emisor no configurado")
             return False
     else:
         if not emisor or not destino_global:
-            print(f"[CORREO] Emisor o destino no configurado. Token {token} -> {base}/api/notificaciones/confirmar/{token}")
+            log_error("correo de confirmación: emisor o destino no configurado")
             return False
-        # Los enlaces por token no requieren sesión, así que el destinatario
-        # puede confirmar o rechazar.
+        # El destinatario debe iniciar sesión con permiso de decisión.
         destinos = [destino_global]
     host, pwd = c["host"], c["pwd"]
 
@@ -7947,14 +7946,20 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
     # En producción se requiere confirmación salvo permiso explícito para
     # crear envíos manuales directos (admin/dev lo tienen implícito).
     if _envio_requiere_confirmacion(sesion, "manual", amb):
-        token = uuid.uuid4().hex
+        correos_sup = _correos_supervisores_decisores(esp["id"], excluir=sesion.get("usuario")) if esp else None
+        if esp and not correos_sup:
+            raise HTTPException(409, detail="El área necesita otro supervisor con permiso de aprobación y correo configurado.")
+        solicitud_id = uuid.uuid4().hex
+        secreto_decision = secrets.token_hex(32)
+        token = f"{solicitud_id}.{secreto_decision}"
         envio_id = crear_envio_batch((lista_reservo or {}).get("nombre") or t_esp or nombre_base(amb), plantilla["clave"], plantilla["nombre"],
                                      len(destinatarios) + len(rechazados), amb,
                                      usuario=sesion.get("usuario", ""),
                                      area_id=(esp["id"] if esp else None),
                                      tabla_pacientes=t_esp, emisor=emisor, estado="pendiente",
                                      reservo_lista_id=lista_id)
-        PENDIENTES[token] = {
+        PENDIENTES[solicitud_id] = {
+            "secreto_decision": secreto_decision,
             "emisor": emisor,
             "ambiente": amb,
             "base": base_job,
@@ -7989,25 +7994,15 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
             solicitante = f"{nombre_sol} ({correo_sol})"
         else:
             solicitante = nombre_sol or correo_sol or "usuario desconocido"
-        # Solo los supervisores del área reciben la solicitud, nadie más.
-        # Sin supervisores con correo no hay a quién avisar: se avisa al
-        # solicitante en vez de dejar la solicitud pendiente para siempre.
-        correos_sup: list[str] | None = None
-        if esp:
-            correos_sup = []
-            correos_sup = _correos_supervisores_decisores(esp["id"])
-            if not correos_sup:
-                raise HTTPException(409, detail="El área no tiene supervisores con permiso de aprobación y correo configurado.")
-        _enviar_correo_confirmacion(token, len(destinatarios), plantilla["nombre"], plantilla["texto"],
+        correo_enviado = _enviar_correo_confirmacion(token, len(destinatarios), plantilla["nombre"], plantilla["texto"],
                                     amb, plantilla["clave"], solicitante,
                                     destinos_extra=correos_sup,
                                     area_nombre=(esp["nombre_visible"] if esp else ""),
                                     cupo_meta=info_limite)
-        return {"requiere_confirmacion": True, "solicitud_id": token, "total": len(destinatarios),
+        return {"requiere_confirmacion": True, "solicitud_id": solicitud_id, "total": len(destinatarios),
                 "ambiente": amb,
                 "rechazados": _rechazados_visibles(rechazados, t_esp or nombre_base(amb), sesion),
-                "aviso_limite_mensajeria": aviso_limite,
-                "confirm_url": f"{url_base()}/api/notificaciones/confirmar/{token}"}
+                "aviso_limite_mensajeria": aviso_limite, "correo_enviado": correo_enviado}
 
     envio_id = crear_envio_batch((lista_reservo or {}).get("nombre") or t_esp or nombre_base(amb), plantilla["clave"], plantilla["nombre"],
                                  len(destinatarios) + len(rechazados), amb,
@@ -8067,15 +8062,25 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
 
 def estado_solicitud(token: str, sesion: dict = Depends(sesion_actual)):
     pend = PENDIENTES.get(token)
-    if not pend:
+    if not pend or pend["usuario"] != sesion.get("usuario"):
         raise HTTPException(404, detail="Solicitud no encontrada")
     return {"solicitud_id": token, "estado": pend["estado"], "total": len(pend["destinatarios"]),
             "job_id": pend.get("job_id"), "ambiente": pend["ambiente"],
             "comentario": pend.get("comentario", "")}
 
 
-def formulario_rechazo(token: str):
-    pend = PENDIENTES.get(token)
+def _pendiente_decision_manual(token: str):
+    seguimiento, separador, secreto = token.partition(".")
+    if not separador or not re.fullmatch(r"[0-9a-f]{64}", secreto):
+        return None
+    pend = PENDIENTES.get(seguimiento)
+    if pend and secrets.compare_digest(pend.get("secreto_decision", ""), secreto):
+        return pend
+    return None
+
+
+def _formulario_decision_manual(token: str, confirmar: bool):
+    pend = _pendiente_decision_manual(token)
     if not pend:
         return HTMLResponse("<html><body style='font-family:Arial; text-align:center; padding:40px;'><h3>Solicitud no encontrada o expirada</h3></body></html>", status_code=404)
     if pend["estado"] == "rechazado":
@@ -8084,33 +8089,45 @@ def formulario_rechazo(token: str):
         return HTMLResponse("<html><body style='font-family:Arial; text-align:center; padding:40px;'><h2>Este envío ya fue confirmado y está en proceso</h2></body></html>")
     total = len(pend["destinatarios"])
     plantilla = _html.escape(pend["plantilla"]["nombre"])
+    accion = "Confirmar envío" if confirmar else "Rechazar envío"
+    comentario = "" if confirmar else '<label>Comentario opcional <textarea name="comentario" maxlength="255"></textarea></label>'
     return HTMLResponse(f"""
-<html><head><meta charset='utf-8'><title>Rechazar envío</title></head>
+<html><head><meta charset='utf-8'><title>{accion}</title></head>
 <body style='font-family: Segoe UI, Arial; text-align:center; padding:40px; background:#f0f2f5;'>
 <div style='background:#fff; max-width:520px; margin:40px auto; padding:32px; border-radius:14px; box-shadow:0 4px 20px rgba(0,0,0,0.1); text-align:left;'>
-<h2 style='color:#b23b37; margin-top:0;'>Rechazar envío</h2>
-<p>Vas a rechazar el envío de <strong>{total} mensajes</strong> de la plantilla <strong>{plantilla}</strong>.</p>
-<form method="POST" action="/api/notificaciones/rechazar/{token}">
-  <label style="display:block; font-size:14px; color:#66757f; margin:14px 0 6px;">Comentario para el enviador (opcional, máximo 255 caracteres):</label>
-  <textarea name="comentario" rows="4" maxlength="255" style="width:100%; padding:10px; font:inherit; font-size:14px; border:1px solid #dde1e6; border-radius:8px;" placeholder="Ej: falta adjuntar el consentimiento firmado."></textarea>
-  <div style="margin-top:20px; text-align:right;">
-    <button type="button" onclick="window.location.href='{url_base()}/api/notificaciones/confirmar/{token}'" style="background:#fafbfc; color:#24303c; border:1px solid #dde1e6; padding:11px 20px; border-radius:10px; font-weight:600; cursor:pointer; font-family:inherit;">Volver</button>
-    <button type="submit" style="background:#b23b37; color:#fff; border:none; padding:11px 22px; border-radius:10px; font-weight:700; cursor:pointer; font-family:inherit;">Rechazar envío</button>
-  </div>
+<h2>{accion}</h2>
+<p><strong>{total} mensajes</strong> de la plantilla <strong>{plantilla}</strong>.</p>
+<p><a href="/login.html" target="_blank" rel="noopener noreferrer">Inicia sesión en SNW</a> con tu cuenta autorizada y vuelve a esta ventana.</p>
+<form id="decision" method="POST">
+  {comentario}
+  <button type="submit">{accion}</button>
 </form>
+<p id="resultado" role="status"></p>
 </div>
+<script src="/js/decision-envio.js" defer></script>
 </body></html>
-""")
+""", headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
 
 
-def rechazar_envio(token: str, comentario: str = Form("")):
-    pend = PENDIENTES.get(token)
+def formulario_rechazo(token: str):
+    return _formulario_decision_manual(token, False)
+
+
+def formulario_confirmacion(token: str):
+    return _formulario_decision_manual(token, True)
+
+
+def rechazar_envio(token: str, comentario: str = Form(""), sesion: dict = Depends(sesion_actual)):
+    pend = _pendiente_decision_manual(token)
     if not pend:
         return HTMLResponse("<html><body style='font-family:Arial; text-align:center; padding:40px;'><h3>Solicitud no encontrada o expirada</h3></body></html>", status_code=404)
+    _exigir_prog_decisor(sesion, pend)
+    if pend["usuario"] == sesion.get("usuario"):
+        raise HTTPException(403, detail="La solicitud debe decidirla otra cuenta autorizada.")
     if pend["estado"] == "rechazado":
         return HTMLResponse("<html><body style='font-family:Arial; text-align:center; padding:40px;'><h2>Este envío ya fue rechazado</h2></body></html>")
     if pend["estado"] == "confirmado":
-        return HTMLResponse("<html><body style='font-family:Arial; text-align:center; padding:40px;'><h2>Este envío ya fue confirmado y está en proceso</h2></body></html>")
+        raise HTTPException(409, detail="El envío ya fue confirmado.")
     comentario = (comentario or "").strip()
     if len(comentario) > 255:
         return HTMLResponse(
@@ -8118,8 +8135,11 @@ def rechazar_envio(token: str, comentario: str = Form("")):
             "<h3>El comentario no puede superar los 255 caracteres.</h3>"
             "<p style='color:#66757f;'>Vuelve atrás e intenta de nuevo con un comentario más corto.</p>"
             "</body></html>", status_code=422)
-    pend["estado"] = "rechazado"
-    pend["comentario"] = comentario
+    with JOBS_LOCK:
+        if pend["estado"] != "pendiente":
+            raise HTTPException(409, detail="La solicitud ya fue decidida.")
+        pend["estado"] = "rechazado"
+        pend["comentario"] = comentario
     envio_id = pend.get("envio_id")
     if envio_id:
         amb = pend["ambiente"]
@@ -8146,14 +8166,17 @@ def rechazar_envio(token: str, comentario: str = Form("")):
 """)
 
 
-def confirmar_envio(token: str, background_tasks: BackgroundTasks):
-    pend = PENDIENTES.get(token)
+def confirmar_envio(token: str, background_tasks: BackgroundTasks, sesion: dict = Depends(sesion_actual)):
+    pend = _pendiente_decision_manual(token)
     if not pend:
         return HTMLResponse("<html><body style='font-family:Arial; text-align:center; padding:40px;'><h3>Solicitud no encontrada o expirada</h3></body></html>", status_code=404)
+    _exigir_prog_decisor(sesion, pend)
+    if pend["usuario"] == sesion.get("usuario"):
+        raise HTTPException(403, detail="La solicitud debe decidirla otra cuenta autorizada.")
     if pend["estado"] == "confirmado":
         return HTMLResponse(f"<html><body style='font-family:Arial; text-align:center; padding:40px;'><h2>Este envío ya fue confirmado</h2><p>Job: {pend.get('job_id')}</p></body></html>")
     if pend["estado"] == "rechazado":
-        return HTMLResponse("<html><body style='font-family:Arial; text-align:center; padding:40px;'><h2>Este envío ya fue rechazado</h2></body></html>")
+        raise HTTPException(409, detail="El envío ya fue rechazado.")
     if not _emisor_vigente(pend.get("emisor")):
         return HTMLResponse("<html><body><h2>Envío bloqueado</h2><p>El número emisor cambió o dejó de estar disponible. Crea un nuevo envío.</p></body></html>", status_code=409)
     if pend["ambiente"] == "desarrollo" and pend.get("area_id") is None:
@@ -8163,17 +8186,17 @@ def confirmar_envio(token: str, background_tasks: BackgroundTasks):
                 "<html><body><h2>Envío bloqueado</h2><p>La base de desarrollo es exclusiva de administradores y desarrolladores.</p></body></html>",
                 status_code=403,
             )
-    pend["estado"] = "confirmado"
     job_id = uuid.uuid4().hex[:8]
     # Un solo envío a la vez POR BASE: si mientras la solicitud esperaba
     # confirmación arrancó otro envío en esa misma base (de la misma u otra
     # solicitud), se rechaza la confirmación y se muestra al supervisor quién y
     # qué está en curso. Una base libre no bloquea a la otra.
     with JOBS_LOCK:
+        if pend["estado"] != "pendiente":
+            raise HTTPException(409, detail="La solicitud ya fue decidida.")
         job_en_curso = _envio_en_curso(pend.get("base", pend["ambiente"]))
         if job_en_curso is not None:
             exc = _error_envio_en_curso(job_en_curso)
-            pend["estado"] = "pendiente"
             detalle = _html.escape(exc.detail)
             return HTMLResponse(f"""
 <html><head><meta charset='utf-8'><title>Envío no confirmado</title></head>
@@ -8185,6 +8208,7 @@ def confirmar_envio(token: str, background_tasks: BackgroundTasks):
 </div>
 </body></html>
 """, status_code=409)
+        pend["estado"] = "confirmado"
         pend["job_id"] = job_id
         JOBS[job_id] = {
             "emisor": pend.get("emisor"),
@@ -8944,10 +8968,12 @@ def _exigir_prog_decisor(sesion: dict, f: dict) -> None:
     raise HTTPException(403, detail="No tienes permiso para aprobar o rechazar este envío.")
 
 
-def _correos_supervisores_decisores(area_id: int) -> list[str]:
+def _correos_supervisores_decisores(area_id: int, *, excluir: str | None = None) -> list[str]:
     """Solo envía enlaces de decisión a supervisores aún autorizados."""
     correos = []
     for supervisor in servicio_areas.correos_supervisores_area(area_id):
+        if excluir and (supervisor.get("usuario") or "").strip().lower() == excluir.strip().lower():
+            continue
         usuario = usuario_buscar(supervisor.get("usuario") or "")
         if usuario and usuario.get("activo", True) and "envios_decidir" in permisos_efectivos(usuario):
             correo = supervisor.get("correo")

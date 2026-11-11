@@ -779,8 +779,8 @@ tiene template de Meta (va como texto libre, ventana de 24 h). No hay gestión d
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| GET | `/api/notificaciones/solicitud/{token}` | Estado de una solicitud pendiente (usado por polling del frontend) |
-| GET | `/api/notificaciones/confirmar/{token}` | Confirmar envío (link del correo). 409 y página HTML si para entonces ya hay un envío en curso en **esa misma base**: la solicitud queda `pendiente` hasta que haya lugar |
+| GET | `/api/notificaciones/solicitud/{solicitud_id}` | Estado de una solicitud pendiente (usado por polling del frontend) |
+| GET / POST | `/api/notificaciones/confirmar/{token}` | GET muestra el formulario del enlace de correo. POST confirma el envío con sesión y permiso de decisión. Si la base tiene otro envío en curso, la solicitud queda pendiente |
 | GET / POST | `/api/notificaciones/rechazar/{token}` | Formulario y envío del rechazo, con comentario opcional (máximo 255 caracteres; 422 si se pasa) |
 
 ### Historial
