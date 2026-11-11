@@ -36,8 +36,9 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, FileResponse, Res
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 from credenciales import credencial_deshabilitada, es_hash_legacy, hash_clave, verificar_clave
+from starlette.datastructures import UploadFile as ArchivoMultipart
 
 from db import (
     conectar, entorno_valido, log_error, instalar_registro_errores, accion_de_error, LOGS_DIR,
@@ -12166,9 +12167,15 @@ def rotar_token_reagendar(sesion: dict = Depends(solo_dev)):
     return {"token": token, "message": "Cópialo ahora: no volverá a mostrarse."}
 
 
-@app.post("/api/v1/paciente-reagendar/importar-csv")
-async def importar_citas_reagendar(request: Request, file: UploadFile = File(...),
-                                  modo_prueba: bool = Form(False)):
+@app.post("/api/v1/paciente-reagendar/importar-csv", openapi_extra={
+    "requestBody": {"required": True, "content": {"multipart/form-data": {"schema": {
+        "type": "object", "required": ["file"], "properties": {
+            "file": {"type": "string", "format": "binary"},
+            "modo_prueba": {"type": "boolean", "default": False},
+        },
+    }}}},
+})
+async def importar_citas_reagendar(request: Request):
     fase = "configuracion"
     datos = b""
     archivo_leido = False
@@ -12196,7 +12203,34 @@ async def importar_citas_reagendar(request: Request, file: UploadFile = File(...
             _log_importacion_csv(request, "CUOTA_TOKEN", estado=429)
             raise HTTPException(429, detail="Demasiadas importaciones. Inténtalo más tarde.")
         fase = "lectura_csv"
-        datos = await file.read(paciente_reagendar.CSV_CARGA_MAX_BYTES + 1)
+        recibidos = 0
+        limite_cuerpo = paciente_reagendar.CSV_CARGA_MAX_BYTES + 64 * 1024
+
+        async def recibir_multipart():
+            nonlocal recibidos
+            evento = await request.receive()
+            recibidos += len(evento.get("body", b""))
+            if recibidos > limite_cuerpo:
+                # Starlette limpia los temporales cuando el parser rechaza el multipart.
+                from starlette.formparsers import MultiPartException
+                raise MultiPartException("El cuerpo de la importación supera el límite permitido.")
+            return evento
+
+        limitada = Request(request.scope, receive=recibir_multipart)
+        try:
+            async with limitada.form(max_files=1, max_fields=1) as formulario:
+                archivo = formulario.get("file")
+                if not isinstance(archivo, ArchivoMultipart):
+                    raise HTTPException(422, detail="Adjunta el CSV en el campo file.")
+                try:
+                    modo_prueba = TypeAdapter(bool).validate_python(formulario.get("modo_prueba", False))
+                except ValidationError as exc:
+                    raise HTTPException(422, detail="El campo modo_prueba debe ser verdadero o falso.") from exc
+                datos = await archivo.read(paciente_reagendar.CSV_CARGA_MAX_BYTES + 1)
+        except Exception:
+            if recibidos > limite_cuerpo:
+                raise HTTPException(413, detail="El cuerpo de la importación supera el límite permitido.") from None
+            raise
         archivo_leido = True
         if len(datos) > paciente_reagendar.CSV_CARGA_MAX_BYTES:
             raise paciente_reagendar.CsvInvalido("El archivo supera los 50 MB.")
