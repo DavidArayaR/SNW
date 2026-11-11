@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SNW · Extras</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
+  <link rel="stylesheet" href="css/tema.css?v=tokens1">
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="css/componentes.css?v=paginador-cinco1">
+  <link rel="stylesheet" href="css/layout.css?v=navcolor1">
+  <link rel="stylesheet" href="css/refinamiento.css?v=merge-frontend1">
+  <link rel="stylesheet" href="css/estilo-nuevo.css?v=ui-unslop1">
+  <link rel="stylesheet" href="css/extras.css?v=controles1">
+  <script src="js/tema.js?v=scrollbar1"></script>
+</head>
+<body data-pagina="extras">
+  <div class="app-shell">
+    <nav class="sidebar" id="sidebar"></nav>
+    <div class="sidebar-backdrop"></div>
+    <div class="app-main">
+      <header class="app-topbar">
+        <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="Abrir menú">
+          <i class="fa-solid fa-bars" aria-hidden="true"></i>
+        </button>
+        <h1 class="app-topbar__titulo">Extras</h1>
+      </header>
+      <main class="layout layout--ancho extras-layout" id="extras" hidden>
+        <section class="panel">
+          <div class="panel__head">
+            <div class="extras-tabs" role="tablist" aria-label="Utilidades">
+              <button class="btn btn--primary" type="button" role="tab" id="tabPrepago"
+                      aria-selected="true" aria-controls="panelPrepago">Recordatorio prepago</button>
+            </div>
+          </div>
+          <div class="extras-body" role="tabpanel" id="panelPrepago" aria-labelledby="tabPrepago">
+            <div class="extras-heading">
+              <div>
+                <h2>Recargas de tus líneas</h2>
+                <p id="ayudaPlazo">Registra cada recarga para recibir el próximo aviso.</p>
+              </div>
+              <div class="extras-actions">
+                <details class="extras-ajustes" id="ajustes">
+                  <summary class="btn btn--ghost"><i class="fa-solid fa-gear" aria-hidden="true"></i> Ajustes</summary>
+                  <div class="extras-ajustes__menu">
+                    <button class="btn btn--ghost" type="button" id="plazo">Plazo del recordatorio</button>
+                    <button class="btn btn--ghost" type="button" id="destino">Correo de aviso</button>
+                    <button class="btn btn--ghost" type="button" id="operadores" hidden>Operadores</button>
+                  </div>
+                </details>
+                <button class="btn btn--primary" type="button" id="agregar">
+                  <i class="fa-solid fa-plus" aria-hidden="true"></i> Agregar número
+                </button>
+              </div>
+            </div>
+            <div class="extras-resumen" id="resumen" role="group" aria-label="Filtrar por estado" hidden>
+              <button type="button" data-filtro="1" aria-pressed="true"><strong id="totalActivas">0</strong><span>Activas</span></button>
+              <button type="button" data-filtro="pendientes" aria-pressed="false"><strong id="totalPendientes">0</strong><span>Recarga pendiente</span></button>
+              <button type="button" data-filtro="configurar" aria-pressed="false"><strong id="totalConfigurar">0</strong><span>Por configurar</span></button>
+            </div>
+            <div class="extras-aviso" id="correoEstado" hidden>
+              <i class="fa-solid fa-envelope" aria-hidden="true"></i>
+              <span>Los avisos por correo requieren un destinatario y un servidor SMTP.</span>
+              <button class="btn btn--ghost" type="button" id="revisarCorreo">Revisar correo</button>
+            </div>
+            <section class="extras-lista" aria-labelledby="listaTitulo">
+              <div class="extras-filtros">
+                <h3 id="listaTitulo">Líneas prepago</h3>
+                <label class="field"><span>Buscar</span><input id="buscar" type="text" inputmode="search" placeholder="Nombre, número o compañía"></label>
+                <label class="field"><span>Mostrar</span>
+                  <select id="filtroActivo">
+                    <option value="1">Activas</option>
+                    <option value="pendientes">Recarga pendiente</option>
+                    <option value="configurar">Por configurar</option>
+                    <option value="0">Desactivadas</option>
+                    <option value="todas">Todas</option>
+                  </select>
+                </label>
+              </div>
+              <p class="extras-status" id="estado" role="status"></p>
+              <table class="extras-tabla" role="table" aria-labelledby="listaTitulo">
+                <thead><tr>
+                  <th scope="col">Línea</th><th scope="col">Última recarga</th>
+                  <th scope="col">Estado del aviso</th><th scope="col">Acciones</th>
+                </tr></thead>
+                <tbody id="lineas"></tbody>
+              </table>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+  <dialog class="panel extras-dialog" id="modal" aria-labelledby="modalTitulo">
+    <div class="panel__head">
+      <h2 id="modalTitulo"></h2>
+      <button type="button" class="btn btn--ghost" id="cerrar" aria-label="Cerrar"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+    </div>
+    <div class="extras-body" id="modalCuerpo"></div>
+    <p class="extras-status extras-dialog-status" id="modalEstado" role="status"></p>
+  </dialog>
+  <script src="js/layout.js?v=reservo-nav2"></script>
+  <script src="js/extras.js?v=plazo1"></script>
+</body>
+</html>

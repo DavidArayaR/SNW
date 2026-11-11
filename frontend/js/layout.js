@@ -135,7 +135,7 @@
   // cada una a sus áreas asignadas (vista de solo lectura sin el
   // permiso). Configuración, dentro de esas páginas, es exclusiva de
   // desarrollador.
-  if (ES_PAG_ADMIN && PAGINA !== "pacientes" && !ES_PRIV) {
+  if ((PAGINA === "extras" || (ES_PAG_ADMIN && PAGINA !== "pacientes")) && !ES_PRIV) {
     location.replace(primeraPaginaPermitida());
     return;
   }
@@ -214,7 +214,10 @@
     ? pintarSubmenu({ id: "Admin", texto: "Administración", icono: "fa-user-shield", items: LINKS_ADMIN_SUB, activo: ES_PAG_ADMIN })
     : "";
 
-  const items = itemsBase + bloqueAdmin;
+  const extras = ES_PRIV ? pintarEnlace({
+    pagina: "extras", href: "extras.html", icono: "fa-toolbox", texto: "Extras",
+  }, true) : "";
+  const items = itemsBase + bloqueAdmin + extras;
 
   const sidebar = document.getElementById("sidebar");
   if (sidebar) {

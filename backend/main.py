@@ -93,6 +93,8 @@ import reservo_pacientes
 import recuperacion_pacientes
 import reservo_bases
 import retencion_datos
+import prepago
+from routes import prepago as rutas_prepago
 from reservo_catalogo import (
     RESERVO_CLINICAS, CLAVES_TOKEN as CLAVES_TOKEN_RESERVO,
     clave_estado_atendido as clave_estado_atendido_reservo,
@@ -9888,6 +9890,7 @@ async def _arrancar_scheduler_programados() -> None:
     except Exception as exc:
         log_error("preparar esquema de retención de datos", exc)
     asyncio.create_task(_loop_retencion_datos())
+    asyncio.create_task(prepago.loop_recordatorios())
     asyncio.create_task(_loop_programados())
     asyncio.create_task(_loop_supresion())
     asyncio.create_task(_loop_reagendar())
@@ -12589,6 +12592,7 @@ for registrar in (
 ):
     app.include_router(registrar(globals()))
 
+app.include_router(rutas_prepago.registrar(solo_admin, solo_dev))
 app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="static")
 
 

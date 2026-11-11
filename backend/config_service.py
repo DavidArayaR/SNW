@@ -101,15 +101,30 @@ def enviar_correo(destino: str, subject: str, html: str) -> bool:
         # Se conserva el modo de correo simulado usado durante el despliegue local.
         print(f"[CORREO SIMULADO] Para {destino} desde {emisor}: {subject}")
         return True
+    estado, error = entregar_correo_real(destino, subject, html, c)
+    if error:
+        log_error(f"enviar_correo: {estado} ({error})")
+    return estado == "enviado"
+
+
+def entregar_correo_real(destino: str, subject: str, html: str, c: dict) -> tuple[str, str | None]:
+    """Informa si es seguro volver a intentar una entrega real por SMTP."""
+    estado = "error"
+    if not c["host"] or not c["emisor"] or not destino:
+        return estado, "SMTP sin configurar"
     try:
-        mensaje = armar_mensaje(subject, emisor, destino, html)
-        with smtplib.SMTP(c["host"], c["port"]) as servidor:
+        mensaje = armar_mensaje(subject, c["emisor"], destino, html)
+        with smtplib.SMTP(c["host"], c["port"], timeout=15) as servidor:
             if c["tls"]:
                 servidor.starttls(context=ssl.create_default_context())
             if c["user"]:
                 servidor.login(c["user"], c["pwd"])
-            servidor.sendmail(emisor, destino, mensaje.as_string())
-        return True
+            estado = "incierto"
+            servidor.sendmail(c["emisor"], destino, mensaje.as_string())
+            estado = "enviado"
     except Exception as exc:
-        log_error(f"enviar_correo a {destino}", exc)
-        return False
+        if estado != "enviado":
+            if isinstance(exc, (smtplib.SMTPRecipientsRefused, smtplib.SMTPSenderRefused, smtplib.SMTPDataError)):
+                estado = "error"
+            return estado, type(exc).__name__
+    return estado, None
