@@ -8,6 +8,7 @@ Router del webhook oficial de WhatsApp Business Platform.
 
 import hashlib
 import hmac
+import json
 import re
 
 from fastapi import APIRouter, Query, Request
@@ -21,6 +22,7 @@ from whatsapp_service import WebhookHandler
 
 router = APIRouter(prefix="/api/whatsapp", tags=["whatsapp"])
 handler = WebhookHandler()
+MAX_CUERPO_WEBHOOK = 2 * 1024 * 1024
 
 
 def firma_meta_valida(cuerpo: bytes, firma: str, secreto: str) -> bool:
@@ -134,19 +136,26 @@ async def _recibir_evento(request: Request, *, secreto: str | None = None,
         log_error("webhook: falta wa_app_secret en configuración; evento no procesado")
         return JSONResponse({"detail": "Webhook no configurado"}, status_code=503)
 
+    firma = request.headers.get("X-Hub-Signature-256", "")
+    if not re.fullmatch(r"sha256=[0-9a-fA-F]{64}", firma):
+        return JSONResponse({"detail": "Firma del webhook inválida"}, status_code=403)
+    cuerpo = bytearray()
     try:
-        cuerpo = await request.body()
+        async for bloque in request.stream():
+            if len(cuerpo) + len(bloque) > MAX_CUERPO_WEBHOOK:
+                return JSONResponse({"detail": "Evento de WhatsApp demasiado grande"}, status_code=413)
+            cuerpo.extend(bloque)
     except ClientDisconnect:
         # El emisor cortó la conexión antes de entregar el cuerpo completo.
         # No verificar una firma parcial ni procesar un evento incompleto.
         return Response(status_code=204)
     if not firma_meta_valida(
-        cuerpo, request.headers.get("X-Hub-Signature-256", ""), secreto
+        cuerpo, firma, secreto
     ):
         return JSONResponse({"detail": "Firma del webhook inválida"}, status_code=403)
 
     try:
-        payload = await request.json()
+        payload = json.loads(cuerpo)
     except Exception as e:
         log_error("webhook: cuerpo de la petición no es JSON válido", e)
         return JSONResponse({"status": "ok", "acciones": []})
