@@ -8239,7 +8239,7 @@ def confirmar_envio(token: str, background_tasks: BackgroundTasks, sesion: dict 
 <body style='font-family: Segoe UI, Arial; text-align:center; padding:40px; background:#f0f2f5;'>
 <div style='background:#fff; max-width:520px; margin:40px auto; padding:32px; border-radius:14px; box-shadow:0 4px 20px rgba(0,0,0,0.1);'>
 <h2 style='color:#128c7e; margin-top:0;'>&#10003; Envío confirmado</h2>
-<p>Se iniciará el envío de <strong>{len(pend['destinatarios'])} mensajes</strong><br>plantilla <strong>{pend['plantilla']['nombre']}</strong>.</p>
+<p>Se iniciará el envío de <strong>{len(pend['destinatarios'])} mensajes</strong><br>plantilla <strong>{_html.escape(pend['plantilla']['nombre'])}</strong>.</p>
 <p style='color:#66757f; font-size:14px;'>Puedes cerrar esta ventana. El sistema continuará automáticamente.</p>
 </div>
 </body></html>
