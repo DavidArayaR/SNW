@@ -2460,14 +2460,16 @@ def mensajes_paciente(paciente_id: int, ambiente: str = Query("produccion"),
             "etiquetas": etiqueta_info["etiquetas"],
             "origen_etiquetas": etiqueta_info["origen"],
         })
-    emisores = list({f.get("wa_phone_id") for f in filas if f.get("wa_phone_id")})
-    if emisores:
+    ids_autorizados = list({f["whatsapp_message_id"] for f in filas
+                          if f.get("plantilla_clave") == "respuesta" and f.get("whatsapp_message_id")})
+    if ids_autorizados:
         with conectar() as conn, conn.cursor() as cur:
-            marcas = ",".join(["%s"] * len(emisores))
+            marcas = ",".join(["%s"] * len(ids_autorizados))
             cur.execute("SELECT mensaje_id, recibido, audio_media_id, audio_transcripcion"
                         " FROM whatsapp_conversaciones_mensajes WHERE tipo='audio'"
-                        f" AND telefono_paciente=%s AND wa_phone_id IN ({marcas})"
-                        " ORDER BY recibido LIMIT 500", (normalizar_telefono(pac["telefono"]), *emisores))
+                        f" AND telefono_paciente=%s AND BINARY mensaje_id IN ({marcas})"
+                        " ORDER BY recibido LIMIT 500",
+                        (normalizar_telefono(pac["telefono"]), *ids_autorizados))
             audios = cur.fetchall()
             ids_audio = {a["mensaje_id"] for a in audios}
             logs_audio = {f["id"] for f in filas if f.get("plantilla_clave") == "respuesta"
