@@ -436,7 +436,7 @@ if (selBasePac) selBasePac.addEventListener("change", async () => {
 function escaparHtml(texto) {
   const div = document.createElement("div");
   div.textContent = texto ?? "";
-  return div.innerHTML;
+  return div.innerHTML.replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
 async function cargar(mostrarFeedback = false) {
