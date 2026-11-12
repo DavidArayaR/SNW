@@ -89,8 +89,8 @@ desarrollador. Cambiar un token invalida la verificación del código de estado
 para esa clínica. El worker solo arranca cuando las tres tablas del módulo
 están instaladas.
 
-Los componentes principales son `backend/reservo_catalogo.py`,
-`backend/reservo_pacientes.py`, `backend/routes/pacientes_reservo.py`, la vista
+Los componentes principales son `backend/snw/reservo/reservo_catalogo.py`,
+`backend/snw/reservo/reservo_pacientes.py`, `backend/routes/pacientes_reservo.py`, la vista
 `frontend/pacientes-reservo.html` y su JS/CSS homónimos. Las pruebas sintéticas
 se ejecutan sin credenciales ni consultan pacientes reales:
 
@@ -355,25 +355,20 @@ snw/
 │                             la BD solo la primera vez, abre el navegador y levanta uvicorn
 ├── iniciar_snw.sh           Mismo arranque para Linux/macOS (chmod +x la primera vez)
 ├── backend/
-│   ├── main.py               API FastAPI: manejadores (envíos en background, confirmación por
-│   │                          correo, plantillas, pacientes, historial, configuración,
-│   │                          tarifas/costos, call center, webhook)
-│   ├── db.py                 Conexión MySQL (PyMySQL), entorno dev/prod, columnas dinámicas,
-│   │                          CONFIG_DEFAULTS, cuentas/invites/resets/auditoría,
-│   │                          log_error() (todo error queda en consola)
-│   ├── schemas.py            Modelos Pydantic de las peticiones (PlantillaIn, EnvioIn, ConfigIn…)
-│   ├── config_service.py     Vista de config para pantallas/motor (leer_config, url_base) y SMTP
-│   │                          (enviar_correo)
-│   ├── telefono.py           Normalización/validación de teléfonos chilenos → `+56 9 …`
-│   ├── routes/               Routers por dominio, cada uno llama a los handlers de main.py:
-│   │                          auth, usuarios, pacientes, plantillas, notificaciones,
-│   │                          estadisticas, configuracion (+ _registry)
-│   ├── whatsapp_service.py   Cliente Graph API + WhatsAppService (envío, templates,
-│   │                          webhook handler) — capa de integración con Meta
-│   ├── wa_rate_limit.py      Gobernador de límites de Meta: cuota de la Graph API,
-│   │                          throughput (msg/s) y clasificación de errores de límite
-│   ├── whatsapp_webhook.py   Router del webhook (verificación GET + recepción POST)
-│   └── motor_envio.py        Motor de envío intercambiable: simulado | api_oficial
+│   ├── main.py                     Entrada de FastAPI y registro de rutas y tareas
+│   ├── db.py                       Conexión MySQL, migraciones, configuración y auditoría
+│   ├── crear_primer_desarrollador.py
+│   ├── routes/                     Routers por dominio y modelos de petición (schemas.py)
+│   └── snw/
+│       ├── infraestructura/        Configuración y correo SMTP
+│       ├── seguridad/              Credenciales, supresión y retención
+│       ├── mensajeria/             Plantillas, medios, generación de texto y motor de envío
+│       ├── whatsapp/               Meta, webhooks, conversaciones y límites de envío
+│       ├── pacientes/              Áreas, bases y validación telefónica
+│       ├── reservo/                Sincronización, recuperación y bases de Reservo
+│       ├── reagendamiento/         Importación de citas y lotes de reagendamiento
+│       ├── reportes/               Estadísticas de campaña y tarifas
+│       └── extras/                 Recordatorios de recarga prepago
 ├── frontend/
 │   ├── index.html             Landing con navegación por rol
 │   ├── login.html             Inicio de sesión + «¿Olvidaste tu contraseña?»
@@ -926,8 +921,8 @@ terminas la migración y pruebas los callbacks nuevos.
 
 ## Integración con WhatsApp Business Cloud API
 
-La capa de integración vive en `backend/whatsapp_service.py` (cliente Graph API +
-`WhatsAppService` + `WebhookHandler`) y `backend/whatsapp_webhook.py` (router). Está
+La capa de integración vive en `backend/snw/whatsapp/whatsapp_service.py` (cliente Graph API +
+`WhatsAppService` + `WebhookHandler`) y `backend/snw/whatsapp/whatsapp_webhook.py` (router). Está
 separada de la lógica de negocio de mensajería. Usa la **Graph API v26.0** por defecto
 (configurable en la clave `wa_graph_version` de la tabla `configuracion`).
 
@@ -966,7 +961,7 @@ local de 3,5 MB; si falla, no se guarda una sincronización incompleta.
 
 ### Límites de envío de Meta
 
-`backend/wa_rate_limit.py` es un gobernador en memoria que cubre las tres capas de límites
+`backend/snw/whatsapp/wa_rate_limit.py` es un gobernador en memoria que cubre las tres capas de límites
 de Meta. Toda llamada a la Graph API pasa por `WhatsAppApiClient._peticion`.
 
 **1 · [Rate limits de la Graph API](https://developers.facebook.com/docs/graph-api/overview/rate-limiting/)**
@@ -1473,7 +1468,7 @@ la pantalla de Reservo. Solo administradores y desarrolladores pueden
 consultarlas o usarlas. Reservo entrega pacientes ya filtrados y autorizados
 por el sistema de origen; SNW los incorpora sin pedir un ID o referencia manual.
 Al guardar, SNW copia solo los pacientes cuyo teléfono pasa la validación chilena
-de `backend/telefono.py`; la vista previa muestra cuántos se guardarán y cuántos
+de `backend/snw/pacientes/telefono.py`; la vista previa muestra cuántos se guardarán y cuántos
 quedarán fuera por falta de un teléfono válido. Las bajas y las supresiones
 permanentes siguen excluidas del envío.
 
