@@ -271,6 +271,19 @@
             <div class="field"><label for="reagendarVentana">Tramo de búsqueda</label><select id="reagendarVentana"><option value="">Todos</option><option value="08-14">08:00–14:00</option><option value="14-20">14:00–20:00</option></select></div>
             <div class="field"><label for="reagendarEstado">Estado</label><select id="reagendarEstado"><option value="">Todos</option><option>PENDIENTE</option><option>PROCESANDO</option><option>ENVIADO</option><option>REINTENTO</option><option>ERROR</option><option>OMITIDO</option></select></div>
             <div class="field"><label for="reagendarModo">Tipo</label><select id="reagendarModo"><option value="">Todos</option><option value="false">Operativos</option><option value="true">Pruebas</option></select></div>
+            <div class="field">
+              <label for="reagendarRespuesta">Tipo de respuesta</label>
+              <select id="reagendarRespuesta">
+                <option value="">Todas</option>
+                <option value="REAGENDAR">Quiere reagendar</option>
+                <option value="CONSULTA">Hizo una consulta</option>
+                <option value="SOLICITAR_CONSULTA">Consulta por aclarar</option>
+                <option value="RESPUESTA">Otra respuesta</option>
+                <option value="DESINTERES">No le interesa</option>
+                <option value="BAJA">Se dio de baja</option>
+                <option value="SIN_RESPUESTA">Sin respuesta</option>
+              </select>
+            </div>
             <button id="reagendarFiltrar" type="button" class="btn btn--primary">Filtrar</button>
           </div>
           <div class="tabla-wrap reagendar__tabla">
@@ -411,7 +424,7 @@
   <script src="js/pass-toggle.js"></script>
   <script src="js/csv-chunks.js?v=csv-codificacion1"></script>
   <script src="js/pacientes.js?v=escape-atributos1"></script>
-  <script src="js/reagendar.js?v=enviar-prueba2"></script>
+  <script src="js/reagendar.js?v=filtro-respuesta1"></script>
   <script src="js/pacientes-tabs.js?v=aplazar-flotante1"></script>
   <script>
     (function () {

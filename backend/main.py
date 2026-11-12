@@ -21,6 +21,7 @@ import unicodedata
 import urllib.parse
 import uuid
 from pathlib import Path
+from typing import Literal
 
 import smtplib
 import ssl
@@ -12688,8 +12689,15 @@ def listar_citas_reagendar(centro: str | None = Query(None),
                           modo_prueba: bool | None = Query(None),
                           pagina: int = Query(1, ge=1),
                           limite: int = Query(25, ge=1, le=100),
-                          sesion: dict = Depends(solo_admin)):
+                          sesion: dict = Depends(solo_admin),
+                          *, respuesta: Literal["SIN_RESPUESTA", "REAGENDAR", "CONSULTA",
+                                                "SOLICITAR_CONSULTA", "RESPUESTA",
+                                                "DESINTERES", "BAJA"] | None = None):
     condiciones, args = [], []
+    ultima_respuesta = (
+        "(SELECT i.accion FROM reagendar_interacciones i"
+        " WHERE i.cita_id=r.id ORDER BY i.creado_en DESC, i.mensaje_id DESC LIMIT 1)"
+    )
     if lote_id:
         condiciones.append("r.lote_id = %s")
         args.append(lote_id)
@@ -12718,6 +12726,11 @@ def listar_citas_reagendar(centro: str | None = Query(None),
         else:
             condiciones.append("r.estado_envio = %s")
             args.append(estado)
+    if respuesta == "SIN_RESPUESTA":
+        condiciones.append(f"{ultima_respuesta} IS NULL")
+    elif respuesta:
+        condiciones.append(f"{ultima_respuesta} = %s")
+        args.append(respuesta)
     condiciones.insert(0, "(r.paciente_telefono_normalizado IS NULL OR d.cita_id=r.id)")
     where = " WHERE " + " AND ".join(condiciones)
     origen = (" paciente_reagendar r LEFT JOIN reagendar_destinatarios d"
@@ -12736,9 +12749,7 @@ def listar_citas_reagendar(centro: str | None = Query(None),
             " r.ultimo_error_codigo, r.importado_en, le.estado_whatsapp,"
             " le.descripcion_error AS error_entrega,"
             " r.enviado_en, r.whatsapp_message_id, le.entregado_en AS recibido_en,"
-            " (SELECT i.accion FROM reagendar_interacciones i"
-            " WHERE i.cita_id=r.id ORDER BY i.creado_en DESC,"
-            " i.mensaje_id DESC LIMIT 1) AS ultima_respuesta"
+            f" {ultima_respuesta} AS ultima_respuesta"
             " FROM" + origen + where +
             " ORDER BY r.id DESC LIMIT %s OFFSET %s", (*args, limite, (pagina - 1) * limite))
         filas = cur.fetchall()

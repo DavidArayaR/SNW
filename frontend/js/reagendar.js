@@ -2,6 +2,9 @@
   const card = document.getElementById("cardReagendar");
   if (!card || !window.snwEsPrivilegiado) return;
   const $ = id => document.getElementById(id);
+  const filtroRespuesta = $("reagendarRespuesta");
+  const etiquetasRespuesta = new Map(Array.from(filtroRespuesta.options,
+    opcion => [opcion.value, opcion.textContent]));
   let pagina = 1;
   let paginas = 1;
   const tamanosPagina = [10, 25, 50, 100];
@@ -511,7 +514,7 @@
     if (loteActual) params.set("lote_id", String(loteActual));
     for (const [id, clave] of [["reagendarCentro", "centro"], ["reagendarFecha", "fecha"],
                                ["reagendarVentana", "ventana"], ["reagendarEstado", "estado"],
-                               ["reagendarModo", "modo_prueba"]]) {
+                               ["reagendarModo", "modo_prueba"], ["reagendarRespuesta", "respuesta"]]) {
       const valor = $(id).value.trim();
       if (valor) params.set(clave, valor);
     }
@@ -537,7 +540,8 @@
                              r.paciente_nombre, r.paciente_telefono_normalizado,
                              r.doctor_nombre, r.modo_prueba ? "Prueba" : "Operativo",
                              r.estado_envio, r.intentos_envio,
-                             fechaHoraChile(r.recibido_en), r.ultima_respuesta,
+                             fechaHoraChile(r.recibido_en),
+                             etiquetasRespuesta.get(r.ultima_respuesta ?? "SIN_RESPUESTA") ?? r.ultima_respuesta,
                              r.error_entrega || r.ultimo_error_codigo]) celda(tr, valor);
         const acciones = document.createElement("td");
         if (r.puede_reintentar) {
