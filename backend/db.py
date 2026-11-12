@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 
 import pymysql
 from dotenv import load_dotenv
-from legacy_config_secrets import leer_credencial_antigua
+from snw.infraestructura.legacy_config_secrets import leer_credencial_antigua
 from telefono import normalizar_telefono
 from whatsapp_channels import CENTROS, claves_centro
 from reservo_catalogo import (

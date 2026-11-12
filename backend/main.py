@@ -82,7 +82,7 @@ from supresion import (asegurar_tabla_supresion, reintentar_pendientes,
                       eliminacion_simulada_activa, oferta_eliminacion_enviada,
                       resumen_supresion, esta_de_baja,
                       migrar_huellas_baja_existentes)
-from config_service import config_correo as _config_correo, enviar_correo as _enviar_correo, armar_mensaje as _armar_mensaje, leer_config, url_base
+from snw.infraestructura.config_service import config_correo as _config_correo, enviar_correo as _enviar_correo, armar_mensaje as _armar_mensaje, leer_config, url_base
 from schemas import (
     ActivarCuentaIn, ClavePropiaIn, ConfigIn, ConfigTodoIn,
     CorreoRecuperacionIn, EnvioIn, AreaIn, AreaRenombrarIn,

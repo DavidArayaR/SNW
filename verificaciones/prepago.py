@@ -21,7 +21,7 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 import prepago
-import config_service
+from snw.infraestructura import config_service
 from routes.prepago import registrar
 
 PUERTO = None
@@ -68,7 +68,7 @@ class PrepagoUnitario(unittest.TestCase):
                  (smtplib.SMTPDataError(451, b"rechazado"), "error"),
                  (smtplib.SMTPServerDisconnected(), "incierto")]
         for fallo, esperado in casos:
-            with self.subTest(esperado=esperado), patch("config_service.smtplib.SMTP") as smtp:
+            with self.subTest(esperado=esperado), patch("snw.infraestructura.config_service.smtplib.SMTP") as smtp:
                 conexion = smtp.return_value.__enter__.return_value
                 conexion.sendmail.side_effect = fallo
                 estado, _ = config_service.entregar_correo_real(SMTP["destino"], "Aviso", "<p>Hola</p>", SMTP)

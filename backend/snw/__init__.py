@@ -1,0 +1,1 @@
+"""Módulos internos de SNW."""

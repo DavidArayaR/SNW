@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 from pymysql.err import IntegrityError
 
-from config_service import config_correo, entregar_correo_real
+from snw.infraestructura.config_service import config_correo, entregar_correo_real
 from db import conectar, config_all, config_set, log_error
 from telefono import normalizar_telefono
 from whatsapp_channels import catalogo_centros, codigo_centro_canonico
