@@ -20,13 +20,14 @@ MOTIVOS = (
 PATRONES = {
     "CONSULTA_HORAS": (
         r"\b(?:tienen|hay|quedan|tendra[n]?|disponib\w*|necesito|busco|quiero|pedir|tomar|reservar|agendar|cambiar|otra|reagendar)\b.{0,35}\b(?:hora[s]?|cupo[s]?|agenda|cita[s]?)\b",
-        r"\b(?:hora[s]?|cupo[s]?|agenda|cita[s]?)\b.{0,35}\b(?:para|disponib\w*|manana|hoy|semana|proxima|otra)\b",
+        r"\b(?:horas?|horitas?|cupos?|agenda|citas?)\b.{0,35}\b(?:para|disponib\w*|manana|hoy|semana|proxima|otra)\b",
         r"\b(?:cuando|a que hora)\b.{0,30}\b(?:atienden|atiende|hay|puedo ir)\b",
     ),
     "CONSULTA_MEDICO": (
         r"\b(?:doctor\w*|medic\w*|especialista[s]?|profesional\w*|psicolog\w*|psiquiatr\w*)\b.{0,45}\b(?:atiende|atendiendo|disponib\w*|hay|tienen|trabaja|hora[s]?)\b",
         r"\b(?:atiende|atendiendo|disponib\w*|hay|tienen|trabaja)\b.{0,45}\b(?:doctor\w*|medic\w*|especialista[s]?|profesional\w*|psicolog\w*|psiquiatr\w*)\b",
         r"\b(?:hay|tienen|disponib\w*)\b.{0,35}\b(?:doctor\w*|medic\w*|especialista[s]?|profesional\w*|psicolog\w*|psiquiatr\w*)\b",
+        r"\bquien\b.{0,25}\bme atendio\b",
     ),
     "CONSULTA_PRECIOS": (
         r"\b(?:cuanto|cual|que)\b.{0,25}\b(?:cuesta|vale|sale|cobran|precio[s]?|valor|arancel|servicio[s]?|especialidad\w*)\b",
@@ -40,6 +41,8 @@ PATRONES = {
         r"\b(?:quiero|necesito|me gustaria|pueden|podrian|quisiera)\b.{0,40}\b(?:saber|informacion|info|explicar|detalle[s]?)\b",
         r"\b(?:mas|mayor)\s+(?:info|informacion|detalle[s]?)\b",
         r"\b(?:de que se trata|como funciona|me explican|me cuentan)\b",
+        r"\b(?:me rechazaron la licencia|mi licencia (?:medica )?(?:fue rechazada|no fue aceptada|no valio))\b",
+        r"\b(?:quede esperando|no me ha llegado)\b.{0,45}\b(?:informe|licencia|receta)\b",
     ),
     "CONSULTA_AMBIGUA": (
         r"^(?:hola|buenas|holi|una consulta|consulta|necesito ayuda|ayuda|buenos dias|buenas tardes)[ !?.]*$",
@@ -103,11 +106,13 @@ def normalizar(texto: str) -> str:
 def es_pregunta_de_precio(texto: str) -> bool:
     """Reconoce solicitudes de precio, aunque falten signos de interrogación."""
     return bool(re.search(
-        r"\b(?:cuanto (?:cuesta|vale|sale|cobran)|"
+        r"\b(?:cuanto (?:cuesta|vale|sale|cobran|esta)|"
         r"(?:cuanto|cual) es el (?:precio|valor|costo|arancel)|"
         r"(?<!no )(?:quiero saber|quisiera saber|necesito saber|me gustaria saber|me pueden indicar|"
         r"me pueden decir)\b.{0,40}\b(?:precio|valor|costo|arancel))\b"
-        r"|^(?:hola )?(?:el )?(?:precio|valor|costo|arancel) (?:de|del|para) \w+",
+        r"|^(?:hola )?(?:el )?(?:precio|valor|costo|arancel) (?:de|del|para) \w+"
+        r"|(?<!no )\b(?:tienen?|hay|ofrecen?|aplica|sigue|puedo acceder a|es posible acceder a)\b.{0,35}"
+        r"\b(?:descuentos?|precio especial|beneficios? especiales)\b",
         normalizar(texto),
     ))
 
@@ -122,7 +127,7 @@ def tipo_consulta_entrante(texto: str, catalogo=None) -> str | None:
     pregunta = any(signo in texto for signo in "¿?")
     peticion = re.search(
         r"\b(?:cuanto|cual|cuando|como|donde|quien|pueden|podrian|puedo|quiero|quisiera|"
-        r"necesito|me gustaria|busco|hay|tienen|atienden)\b", t)
+        r"necesito|me gustaria|busco|hay|tienen|atienden|alguna|algun)\b", t)
     if es_pregunta_de_precio(texto) or (pregunta or peticion) and any(
         motivo in clasificacion.motivos for motivo in ("CONSULTA_HORAS", "CONSULTA_MEDICO", "SOLICITA_CONTACTO")
     ):
@@ -135,9 +140,12 @@ def tipo_consulta_entrante(texto: str, catalogo=None) -> str | None:
     if any(re.search(r"(?<!\w)" + re.escape(frase) + r"(?!\w)", t)
            for motivo, frases in (catalogo or {}).items() if motivo != "CONSULTA_AMBIGUA" for frase in frases):
         return "consulta"
-    if ("SOLICITA_INFORMACION" in clasificacion.motivos and
-            re.search(r"\b(?:sobre|acerca de|si|como|cuando|donde|quien)\s+\w+", t)):
+    if ("SOLICITA_INFORMACION" in clasificacion.motivos and re.search(
+        r"\b(?:sobre|acerca de|si|como|cuando|donde|quien)\s+\w+|\b(?:licencia|informe|receta)\b", t
+    )):
         return "consulta"
+    if any(f" {frase} " in f" {t} " for frase in (catalogo or {}).get("CONSULTA_AMBIGUA", ())):
+        return "aclarar"
     if re.search(r"\b(?:tengo una (?:consulta|duda|pregunta)|una consulta|necesito ayuda|"
                  r"(?:quiero|necesito|quisiera) (?:informacion|consultar))\b", t) or re.fullmatch(
                      r"(?:hola )?(?:quiero|necesito|quisiera) saber", t):

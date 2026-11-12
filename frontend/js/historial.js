@@ -1303,6 +1303,10 @@ const etiquetasMotivoCC = {
   CONSULTA_HORAS: "Horas",
   CONSULTA_MEDICO: "Profesionales",
   CONSULTA_PRECIOS: "Precios y servicios",
+  CONSULTA_PRECIO_ESPECIAL: "Precio especial",
+  CONSULTA_PRECIO_TERAPIA: "Precio de terapia",
+  CONSULTA_CAMPANIA: "Consulta de campaña",
+  CONSULTA_DIRECTA: "Consulta directa",
   SOLICITA_CONTACTO: "Contacto",
   SOLICITA_INFORMACION: "Información",
   CONSULTA_AMBIGUA: "Consulta general"

@@ -1028,7 +1028,12 @@ agrupan en **Agenda y atención**, **Precios y cobertura** y **Consultas y
 contacto**. Cada clínica puede editar sus textos en **Configuración →
 Respuestas del sistema**.
 
-El envío requiere permiso de Historial, de acceso a los datos y de call center,
+Cuando llega una consulta concreta, SNW elige automáticamente la respuesta
+preparada correspondiente y envía el botón de call center de la clínica al
+cerrar la ventana de dos minutos. Para consultas ambiguas o repartidas en
+varios mensajes, pide que el paciente las escriba completas en un solo mensaje.
+
+El envío manual requiere permiso de Historial, de acceso a los datos y de call center,
 además de una ventana de atención de WhatsApp abierta con ese emisor. El servidor
 verifica el mensaje seleccionado y añade su texto al enlace de la clínica. Si
 la consulta excede el tamaño del enlace, se solicita una más breve. La

@@ -2808,6 +2808,7 @@ def _despachar_call_center(pac: dict, ambiente: str, tabla: str | None = None,
                            emisor_forzado: dict | None = None, automatico: bool = True,
                            referencia: str | None = None, mensaje_prueba: str | None = None,
                            mensaje_preparado: str | None = None, *,
+                           categoria_consulta: str | None = None,
                            propagar_incierto: bool = False) -> dict:
     """Envía el mensaje fijo de call center a un paciente y lo registra en el
     historial y en call_center_log. Devuelve {ok, error, telefono}. No lanza.
@@ -2827,6 +2828,12 @@ def _despachar_call_center(pac: dict, ambiente: str, tabla: str | None = None,
     emisor = emisor_forzado or _emisor_para_respuesta(telefono, tabla or tabla_pacientes(ambiente))
     if not emisor:
         return {"ok": False, "error": "No se pudo identificar el número emisor", "telefono": telefono}
+    if categoria_consulta:
+        codigo = emisor["codigo"]
+        texto_personalizado = renderizar_mensaje(_respuesta_sistema(f"manual_{categoria_consulta}", codigo), pac)
+        introduccion = _respuesta_sistema(f"preparado_{categoria_consulta}", codigo)
+        introduccion = introduccion.replace("{clinica}", emisor["nombre"])
+        mensaje_preparado = respuestas_manuales.preparar_texto(introduccion, consulta)
     texto, datos_plantilla, numero_cc = (
         _cc_datos_envio(pac, ambiente, consulta, emisor, mensaje_preparado=mensaje_preparado)
         if mensaje_preparado is not None else
@@ -2839,6 +2846,8 @@ def _despachar_call_center(pac: dict, ambiente: str, tabla: str | None = None,
         datos_plantilla["texto"] = texto
     if not numero_cc:
         return {"ok": False, "error": f"{emisor['nombre']}: falta un número CRM válido", "telefono": telefono}
+    if categoria_consulta and not respuestas_manuales.cabe_en_enlace(numero_cc, mensaje_preparado):
+        return {"ok": False, "error": "El mensaje preparado supera el tamaño del enlace.", "telefono": telefono}
     esp_id = None
     if tabla is not None:
         _esp_cc = servicio_areas.area_por_tabla(tabla)
@@ -3043,8 +3052,13 @@ def _enviar_derivacion_consulta(derivacion_id: int) -> None:
     try:
         with conectar() as conn, conn.cursor() as cur:
             cur.execute(
-                "SELECT id, telefono, mensaje_original, base_datos, paciente_id, estado"
-                " FROM call_center_derivaciones WHERE id = %s", (derivacion_id,))
+                "SELECT d.id, d.telefono, d.mensaje_original, d.base_datos, d.paciente_id, d.estado,"
+                " d.motivos, d.wa_phone_id,"
+                " EXISTS (SELECT 1 FROM whatsapp_conversaciones_mensajes m"
+                " WHERE BINARY m.wa_phone_id=BINARY d.wa_phone_id"
+                " AND BINARY m.telefono_paciente=BINARY d.telefono"
+                " AND m.recibido>DATE_SUB(NOW(), INTERVAL 24 HOUR) AND m.recibido<=NOW()) AS ventana"
+                " FROM call_center_derivaciones d WHERE d.id = %s", (derivacion_id,))
             d = cur.fetchone()
             if not d or d["estado"] != "pendiente" or esta_suprimido(d["telefono"]):
                 return
@@ -3058,9 +3072,22 @@ def _enviar_derivacion_consulta(derivacion_id: int) -> None:
                 return
         tabla = d["base_datos"]
         ambiente = "desarrollo" if tabla == tabla_pacientes("desarrollo") else "produccion"
-        res = _despachar_call_center(
-            pac, ambiente, tabla=None if ambiente == "desarrollo" else tabla,
-            consulta=d["mensaje_original"])
+        categoria = next(
+            (respuestas_manuales.MOTIVOS_CATEGORIA[motivo] for motivo in (d.get("motivos") or "").split(",")
+             if motivo in respuestas_manuales.MOTIVOS_CATEGORIA), None)
+        emisor = resolver_phone_id(d["wa_phone_id"]) if d.get("wa_phone_id") else None
+        if d.get("wa_phone_id") and (
+            not emisor or not emisor.get("configured") or not d.get("ventana")
+            or WhatsAppService(phone_number_id=d["wa_phone_id"])._estaba_opt_out(d["telefono"])
+        ):
+            res = {"ok": False, "error": "Emisor, ventana de atención o paciente no disponible."}
+        else:
+            res = _despachar_call_center(
+                pac, ambiente, tabla=None if ambiente == "desarrollo" else tabla,
+                consulta=d["mensaje_original"], emisor_forzado=emisor,
+                categoria_consulta=categoria)
+        if not res.get("ok"):
+            log_error(f"derivación de call center #{derivacion_id}: no se pudo confirmar el aviso")
         with conectar() as conn, conn.cursor() as cur:
             cur.execute(
                 "UPDATE call_center_derivaciones SET estado = %s,"
@@ -3091,6 +3118,10 @@ def _registrar_derivacion_consulta(telefono: str, texto: str, mensaje_id: str,
     # La cola CRM local no se utiliza. La consulta se gestiona mediante el
     # botón que abre el WhatsApp del CRM; no se copian respuestas a esa cola.
     emisor = emisor_webhook_actual()
+    if motivos[0] in ("CONSULTA_CAMPANIA", "CONSULTA_DIRECTA"):
+        catalogo = patrones_configurados(config_get("call_center_patrones_consulta", "{}"))
+        motivo = respuestas_manuales.motivo_respuesta_automatica(texto, catalogo)
+        motivos = (motivo, *motivos)
     nueva = False
     with conectar() as conn, conn.cursor() as cur:
         cur.execute("SELECT derivacion_id FROM call_center_derivacion_mensajes"
@@ -3218,7 +3249,7 @@ def _enviar_aviso_consulta_campania(telefono: str, phone_id: str,
 
 def _gestionar_consulta_campania(telefono: str, texto: str, mensaje_id: str,
                                  referencia_meta_id: str | None, *, decision_ventana: str | None = None) -> str:
-    """Deriva preguntas de precio concretas y pide detalle para las demás consultas."""
+    """Deriva una consulta concreta o pide que el paciente la envíe completa."""
     emisor = emisor_webhook_actual()
     if not emisor or not mensaje_id or not texto.strip():
         return "sin_campania"

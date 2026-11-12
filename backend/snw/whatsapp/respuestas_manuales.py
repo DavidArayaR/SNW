@@ -1,7 +1,10 @@
-"""Composición y trazabilidad de respuestas manuales de Historial."""
+"""Catálogo y composición de respuestas de call center."""
 
+import re
 from dataclasses import dataclass
 from urllib.parse import quote
+
+from snw.whatsapp.intenciones_call_center import clasificar, es_pregunta_de_precio, normalizar
 
 
 @dataclass(frozen=True)
@@ -62,6 +65,41 @@ CATEGORIAS = {
         "Hola, quisiera explicar mi consulta al equipo de atención de {clinica}.",
     ),
 }
+
+
+MOTIVOS_CATEGORIA = {
+    "CONSULTA_PRECIO_ESPECIAL": "precio_especial",
+    "CONSULTA_PRECIO_TERAPIA": "precio_terapia",
+    "CONSULTA_PRECIOS": "precios",
+    "CONSULTA_HORAS": "horas",
+    "CONSULTA_MEDICO": "profesionales",
+    "SOLICITA_CONTACTO": "contacto",
+    "SOLICITA_INFORMACION": "informacion",
+}
+
+
+def motivo_respuesta_automatica(texto, catalogo):
+    """Elige el tipo preparado para una consulta que ya pasó el filtro de envío."""
+    t = normalizar(texto)
+    motivos = clasificar(texto, catalogo).motivos
+    if re.search(r"\b(?:precios? especial\w*|descuentos?|beneficios? especiales|promociones?|promocion)\b", t):
+        return "CONSULTA_PRECIO_ESPECIAL"
+    literal = max(
+        ((len(frase), motivo) for motivo, frases in catalogo.items()
+         if motivo in MOTIVOS_CATEGORIA
+         for frase in frases if f" {frase} " in f" {t} "),
+        key=lambda coincidencia: coincidencia[0], default=(0, None),
+    )[1]
+    if es_pregunta_de_precio(texto) or literal == "CONSULTA_PRECIOS":
+        if re.search(r"\b(?:terapias?|psicoterapias?|psicolog\w*)\b", t):
+            return "CONSULTA_PRECIO_TERAPIA"
+        return "CONSULTA_PRECIOS"
+    if literal:
+        return literal
+    if re.search(r"\b(?:fonasa|isapre|cobertura)\b", t) and "CONSULTA_HORAS" not in motivos:
+        return "CONSULTA_PRECIOS"
+    return next((motivo for motivo in MOTIVOS_CATEGORIA if motivo in motivos and motivo != "CONSULTA_PRECIOS"),
+                "SOLICITA_INFORMACION")
 
 
 def contexto_original(texto, tipo=None):
