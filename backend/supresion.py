@@ -18,7 +18,7 @@ import pymysql
 import httpx
 
 from db import BASE_DIR, conectar, config_get, log_error
-from telefono import normalizar_telefono
+from snw.pacientes.telefono import normalizar_telefono
 
 RUTA_CLAVE = BASE_DIR / ".env.supresion"
 TABLA_HUELLAS_BAJA = "pacientes_baja_huellas"
@@ -209,7 +209,7 @@ def _migracion_huellas_completa_cur(cur) -> bool:
 
 def _baja_legacy_activa_cur(cur, telefono: str) -> bool:
     """Respaldo durante el backfill: consulta opt-outs antiguos aún no migrados."""
-    import servicio_areas
+    from snw.pacientes import servicio_areas
 
     expresion = ("REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(telefono, '+', ''), ' ', ''),"
                  " '-', ''), '(', ''), ')', ''), '.', '')")
@@ -317,7 +317,7 @@ def migrar_huellas_baja_existentes() -> int:
     una baja que se haya retractado durante la migración.
     """
     asegurar_tabla_supresion()
-    import servicio_areas
+    from snw.pacientes import servicio_areas
 
     migradas = 0
     temporales: set[str] = set()
@@ -542,7 +542,7 @@ def _nombre_reducido(nombre: str, apellido: str = "") -> str:
 
 def _limpiar_datos(cur, telefono: str) -> tuple[int, int]:
     """Limpia datos del número en una sola transacción; conserva métricas de envíos."""
-    import servicio_areas
+    from snw.pacientes import servicio_areas
 
     afectados = 0
     tablas_afectadas = 0

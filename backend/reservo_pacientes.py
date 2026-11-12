@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 import pymysql
-from telefono import normalizar_telefono
+from snw.pacientes.telefono import normalizar_telefono
 
 from reservo_catalogo import (
     RESERVO_CLINICAS, clave_estado_atendido, clave_estado_verificado,
@@ -80,7 +80,7 @@ def generar_nombre_base(codigo: str, nombre_personalizado: str,
 
 def _valores_pacientes_lista(lista_id: int, pacientes: list[dict]) -> list[tuple]:
     """Copia solo pacientes con móvil chileno aceptado por telefono.py."""
-    from telefono import normalizar_telefono
+    from snw.pacientes.telefono import normalizar_telefono
 
     valores = []
     for paciente in pacientes:
@@ -690,7 +690,7 @@ def _obtener_job_base(cur, job_id: int, *, bloquear: bool = False) -> dict:
 def previsualizar_base_contactos(job_id: int, nombre_personalizado: str,
                                  ahora: dt.datetime | None = None) -> dict:
     """Resumen de la cohorte ya sincronizada; no vuelve a consultar Reservo."""
-    from telefono import normalizar_telefono
+    from snw.pacientes.telefono import normalizar_telefono
 
     with _db() as conn, conn.cursor() as cur:
         job = _obtener_job_base(cur, job_id)
@@ -807,7 +807,7 @@ def listar_bases_contacto() -> list[dict]:
         items = cur.fetchall()
     for item in items:
         if item.get('area_id'):
-            import servicio_areas
+            from snw.pacientes import servicio_areas
             area = servicio_areas.obtener_area(item['area_id'])
             item['nombre_tabla_base'] = (area or {}).get('nombre_tabla_base')
             item['total'] = (area or {}).get('total_pacientes', 0)
@@ -820,7 +820,7 @@ def listar_bases_contacto() -> list[dict]:
 
 def tratamientos_base(lista_id: int | None, *, tabla: str = TABLA_LISTA_RESERVO) -> list[str]:
     if tabla != TABLA_LISTA_RESERVO:
-        import servicio_areas
+        from snw.pacientes import servicio_areas
         if not servicio_areas.tabla_valida(tabla):
             return []
     with _db() as conn, conn.cursor() as cur:

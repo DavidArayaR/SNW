@@ -16,7 +16,7 @@ import reagendar_batches
 
 from db import conectar, config_all, config_get
 from supresion import huella_telefono
-from telefono import normalizar_telefono
+from snw.pacientes.telefono import normalizar_telefono
 from whatsapp_channels import catalogo_centros
 
 CSV_MAX_BYTES = 5 * 1024 * 1024

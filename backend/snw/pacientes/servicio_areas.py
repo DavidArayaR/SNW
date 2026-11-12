@@ -21,7 +21,7 @@ import re
 import unicodedata
 
 from db import conectar, log_error, columna_existe, tabla_pacientes
-from telefono import normalizar_telefono
+from snw.pacientes.telefono import normalizar_telefono
 
 # Nombre físico válido de tabla de especialidad. Los nombres legacy
 # (`pacientes_dev`, `pacientes_prod`) también calzan el patrón, por eso una

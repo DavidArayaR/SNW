@@ -90,8 +90,8 @@ from schemas import (
     PlantillaIn, SincronizarPlantillasIn, GenerarPlantillaIAIn, PruebaWAIn, ResetIn, RolAreaIn, UsuarioUpdIn,
     RechazoPlantillaIn, PlantillaPreviaIn, PruebaPlantillaIn,
 )
-from telefono import normalizar_telefono
-import servicio_areas
+from snw.pacientes.telefono import normalizar_telefono
+from snw.pacientes import servicio_areas
 import paciente_reagendar
 import reagendar_batches
 import reservo_pacientes
@@ -106,7 +106,7 @@ from reservo_catalogo import (
     clave_estado_verificado as clave_estado_verificado_reservo,
     clave_token as clave_token_reservo,
 )
-from servicio_areas import CSV_MAX_BYTES
+from snw.pacientes.servicio_areas import CSV_MAX_BYTES
 from routes import auth, configuracion, estadisticas as rutas_estadisticas
 from routes import notificaciones, pacientes, plantillas, usuarios, areas
 from routes import pacientes_reservo as rutas_pacientes_reservo

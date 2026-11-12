@@ -39,7 +39,7 @@ from supresion import (activar_huella_baja, bloquear_huella_baja,
                       es_exento, es_numero_prueba,
                       solicitar_eliminacion, oferta_eliminacion_enviada,
                       eliminacion_simulada_activa)
-import servicio_areas
+from snw.pacientes import servicio_areas
 from wa_rate_limit import (
     gobernador, es_error_throttle, clasificar_error, reintentos_throttle, TOPE_ESPERA_S,
 )

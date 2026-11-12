@@ -4,7 +4,7 @@ Reservo conserva los metadatos de procedencia; los pacientes operativos viven
 en el mismo esquema, registro de áreas y rutas que cualquier otra base.
 """
 from db import conectar
-import servicio_areas
+from snw.pacientes import servicio_areas
 
 
 def integrar_bases(base_id: int | None = None):

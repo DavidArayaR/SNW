@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 import pymysql
 from dotenv import load_dotenv
 from snw.infraestructura.legacy_config_secrets import leer_credencial_antigua
-from telefono import normalizar_telefono
+from snw.pacientes.telefono import normalizar_telefono
 from whatsapp_channels import CENTROS, claves_centro
 from reservo_catalogo import (
     RESERVO_CLINICAS, clave_estado_atendido, clave_estado_verificado, clave_umbral_recuperacion,
@@ -1556,7 +1556,7 @@ def asegurar_tabla_config() -> None:
             # Modelo multi-área: tablas `areas`,
             # `roles_area` y `usuario_area_roles`. Import
             # diferido porque servicio_especialidades importa este módulo.
-            from servicio_areas import asegurar_tablas_areas, migrar_tablas_areas
+            from snw.pacientes.servicio_areas import asegurar_tablas_areas, migrar_tablas_areas
             migrar_tablas_areas(cur)
             asegurar_tablas_areas(cur)
 

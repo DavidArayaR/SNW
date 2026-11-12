@@ -22,7 +22,7 @@ from reservo_pacientes import (ClienteReservo, ReservoError, codigo_estado, divi
                                cliente_valido, _guardar_paciente_cursor, tratamientos_cita, validar_uuid)
 from supresion import (bloquear_huella_baja, limpiar_cerrojos_baja_inactivos,
                        telefonos_bloqueados_para_envio)
-from telefono import normalizar_telefono
+from snw.pacientes.telefono import normalizar_telefono
 
 
 RUTA = "/api/v1/recuperacion-pacientes"

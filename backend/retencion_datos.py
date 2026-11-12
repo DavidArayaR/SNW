@@ -114,7 +114,7 @@ def asegurar_esquema() -> None:
                 if _existe_tabla(cur, tabla) and "fecha_actualizacion" in _columnas(cur, tabla):
                     _asegurar_indice(cur, tabla, "idx_retencion_fecha", "fecha_actualizacion")
 
-            from servicio_areas import tablas_de_pacientes, tabla_valida
+            from snw.pacientes.servicio_areas import tablas_de_pacientes, tabla_valida
             for tabla in tablas_de_pacientes():
                 if (tabla_valida(tabla) and _existe_tabla(cur, tabla)
                         and "fecha_actualizacion" in _columnas(cur, tabla)):
@@ -455,7 +455,7 @@ def _borrar_destinatarios_programados_vencidos(cur, dias: int) -> int:
 
 
 def _purga_pacientes_dinamicos(cur, dias: int) -> int:
-    from servicio_areas import tablas_de_pacientes, tabla_valida
+    from snw.pacientes.servicio_areas import tablas_de_pacientes, tabla_valida
 
     total = 0
     tiene_logs = _existe_tabla(cur, "log_envios")
