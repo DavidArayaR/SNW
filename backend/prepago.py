@@ -60,7 +60,7 @@ ESQUEMA = (
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
     """CREATE TABLE IF NOT EXISTS prepago_recordatorios (
         id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, linea_id BIGINT UNSIGNED NOT NULL,
-        ciclo INT UNSIGNED NOT NULL, fecha_ultima_recarga DATE NOT NULL, programado DATE NOT NULL,
+        ciclo INT UNSIGNED NOT NULL, fecha_ultima_recarga DATE NULL, programado DATE NOT NULL,
         intento_en DATETIME NOT NULL, enviado_en DATETIME NULL,
         destinatario VARCHAR(254) NOT NULL, estado VARCHAR(20) NOT NULL,
         error VARCHAR(100) NULL,
@@ -80,6 +80,9 @@ def asegurar_esquema(config=None):
     with conectar() as conn, conn.cursor() as cur:
         for sentencia in ESQUEMA:
             cur.execute(sentencia)
+        cur.execute("SHOW COLUMNS FROM prepago_recordatorios WHERE Field='fecha_ultima_recarga'")
+        if cur.fetchone()["Null"] == "NO":
+            cur.execute("ALTER TABLE prepago_recordatorios MODIFY fecha_ultima_recarga DATE NULL")
         cur.executemany(
             "INSERT INTO prepago_operadores (codigo,nombre,dominio,url_recarga) VALUES (%s,%s,%s,%s)"
             " ON DUPLICATE KEY UPDATE codigo=VALUES(codigo)", OPERADORES,
@@ -135,7 +138,7 @@ def calendario(fecha, hoy_local, dias=DIAS):
         "proximo_recordatorio": vence,
         "dias_transcurridos": (hoy_local - fecha).days if fecha else None,
         "dias_restantes": restantes,
-        "estado": ("Sin configurar" if restantes is None else "Pendiente" if restantes <= 0
+        "estado": ("Pendiente" if restantes is None or restantes <= 0
                    else "Próximo" if restantes <= 30 else "Al día"),
     }
 
@@ -246,7 +249,7 @@ def _registrar_fecha(cur, linea_id, fecha, anterior, tipo, actor, observacion):
     )
     cur.execute(
         "UPDATE prepago_recordatorios SET estado='cancelado' "
-        "WHERE linea_id=%s AND fecha_ultima_recarga<>%s AND estado='error'", (linea_id, fecha),
+        "WHERE linea_id=%s AND NOT (fecha_ultima_recarga <=> %s) AND estado='error'", (linea_id, fecha),
     )
 
 
@@ -373,7 +376,7 @@ def revisar_recordatorios(hoy_local=None, enviar=entregar_correo_real):
         if not tomado:
             return
         cur.execute("SELECT id FROM prepago_lineas WHERE activo=1 AND avisar=1 "
-                    "AND telefono IS NOT NULL AND ultima_recarga<=%s ORDER BY id",
+                    "AND telefono IS NOT NULL AND (ultima_recarga IS NULL OR ultima_recarga<=%s) ORDER BY id",
                     (corte,))
         candidatos = {fila["id"] for fila in cur.fetchall()}
         if not candidatos:
@@ -418,7 +421,8 @@ def revisar_recordatorios(hoy_local=None, enviar=entregar_correo_real):
             cur.execute(
                 "INSERT INTO prepago_recordatorios (linea_id,ciclo,fecha_ultima_recarga,programado,intento_en,destinatario,estado)"
                 " VALUES (%s,%s,%s,%s,UTC_TIMESTAMP(),%s,'incierto')",
-                (linea["id"], linea["ciclo"], linea["ultima_recarga"], linea["proximo_recordatorio"], destino),
+                (linea["id"], linea["ciclo"], linea["ultima_recarga"],
+                 linea["proximo_recordatorio"] or hoy_local, destino),
             )
             intentos.append(cur.lastrowid)
         conn.commit()

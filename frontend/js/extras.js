@@ -40,7 +40,7 @@
 
   function pintar() {
     const diasAviso = datos.recordatorio_dias === 1 ? "1 día" : `${datos.recordatorio_dias} días`;
-    $("ayudaPlazo").textContent = `SNW envía un aviso ${diasAviso} después de la última recarga registrada.`;
+    $("ayudaPlazo").textContent = `Las líneas nuevas empiezan vencidas. Después de registrar una recarga, el próximo aviso vence en ${diasAviso}.`;
     const activas = datos.lineas.filter((l) => l.activo);
     $("totalActivas").textContent = activas.length;
     $("totalPendientes").textContent = activas.filter((l) => l.estado === "Pendiente").length;
@@ -73,7 +73,9 @@
     const enlace = l.url_recarga?.startsWith("https://") ? l.url_recarga : "";
     const dias = l.dias_restantes;
     let detalle = "";
-    if (l.activo && estado !== "Sin configurar") {
+    if (l.activo && estado === "Pendiente" && dias == null) {
+      detalle = "Registra la primera recarga para iniciar el plazo.";
+    } else if (l.activo && estado !== "Sin configurar" && dias != null) {
       detalle = dias < 0 ? `Venció el ${fecha(l.proximo_recordatorio)}`
         : dias === 0 ? "Vence hoy" : `${fecha(l.proximo_recordatorio)} · ${dias === 1 ? "Falta 1 día" : `Faltan ${dias} días`}`;
     }
@@ -100,7 +102,7 @@
       </td>
       <td class="extras-ciclo" role="cell">
         <span class="extras-etiqueta-movil">Estado del aviso</span>
-        <span class="extras-estado" data-estado="${escapar(estado)}">${escapar(estado)}</span>
+        <span class="extras-estado" data-estado="${escapar(estado)}">${estado === "Pendiente" ? "Vencida" : escapar(estado)}</span>
         ${detalle ? `<small>${detalle}</small>` : ""}
         ${!l.avisar && l.activo ? "<small>Correo desactivado para esta línea</small>" : ""}
       </td>
@@ -176,8 +178,8 @@
         <label class="field"><span>Compañía</span><select name="operador" required>${opciones(ops, l?.operador || "wom")}</select></label>
         <label class="field"><span>Sistema o uso</span><select name="sistema">${opciones(["SNW", "CRM", "Personal", "Otro"].map((s) => [s, s]), l?.sistema || "Otro")}</select></label>
         <label class="field"><span>Clínica</span><select name="clinica">${opciones([["", "Sin clínica"], ...Object.entries(datos.clinicas)], l?.clinica || "")}</select></label>
-        <label class="field"><span>Última recarga</span><input name="ultima_recarga" type="date" min="1900-01-01" max="${datos.hoy}"
-            value="${escapar(l?.ultima_recarga)}" ${l?.ultima_recarga ? "required" : ""}></label>
+        ${l?.ultima_recarga ? `<label class="field"><span>Última recarga</span><input name="ultima_recarga" type="date"
+            min="1900-01-01" max="${datos.hoy}" value="${escapar(l.ultima_recarga)}" required></label>` : ""}
       </div>
       <label class="extras-check"><input type="checkbox" name="avisar" ${!l || l.avisar ? "checked" : ""}> <span>Enviar recordatorios por correo</span></label>
       <label class="extras-check"><input type="checkbox" name="activo" ${!l || l.activo ? "checked" : ""}> <span>Línea activa</span></label>

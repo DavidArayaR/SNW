@@ -38,7 +38,10 @@ class PrepagoUnitario(unittest.TestCase):
         self.assertEqual(antes["dias_restantes"], 1)
         self.assertEqual(antes["estado"], "Próximo")
         self.assertEqual(prepago.calendario(ciclo, vence)["estado"], "Pendiente")
-        self.assertEqual(prepago.calendario(None, vence)["estado"], "Sin configurar")
+        inicial = prepago.calendario(None, vence)
+        self.assertEqual(inicial["estado"], "Pendiente")
+        self.assertIsNone(inicial["proximo_recordatorio"])
+        self.assertIsNone(inicial["dias_restantes"])
         self.assertEqual(prepago.ZONA.key, "America/Santiago")
 
     def test_urls_de_operador_y_dominio(self):
@@ -133,6 +136,9 @@ class PrepagoMariaDB(unittest.TestCase):
         self.hoy = prepago.hoy()
         self.config = {"VS_WSP_PHONE_NUMBER": "+56900000001", "MS_CRM_PHONE_NUMBER": "+56900000002"}
         prepago.asegurar_esquema(self.config)
+        with self.db() as conn, conn.cursor() as cur:
+            cur.execute("UPDATE prepago_lineas SET avisar=0 WHERE semilla IS NOT NULL")
+            conn.commit()
 
     def crear(self, numero, fecha=None):
         return prepago.guardar_linea(dict(nombre="Línea ficticia", telefono=numero, operador="entel",
@@ -171,7 +177,6 @@ class PrepagoMariaDB(unittest.TestCase):
         linea = self.crear("900000004", fecha)
         otra = self.crear("900000007", fecha)
         futura = self.crear("900000008", self.hoy)
-        sin_fecha = self.crear("900000009")
         entro = threading.Event()
         liberar = threading.Event()
 
@@ -202,11 +207,9 @@ class PrepagoMariaDB(unittest.TestCase):
         self.assertIn("+56900000004", vencidas)
         self.assertIn("+56900000007", vencidas)
         self.assertIn("+56900000008", restantes)
-        self.assertIn("+56900000009", restantes)
         self.assertEqual(prepago.historial(linea, 1)["avisos"][0]["estado"], "enviado")
         self.assertEqual(prepago.historial(otra, 1)["avisos"][0]["estado"], "enviado")
         self.assertFalse(prepago.historial(futura, 1)["avisos"])
-        self.assertFalse(prepago.historial(sin_fecha, 1)["avisos"])
         corregida = next(l for l in prepago.estado()["lineas"] if l["id"] == linea)
         corregida["ultima_recarga"] -= dt.timedelta(days=1)
         prepago.guardar_linea(corregida, "pruebas", linea)
@@ -245,6 +248,32 @@ class PrepagoMariaDB(unittest.TestCase):
             prepago.revisar_recordatorios(self.hoy, smtp)
         smtp.assert_called_once()
         self.assertEqual(prepago.historial(linea_id, 1)["avisos"][0]["programado"], self.hoy)
+
+    def test_aviso_inicial_sin_fecha_y_primera_recarga(self):
+        # Reproduce un esquema instalado antes de admitir avisos sin fecha.
+        with self.db() as conn, conn.cursor() as cur:
+            cur.execute("ALTER TABLE prepago_recordatorios MODIFY fecha_ultima_recarga DATE NOT NULL")
+        prepago.asegurar_esquema(self.config)
+        prepago.asegurar_esquema(self.config)
+        iniciales = [self.crear("900000004"), self.crear("900000005")]
+        lista = {linea["id"]: linea for linea in prepago.estado()["lineas"]}
+        self.assertTrue(all(lista[id_]["estado"] == "Pendiente" for id_ in iniciales))
+        sin_numero = next(linea for linea in lista.values() if linea["nombre"] == "SNW MS")
+        self.assertEqual(sin_numero["estado"], "Sin configurar")
+        smtp = Mock(return_value=("enviado", None))
+        prepago.revisar_recordatorios(self.hoy, smtp)
+        prepago.revisar_recordatorios(self.hoy, smtp)
+        smtp.assert_called_once()
+        pendientes = smtp.call_args.args[2].split("<h2>Otras líneas activas</h2>")[0]
+        self.assertEqual(pendientes.count("Sin fecha de recarga registrada"), 2)
+        for linea_id in iniciales:
+            aviso = prepago.historial(linea_id, 1)["avisos"][0]
+            self.assertIsNone(aviso["fecha_ultima_recarga"])
+            self.assertEqual(aviso["estado"], "enviado")
+            prepago.registrar_recarga(linea_id, self.hoy, "", "pruebas", 1)
+        lista = {linea["id"]: linea for linea in prepago.estado()["lineas"]}
+        self.assertTrue(all(lista[id_]["dias_restantes"] == 150 for id_ in iniciales))
+        self.assertTrue(all(lista[id_]["estado"] == "Al día" for id_ in iniciales))
 
 
 if __name__ == "__main__":
