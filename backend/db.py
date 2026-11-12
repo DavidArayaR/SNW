@@ -1730,7 +1730,7 @@ def _permisos_csv(permisos) -> str:
 
 def _sembrar_usuarios(cur) -> None:
     """Importa las cuentas históricas y desactiva credenciales predeterminadas."""
-    from credenciales import HASHES_PREDETERMINADOS
+    from snw.seguridad.credenciales import HASHES_PREDETERMINADOS
     cur.execute("SELECT COUNT(*) AS n FROM usuarios")
     vacia = (cur.fetchone() or {}).get("n", 0) == 0
 

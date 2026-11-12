@@ -4,7 +4,7 @@ import argparse
 import re
 from getpass import getpass
 
-from credenciales import hash_clave
+from snw.seguridad.credenciales import hash_clave
 from db import MAX_DESARROLLADORES, asegurar_tabla_config, conectar
 
 

@@ -15,7 +15,7 @@ import pymysql
 import reagendar_batches
 
 from db import conectar, config_all, config_get
-from supresion import huella_telefono
+from snw.seguridad.supresion import huella_telefono
 from snw.pacientes.telefono import normalizar_telefono
 from whatsapp_channels import catalogo_centros
 
@@ -399,7 +399,7 @@ def importar(datos: bytes, cfg: dict, *, recibido: dt.datetime | None = None,
     programado = None if modo_prueba else programacion_carga(fecha, ventana, recibido)
     insertados = recuperados = duplicados = ya_enviados = elegibles = 0
     motivos_omitidos: dict[str, int] = {}
-    from supresion import bloquear_huella_baja, limpiar_cerrojos_baja_inactivos, huella_telefono
+    from snw.seguridad.supresion import bloquear_huella_baja, limpiar_cerrojos_baja_inactivos, huella_telefono
     huellas_baja_inactivas: list[str] = []
     with conectar() as conn, conn.cursor() as cur:
         lote_id = lote_existente
@@ -665,7 +665,7 @@ def motivo_no_reintentar(cita: dict, *, permitir_incierto: bool = False) -> str 
 def preparar_reintentos_manuales(ids: list[int], validar_cita, *, permitir_incierto: bool = False) -> dict:
     """Rehabilita citas concretas en su cola persistente; no llama a Meta."""
     marcadores = ",".join(["%s"] * len(ids))
-    from supresion import huella_telefono
+    from snw.seguridad.supresion import huella_telefono
     with conectar() as conn, conn.cursor() as cur:
         cur.execute("SELECT r.*, le.estado_whatsapp FROM paciente_reagendar r"
                     " LEFT JOIN log_envios le ON le.id=r.log_envio_id"
@@ -960,7 +960,7 @@ def registrar_respuesta_reagendar(telefono: str, phone_id: str, mensaje_id: str,
     if consulta is None:
         from whatsapp_service import es_consulta_explicita
         consulta = es_consulta_explicita(texto)
-    from supresion import (activar_huella_baja, bloquear_huella_baja,
+    from snw.seguridad.supresion import (activar_huella_baja, bloquear_huella_baja,
                            limpiar_cerrojos_baja_inactivos, retirar_huella_baja)
     with conectar() as conn, conn.cursor() as cur:
         def ultima_cita_del_emisor():

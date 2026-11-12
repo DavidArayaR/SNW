@@ -20,7 +20,7 @@ from reservo_catalogo import (RESERVO_CLINICAS, clave_umbral_recuperacion as cla
 from reservo_pacientes import (ClienteReservo, ReservoError, codigo_estado, dividir_periodo,
                                fecha_atencion_utc, generar_nombre_base, normalizar_cliente_uuid,
                                cliente_valido, _guardar_paciente_cursor, tratamientos_cita, validar_uuid)
-from supresion import (bloquear_huella_baja, limpiar_cerrojos_baja_inactivos,
+from snw.seguridad.supresion import (bloquear_huella_baja, limpiar_cerrojos_baja_inactivos,
                        telefonos_bloqueados_para_envio)
 from snw.pacientes.telefono import normalizar_telefono
 

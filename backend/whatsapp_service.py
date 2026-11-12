@@ -33,7 +33,7 @@ from intenciones_call_center import clasificar, normalizar as normalizar_intenci
 from plantilla_media import obtener_media, ruta_media
 from plantilla_revision import (botones_para_meta, presentar_plantilla,
                                variables_del_cuerpo, version_opciones)
-from supresion import (activar_huella_baja, bloquear_huella_baja,
+from snw.seguridad.supresion import (activar_huella_baja, bloquear_huella_baja,
                       limpiar_cerrojos_baja_inactivos, retirar_huella_baja,
                       esta_suprimido, esta_de_baja, esta_bloqueado_para_envio,
                       es_exento, es_numero_prueba,

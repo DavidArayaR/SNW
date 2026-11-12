@@ -71,7 +71,7 @@ def guardar_mensaje_completo(cur, texto: str, telefono: str) -> None:
 
     La llamada falla sin huella válida; jamás deja un texto completo huérfano.
     """
-    from supresion import huella_telefono
+    from snw.seguridad.supresion import huella_telefono
 
     huella = huella_telefono(telefono)
     cur.execute("SELECT estado FROM supresion_telefonos WHERE huella = %s FOR UPDATE",

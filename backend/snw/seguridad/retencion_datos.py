@@ -563,7 +563,7 @@ def _purga_reservo(cur, dias: int) -> int:
 def _purga_reagendamientos(cur, dias: int) -> int:
     if not _existe_tabla(cur, "paciente_reagendar"):
         return 0
-    from supresion import huella_telefono
+    from snw.seguridad.supresion import huella_telefono
 
     total = 0
     while total < _MAX_FILAS_POR_EJECUCION:

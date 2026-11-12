@@ -852,7 +852,7 @@ def importar_pacientes_csv(area_id: int, datos: bytes, usuario_id: int,
         if (telefono := normalizar_telefono(_limpiar_celda_csv(fila.get(elegidas["telefono"]))))
     }
 
-    from supresion import (activar_huella_baja, bloquear_huella_baja,
+    from snw.seguridad.supresion import (activar_huella_baja, bloquear_huella_baja,
                            limpiar_cerrojos_baja_inactivos, huella_telefono)
 
     with conectar() as conn, conn.cursor() as cur:

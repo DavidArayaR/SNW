@@ -96,7 +96,7 @@ def huella_pareja(phone_id: str, destinatario: str) -> str:
         raise ValueError("Falta destinatario para limitar el envío")
     # Reutiliza la huella HMAC de supresión: un SHA simple de teléfonos
     # permitiría probar por fuerza bruta el pequeño espacio de números.
-    from supresion import huella_telefono
+    from snw.seguridad.supresion import huella_telefono
     huella_paciente = huella_telefono("+" + digitos)
     return hashlib.sha256(f"{phone_id}:{huella_paciente}".encode()).hexdigest()
 

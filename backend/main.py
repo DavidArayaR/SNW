@@ -40,7 +40,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
-from credenciales import credencial_deshabilitada, es_hash_legacy, hash_clave, verificar_clave
+from snw.seguridad.credenciales import credencial_deshabilitada, es_hash_legacy, hash_clave, verificar_clave
 from starlette.datastructures import UploadFile as ArchivoMultipart
 
 from db import (
@@ -77,7 +77,7 @@ from wa_dispatch_limit import (estados as estados_despacho, politica as politica
 from whatsapp_service import (WhatsAppService, EnvioInterrumpido,
                               es_mensaje_interes, etiquetas_automaticas)
 from whatsapp_webhook import router as whatsapp_router
-from supresion import (asegurar_tabla_supresion, reintentar_pendientes,
+from snw.seguridad.supresion import (asegurar_tabla_supresion, reintentar_pendientes,
                       esta_suprimido, es_exento, es_numero_prueba,
                       eliminacion_simulada_activa, oferta_eliminacion_enviada,
                       resumen_supresion, esta_de_baja,
@@ -97,7 +97,7 @@ import reagendar_batches
 import reservo_pacientes
 import recuperacion_pacientes
 import reservo_bases
-import retencion_datos
+from snw.seguridad import retencion_datos
 import prepago
 from routes import prepago as rutas_prepago
 from reservo_catalogo import (
@@ -1758,7 +1758,7 @@ def _actualizar_huella_baja_manual(cur, telefono: str, respuesta: str,
     Un cambio manual puede retirar solo una baja creada manualmente; una baja
     recibida del paciente se libera únicamente cuando vuelve a escribir.
     """
-    from supresion import (activar_huella_baja, bloquear_huella_baja,
+    from snw.seguridad.supresion import (activar_huella_baja, bloquear_huella_baja,
                            limpiar_cerrojos_baja_inactivos, retirar_huella_baja)
 
     numero = normalizar_telefono(telefono or "")

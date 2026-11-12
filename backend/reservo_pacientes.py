@@ -216,7 +216,7 @@ def guardar_pagina_citas_cache(codigo: str, desde: dt.date, hasta: dt.date,
                                estado_atendido: str) -> None:
     from db import conectar
     minimo = [_cita_para_cache(cita, estado_atendido) for cita in citas]
-    from supresion import (bloquear_huella_baja, limpiar_cerrojos_baja_inactivos)
+    from snw.seguridad.supresion import (bloquear_huella_baja, limpiar_cerrojos_baja_inactivos)
     huellas_temporales: list[str] = []
     with conectar() as conn, conn.cursor() as cur:
         for cita in minimo:
@@ -1073,7 +1073,7 @@ def _guardar_paciente_cursor(cur, codigo: str, cliente: dict,
     telefono = normalizar_telefono(str(telefono_cliente(cliente) or ""))
     if not telefono:
         return "telefono_invalido", 0
-    from supresion import bloquear_huella_baja
+    from snw.seguridad.supresion import bloquear_huella_baja
 
     huella, baja = bloquear_huella_baja(cur, telefono)
     if not baja and huellas_baja_inactivas is not None:
@@ -1172,7 +1172,7 @@ def _guardar_pagina(job_id: int, codigo: str,
         parametros.extend((nuevos, actualizados, job_id))
         cur.execute("UPDATE reservo_sincronizaciones SET " + ",".join(asignaciones) +
                     " WHERE id=%s", parametros)
-        from supresion import limpiar_cerrojos_baja_inactivos
+        from snw.seguridad.supresion import limpiar_cerrojos_baja_inactivos
         limpiar_cerrojos_baja_inactivos(cur, huellas_baja_inactivas)
         conn.commit()
     return nuevos, actualizados
