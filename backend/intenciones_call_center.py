@@ -29,7 +29,7 @@ PATRONES = {
         r"\b(?:hay|tienen|disponib\w*)\b.{0,35}\b(?:doctor\w*|medic\w*|especialista[s]?|profesional\w*|psicolog\w*|psiquiatr\w*)\b",
     ),
     "CONSULTA_PRECIOS": (
-        r"\b(?:cuanto|cual|que)\b.{0,25}\b(?:cuesta|vale|precio[s]?|valor|arancel|servicio[s]?|especialidad\w*)\b",
+        r"\b(?:cuanto|cual|que)\b.{0,25}\b(?:cuesta|vale|sale|cobran|precio[s]?|valor|arancel|servicio[s]?|especialidad\w*)\b",
         r"\b(?:precio[s]?|valor|arancel|costo[s]?|especialidad\w*|servicio[s]?)\b",
     ),
     "SOLICITA_CONTACTO": (
@@ -98,6 +98,17 @@ def normalizar(texto: str) -> str:
     texto = unicodedata.normalize("NFKD", (texto or "").casefold())
     texto = "".join(c for c in texto if not unicodedata.combining(c))
     return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]", " ", texto)).strip()[:2000]
+
+
+def es_pregunta_de_precio(texto: str) -> bool:
+    """Reconoce solicitudes de precio, aunque falten signos de interrogación."""
+    return bool(re.search(
+        r"\b(?:cuanto (?:cuesta|vale|sale|cobran)|"
+        r"(?:cuanto|cual) es el (?:precio|valor|costo|arancel)|"
+        r"(?:quiero saber|quisiera saber|necesito saber|me gustaria saber|me pueden indicar|"
+        r"me pueden decir)\b.{0,40}\b(?:precio|valor|costo|arancel))\b",
+        normalizar(texto),
+    ))
 
 
 @dataclass(frozen=True)

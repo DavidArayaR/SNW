@@ -28,6 +28,7 @@ import ssl
 import httpx
 import audio_transcripcion
 import estadisticas_envio
+from intenciones_call_center import es_pregunta_de_precio
 import simulacion_envio
 import pymysql
 from fastapi import (BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException,
@@ -3111,13 +3112,12 @@ def _registrar_derivacion_consulta(telefono: str, texto: str, mensaje_id: str,
 
 
 _AVISO_CONSULTA_CAMPANIA = (
-    "Para registrar tu consulta correctamente, escríbela completa en un solo "
-    "mensaje de hasta 500 caracteres. Después te enviaremos un botón para "
-    "continuarla en el WhatsApp del call center."
+    "Cuéntanos tu consulta en un solo mensaje. Después te enviaremos un botón "
+    "para hablar con nuestro equipo por WhatsApp."
 )
 _AVISO_CONSULTA_LARGA = (
-    "Tu consulta supera los 500 caracteres. Resúmela en un solo mensaje "
-    "para poder prepararla y continuar con el call center."
+    "¿Puedes resumir tu consulta en un solo mensaje? Así podremos prepararla "
+    "para que la envíes a nuestro equipo por WhatsApp."
 )
 
 
@@ -3184,12 +3184,14 @@ def _enviar_aviso_consulta_campania(telefono: str, phone_id: str,
 
 def _gestionar_consulta_campania(telefono: str, texto: str, mensaje_id: str,
                                  referencia_meta_id: str | None) -> str:
-    """Pide detalle antes de derivar; 0 identifica una consulta sin campaña."""
+    """Deriva preguntas de precio concretas y pide detalle para las demás consultas."""
     emisor = emisor_webhook_actual()
     if not emisor or not mensaje_id or not texto.strip():
         return "sin_campania"
     tel = normalizar_telefono(telefono) or telefono
     phone_id = emisor["phoneNumberId"]
+    consulta_precio = es_pregunta_de_precio(texto)
+    texto_largo = len(texto.strip()) > 500
     with conectar() as conn, conn.cursor() as cur:
         campania = _ultima_campania_del_emisor(cur, tel, phone_id, referencia_meta_id)
         cur.execute("SELECT campania_log_id, primer_mensaje_id, ultimo_mensaje_id,"
@@ -3213,14 +3215,16 @@ def _gestionar_consulta_campania(telefono: str, texto: str, mensaje_id: str,
             campania = {"id": 0, "base_datos": (cur.fetchone() or {}).get("tabla_pacientes")}
         misma_campania = estado.get("campania_log_id") == campania["id"]
         if misma_campania and estado.get("estado") == "completada":
-            if campania["id"] != 0 or not _pide_detallar_consulta(texto):
+            nueva_prueba = (consulta_precio and mensaje_id[:255] != estado.get("ultimo_mensaje_id")
+                            and es_numero_prueba(tel))
+            if not nueva_prueba and (campania["id"] != 0 or not _pide_detallar_consulta(texto)):
                 return "ya_gestionada"
         if misma_campania and vigente and estado.get("estado") == "esperando":
             if estado.get("primer_mensaje_id") == mensaje_id[:255]:
                 return "esperando"
-            if _pide_detallar_consulta(texto):
+            if _pide_detallar_consulta(texto) and not consulta_precio:
                 return "esperando"  # repetir la frase no es el detalle solicitado
-            if len(texto.strip()) > 500:
+            if texto_largo:
                 if estado.get("ultimo_mensaje_id") == "consulta_larga_avisada":
                     return "texto_largo"
                 cur.execute("UPDATE campania_consultas SET ultimo_mensaje_id='consulta_larga_avisada'"
@@ -3242,16 +3246,18 @@ def _gestionar_consulta_campania(telefono: str, texto: str, mensaje_id: str,
             conn.commit()
             derivar = True
         else:
+            derivar = consulta_precio and not texto_largo
+            ultimo = mensaje_id[:255] if derivar else None
+            siguiente = "completada" if derivar else "esperando"
             cur.execute(
                 "INSERT INTO campania_consultas"
-                " (wa_phone_id, telefono, campania_log_id, primer_mensaje_id, estado)"
-                " VALUES (%s, %s, %s, %s, 'esperando')"
+                " (wa_phone_id, telefono, campania_log_id, primer_mensaje_id, ultimo_mensaje_id, estado)"
+                " VALUES (%s, %s, %s, %s, %s, %s)"
                 " ON DUPLICATE KEY UPDATE campania_log_id=VALUES(campania_log_id),"
-                " primer_mensaje_id=VALUES(primer_mensaje_id), ultimo_mensaje_id=NULL,"
-                " estado='esperando', actualizado=NOW()",
-                (phone_id, tel, campania["id"], mensaje_id[:255]))
+                " primer_mensaje_id=VALUES(primer_mensaje_id), ultimo_mensaje_id=VALUES(ultimo_mensaje_id),"
+                " estado=VALUES(estado), actualizado=NOW()",
+                (phone_id, tel, campania["id"], mensaje_id[:255], ultimo, siguiente))
             conn.commit()
-            derivar = False
     if derivar:
         try:
             resultado = _registrar_derivacion_consulta(
@@ -3497,7 +3503,7 @@ _RESPUESTAS_SISTEMA = {
                             "Se envía después de registrar una consulta de campaña."),
     "consulta_detalle": ("Consulta · pedir detalle", _AVISO_CONSULTA_CAMPANIA,
                          "Pide la consulta completa en un solo mensaje."),
-    "consulta_larga": ("Consulta · más de 500 caracteres", _AVISO_CONSULTA_LARGA,
+    "consulta_larga": ("Consulta · pedir un resumen", _AVISO_CONSULTA_LARGA,
                        "Se envía si la consulta supera el máximo admitido."),
     "reagendar_consulta": ("Reagendamiento · pedir consulta",
                            "Escríbenos tu consulta para prepararla y abrir el WhatsApp "
