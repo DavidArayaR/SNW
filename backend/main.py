@@ -83,7 +83,7 @@ from snw.seguridad.supresion import (asegurar_tabla_supresion, reintentar_pendie
                       resumen_supresion, esta_de_baja,
                       migrar_huellas_baja_existentes)
 from snw.infraestructura.config_service import config_correo as _config_correo, enviar_correo as _enviar_correo, armar_mensaje as _armar_mensaje, leer_config, url_base
-from schemas import (
+from routes.schemas import (
     ActivarCuentaIn, ClavePropiaIn, ConfigIn, ConfigTodoIn,
     CorreoRecuperacionIn, EnvioIn, AreaIn, AreaRenombrarIn,
     InvitarIn, LoginIn, OlvideIn,
@@ -9645,7 +9645,7 @@ def _ejecutar_programado(f: dict) -> None:
     """Lanza un programado vencido reutilizando el pipeline normal (misma
     elegibilidad, límites y registro). La sesión es del sistema con rol
     administrador, pero el envío queda atribuido a quien lo programó."""
-    from schemas import EnvioIn
+    from routes.schemas import EnvioIn
 
     emisor = {"codigo": f.get("centro_codigo"), "phoneNumberId": f.get("wa_phone_id"),
               "phoneNumber": f.get("numero_emisor")}
