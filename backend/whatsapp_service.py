@@ -1702,8 +1702,12 @@ class WhatsAppService:
                 continue
             detalle_error = None
             if estado == "failed":
-                detalle_error = self._detalle_errores(s.get("errors"))
-                log_error(f"webhook: mensaje {message_id} a {telefono} falló - {detalle_error}")
+                errores = s.get("errors")
+                detalle_error = self._detalle_errores(errores)
+                codigo = (errores[0] or {}).get("code") if errores else None
+                tipo = f"Meta-{codigo}" if type(codigo) is int and 1 <= codigo <= 999999 else "Meta-EntregaFallida"
+                log_error(f"webhook: mensaje {message_id} a {telefono} falló - {detalle_error}",
+                          tipo_archivo=tipo)
             self._actualizar_estado(message_id, estado, detalle_error, s.get("timestamp"))
             acciones.append(f"estado_{estado}")
         return acciones

@@ -35,8 +35,9 @@ _ACCION_ERROR = ContextVar("snw_accion_error", default=None)
 _CAPTURA_CONSOLA_ACCION = ContextVar("snw_captura_consola_accion", default=None)
 _STREAMS_CONSOLA_ORIGINALES = {}
 _STREAMS_CONSOLA_CAPTURA = {}
+TIPO_LOG = r"[A-Za-z_][A-Za-z0-9_-]{0,63}"
 _NOMBRE_ERROR_RECIENTE = re.compile(
-    r"errores-(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-\d{6})-\d+-\d+\.log\Z")
+    rf"errores-(\d{{4}}-\d{{2}}-\d{{2}}_\d{{2}}-\d{{2}}-\d{{2}}-\d{{6}})-\d+-\d+(?:--{TIPO_LOG})?\.log\Z")
 _MAX_ERRORES_CONTEXTO = 100
 
 
@@ -167,9 +168,10 @@ def _accion_actual(contexto: str) -> str:
     return _texto_log_seguro(accion or contexto or "No identificada")
 
 
-def _nombre_log_para(ahora: datetime, secuencia: int) -> str:
-    """Identifica un error por fecha, hora, proceso y secuencia."""
-    return f"errores-{ahora:%Y-%m-%d_%H-%M-%S-%f}-{os.getpid()}-{secuencia}.log"
+def _nombre_log_para(ahora: datetime, secuencia: int, tipo: str = "Error") -> str:
+    """Incluye un identificador seguro, separado del mensaje del error."""
+    tipo = tipo if re.fullmatch(TIPO_LOG, tipo) else "Error"
+    return f"errores-{ahora:%Y-%m-%d_%H-%M-%S-%f}-{os.getpid()}-{secuencia}--{tipo}.log"
 
 
 def _texto_log_seguro(valor: str, limite: int | None = 1500) -> str:
@@ -213,7 +215,8 @@ def _errores_ultimos_cinco_minutos(ahora: datetime) -> tuple[list[str], int]:
     return [item[1] for item in recientes[:_MAX_ERRORES_CONTEXTO]], omitidos
 
 
-def _guardar_error_archivo(contexto: str, exc: BaseException | None = None) -> None:
+def _guardar_error_archivo(contexto: str, exc: BaseException | None = None,
+                          *, tipo_archivo: str = "Error") -> None:
     """Crea un archivo exclusivo por error; crea logs/ al necesitarlo."""
     ahora = datetime.now(_ZONA_LOG)
     accion = _accion_actual(contexto)
@@ -221,6 +224,9 @@ def _guardar_error_archivo(contexto: str, exc: BaseException | None = None) -> N
     traza = ""
     if exc is not None:
         codigo = exc.args[0] if exc.args and isinstance(exc.args[0], int) else None
+        tipo_archivo = type(exc).__name__
+        if isinstance(exc, pymysql.MySQLError) and codigo is not None and 1000 <= codigo <= 9999:
+            tipo_archivo += f"-{codigo}"
         mensaje += f" | {type(exc).__name__}" + (f" ({codigo})" if codigo is not None else "")
         if exc.__traceback__ is not None:
             # format_tb incluye líneas de código que pueden contener valores
@@ -248,7 +254,7 @@ def _guardar_error_archivo(contexto: str, exc: BaseException | None = None) -> N
             entrada = (mensaje + f"\nAcción: {accion}" + traza + seccion + "\n").encode(
                 "utf-8", errors="replace")
             while True:
-                ruta = LOGS_DIR / _nombre_log_para(ahora, next(_SECUENCIA_LOG))
+                ruta = LOGS_DIR / _nombre_log_para(ahora, next(_SECUENCIA_LOG), tipo_archivo)
                 try:
                     descriptor = os.open(ruta, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
                     break
@@ -297,7 +303,7 @@ def instalar_registro_errores() -> None:
 
 
 def log_error(contexto: str, exc: BaseException | None = None,
-              *, solo_tipo: bool = False) -> None:
+              *, solo_tipo: bool = False, tipo_archivo: str = "Error") -> None:
     """Registra en consola (stderr) cualquier error, con su traza completa.
 
     Se usa en todos los bloques try/except del backend para que ningún
@@ -311,7 +317,7 @@ def log_error(contexto: str, exc: BaseException | None = None,
         else:
             traceback.print_exception(type(exc), exc, exc.__traceback__)
         sys.stderr.flush()
-    _guardar_error_archivo(contexto, exc)
+    _guardar_error_archivo(contexto, exc, tipo_archivo=tipo_archivo)
 
 
 def registrar_resultado_csv_remoto(estado: str, fase: str, *, http_status: int,
@@ -326,13 +332,14 @@ def registrar_resultado_csv_remoto(estado: str, fase: str, *, http_status: int,
              f" | duración_ms={max(0, int(duracion_ms))}")
     detalle = " | ".join(f"{campo}={valor}" for campo, valor in conteos.items())
     entrada = f"{linea}\n{detalle}\n"
+    tipo = f"--HTTP-{http_status}" if 400 <= http_status <= 599 else ""
     print(entrada, end="", file=sys.stderr, flush=True)
     try:
         with _LOG_LOCK:
             LOGS_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
             while True:
                 nombre = (f"csv-remoto-{ahora:%Y-%m-%d_%H-%M-%S-%f}-"
-                          f"{os.getpid()}-{next(_SECUENCIA_LOG)}.log")
+                          f"{os.getpid()}-{next(_SECUENCIA_LOG)}{tipo}.log")
                 try:
                     descriptor = os.open(LOGS_DIR / nombre, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
                     break

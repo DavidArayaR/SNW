@@ -41,7 +41,7 @@ from credenciales import credencial_deshabilitada, es_hash_legacy, hash_clave, v
 from starlette.datastructures import UploadFile as ArchivoMultipart
 
 from db import (
-    conectar, entorno_valido, log_error, instalar_registro_errores, accion_de_error, LOGS_DIR,
+    conectar, entorno_valido, log_error, instalar_registro_errores, accion_de_error, LOGS_DIR, TIPO_LOG,
     registrar_resultado_csv_remoto,
     nombre_base, columnas_tabla, columna_existe,
     tabla_pacientes, asegurar_tabla_config, config_all, config_get, config_set,
@@ -211,7 +211,7 @@ def _log_importacion_csv(request: Request, codigo: str, *, estado: int | None = 
         partes.append(f"HTTP {estado}")
     if detalle:
         partes.append(detalle)
-    log_error(" | ".join(partes), exc, solo_tipo=exc is not None)
+    log_error(" | ".join(partes), exc, solo_tipo=exc is not None, tipo_archivo=codigo)
 
 
 @app.middleware("http")
@@ -492,7 +492,9 @@ def solo_dev(sesion: dict = Depends(sesion_actual)) -> dict:
 
 
 _NOMBRE_LOG_ERROR = re.compile(
-    r"(?:errores|csv-remoto)-(\d{4}-\d{2}-\d{2})(?:_(\d{2}-\d{2}-\d{2}-\d{6})-(\d+)(?:-(\d+))?)?\.log\Z")
+    r"(?:errores|csv-remoto)-(\d{4}-\d{2}-\d{2})"
+    r"(?:_(\d{2}-\d{2}-\d{2}-\d{6})-(\d+)(?:-(\d+))?"
+    rf"(?:--{TIPO_LOG})?)?\.log\Z")
 _LOGS_LOTE_BORRADO = 100
 _LOGS_EDAD_MINIMA_SEGUNDOS = 24 * 60 * 60
 
