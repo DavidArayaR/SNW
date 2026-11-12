@@ -18,7 +18,7 @@ import pymysql
 from dotenv import load_dotenv
 from snw.infraestructura.legacy_config_secrets import leer_credencial_antigua
 from snw.pacientes.telefono import normalizar_telefono
-from whatsapp_channels import CENTROS, claves_centro
+from snw.whatsapp.whatsapp_channels import CENTROS, claves_centro
 from snw.reservo.reservo_catalogo import (
     RESERVO_CLINICAS, clave_estado_atendido, clave_estado_verificado, clave_umbral_recuperacion,
     clave_cobertura_recuperacion,

@@ -17,8 +17,8 @@ from starlette.requests import ClientDisconnect
 from starlette.concurrency import run_in_threadpool
 
 from db import config_all, config_get, log_error
-from whatsapp_channels import catalogo_centros, listar_canales
-from whatsapp_service import WebhookHandler
+from snw.whatsapp.whatsapp_channels import catalogo_centros, listar_canales
+from snw.whatsapp.whatsapp_service import WebhookHandler
 
 router = APIRouter(prefix="/api/whatsapp", tags=["whatsapp"])
 handler = WebhookHandler()

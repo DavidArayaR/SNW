@@ -11,7 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 
 
-RUTA_BLACKLIST = Path(__file__).resolve().parents[1] / "blacklist_es.txt"
+RUTA_BLACKLIST = Path(__file__).resolve().parents[3] / "blacklist_es.txt"
 
 
 def _normalizar(texto: str) -> str:

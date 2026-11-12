@@ -7,8 +7,8 @@ from fastapi import HTTPException
 
 from db import conectar
 from snw.mensajeria.groq_service import leer_clave, consumir_cuota
-from whatsapp_channels import credenciales_centro
-from whatsapp_service import graph_url
+from snw.whatsapp.whatsapp_channels import credenciales_centro
+from snw.whatsapp.whatsapp_service import graph_url
 
 MAX_AUDIO = 25 * 1024 * 1024
 FORMATOS = {"audio/ogg": "ogg", "audio/opus": "ogg", "audio/mpeg": "mp3",

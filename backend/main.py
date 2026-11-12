@@ -26,10 +26,10 @@ import smtplib
 import ssl
 
 import httpx
-import audio_transcripcion
-import consultas_ventana
+from snw.whatsapp import audio_transcripcion
+from snw.whatsapp import consultas_ventana
 import estadisticas_envio
-from intenciones_call_center import (detectar_automatizacion, es_pregunta_de_precio,
+from snw.whatsapp.intenciones_call_center import (detectar_automatizacion, es_pregunta_de_precio,
                                     patrones_configurados, tipo_consulta_entrante)
 from snw.mensajeria import simulacion_envio
 import pymysql
@@ -60,23 +60,23 @@ from db import (
 )
 from snw.mensajeria.motor_envio import (obtener_canal, MotorApiOficial, ResultadoEnvioIncierto,
                          FalloInfraestructuraDespacho)
-from whatsapp_channels import (CENTROS, catalogo_centros, claves_centro, credenciales_centro,
+from snw.whatsapp.whatsapp_channels import (CENTROS, catalogo_centros, claves_centro, credenciales_centro,
                                mismo_centro,
                                app_id_centro, listar_canales, resolver_centro, resolver_phone_id,
                                emisor_webhook_actual)
-from whatsapp_channel_verification import verificar_canal_meta
-import whatsapp_service
+from snw.whatsapp.whatsapp_channel_verification import verificar_canal_meta
+from snw.whatsapp import whatsapp_service
 from snw.mensajeria.plantilla_media import (MAX_MEDIA_BYTES, descargar_media_meta, guardar_media,
                             guardar_media_importada, obtener_media, ruta_media)
 from snw.mensajeria.plantilla_revision import (MAX_CUERPO, presentar_plantilla, variables_del_cuerpo,
                                componentes_para_vista, version_opciones)
 from snw.mensajeria.groq_service import consumir_cuota, generar_borrador, validar_instruccion
-from wa_rate_limit import gobernador as wa_gobernador
-from wa_dispatch_limit import (estados as estados_despacho, politica as politica_despacho,
+from snw.whatsapp.wa_rate_limit import gobernador as wa_gobernador
+from snw.whatsapp.wa_dispatch_limit import (estados as estados_despacho, politica as politica_despacho,
                                limpiar_pares_vencidos)
-from whatsapp_service import (WhatsAppService, EnvioInterrumpido,
+from snw.whatsapp.whatsapp_service import (WhatsAppService, EnvioInterrumpido,
                               es_mensaje_interes, etiquetas_automaticas)
-from whatsapp_webhook import router as whatsapp_router
+from snw.whatsapp.whatsapp_webhook import router as whatsapp_router
 from snw.seguridad.supresion import (asegurar_tabla_supresion, reintentar_pendientes,
                       esta_suprimido, es_exento, es_numero_prueba,
                       eliminacion_simulada_activa, oferta_eliminacion_enviada,
@@ -5824,7 +5824,7 @@ def _estado_tokens_reservo(cfg: dict | None = None) -> dict[str, bool]:
 
 def descargar_corpus_csv(origen: str = Query("completo"),
                         sesion: dict = Depends(solo_dev)):
-    from corpus_respuestas import preparar_csv
+    from snw.whatsapp.corpus_respuestas import preparar_csv
 
     if origen not in ("completo", "desidentificado", "ambos"):
         raise HTTPException(422, detail="Selecciona un corpus válido.")
@@ -6579,7 +6579,7 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
             if not v or "mensaje automático" not in v.casefold() or len(v) > 1000:
                 raise HTTPException(422, detail="El aviso debe incluir «mensaje automático» y tener menos de 1000 caracteres.")
         if clave == "call_center_patrones_consulta":
-            from intenciones_call_center import MOTIVOS
+            from snw.whatsapp.intenciones_call_center import MOTIVOS
             try:
                 catalogo_patrones = json.loads(v or "{}")
             except ValueError:
@@ -11964,7 +11964,7 @@ def _tarifa_proxima(tarifas: list[dict]) -> dict | None:
 
 def _obtener_moneda_meta() -> str | None:
     """Usa moneda automática solo si todas las WABA activas coinciden."""
-    from whatsapp_service import graph_url
+    from snw.whatsapp.whatsapp_service import graph_url
     cfg = config_all(refresh=True)
     canales = [canal for canal in listar_canales(cfg)
                if canal["configured"] and canal.get("wabaId")]

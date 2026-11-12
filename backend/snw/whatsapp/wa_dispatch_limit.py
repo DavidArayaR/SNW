@@ -15,7 +15,7 @@ from datetime import datetime
 import pymysql
 
 from db import CONFIG_DEFAULTS, conectar
-from whatsapp_channels import CENTROS, resolver_phone_id
+from snw.whatsapp.whatsapp_channels import CENTROS, resolver_phone_id
 
 
 def _entero(valor, defecto: int, minimo: int, maximo: int) -> int:

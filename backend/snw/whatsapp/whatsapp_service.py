@@ -25,11 +25,11 @@ import httpx
 from pymysql.err import MySQLError, OperationalError
 
 from db import conectar, config_all, config_get, log_error, tabla_pacientes
-from whatsapp_channels import (CENTROS, EMISOR_WEBHOOK, catalogo_centros,
+from snw.whatsapp.whatsapp_channels import (CENTROS, EMISOR_WEBHOOK, catalogo_centros,
                                app_id_centro, credenciales_centro, listar_canales, resolver_phone_id)
-from whatsapp_channel_verification import verificar_canal_meta
-from corpus_respuestas import guardar_mensaje_completo
-from intenciones_call_center import clasificar, normalizar as normalizar_intencion, patrones_configurados
+from snw.whatsapp.whatsapp_channel_verification import verificar_canal_meta
+from snw.whatsapp.corpus_respuestas import guardar_mensaje_completo
+from snw.whatsapp.intenciones_call_center import clasificar, normalizar as normalizar_intencion, patrones_configurados
 from snw.mensajeria.plantilla_media import obtener_media, ruta_media
 from snw.mensajeria.plantilla_revision import (botones_para_meta, presentar_plantilla,
                                variables_del_cuerpo, version_opciones)
@@ -40,11 +40,11 @@ from snw.seguridad.supresion import (activar_huella_baja, bloquear_huella_baja,
                       solicitar_eliminacion, oferta_eliminacion_enviada,
                       eliminacion_simulada_activa)
 from snw.pacientes import servicio_areas
-from wa_rate_limit import (
+from snw.whatsapp.wa_rate_limit import (
     gobernador, es_error_throttle, clasificar_error, reintentos_throttle, TOPE_ESPERA_S,
 )
-from wa_dispatch_limit import reservar as reservar_despacho, bloquear as bloquear_despacho
-from wa_dispatch_limit import aplazar_pareja, politica as politica_despacho, registrar_aceptado
+from snw.whatsapp.wa_dispatch_limit import reservar as reservar_despacho, bloquear as bloquear_despacho
+from snw.whatsapp.wa_dispatch_limit import aplazar_pareja, politica as politica_despacho, registrar_aceptado
 
 # Versión de la Graph API de Meta. Configurable en la tabla `configuracion`
 # (clave `wa_graph_version`); si no está, se usa este valor por defecto.

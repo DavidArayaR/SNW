@@ -17,7 +17,7 @@ from snw.reagendamiento import reagendar_batches
 from db import conectar, config_all, config_get
 from snw.seguridad.supresion import huella_telefono
 from snw.pacientes.telefono import normalizar_telefono
-from whatsapp_channels import catalogo_centros
+from snw.whatsapp.whatsapp_channels import catalogo_centros
 
 CSV_MAX_BYTES = 5 * 1024 * 1024
 CSV_MAX_FILAS = 10000
@@ -958,7 +958,7 @@ def registrar_respuesta_reagendar(telefono: str, phone_id: str, mensaje_id: str,
     if not mensaje_id or not phone_id or not telefono:
         return None
     if consulta is None:
-        from whatsapp_service import es_consulta_explicita
+        from snw.whatsapp.whatsapp_service import es_consulta_explicita
         consulta = es_consulta_explicita(texto)
     from snw.seguridad.supresion import (activar_huella_baja, bloquear_huella_baja,
                            limpiar_cerrojos_baja_inactivos, retirar_huella_baja)
@@ -1014,7 +1014,7 @@ def registrar_respuesta_reagendar(telefono: str, phone_id: str, mensaje_id: str,
                 (telefono, phone_id))
             cita = cur.fetchone()
         if not cita and not referencia_id and not es_aceptacion_reagendar(texto):
-            from whatsapp_service import es_solo_saludo_o_estado
+            from snw.whatsapp.whatsapp_service import es_solo_saludo_o_estado
             if declina or not es_solo_saludo_o_estado(texto):
                 cita = ultima_cita_del_emisor()
         if not cita:

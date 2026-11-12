@@ -10,7 +10,7 @@ import unicodedata
 from dataclasses import dataclass
 from difflib import get_close_matches
 
-from deteccion_ofensas import DeteccionOfensa, detectar_ofensa
+from snw.whatsapp.deteccion_ofensas import DeteccionOfensa, detectar_ofensa
 
 MOTIVOS = (
     "CONSULTA_HORAS", "CONSULTA_MEDICO", "CONSULTA_PRECIOS",

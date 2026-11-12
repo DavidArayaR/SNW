@@ -1,7 +1,7 @@
 from db import log_error
 import httpx
 
-from whatsapp_service import WhatsAppService, ResultadoEnvioIncierto, EnvioInterrumpido
+from snw.whatsapp.whatsapp_service import WhatsAppService, ResultadoEnvioIncierto, EnvioInterrumpido
 from snw.seguridad.supresion import esta_bloqueado_para_envio, esta_suprimido  # compatibilidad con integraciones existentes
 
 

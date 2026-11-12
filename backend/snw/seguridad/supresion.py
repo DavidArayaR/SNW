@@ -436,7 +436,7 @@ def solicitar_eliminacion(telefono: str) -> str:
     if not tel:
         raise ValueError("Teléfono inválido para eliminación")
     huella = huella_telefono(tel)
-    from whatsapp_channels import emisor_webhook_actual
+    from snw.whatsapp.whatsapp_channels import emisor_webhook_actual
     phone_id_origen = (emisor_webhook_actual() or {}).get("phoneNumberId")
     with conectar() as conn, conn.cursor() as cur:
         huella_bloqueo, _ = bloquear_huella_baja(cur, tel)
@@ -482,7 +482,7 @@ def oferta_eliminacion_enviada(telefono: str) -> bool:
 
 
 def _bloquear_en_meta(telefono: str, phone_id: str) -> bool:
-    from whatsapp_channels import credenciales_centro
+    from snw.whatsapp.whatsapp_channels import credenciales_centro
     try:
         token = credenciales_centro(phone_id)["token"]
         version = (config_get("wa_graph_version") or "v26.0").strip()
@@ -643,7 +643,7 @@ def _limpiar_datos(cur, telefono: str) -> tuple[int, int]:
     cur.execute("DELETE FROM call_center_prueba_envios WHERE telefono = %s", (telefono,))
     # La cuota por pareja guarda solo la huella, pero sigue derivándose del
     # teléfono: también debe desaparecer al tramitar ELIMINAR.
-    from wa_dispatch_limit import huella_pareja
+    from snw.whatsapp.wa_dispatch_limit import huella_pareja
     cur.execute("SELECT phone_id FROM wa_despacho_canales")
     for canal in cur.fetchall():
         phone_id = canal.get("phone_id")
