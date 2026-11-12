@@ -6016,6 +6016,12 @@ def publicar_base_recuperacion(solicitud_id: str, sesion: dict = Depends(solo_ad
     base, nueva = recuperacion_pacientes.publicar_base(usuario, solicitud_id)
     try:
         reservo_bases.integrar_bases(base["lista_generada_id"])
+    except reservo_bases.ErrorIntegridadBaseReservo as exc:
+        log_error(str(exc), exc, solo_tipo=True)
+        raise HTTPException(
+            503, detail="La base quedó guardada, pero no se pudo habilitar. "
+                        f"Revisa el error de base de datos {exc.codigo_sql} en Configuración → Logs."
+        ) from exc
     except Exception as exc:
         log_error("integrar base de recuperación", exc, solo_tipo=True)
         raise HTTPException(503, detail="No se pudo habilitar la base. Vuelve a intentar publicar.") from exc
@@ -6223,9 +6229,12 @@ def guardar_base_reservo(job_id: int, body: ReservoBaseIn,
     try:
         base = reservo_pacientes.guardar_base_contactos(
             job_id, body.nombre_personalizado, sesion.get("usuario", ""))
-        reservo_bases.integrar_bases()
+        reservo_bases.integrar_bases(base["id"])
         datos = next(f for f in reservo_bases.datos_por_area().values() if f['id'] == base['id'])
         base.update(area_id=datos['area_id'], nombre_tabla_base=datos['nombre_tabla_base'])
+    except reservo_bases.ErrorIntegridadBaseReservo as exc:
+        log_error(str(exc), exc, solo_tipo=True)
+        raise HTTPException(503, detail=f"No se pudo habilitar la base. Error de base de datos {exc.codigo_sql}.") from exc
     except LookupError as exc:
         raise HTTPException(404, detail=str(exc)) from exc
     except ValueError as exc:

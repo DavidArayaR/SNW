@@ -3,8 +3,16 @@
 Reservo conserva los metadatos de procedencia; los pacientes operativos viven
 en el mismo esquema, registro de áreas y rutas que cualquier otra base.
 """
-from db import conectar
+from pymysql.err import IntegrityError
+
+from db import conectar, log_error
 from snw.pacientes import servicio_areas
+
+
+class ErrorIntegridadBaseReservo(RuntimeError):
+    def __init__(self, lista_id: int, codigo_sql: int):
+        self.codigo_sql = codigo_sql
+        super().__init__(f"La copia de la lista Reservo {lista_id} falló por integridad (MySQL {codigo_sql}).")
 
 
 def integrar_bases(base_id: int | None = None):
@@ -52,9 +60,17 @@ def integrar_bases(base_id: int | None = None):
                                 'interes_fecha,tratamiento_ultima_atencion,fecha_ultima_atencion,fecha_actualizacion')
                     # IDs originales preservados: las etiquetas y destinatarios
                     # congelados siguen apuntando al mismo paciente de la lista.
-                    cur.execute(f'INSERT INTO {tabla} ({columnas},reservo_cliente_uuid,reservo_paciente_id)'
-                                f' SELECT {columnas},cliente_uuid,paciente_id'
-                                ' FROM reservo_lista_pacientes WHERE lista_id=%s', (lista_id,))
+                    # Reservo admite nombres y apellidos nulos. La ficha
+                    # operativa representa el texto ausente con una cadena vacía.
+                    origen = columnas.replace(
+                        'id,nombre,apellido,', "id,COALESCE(nombre,''),COALESCE(apellido,''),", 1)
+                    try:
+                        cur.execute(f'INSERT INTO {tabla} ({columnas},reservo_cliente_uuid,reservo_paciente_id)'
+                                    f' SELECT {origen},cliente_uuid,paciente_id'
+                                    ' FROM reservo_lista_pacientes WHERE lista_id=%s', (lista_id,))
+                    except IntegrityError as exc:
+                        # El texto de MySQL puede incluir valores de pacientes.
+                        raise ErrorIntegridadBaseReservo(lista_id, exc.args[0]) from exc
                     cur.execute('UPDATE log_envios l JOIN reservo_lista_pacientes p ON p.id=l.paciente_id'
                                 ' LEFT JOIN envios e ON e.id=l.envio_id'
                                 ' SET l.tabla_pacientes=%s,l.area_id=%s'
@@ -84,6 +100,11 @@ def integrar_bases(base_id: int | None = None):
                     # paralelos y que el webhook encuentre dos copias operativas.
                     cur.execute('DELETE FROM reservo_lista_pacientes WHERE lista_id=%s', (lista_id,))
                     conn.commit()
+                except ErrorIntegridadBaseReservo as exc:
+                    conn.rollback()
+                    if base_id is not None:
+                        raise
+                    log_error(str(exc), exc, solo_tipo=True)
                 except Exception:
                     conn.rollback()
                     raise

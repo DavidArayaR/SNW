@@ -330,9 +330,11 @@ def obtener_resultado(usuario, solicitud_id):
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT s.solicitud_id,s.estado,s.version,a.finalizado_en,a.error,"
-            " a.pacientes_analizados,a.pacientes_inactivos,a.citas_sin_uuid,p.base_id,p.contactos"
+            " a.pacientes_analizados,a.pacientes_inactivos,a.citas_sin_uuid,p.base_id,p.contactos,"
+            " b.area_id AS area_publicada"
             " FROM recuperacion_solicitudes s LEFT JOIN recuperacion_analisis a ON a.solicitud=s.id"
             " LEFT JOIN recuperacion_publicaciones p ON p.solicitud=s.id"
+            " LEFT JOIN reservo_bases_contacto b ON b.id=p.base_id"
             " WHERE s.usuario=%s AND s.solicitud_id=%s", (usuario, solicitud_id),
         )
         fila = cur.fetchone()
@@ -347,6 +349,7 @@ def obtener_resultado(usuario, solicitud_id):
         "conteos": {k: fila[k] for k in ("pacientes_analizados", "pacientes_inactivos", "citas_sin_uuid")}
         if fila["pacientes_analizados"] is not None else None,
         "lista_generada_id": fila["base_id"],
+        "publicacion_pendiente": bool(fila["base_id"] and not fila["area_publicada"]),
         "contactos_publicados": fila["contactos"],
         "error": {"codigo": "ANALISIS_RESERVO", "detalle": fila["error"]} if fila["error"] else None,
     }

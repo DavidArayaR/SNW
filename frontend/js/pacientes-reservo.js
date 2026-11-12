@@ -783,7 +783,13 @@
           pacientes_inactivos: "Pacientes inactivos", citas_sin_uuid: "Citas sin identificador" });
         revisar.hidden = fila.estado !== "ANALIZADA";
         if (comprobar && fila.estado === "ANALIZADA") revisarContactos();
-        if (resultado.lista_generada_id) {
+        if (resultado.publicacion_pendiente) {
+          abrirBase.hidden = true;
+          publicar.hidden = false;
+          publicar.textContent = "Reintentar publicación";
+          contactoAviso.textContent = "La lista se guardó y falta habilitarla en Base de datos.";
+        } else if (resultado.lista_generada_id) {
+          publicar.hidden = true;
           abrirBase.href = `pacientes.html?base_reservo=${encodeURIComponent(resultado.lista_generada_id)}`;
           abrirBase.hidden = false;
           contactoAviso.textContent = `Base publicada con ${Number(resultado.contactos_publicados).toLocaleString("es-CL")} pacientes.`;
@@ -813,6 +819,7 @@
       revisar.hidden = true;
       revisar.disabled = false;
       publicar.hidden = true;
+      publicar.textContent = "Publicar base de pacientes";
       publicar.disabled = false;
       abrirBase.hidden = true;
       abrirBase.removeAttribute("href");
