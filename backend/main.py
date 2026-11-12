@@ -28,7 +28,7 @@ import ssl
 import httpx
 from snw.whatsapp import audio_transcripcion
 from snw.whatsapp import consultas_ventana
-import estadisticas_envio
+from snw.reportes import estadisticas_envio
 from snw.whatsapp.intenciones_call_center import (detectar_automatizacion, es_pregunta_de_precio,
                                     patrones_configurados, tipo_consulta_entrante)
 from snw.mensajeria import simulacion_envio
@@ -123,7 +123,7 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
-from service_pricing import clasificar_entregas_servicio, validar_periodos
+from snw.reportes.service_pricing import clasificar_entregas_servicio, validar_periodos
 app.include_router(whatsapp_router)
 
 _documentacion_basic = HTTPBasic(auto_error=False)
