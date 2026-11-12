@@ -886,11 +886,7 @@ $("#detalleBody").addEventListener("click", (e) => {
   if (cc) {
     const fila = filasDetalle.find(d => Number(d.id) === Number(cc.dataset.callcenterManual));
     if (fila && detalleActual) {
-      callCenterManualActual = { envioId: detalleActual.envioId, registroId: fila.id, ambiente: detalleActual.ambiente };
-      $("#callCenterManualMensaje").value = fila.mensaje_callcenter || "";
-      $("#callCenterManualError").textContent = "";
-      $("#modalCallCenterManual").hidden = false;
-      $("#callCenterManualMensaje").focus();
+      abrirCallCenterManual(fila, detalleActual);
     }
     return;
   }
@@ -899,33 +895,101 @@ $("#detalleBody").addEventListener("click", (e) => {
 });
 
 let callCenterManualActual = null;
-const cerrarCallCenterManual = () => { $("#modalCallCenterManual").hidden = true; };
-$("#cancelarCallCenterManual").addEventListener("click", cerrarCallCenterManual);
+const ccModo = $("#callCenterManualModo");
+const ccPreparado = $("#callCenterManualPreparado");
+const ccEnviar = $("#enviarCallCenterManual");
+const ccError = $("#callCenterManualError");
+
+function urlCallCenterManual(objetivo) {
+  return `api/notificaciones/historial/${encodeURIComponent(objetivo.envioId)}/call-center/${objetivo.registroId}?ambiente=${encodeURIComponent(objetivo.ambiente)}`;
+}
+
+function mostrarPreparadoManual() {
+  const personalizado = ccModo.value === "personalizado";
+  ccPreparado.readOnly = !personalizado;
+  ccPreparado.required = personalizado;
+  ccPreparado.value = personalizado
+    ? callCenterManualActual.personalizado
+    : callCenterManualActual.predeterminado || "";
+}
+
+async function abrirCallCenterManual(fila, detalle) {
+  const objetivo = { envioId: detalle.envioId, registroId: fila.id, ambiente: detalle.ambiente };
+  callCenterManualActual = objetivo;
+  $("#callCenterManualTitulo").textContent = fila.reagendamiento
+    ? "Enviar botón de reagendamiento" : "Enviar botón de call center";
+  $("#callCenterManualMensaje").value = fila.mensaje_callcenter || "";
+  ccModo.value = "predeterminado";
+  ccModo.disabled = true;
+  ccEnviar.disabled = true;
+  mostrarPreparadoManual();
+  ccError.textContent = "Cargando mensaje preparado…";
+  $("#modalCallCenterManual").hidden = false;
+  $("#callCenterManualMensaje").focus();
+  try {
+    const res = await fetch(urlCallCenterManual(objetivo), { headers: authHeaders(), cache: "no-store" });
+    const data = await res.json().catch(() => ({}));
+    if (objetivo !== callCenterManualActual) return;
+    if (!res.ok) throw new Error(data.detail || "No se pudo cargar el mensaje preparado.");
+    objetivo.predeterminado = data.mensaje_preparado;
+    objetivo.personalizado = (objetivo.predeterminado || "").slice(0, ccPreparado.maxLength);
+    ccModo.options[0].disabled = !objetivo.predeterminado;
+    if (!objetivo.predeterminado) ccModo.value = "personalizado";
+    mostrarPreparadoManual();
+    ccError.textContent = objetivo.predeterminado ? "" : "Escribe un mensaje preparado para continuar.";
+    ccModo.disabled = false;
+    ccEnviar.disabled = false;
+  } catch (err) {
+    if (objetivo === callCenterManualActual) ccError.textContent = err.message;
+  }
+}
+
+function cerrarCallCenterManual() {
+  $("#modalCallCenterManual").hidden = true;
+  callCenterManualActual = null;
+}
+
+ccModo.addEventListener("change", mostrarPreparadoManual);
+ccPreparado.addEventListener("input", () => {
+  callCenterManualActual.personalizado = ccPreparado.value;
+});
+$("#cancelarCallCenterManual").addEventListener("click", () => {
+  if (!callCenterManualActual?.enviando) cerrarCallCenterManual();
+});
 $("#modalCallCenterManual").addEventListener("click", e => {
-  if (e.target === e.currentTarget && !$("#enviarCallCenterManual").disabled) cerrarCallCenterManual();
+  if (e.target === e.currentTarget && !callCenterManualActual?.enviando) cerrarCallCenterManual();
 });
 document.addEventListener("keydown", e => {
-  if (e.key === "Escape" && !$("#enviarCallCenterManual").disabled) cerrarCallCenterManual();
+  if (e.key === "Escape" && callCenterManualActual && !callCenterManualActual.enviando) cerrarCallCenterManual();
 });
 $("#formCallCenterManual").addEventListener("submit", async e => {
   e.preventDefault();
   const objetivo = callCenterManualActual;
-  const boton = $("#enviarCallCenterManual");
-  if (!objetivo || boton.disabled) return;
-  boton.disabled = true;
-  $("#callCenterManualError").textContent = "Enviando…";
+  if (!objetivo || ccEnviar.disabled) return;
+  const mensajePreparado = ccModo.value === "personalizado" ? ccPreparado.value.trim() : null;
+  if (mensajePreparado === "") {
+    ccError.textContent = "Escribe el mensaje preparado o usa el predeterminado.";
+    ccPreparado.focus();
+    return;
+  }
+  objetivo.enviando = true;
+  ccEnviar.disabled = true;
+  ccError.textContent = "Enviando…";
   try {
-    const res = await fetch(`api/notificaciones/historial/${encodeURIComponent(objetivo.envioId)}/call-center/${objetivo.registroId}?ambiente=${objetivo.ambiente}`, {
+    const res = await fetch(urlCallCenterManual(objetivo), {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ mensaje: $("#callCenterManualMensaje").value.trim() }),
+      body: JSON.stringify({ mensaje: $("#callCenterManualMensaje").value.trim(), mensaje_preparado: mensajePreparado }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.detail || "No se pudo enviar el mensaje.");
     cerrarCallCenterManual();
     toast(data.mensaje);
   } catch (err) {
-    $("#callCenterManualError").textContent = err.message;
-  } finally { boton.disabled = false; }
+    ccError.textContent = err.message;
+  } finally {
+    objetivo.enviando = false;
+    ccEnviar.disabled = false;
+  }
 });
 
 async function abrirMensajes(pacienteId) {

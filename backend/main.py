@@ -2703,9 +2703,20 @@ def _guardar_contexto_prueba(message_id: str, telefono: str, emisor: dict,
         conn.commit()
 
 
+def _mensaje_preparado_callcenter(pac: dict, emisor: dict | None, consulta: str = "",
+                                   referencia: str | None = None, mensaje_prueba: str | None = None) -> str:
+    codigo = (emisor or {}).get("codigo")
+    if consulta:
+        return paciente_reagendar.mensaje_preparado_consulta(consulta, codigo)
+    return (mensaje_prueba or _mensaje_crm_ultima_campania(
+        normalizar_telefono(pac.get("telefono") or "") or "", emisor, referencia)
+        or _respuesta_sistema("preparado_interes", codigo))
+
+
 def _cc_datos_envio(pac: dict, ambiente: str, consulta: str = "",
                     emisor: dict | None = None, referencia: str | None = None,
-                    mensaje_prueba: str | None = None) -> tuple[str, dict, str]:
+                    mensaje_prueba: str | None = None, *,
+                    mensaje_preparado: str | None = None) -> tuple[str, dict, str]:
     """Devuelve (texto renderizado, datos_plantilla, numero_asignado) para el
     mensaje fijo de call center. Añade el botón que abre el chat del call
     center si la clínica receptora tiene un número CRM válido. Nunca usa el
@@ -2719,11 +2730,8 @@ def _cc_datos_envio(pac: dict, ambiente: str, consulta: str = "",
         numero = ""
     if numero:
         url = f"https://wa.me/{numero}"
-        mensaje_preparado = (paciente_reagendar.mensaje_preparado_consulta(consulta, codigo)
-                             if consulta else
-                             mensaje_prueba or _mensaje_crm_ultima_campania(
-                                 normalizar_telefono(pac.get("telefono") or "") or "", emisor, referencia)
-                             or _respuesta_sistema("preparado_interes", codigo))
+        mensaje_preparado = mensaje_preparado or _mensaje_preparado_callcenter(
+            pac, emisor, consulta, referencia, mensaje_prueba)
         url += "?text=" + urllib.parse.quote(mensaje_preparado, safe="")
         datos["cta"] = {
             "texto": CALL_CENTER_PLANTILLA_FIJA["cc_boton_texto"][:20],
@@ -2778,7 +2786,8 @@ def _tabla_ultimo_envio_emisor(telefono: str, referencia: str | None = None) -> 
 def _despachar_call_center(pac: dict, ambiente: str, tabla: str | None = None,
                            consulta: str = "", texto_personalizado: str | None = None,
                            emisor_forzado: dict | None = None, automatico: bool = True,
-                           referencia: str | None = None, mensaje_prueba: str | None = None) -> dict:
+                           referencia: str | None = None, mensaje_prueba: str | None = None,
+                           mensaje_preparado: str | None = None) -> dict:
     """Envía el mensaje fijo de call center a un paciente y lo registra en el
     historial y en call_center_log. Devuelve {ok, error, telefono}. No lanza.
     Con `tabla` (area) se etiqueta esa tabla y se salta el filtro de
@@ -2798,6 +2807,8 @@ def _despachar_call_center(pac: dict, ambiente: str, tabla: str | None = None,
     if not emisor:
         return {"ok": False, "error": "No se pudo identificar el número emisor", "telefono": telefono}
     texto, datos_plantilla, numero_cc = (
+        _cc_datos_envio(pac, ambiente, consulta, emisor, mensaje_preparado=mensaje_preparado)
+        if mensaje_preparado is not None else
         _cc_datos_envio(pac, ambiente, consulta, emisor, referencia, mensaje_prueba)
         if mensaje_prueba is not None else
         _cc_datos_envio(pac, ambiente, consulta, emisor, referencia)
@@ -10765,9 +10776,10 @@ def detalle_historial(envio_id: str, ambiente: str = Query("produccion"),
 
 class CallCenterManualIn(BaseModel):
     mensaje: str = Field(..., min_length=1, max_length=1000)
+    mensaje_preparado: str | None = Field(None, min_length=1, max_length=500)
 
 
-def _enviar_callcenter_manual_reagendar(envio_id, registro_id, texto):
+def _contexto_callcenter_manual_reagendar(envio_id, registro_id):
     with conectar("produccion") as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT r.*, le.wa_phone_id AS emisor_original, le.numero_telefono AS telefono_original,"
@@ -10802,7 +10814,20 @@ def _enviar_callcenter_manual_reagendar(envio_id, registro_id, texto):
     numero = re.sub(r"\D", "", cfg.get(f"{canal['codigo']}_CRM_PHONE_NUMBER") or "")
     if not re.fullmatch(r"[1-9]\d{7,14}", numero):
         raise HTTPException(409, detail="Configura el número CRM de la clínica.")
-    preparado = paciente_reagendar.mensaje_preparado_reagendar(cita)
+    return cita, canal, telefono, numero
+
+
+def _preparado_manual_reagendar(cita):
+    try:
+        return paciente_reagendar.mensaje_preparado_reagendar(cita)
+    except ValueError:
+        return None
+
+
+def _enviar_callcenter_manual_reagendar(cita, canal, telefono, numero, texto, preparado):
+    if preparado is None:
+        raise HTTPException(409, detail="Faltan datos de la cita para preparar el mensaje. Escribe un mensaje personalizado.")
+    servicio = WhatsAppService(phone_number_id=canal["phoneNumberId"])
     url = f"https://wa.me/{numero}?text={urllib.parse.quote(preparado, safe='')}"
     ok, respuesta_id, error, _ = asyncio.run(servicio.enviar(
         telefono, texto, plantilla={"cta": {"texto": "Ir a call center", "url": url}}))
@@ -10813,29 +10838,20 @@ def _enviar_callcenter_manual_reagendar(envio_id, registro_id, texto):
         raise HTTPException(502, detail="Meta no aceptó el mensaje de reagendamiento.")
 
 
-def enviar_callcenter_manual(envio_id: int, registro_id: int, body: CallCenterManualIn,
-                            ambiente: str = Query("produccion"),
-                            sesion: dict = Depends(exigir("historial"))):
+def _registro_callcenter_manual(envio_id, registro_id, ambiente, sesion):
     if not tiene_permiso(sesion, "call_center"):
         raise HTTPException(403, detail="No tienes permiso para enviar el botón de call center.")
-    texto = body.mensaje.strip()
-    if not texto:
-        raise HTTPException(422, detail="Escribe el mensaje que acompañará al botón.")
     # Reutiliza la autorización por envío y área del historial.
     detalle = detalle_historial(str(envio_id), ambiente=ambiente, sesion=sesion)
     fila = next((f for f in detalle if f["id"] == registro_id), None)
     if fila is None:
         raise HTTPException(404, detail="Registro no encontrado en este envío.")
-    if fila.get("reagendamiento"):
-        _enviar_callcenter_manual_reagendar(envio_id, registro_id, texto)
-        try:
-            auditoria_registrar(sesion.get("usuario", ""), "callcenter_manual", str(registro_id),
-                               "Envió manualmente un botón de reagendamiento al CRM de la clínica")
-        except Exception as exc:
-            log_error("auditar envío manual de reagendamiento", exc, solo_tipo=True)
-        return {"ok": True, "mensaje": "Meta aceptó el mensaje con el botón de reagendamiento."}
+    return fila
+
+
+def _contexto_callcenter_manual(envio_id, registro_id, ambiente):
     with conectar(ambiente) as conn, conn.cursor() as cur:
-        cur.execute("SELECT l.paciente_id, l.numero_telefono, l.wa_phone_id,"
+        cur.execute("SELECT l.paciente_id, l.numero_telefono, l.wa_phone_id, l.whatsapp_message_id,"
                     " COALESCE(l.tabla_pacientes, e.tabla_pacientes, e.base_datos) AS tabla,"
                     " e.reservo_lista_id"
                     " FROM log_envios l JOIN envios e ON e.id=l.envio_id"
@@ -10878,9 +10894,47 @@ def enviar_callcenter_manual(envio_id: int, registro_id: int, body: CallCenterMa
         raise HTTPException(403, detail="En desarrollo solo puedes enviar a números de prueba.")
     if esta_suprimido(telefono) or WhatsAppService()._estaba_opt_out(telefono):
         raise HTTPException(409, detail="El paciente está eliminado o dado de baja.")
+    return paciente, emisor, tabla, origen.get("whatsapp_message_id")
+
+
+def previsualizar_callcenter_manual(envio_id: int, registro_id: int, ambiente: str = Query("produccion"),
+                                   sesion: dict = Depends(exigir("historial"))):
+    fila = _registro_callcenter_manual(envio_id, registro_id, ambiente, sesion)
+    if fila.get("reagendamiento"):
+        cita, _, _, _ = _contexto_callcenter_manual_reagendar(envio_id, registro_id)
+        preparado = _preparado_manual_reagendar(cita)
+    else:
+        paciente, emisor, _, referencia = _contexto_callcenter_manual(envio_id, registro_id, ambiente)
+        preparado = _mensaje_preparado_callcenter(paciente, emisor, referencia=referencia)
+    return {"mensaje_preparado": preparado}
+
+
+def enviar_callcenter_manual(envio_id: int, registro_id: int, body: CallCenterManualIn,
+                            ambiente: str = Query("produccion"),
+                            sesion: dict = Depends(exigir("historial"))):
+    fila = _registro_callcenter_manual(envio_id, registro_id, ambiente, sesion)
+    texto = body.mensaje.strip()
+    if not texto:
+        raise HTTPException(422, detail="Escribe el mensaje que acompañará al botón.")
+    preparado = body.mensaje_preparado
+    if preparado is not None:
+        preparado = preparado.strip()
+        if not preparado:
+            raise HTTPException(422, detail="Escribe el mensaje preparado o usa el predeterminado.")
+    if fila.get("reagendamiento"):
+        cita, canal, telefono, numero = _contexto_callcenter_manual_reagendar(envio_id, registro_id)
+        _enviar_callcenter_manual_reagendar(
+            cita, canal, telefono, numero, texto, preparado or _preparado_manual_reagendar(cita))
+        try:
+            auditoria_registrar(sesion.get("usuario", ""), "callcenter_manual", str(registro_id),
+                               "Envió manualmente un botón de reagendamiento al CRM de la clínica")
+        except Exception as exc:
+            log_error("auditar envío manual de reagendamiento", exc, solo_tipo=True)
+        return {"ok": True, "mensaje": "Meta aceptó el mensaje con el botón de reagendamiento."}
+    paciente, emisor, tabla, referencia = _contexto_callcenter_manual(envio_id, registro_id, ambiente)
     resultado = _despachar_call_center(paciente, ambiente, tabla=tabla,
                                       texto_personalizado=texto, emisor_forzado=emisor,
-                                      automatico=False)
+                                      automatico=False, referencia=referencia, mensaje_preparado=preparado)
     if not resultado["ok"]:
         raise HTTPException(502, detail=resultado.get("error") or "Meta no aceptó el mensaje.")
     try:

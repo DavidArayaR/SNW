@@ -224,10 +224,21 @@
     <form id="formCallCenterManual" class="modal__card modal__card--detalle" role="dialog" aria-modal="true" aria-labelledby="callCenterManualTitulo">
       <h3 id="callCenterManualTitulo">Enviar botón de call center</h3>
       <div class="field">
-        <label for="callCenterManualMensaje">Mensaje para el paciente</label>
-        <textarea id="callCenterManualMensaje" rows="5" maxlength="1000" required></textarea>
+        <label for="callCenterManualMensaje">Mensaje que acompaña al botón</label>
+        <textarea id="callCenterManualMensaje" rows="3" maxlength="1000" required></textarea>
       </div>
-      <p class="field__hint">Puedes agregar una disculpa o adaptar el texto. Se incluirá el botón «Ir a call center» con el número CRM de la clínica de este envío. El paciente debe haber escrito en las últimas 24 horas.</p>
+      <div class="field">
+        <label for="callCenterManualModo">Mensaje preparado para el chat del CRM</label>
+        <select id="callCenterManualModo">
+          <option value="predeterminado">Usar el predeterminado</option>
+          <option value="personalizado">Editar para este envío</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="callCenterManualPreparado">Texto que aparecerá al pulsar «Ir a call center»</label>
+        <textarea id="callCenterManualPreparado" rows="3" maxlength="500" readonly></textarea>
+      </div>
+      <p class="field__hint">El botón abre el chat del CRM de la clínica. El paciente debe haber escrito en las últimas 24 horas.</p>
       <p id="callCenterManualError" class="field__hint" role="alert"></p>
       <div class="modal__actions">
         <button type="button" class="btn btn--ghost" id="cancelarCallCenterManual">Cancelar</button>
@@ -285,7 +296,7 @@
 
   <script src="js/layout.js?v=reservo-nav2"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/historial.js?v=reagendar-boton-manual1"></script>
+  <script src="js/historial.js?v=mensaje-preparado-manual1"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>
