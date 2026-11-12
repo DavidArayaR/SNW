@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 
 from fastapi import HTTPException
 
-from plantilla_media import MAX_MEDIA_BYTES, obtener_media, ruta_media
+from snw.mensajeria.plantilla_media import MAX_MEDIA_BYTES, obtener_media, ruta_media
 
 
 EJEMPLOS = {"nombre": "David", "apellido": "Araya",

@@ -11,7 +11,7 @@ import httpx
 from fastapi import HTTPException
 
 from db import config_get, conectar
-from plantilla_revision import MAX_CUERPO, presentar_plantilla
+from snw.mensajeria.plantilla_revision import MAX_CUERPO, presentar_plantilla
 
 
 MODELO = "openai/gpt-oss-120b"

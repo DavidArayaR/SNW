@@ -6,7 +6,7 @@ import httpx
 from fastapi import HTTPException
 
 from db import conectar
-from groq_service import leer_clave, consumir_cuota
+from snw.mensajeria.groq_service import leer_clave, consumir_cuota
 from whatsapp_channels import credenciales_centro
 from whatsapp_service import graph_url
 

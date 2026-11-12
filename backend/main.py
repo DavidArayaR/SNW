@@ -31,7 +31,7 @@ import consultas_ventana
 import estadisticas_envio
 from intenciones_call_center import (detectar_automatizacion, es_pregunta_de_precio,
                                     patrones_configurados, tipo_consulta_entrante)
-import simulacion_envio
+from snw.mensajeria import simulacion_envio
 import pymysql
 from fastapi import (BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException,
                      Query, Request, UploadFile, status)
@@ -58,7 +58,7 @@ from db import (
     invite_crear, invite_estado, invite_consumir,
     auditoria_registrar, auditoria_listar,
 )
-from motor_envio import (obtener_canal, MotorApiOficial, ResultadoEnvioIncierto,
+from snw.mensajeria.motor_envio import (obtener_canal, MotorApiOficial, ResultadoEnvioIncierto,
                          FalloInfraestructuraDespacho)
 from whatsapp_channels import (CENTROS, catalogo_centros, claves_centro, credenciales_centro,
                                mismo_centro,
@@ -66,11 +66,11 @@ from whatsapp_channels import (CENTROS, catalogo_centros, claves_centro, credenc
                                emisor_webhook_actual)
 from whatsapp_channel_verification import verificar_canal_meta
 import whatsapp_service
-from plantilla_media import (MAX_MEDIA_BYTES, descargar_media_meta, guardar_media,
+from snw.mensajeria.plantilla_media import (MAX_MEDIA_BYTES, descargar_media_meta, guardar_media,
                             guardar_media_importada, obtener_media, ruta_media)
-from plantilla_revision import (MAX_CUERPO, presentar_plantilla, variables_del_cuerpo,
+from snw.mensajeria.plantilla_revision import (MAX_CUERPO, presentar_plantilla, variables_del_cuerpo,
                                componentes_para_vista, version_opciones)
-from groq_service import consumir_cuota, generar_borrador, validar_instruccion
+from snw.mensajeria.groq_service import consumir_cuota, generar_borrador, validar_instruccion
 from wa_rate_limit import gobernador as wa_gobernador
 from wa_dispatch_limit import (estados as estados_despacho, politica as politica_despacho,
                                limpiar_pares_vencidos)

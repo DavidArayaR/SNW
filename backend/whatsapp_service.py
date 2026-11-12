@@ -30,8 +30,8 @@ from whatsapp_channels import (CENTROS, EMISOR_WEBHOOK, catalogo_centros,
 from whatsapp_channel_verification import verificar_canal_meta
 from corpus_respuestas import guardar_mensaje_completo
 from intenciones_call_center import clasificar, normalizar as normalizar_intencion, patrones_configurados
-from plantilla_media import obtener_media, ruta_media
-from plantilla_revision import (botones_para_meta, presentar_plantilla,
+from snw.mensajeria.plantilla_media import obtener_media, ruta_media
+from snw.mensajeria.plantilla_revision import (botones_para_meta, presentar_plantilla,
                                variables_del_cuerpo, version_opciones)
 from snw.seguridad.supresion import (activar_huella_baja, bloquear_huella_baja,
                       limpiar_cerrojos_baja_inactivos, retirar_huella_baja,

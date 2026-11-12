@@ -15,7 +15,7 @@ from fastapi import HTTPException
 from PIL import Image
 
 
-MEDIA_DIR = Path(__file__).resolve().parent.parent / "data" / "plantillas_media"
+MEDIA_DIR = Path(__file__).resolve().parents[3] / "data" / "plantillas_media"
 MAX_MEDIA_BYTES = 3_500_000
 _ID_VALIDO = re.compile(r"[0-9a-f]{32}\Z")
 
