@@ -1156,9 +1156,15 @@ def asegurar_tabla_config() -> None:
             columnas_audio = {fila["Field"] for fila in cur.fetchall()}
             for columna, tipo_sql in (("audio_media_id", "VARCHAR(255) NULL"),
                                       ("audio_transcripcion", "TEXT NULL"),
-                                      ("accion_boton", "VARCHAR(30) NULL")):
+                                      ("accion_boton", "VARCHAR(30) NULL"),
+                                      ("consulta_vence", "DATETIME NULL"),
+                                      ("consulta_referencia", "VARCHAR(255) NULL"),
+                                      ("consulta_agrupado", "BOOLEAN NOT NULL DEFAULT FALSE")):
                 if columna not in columnas_audio:
                     cur.execute(f"ALTER TABLE whatsapp_conversaciones_mensajes ADD COLUMN {columna} {tipo_sql}")
+            cur.execute("SHOW INDEX FROM whatsapp_conversaciones_mensajes WHERE Key_name='idx_consulta_vence'")
+            if not cur.fetchone():
+                cur.execute("ALTER TABLE whatsapp_conversaciones_mensajes ADD INDEX idx_consulta_vence (consulta_vence)")
             # Cuentas de la aplicación (antes en data/usuarios.json).
             cur.execute(
                 "CREATE TABLE IF NOT EXISTS usuarios ("

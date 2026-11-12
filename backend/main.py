@@ -27,8 +27,10 @@ import ssl
 
 import httpx
 import audio_transcripcion
+import consultas_ventana
 import estadisticas_envio
-from intenciones_call_center import es_pregunta_de_precio
+from intenciones_call_center import (detectar_automatizacion, es_pregunta_de_precio,
+                                    patrones_configurados, tipo_consulta_entrante)
 import simulacion_envio
 import pymysql
 from fastapi import (BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException,
@@ -3123,8 +3125,8 @@ def _registrar_derivacion_consulta(telefono: str, texto: str, mensaje_id: str,
 
 
 _AVISO_CONSULTA_CAMPANIA = (
-    "Cuéntanos tu consulta en un solo mensaje. Después te enviaremos un botón "
-    "para hablar con nuestro equipo por WhatsApp."
+    "Por favor, para registrar tu consulta correctamente, escríbela completa en un solo mensaje. "
+    "Después te enviaremos un botón para continuarla en el WhatsApp del call center."
 )
 _AVISO_CONSULTA_LARGA = (
     "¿Puedes resumir tu consulta en un solo mensaje? Así podremos prepararla "
@@ -3194,14 +3196,15 @@ def _enviar_aviso_consulta_campania(telefono: str, phone_id: str,
 
 
 def _gestionar_consulta_campania(telefono: str, texto: str, mensaje_id: str,
-                                 referencia_meta_id: str | None) -> str:
+                                 referencia_meta_id: str | None, *, decision_ventana: str | None = None) -> str:
     """Deriva preguntas de precio concretas y pide detalle para las demás consultas."""
     emisor = emisor_webhook_actual()
     if not emisor or not mensaje_id or not texto.strip():
         return "sin_campania"
     tel = normalizar_telefono(telefono) or telefono
     phone_id = emisor["phoneNumberId"]
-    consulta_precio = es_pregunta_de_precio(texto)
+    consulta_completa = (decision_ventana == "derivar" if decision_ventana
+                         else es_pregunta_de_precio(texto))
     texto_largo = len(texto.strip()) > 500
     with conectar() as conn, conn.cursor() as cur:
         campania = _ultima_campania_del_emisor(cur, tel, phone_id, referencia_meta_id)
@@ -3215,7 +3218,7 @@ def _gestionar_consulta_campania(telefono: str, texto: str, mensaje_id: str,
         if not campania:
             esperando_directa = (estado.get("campania_log_id") == 0 and vigente
                                  and estado.get("estado") == "esperando")
-            if not esperando_directa and not _pide_detallar_consulta(texto):
+            if not decision_ventana and not esperando_directa and not _pide_detallar_consulta(texto):
                 return "sin_campania"
             # Los envíos de prueba no crean lote en `envios`. Su último
             # contacto desde este emisor permite preferir la base correcta.
@@ -3225,15 +3228,15 @@ def _gestionar_consulta_campania(telefono: str, texto: str, mensaje_id: str,
                 " ORDER BY id DESC LIMIT 1", (phone_id, tel))
             campania = {"id": 0, "base_datos": (cur.fetchone() or {}).get("tabla_pacientes")}
         misma_campania = estado.get("campania_log_id") == campania["id"]
-        if misma_campania and estado.get("estado") == "completada":
-            nueva_prueba = (consulta_precio and mensaje_id[:255] != estado.get("ultimo_mensaje_id")
+        if not decision_ventana and misma_campania and estado.get("estado") == "completada":
+            nueva_prueba = (consulta_completa and mensaje_id[:255] != estado.get("ultimo_mensaje_id")
                             and es_numero_prueba(tel))
             if not nueva_prueba and (campania["id"] != 0 or not _pide_detallar_consulta(texto)):
                 return "ya_gestionada"
-        if misma_campania and vigente and estado.get("estado") == "esperando":
+        if decision_ventana != "aclarar" and misma_campania and vigente and estado.get("estado") == "esperando":
             if estado.get("primer_mensaje_id") == mensaje_id[:255]:
                 return "esperando"
-            if _pide_detallar_consulta(texto) and not consulta_precio:
+            if _pide_detallar_consulta(texto) and not consulta_completa:
                 return "esperando"  # repetir la frase no es el detalle solicitado
             if texto_largo:
                 if estado.get("ultimo_mensaje_id") == "consulta_larga_avisada":
@@ -3257,7 +3260,7 @@ def _gestionar_consulta_campania(telefono: str, texto: str, mensaje_id: str,
             conn.commit()
             derivar = True
         else:
-            derivar = consulta_precio and not texto_largo
+            derivar = consulta_completa and not texto_largo
             ultimo = mensaje_id[:255] if derivar else None
             siguiente = "completada" if derivar else "esperando"
             cur.execute(
@@ -3300,6 +3303,71 @@ def _gestionar_consulta_campania(telefono: str, texto: str, mensaje_id: str,
 
 
 whatsapp_service.al_consulta_campania = _gestionar_consulta_campania
+
+
+def _programar_consulta_entrante(telefono, texto, mensaje_id, referencia):
+    emisor = emisor_webhook_actual()
+    if not emisor or not mensaje_id:
+        return "sin_campania"
+    catalogo = patrones_configurados(config_get("call_center_patrones_consulta", "{}"))
+    if not tipo_consulta_entrante(texto, catalogo):
+        return "sin_consulta"
+    programada = consultas_ventana.programar(
+        emisor["phoneNumberId"], normalizar_telefono(telefono) or telefono, mensaje_id, referencia)
+    return "programada" if programada else "no_programada"
+
+
+whatsapp_service.al_programar_consulta = _programar_consulta_entrante
+
+
+def _resolver_ventana_consulta(ventana):
+    telefono = ventana["telefono"]
+    emisor = resolver_phone_id(ventana["phone_id"])
+    if not emisor or not emisor.get("configured") or esta_suprimido(telefono):
+        return
+    servicio = WhatsAppService(phone_number_id=emisor["phoneNumberId"])
+    if servicio._estaba_opt_out(telefono):
+        return
+    catalogo = patrones_configurados(config_get("call_center_patrones_consulta", "{}"))
+    mensajes = [m for m in ventana["mensajes"] if m["tipo"] != "text" or
+                detectar_automatizacion(m["texto"] or "")[0] == "SIN_EVIDENCIA_AUTOMATIZACION"]
+    consultas = [(m, tipo_consulta_entrante(m["texto"] or "", catalogo))
+                 for m in mensajes if m["tipo"] == "text"
+                 and not whatsapp_service.es_solo_saludo_o_estado(m["texto"] or "")]
+    elegida = next((m for m, tipo in consultas if tipo == "consulta"), None)
+    decision = "derivar" if elegida and len(mensajes) == 1 else "aclarar"
+    elegida = elegida or next((m for m, tipo in consultas if tipo == "aclarar"), None)
+    if not elegida:
+        return
+    referencia = elegida["consulta_referencia"] or next(
+        (m["consulta_referencia"] for m in mensajes if m["consulta_referencia"]), None)
+    token = whatsapp_service.EMISOR_WEBHOOK.set(emisor)
+    try:
+        _gestionar_consulta_campania(
+            telefono, elegida["texto"], elegida["mensaje_id"], referencia, decision_ventana=decision)
+    finally:
+        whatsapp_service.EMISOR_WEBHOOK.reset(token)
+
+
+def _revisar_ventanas_consulta():
+    for _ in range(25):
+        ventana = consultas_ventana.tomar_ventana()
+        if ventana is None:
+            break
+        if ventana:
+            try:
+                _resolver_ventana_consulta(ventana)
+            except Exception as exc:
+                log_error("procesar ventana de consulta", exc, solo_tipo=True)
+
+
+async def _loop_ventanas_consulta():
+    while True:
+        try:
+            await asyncio.to_thread(_revisar_ventanas_consulta)
+        except Exception as exc:
+            log_error("scheduler de ventanas de consulta", exc, solo_tipo=True)
+        await asyncio.sleep(5)
 
 
 def _contexto_derivacion_crm(cur, emisor: dict, telefono: str, mensaje_id: str,
@@ -9953,6 +10021,7 @@ async def _arrancar_scheduler_programados() -> None:
     asyncio.create_task(_loop_retencion_datos())
     asyncio.create_task(prepago.loop_recordatorios())
     asyncio.create_task(_loop_programados())
+    asyncio.create_task(_loop_ventanas_consulta())
     asyncio.create_task(_loop_supresion())
     asyncio.create_task(_loop_reagendar())
     try:

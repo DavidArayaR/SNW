@@ -105,10 +105,44 @@ def es_pregunta_de_precio(texto: str) -> bool:
     return bool(re.search(
         r"\b(?:cuanto (?:cuesta|vale|sale|cobran)|"
         r"(?:cuanto|cual) es el (?:precio|valor|costo|arancel)|"
-        r"(?:quiero saber|quisiera saber|necesito saber|me gustaria saber|me pueden indicar|"
-        r"me pueden decir)\b.{0,40}\b(?:precio|valor|costo|arancel))\b",
+        r"(?<!no )(?:quiero saber|quisiera saber|necesito saber|me gustaria saber|me pueden indicar|"
+        r"me pueden decir)\b.{0,40}\b(?:precio|valor|costo|arancel))\b"
+        r"|^(?:hola )?(?:el )?(?:precio|valor|costo|arancel) (?:de|del|para) \w+",
         normalizar(texto),
     ))
+
+
+def tipo_consulta_entrante(texto: str, catalogo=None) -> str | None:
+    """Separa preguntas con contenido, solicitudes de ayuda y texto incidental."""
+    clasificacion = clasificar(texto, catalogo)
+    if (clasificacion.automatizacion != "SIN_EVIDENCIA_AUTOMATIZACION"
+            or clasificacion.confirma or clasificacion.cancela):
+        return None
+    t = normalizar(texto)
+    pregunta = any(signo in texto for signo in "¿?")
+    peticion = re.search(
+        r"\b(?:cuanto|cual|cuando|como|donde|quien|pueden|podrian|puedo|quiero|quisiera|"
+        r"necesito|me gustaria|busco|hay|tienen|atienden)\b", t)
+    if es_pregunta_de_precio(texto) or (pregunta or peticion) and any(
+        motivo in clasificacion.motivos for motivo in ("CONSULTA_HORAS", "CONSULTA_MEDICO", "SOLICITA_CONTACTO")
+    ):
+        return "consulta"
+    if (pregunta or peticion) and re.search(
+        r"\b(?:fonasa|isapre|telemedicina|boleta|reembolso|licencia|informe|"
+        r"receta|terapia|ubicacion|direccion|horarios?|disponibilidad)\b", t
+    ):
+        return "consulta"
+    if any(re.search(r"(?<!\w)" + re.escape(frase) + r"(?!\w)", t)
+           for motivo, frases in (catalogo or {}).items() if motivo != "CONSULTA_AMBIGUA" for frase in frases):
+        return "consulta"
+    if ("SOLICITA_INFORMACION" in clasificacion.motivos and
+            re.search(r"\b(?:sobre|acerca de|si|como|cuando|donde|quien)\s+\w+", t)):
+        return "consulta"
+    if re.search(r"\b(?:tengo una (?:consulta|duda|pregunta)|una consulta|necesito ayuda|"
+                 r"(?:quiero|necesito|quisiera) (?:informacion|consultar))\b", t) or re.fullmatch(
+                     r"(?:hola )?(?:quiero|necesito|quisiera) saber", t):
+        return "aclarar"
+    return None
 
 
 @dataclass(frozen=True)

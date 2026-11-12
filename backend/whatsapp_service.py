@@ -231,6 +231,7 @@ al_detectar_consulta = None
 # Callback de campañas normales: pide una consulta concreta y deriva el
 # siguiente mensaje. Las respuestas de reagendamiento usan su propio flujo.
 al_consulta_campania = None
+al_programar_consulta = None
 
 _INTERES_DIRECTO_TEXTOS = frozenset((
     "me interesa", "si me interesa", "interesado", "interesada",
@@ -1568,16 +1569,16 @@ class WhatsAppService:
                     and not es_interes_directo(cuerpo)
                     and not fue_baja and not no_interes
                     and es_consulta_explicita(cuerpo, clasificacion)):
-                if callable(al_consulta_campania):
+                if callable(al_programar_consulta):
                     try:
-                        estado = al_consulta_campania(
+                        estado = al_programar_consulta(
                             telefono, cuerpo, mensaje.get("id"),
                             (mensaje.get("context") or {}).get("id"))
                         if estado != "sin_campania":
                             acciones.append(f"consulta_campania_{estado}")
                             continue
                     except Exception as exc:
-                        log_error("al_consulta_campania", exc)
+                        log_error("al_programar_consulta", exc, solo_tipo=True)
                         acciones.append("consulta_campania_error")
                         continue
 
