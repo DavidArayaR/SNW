@@ -885,83 +885,125 @@ $("#detalleBody").addEventListener("click", (e) => {
 });
 
 let callCenterManualActual = null;
-const ccModo = $("#callCenterManualModo");
 const ccPreparado = $("#callCenterManualPreparado");
+const ccEditor = $("#callCenterManualEditor");
+const ccEditar = $("#callCenterManualEditar");
 const ccEnviar = $("#enviarCallCenterManual");
 const ccError = $("#callCenterManualError");
+const ccEstado = $("#callCenterManualEstado");
 const ccCategoria = $("#callCenterManualCategoria");
+const ccOpciones = $("#callCenterManualOpciones");
+const ccVistas = $("#callCenterManualVistas");
 const ccTexto = $("#callCenterManualMensaje");
 const ccCancelar = $("#cancelarCallCenterManual");
 
 function urlCallCenterManual(objetivo) {
   const { envioId, registroId, ambiente, mensajeId } = objetivo;
-  const query = new URLSearchParams({ ambiente, mensaje_id: mensajeId, categoria: ccCategoria.value });
+  const query = new URLSearchParams({ ambiente, mensaje_id: mensajeId, categoria: objetivo.categoria });
   return `api/notificaciones/historial/${encodeURIComponent(envioId)}/call-center/${registroId}?${query}`;
 }
 
 function mostrarVistaPreparado() {
   const datos = callCenterManualActual?.datos;
+  const introduccion = ccEditor.hidden ? datos?.mensaje_preparado : ccPreparado.value.trim();
   const cierre = datos?.cierre ? `\n\n${datos.cierre}` : "";
   $("#callCenterManualVista").textContent = datos
-    ? `${ccPreparado.value.trim()}\n\nMensaje original:\n«${datos.consulta}»${cierre}` : "";
+    ? `${introduccion}\n\nMensaje original:\n«${datos.consulta}»${cierre}` : "";
 }
 
-function mostrarPreparadoManual() {
-  const objetivo = callCenterManualActual;
-  if (!objetivo?.datos) return;
-  const personalizado = ccModo.value === "personalizado";
-  ccPreparado.readOnly = !personalizado;
-  ccPreparado.required = personalizado;
-  ccPreparado.value = personalizado ? objetivo.personalizado : objetivo.datos.mensaje_preparado;
+function editarPreparadoManual(editar) {
+  ccEditor.hidden = !editar;
+  ccPreparado.required = editar;
+  ccEditar.setAttribute("aria-expanded", String(editar));
+  ccEditar.textContent = editar ? "Restaurar introducción" : "Editar introducción";
   mostrarVistaPreparado();
+}
+
+function opcionRespuestaManual(codigo, etiqueta) {
+  const opcion = document.createElement("label");
+  opcion.className = "msg-respuesta-opcion";
+  const radio = document.createElement("input");
+  radio.type = "radio";
+  radio.name = "tipoRespuestaManual";
+  radio.value = codigo;
+  radio.checked = codigo === callCenterManualActual.categoria;
+  const texto = document.createElement("span");
+  texto.textContent = etiqueta;
+  opcion.append(radio, texto);
+  return opcion;
+}
+
+function mostrarCategoriasManuales(categorias) {
+  const grupos = new Map();
+  for (const { codigo, grupo, etiqueta } of categorias) {
+    if (!grupos.has(grupo)) {
+      const bloque = document.createElement("div");
+      bloque.className = "msg-respuesta-grupo";
+      const titulo = document.createElement("p");
+      titulo.className = "msg-respuesta-rotulo";
+      titulo.textContent = grupo;
+      bloque.append(titulo);
+      ccOpciones.append(bloque);
+      grupos.set(grupo, bloque);
+    }
+    grupos.get(grupo).append(opcionRespuestaManual(codigo, etiqueta));
+  }
 }
 
 async function cargarVistaCallCenter(objetivo) {
   const solicitud = ++objetivo.carga;
   objetivo.datos = null;
-  ccModo.disabled = ccEnviar.disabled = true;
-  ccTexto.readOnly = ccPreparado.readOnly = true;
-  ccTexto.value = ccPreparado.value = "";
-  $("#callCenterManualDestino").textContent = "";
-  mostrarVistaPreparado();
-  ccError.textContent = "Cargando vista previa…";
+  ccVistas.hidden = ccEnviar.disabled = true;
+  ccTexto.required = false;
+  editarPreparadoManual(false);
+  ccError.textContent = "";
+  ccEstado.textContent = "Cargando vista previa…";
   try {
     const res = await fetch(urlCallCenterManual(objetivo), { headers: authHeaders(), cache: "no-store" });
     if (res.status === 401) { window.snwSesionExpirada(); return; }
     const data = await res.json().catch(() => ({}));
     if (objetivo !== callCenterManualActual || solicitud !== objetivo.carga) return;
     if (!res.ok) throw new Error(data.detail || "No se pudo cargar la respuesta.");
+    if (!objetivo.catalogoCargado) {
+      mostrarCategoriasManuales(data.categorias || []);
+      objetivo.catalogoCargado = true;
+    }
     objetivo.datos = data;
-    objetivo.personalizado = data.mensaje_preparado.slice(0, ccPreparado.maxLength);
-    ccModo.value = "predeterminado";
+    ccPreparado.value = data.mensaje_preparado.slice(0, ccPreparado.maxLength);
     ccTexto.value = data.mensaje;
     $("#callCenterManualOriginal").textContent = data.consulta;
-    $("#callCenterManualDestino").textContent = `Chat de call center · +${data.numero_call_center}`;
+    $("#callCenterManualDestino").textContent = `Destino: +${data.numero_call_center}`;
     $("#callCenterManualContexto").textContent = `${objetivo.paciente} · ${data.clinica}`;
-    mostrarPreparadoManual();
-    ccError.textContent = "";
-    ccModo.disabled = ccEnviar.disabled = ccTexto.readOnly = false;
+    mostrarVistaPreparado();
+    ccEstado.textContent = "";
+    ccVistas.hidden = ccEnviar.disabled = false;
+    ccTexto.required = true;
   } catch (err) {
-    if (objetivo === callCenterManualActual && solicitud === objetivo.carga) ccError.textContent = err.message;
+    if (objetivo === callCenterManualActual && solicitud === objetivo.carga) {
+      ccEstado.textContent = "";
+      ccError.textContent = err.message;
+    }
   }
 }
 
 function abrirCallCenterManual(vista, mensaje, boton) {
   const contexto = vista.respuestaManual;
   const objetivo = {
-    ...contexto, boton, mensajeId: String(mensaje.id), carga: 0,
-    paciente: [$("#mensajesTitulo").textContent, telefonoEnmascarado(vista.paciente?.telefono)].join(" · "),
+    ...contexto, boton, mensajeId: String(mensaje.id), carga: 0, categoria: "general",
+    paciente: [inicialesPaciente([vista.paciente?.nombre, vista.paciente?.apellido].filter(Boolean).join(" ")),
+      telefonoEnmascarado(vista.paciente?.telefono)].join(" · "),
   };
   callCenterManualActual = objetivo;
   const reagendar = !!contexto.fila.reagendamiento;
-  ccCategoria.options[0].text = reagendar ? "Enviar botón de reagendamiento" : "Enviar botón de call center";
-  ccCategoria.querySelector("optgroup:last-child").disabled = reagendar;
-  ccCategoria.value = "general";
-  ccCategoria.disabled = reagendar;
+  ccOpciones.replaceChildren(opcionRespuestaManual("general", "Respuesta general"));
+  ccCategoria.hidden = reagendar;
+  ccCategoria.disabled = ccEditar.disabled = ccCancelar.disabled = false;
+  ccTexto.readOnly = ccPreparado.readOnly = false;
+  $("#callCenterManualTitulo").textContent = reagendar ? "Responder sobre el reagendamiento" : "Responder al paciente";
   $("#callCenterManualContexto").textContent = objetivo.paciente;
   $("#callCenterManualOriginal").textContent = mensaje.texto || "Mensaje sin texto";
   $("#modalCallCenterManual").hidden = false;
-  (reagendar ? ccCancelar : ccCategoria).focus();
+  (reagendar ? ccCancelar : ccOpciones.querySelector("input")).focus();
   cargarVistaCallCenter(objetivo);
 }
 
@@ -972,12 +1014,20 @@ function cerrarCallCenterManual() {
   boton?.focus();
 }
 
-ccCategoria.addEventListener("change", () => cargarVistaCallCenter(callCenterManualActual));
-ccModo.addEventListener("change", mostrarPreparadoManual);
-ccPreparado.addEventListener("input", () => {
-  callCenterManualActual.personalizado = ccPreparado.value;
-  mostrarVistaPreparado();
+ccCategoria.addEventListener("change", e => {
+  const objetivo = callCenterManualActual;
+  if (!objetivo || objetivo.enviando || e.target.name !== "tipoRespuestaManual") return;
+  objetivo.categoria = e.target.value;
+  cargarVistaCallCenter(objetivo);
 });
+ccEditar.addEventListener("click", () => {
+  if (!callCenterManualActual?.datos) return;
+  const editar = ccEditor.hidden;
+  ccPreparado.value = callCenterManualActual.datos.mensaje_preparado.slice(0, ccPreparado.maxLength);
+  editarPreparadoManual(editar);
+  if (editar) ccPreparado.focus();
+});
+ccPreparado.addEventListener("input", mostrarVistaPreparado);
 ccCancelar.addEventListener("click", () => {
   if (!callCenterManualActual?.enviando) cerrarCallCenterManual();
 });
@@ -992,16 +1042,17 @@ $("#formCallCenterManual").addEventListener("submit", async e => {
   const objetivo = callCenterManualActual;
   if (!objetivo?.datos || ccEnviar.disabled || objetivo.enviando) return;
   objetivo.enviando = true;
-  ccEnviar.disabled = ccCategoria.disabled = ccModo.disabled = ccCancelar.disabled = true;
+  ccEnviar.disabled = ccCategoria.disabled = ccEditar.disabled = ccCancelar.disabled = true;
   ccTexto.readOnly = ccPreparado.readOnly = true;
-  ccError.textContent = "Enviando…";
+  ccError.textContent = "";
+  ccEstado.textContent = "Enviando…";
   try {
     const res = await fetch(urlCallCenterManual(objetivo), {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({
         mensaje: ccTexto.value.trim(),
-        mensaje_preparado: ccModo.value === "personalizado" ? ccPreparado.value.trim() : null,
-        mensaje_id: objetivo.mensajeId, categoria: ccCategoria.value, solicitud_id: objetivo.datos.solicitud_id,
+        mensaje_preparado: ccEditor.hidden ? null : ccPreparado.value.trim(),
+        mensaje_id: objetivo.mensajeId, categoria: objetivo.categoria, solicitud_id: objetivo.datos.solicitud_id,
       }),
     });
     if (res.status === 401) { window.snwSesionExpirada(); return; }
@@ -1014,9 +1065,11 @@ $("#formCallCenterManual").addEventListener("submit", async e => {
     ccError.textContent = err.message;
   } finally {
     objetivo.enviando = false;
-    ccEnviar.disabled = ccModo.disabled = ccCancelar.disabled = ccTexto.readOnly = false;
-    ccCategoria.disabled = !!objetivo.fila.reagendamiento;
-    ccPreparado.readOnly = ccModo.value !== "personalizado";
+    if (objetivo === callCenterManualActual) {
+      ccEstado.textContent = "";
+      ccEnviar.disabled = ccCategoria.disabled = ccEditar.disabled = ccCancelar.disabled = false;
+      ccTexto.readOnly = ccPreparado.readOnly = false;
+    }
   }
 });
 

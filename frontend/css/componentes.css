@@ -768,8 +768,98 @@ tbody tr:last-child td { border-bottom: none; }
 }
 #modalCallCenterManual { z-index: 1051; }
 .msg-respuesta-form {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: min(780px, 100%);
+  max-width: 780px;
   max-height: 90dvh;
+  overflow: hidden;
+  padding: 0;
+}
+.msg-respuesta-form > :is(header, div, footer) {
+  padding: .95rem clamp(.8rem, 3vw, 1.4rem);
+}
+.msg-respuesta-cabecera { border-bottom: 1px solid var(--borde); }
+.msg-respuesta-form .msg-respuesta-cabecera h3 { margin: 0; }
+.msg-respuesta-cuerpo {
+  display: grid;
+  align-content: start;
+  gap: 1rem;
   overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.msg-respuesta-form :is(.msg-respuesta-categorias, .msg-respuesta-vistas, .field)[hidden] { display: none; }
+.msg-respuesta-categorias { min-width: 0; margin: 0; padding: 0; border: 0; }
+.msg-respuesta-categorias legend {
+  float: none;
+  margin-bottom: .55rem;
+  font-size: .95rem;
+  font-weight: 700;
+}
+.msg-respuesta-grupos, .msg-respuesta-grupo {
+  display: grid;
+  gap: .45rem;
+}
+.msg-respuesta-grupos {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 185px), 1fr));
+  align-items: start;
+}
+.msg-respuesta-grupos > .msg-respuesta-opcion { grid-column: 1 / -1; justify-self: start; }
+.msg-respuesta-rotulo {
+  margin: 0;
+  color: var(--texto);
+  font-size: .82rem;
+  font-weight: 700;
+}
+.msg-respuesta-opcion {
+  display: flex;
+  gap: .55rem;
+  align-items: center;
+  min-height: 36px;
+  padding: .35rem .6rem;
+  border: 1px solid var(--borde);
+  border-radius: .5rem;
+  color: var(--texto);
+  font-size: .8rem;
+  cursor: pointer;
+}
+.msg-respuesta-opcion input { flex: none; accent-color: var(--verde); }
+.msg-respuesta-opcion:hover { border-color: var(--verde); }
+.msg-respuesta-opcion:has(input:checked) {
+  color: var(--ok-fg);
+  background: var(--ok-bg);
+  border-color: var(--ok-fg);
+}
+.msg-respuesta-opcion:focus-within { outline: 2px solid var(--verde); outline-offset: 2px; }
+.msg-respuesta-categorias:disabled .msg-respuesta-opcion { cursor: default; }
+.msg-respuesta-vistas {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 255px), 1fr));
+  gap: .65rem;
+  align-items: start;
+}
+.msg-respuesta-tarjeta {
+  min-width: 0;
+  padding: .7rem;
+  border: 1px solid var(--borde);
+  border-radius: .65rem;
+  background: var(--surface-2);
+}
+.msg-respuesta-tarjeta textarea { resize: vertical; }
+.msg-respuesta-boton-vista {
+  margin-top: .45rem;
+  color: var(--ok-fg);
+  font-size: .8rem;
+  font-weight: 650;
+}
+.msg-respuesta-pie {
+  border-top: 1px solid var(--borde);
+}
+.msg-respuesta-pie .modal__actions { margin-top: .4rem; }
+.msg-respuesta-pie :is([role="alert"], [role="status"]):empty { display: none; }
+.msg-respuesta-pie [role="alert"] { color: var(--rojo); }
+@media (max-width: 520px) {
+  .msg-respuesta-opcion { min-height: 44px; }
 }
 .msg-respuesta-original {
   margin: .45rem 0;

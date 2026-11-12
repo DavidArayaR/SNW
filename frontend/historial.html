@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
   <link rel="stylesheet" href="css/tema.css?v=tokens1">
   <link rel="stylesheet" href="css/styles.css?v=ritmo-historial1">
-  <link rel="stylesheet" href="css/componentes.css?v=respuesta-por-mensaje1">
+  <link rel="stylesheet" href="css/componentes.css?v=responder-guiado1">
   <link rel="stylesheet" href="css/layout.css?v=navcolor1">
   <link rel="stylesheet" href="css/refinamiento.css?v=merge-frontend1">
   <link rel="stylesheet" href="css/estilo-nuevo.css?v=ui-unslop1">
@@ -222,43 +222,48 @@
 
   <div id="modalCallCenterManual" class="modal" hidden>
     <form id="formCallCenterManual" class="modal__card modal__card--detalle msg-respuesta-form" role="dialog" aria-modal="true" aria-labelledby="callCenterManualTitulo">
-      <h3 id="callCenterManualTitulo">Responder</h3>
-      <p id="callCenterManualContexto" class="field__hint"></p>
-      <blockquote id="callCenterManualOriginal" class="msg-respuesta-original"></blockquote>
-      <div class="field">
-        <label for="callCenterManualCategoria">Tipo de respuesta</label>
-        <select id="callCenterManualCategoria">
-          <optgroup label="Acciones manuales">
-            <option value="general">Enviar botón de call center</option>
-          </optgroup>
-          <optgroup label="Mensajes preparados">
-            <option value="precio_especial">Preguntas sobre el precio especial</option>
-            <option value="precio_terapia">Preguntas sobre el precio de terapia</option>
-          </optgroup>
-        </select>
+      <header class="msg-respuesta-cabecera">
+        <h3 id="callCenterManualTitulo">Responder al paciente</h3>
+        <p id="callCenterManualContexto" class="field__hint"></p>
+      </header>
+      <div class="msg-respuesta-cuerpo">
+        <div>
+          <p class="msg-respuesta-rotulo">Mensaje recibido</p>
+          <blockquote id="callCenterManualOriginal" class="msg-respuesta-original"></blockquote>
+        </div>
+        <fieldset id="callCenterManualCategoria" class="msg-respuesta-categorias">
+          <legend>Elige una respuesta</legend>
+          <div id="callCenterManualOpciones" class="msg-respuesta-grupos"></div>
+        </fieldset>
+        <div id="callCenterManualVistas" class="msg-respuesta-vistas" hidden>
+          <section class="msg-respuesta-tarjeta field">
+            <label for="callCenterManualMensaje" class="msg-respuesta-rotulo">Lo que recibirá el paciente</label>
+            <textarea id="callCenterManualMensaje" rows="4" maxlength="1000" required></textarea>
+            <div class="msg-respuesta-boton-vista">
+              <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i> Ir a call center
+            </div>
+          </section>
+          <section class="msg-respuesta-tarjeta" aria-labelledby="callCenterManualTituloVista">
+            <h4 id="callCenterManualTituloVista" class="msg-respuesta-rotulo">Lo que se abrirá en el call center</h4>
+            <p id="callCenterManualDestino" class="field__hint"></p>
+            <div id="callCenterManualVista" class="msg-respuesta-original"></div>
+            <button type="button" class="btn btn--sm btn--ghost" id="callCenterManualEditar"
+                    aria-controls="callCenterManualEditor" aria-expanded="false">Editar introducción</button>
+            <div id="callCenterManualEditor" class="field" hidden>
+              <label for="callCenterManualPreparado">Introducción del mensaje</label>
+              <textarea id="callCenterManualPreparado" rows="2" maxlength="500"></textarea>
+            </div>
+          </section>
+        </div>
       </div>
-      <div class="field">
-        <label for="callCenterManualMensaje">Mensaje que acompaña al botón</label>
-        <textarea id="callCenterManualMensaje" rows="3" maxlength="1000" required></textarea>
-      </div>
-      <div class="field">
-        <label for="callCenterManualModo">Mensaje preparado para el chat del CRM</label>
-        <select id="callCenterManualModo">
-          <option value="predeterminado">Usar el predeterminado</option>
-          <option value="personalizado">Editar para este envío</option>
-        </select>
-      </div>
-      <div class="field">
-        <label for="callCenterManualPreparado">Introducción del mensaje preparado</label>
-        <textarea id="callCenterManualPreparado" rows="3" maxlength="500" readonly></textarea>
-      </div>
-      <p id="callCenterManualDestino" class="field__hint"></p>
-      <div id="callCenterManualVista" class="msg-respuesta-original" aria-label="Vista previa del mensaje para call center"></div>
-      <p id="callCenterManualError" class="field__hint" role="alert"></p>
-      <div class="modal__actions">
-        <button type="button" class="btn btn--ghost" id="cancelarCallCenterManual">Cancelar</button>
-        <button type="submit" class="btn btn--primary" id="enviarCallCenterManual">Enviar respuesta</button>
-      </div>
+      <footer class="msg-respuesta-pie">
+        <p id="callCenterManualEstado" class="field__hint" role="status"></p>
+        <p id="callCenterManualError" class="field__hint" role="alert"></p>
+        <div class="modal__actions">
+          <button type="button" class="btn btn--ghost" id="cancelarCallCenterManual">Cancelar</button>
+          <button type="submit" class="btn btn--primary" id="enviarCallCenterManual" disabled>Enviar respuesta</button>
+        </div>
+      </footer>
     </form>
   </div>
 
@@ -311,7 +316,7 @@
 
   <script src="js/layout.js?v=reservo-nav2"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/historial.js?v=respuesta-por-mensaje1"></script>
+  <script src="js/historial.js?v=responder-guiado1"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>

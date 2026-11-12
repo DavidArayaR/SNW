@@ -1023,8 +1023,9 @@ El `wa_id` de Meta viene **sin `+`** (`56993921740`); la comparación con `pacie
 
 En el detalle de un envío, abre **Ver mensajes** y pulsa **Responder** junto
 al mensaje entrante. El aviso para el paciente y el mensaje que se abrirá en
-el call center se previsualizan por separado. Las sugerencias de precio
-especial y de terapia se pueden personalizar por clínica en **Configuración →
+el call center se previsualizan por separado. Las respuestas preparadas se
+agrupan en **Agenda y atención**, **Precios y cobertura** y **Consultas y
+contacto**. Cada clínica puede editar sus textos en **Configuración →
 Respuestas del sistema**.
 
 El envío requiere permiso de Historial, de acceso a los datos y de call center,

@@ -3605,20 +3605,16 @@ _RESPUESTAS_SISTEMA = {
                          "Pide la consulta completa en un solo mensaje."),
     "consulta_larga": ("Consulta · pedir un resumen", _AVISO_CONSULTA_LARGA,
                        "Se envía si la consulta supera el máximo admitido."),
-    "manual_precio_especial": ("Respuesta manual · precio especial",
-        "¡Hola! Gracias por escribirnos. En nuestro call center pueden orientarte sobre los valores especiales "
-        "disponibles y sus condiciones. Usa el botón para enviarles tu consulta.",
-        "Texto sugerido para consultas sobre un precio especial desde Historial."),
-    "manual_precio_terapia": ("Respuesta manual · precio de terapia",
-        "¡Hola! Gracias por contactarnos. En nuestro call center pueden orientarte sobre los valores "
-        "actuales de las sesiones de terapia y las opciones de atención. Usa el botón para enviarles tu consulta.",
-        "Texto sugerido para consultas sobre el precio de terapia desde Historial."),
-    "preparado_precio_especial": ("Chat de call center · precio especial",
-        respuestas_manuales.CATEGORIAS["precio_especial"][1],
-        "Introducción del chat de call center. Puedes usar {clinica}. Se agrega el mensaje seleccionado."),
-    "preparado_precio_terapia": ("Chat de call center · precio de terapia",
-        respuestas_manuales.CATEGORIAS["precio_terapia"][1],
-        "Introducción del chat de call center. Puedes usar {clinica}. Se agrega el mensaje seleccionado."),
+    **{
+        f"{prefijo}_{codigo}": (f"{titulo} · {respuesta.etiqueta}", texto, ayuda)
+        for codigo, respuesta in respuestas_manuales.CATEGORIAS.items()
+        for prefijo, titulo, texto, ayuda in (
+            ("manual", "Aviso al paciente", respuesta.aviso,
+             "Acompaña al botón enviado desde Historial."),
+            ("preparado", "Chat de call center", respuesta.introduccion,
+             "Puedes usar {clinica}. El mensaje original se agrega al final."),
+        )
+    },
     "reagendar_consulta": ("Reagendamiento · pedir consulta",
                            "Escríbenos tu consulta para prepararla y abrir el WhatsApp "
                            "del equipo de atención de tu clínica.",
@@ -11065,7 +11061,7 @@ def _vista_respuesta_manual(envio_id, registro_id, mensaje_id, categoria, ambien
     fila = _registro_callcenter_manual(envio_id, registro_id, ambiente, sesion)
     reagendar = bool(fila.get("reagendamiento"))
     cierre = ""
-    if categoria not in respuestas_manuales.CATEGORIAS or (reagendar and categoria != "general"):
+    if categoria != "general" and (reagendar or categoria not in respuestas_manuales.CATEGORIAS):
         raise HTTPException(422, detail="Elige una categoría disponible para esta respuesta.")
     if reagendar:
         envio_id = reagendar_batches.resolver_envio(envio_id)
@@ -11085,17 +11081,20 @@ def _vista_respuesta_manual(envio_id, registro_id, mensaje_id, categoria, ambien
         numero = re.sub(r"\D", "", config_get(f"{emisor['codigo']}_CRM_PHONE_NUMBER") or "")
         if not re.fullmatch(r"[1-9]\d{7,14}", numero):
             raise HTTPException(409, detail="Configura el número CRM de la clínica.")
-        clave, saludo = respuestas_manuales.CATEGORIAS[categoria]
-        texto = renderizar_mensaje(_respuesta_sistema(clave, emisor["codigo"]), paciente)
-        introduccion = (config_get(_clave_respuesta_sistema(emisor["codigo"], f"preparado_{categoria}"))
-                        if categoria != "general" else None)
+        codigo = emisor["codigo"]
         if categoria == "general":
-            formato = config_get(_clave_respuesta_sistema(emisor["codigo"], "preparado_consulta")) or ""
+            texto = _respuesta_sistema("consulta_callcenter", codigo)
+            formato = config_get(_clave_respuesta_sistema(codigo, "preparado_consulta")) or ""
+            introduccion = ""
             if formato.count("{consulta}") == 1:
                 introduccion, _, cierre = formato.partition("{consulta}")
-                introduccion = introduccion.strip()
                 cierre = cierre.strip()
-        preparado = (introduccion or saludo).replace("{clinica}", emisor["nombre"])
+            introduccion = introduccion.strip() or "Hola, quisiera comunicarme con el call center de {clinica}."
+        else:
+            texto = _respuesta_sistema(f"manual_{categoria}", codigo)
+            introduccion = _respuesta_sistema(f"preparado_{categoria}", codigo)
+        texto = renderizar_mensaje(texto, paciente)
+        preparado = introduccion.replace("{clinica}", emisor["nombre"])
         destino = (paciente, emisor, tabla)
     return {"clinica": emisor["nombre"], "numero_call_center": numero, "consulta": original,
             "mensaje": texto, "mensaje_preparado": preparado, "cierre": cierre,
@@ -11137,7 +11136,11 @@ def previsualizar_callcenter_manual(envio_id: int, registro_id: int, ambiente: s
                                    categoria: str = Query("general", max_length=30)):
     if isinstance(mensaje_id, str) and mensaje_id:
         vista, _ = _vista_respuesta_manual(envio_id, registro_id, mensaje_id, categoria, ambiente, sesion)
-        return {**vista, "solicitud_id": str(uuid.uuid4())}
+        categorias = [] if vista["reagendamiento"] else [
+            {"codigo": codigo, "grupo": respuesta.grupo, "etiqueta": respuesta.etiqueta}
+            for codigo, respuesta in respuestas_manuales.CATEGORIAS.items()
+        ]
+        return {**vista, "categorias": categorias, "solicitud_id": str(uuid.uuid4())}
     fila = _registro_callcenter_manual(envio_id, registro_id, ambiente, sesion)
     if fila.get("reagendamiento"):
         cita, _, _, _ = _contexto_callcenter_manual_reagendar(envio_id, registro_id)
