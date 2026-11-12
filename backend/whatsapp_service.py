@@ -2016,7 +2016,7 @@ class WhatsAppService:
                        simulada: bool = False) -> None:
         match = _TEL_MATCH.format(col="telefono")
         try:
-            from paciente_reagendar import marcar_opt_out_reagendar
+            from snw.reagendamiento.paciente_reagendar import marcar_opt_out_reagendar
             with conectar() as conn, conn.cursor() as cur:
                 huella, huella_activa = bloquear_huella_baja(cur, telefono)
                 huellas_temporales = [] if huella_activa else [huella]
@@ -2094,7 +2094,7 @@ class WhatsAppService:
         la baja fue explícita o puesta a mano por un admin/dev."""
         match = _TEL_MATCH.format(col="telefono")
         try:
-            from paciente_reagendar import marcar_opt_out_reagendar
+            from snw.reagendamiento.paciente_reagendar import marcar_opt_out_reagendar
             with conectar() as conn, conn.cursor() as cur:
                 huella, huella_activa = bloquear_huella_baja(cur, telefono)
                 huellas_temporales = [] if huella_activa else [huella]
@@ -2169,7 +2169,7 @@ class WhatsAppService:
         para volver a poder mandarle plantillas al cabo de una semana."""
         match = _TEL_MATCH.format(col="telefono")
         try:
-            from paciente_reagendar import marcar_opt_out_reagendar
+            from snw.reagendamiento.paciente_reagendar import marcar_opt_out_reagendar
             with conectar() as conn, conn.cursor() as cur:
                 huella, huella_activa = bloquear_huella_baja(cur, telefono)
                 huellas_temporales = [] if huella_activa else [huella]

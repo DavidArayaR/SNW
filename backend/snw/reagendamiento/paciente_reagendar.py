@@ -12,7 +12,7 @@ import unicodedata
 from zoneinfo import ZoneInfo
 
 import pymysql
-import reagendar_batches
+from snw.reagendamiento import reagendar_batches
 
 from db import conectar, config_all, config_get
 from snw.seguridad.supresion import huella_telefono

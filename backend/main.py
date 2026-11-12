@@ -92,8 +92,8 @@ from schemas import (
 )
 from snw.pacientes.telefono import normalizar_telefono
 from snw.pacientes import servicio_areas
-import paciente_reagendar
-import reagendar_batches
+from snw.reagendamiento import paciente_reagendar
+from snw.reagendamiento import reagendar_batches
 from snw.reservo import reservo_pacientes
 from snw.reservo import recuperacion_pacientes
 from snw.reservo import reservo_bases
