@@ -4,7 +4,7 @@ import asyncio
 import datetime as dt
 import re
 from collections import Counter
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from html import escape
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
@@ -331,49 +331,33 @@ def historial(linea_id, pagina):
                 "mas": len(recargas) > 30 or len(avisos) > 30}
 
 
-def _procesar_linea(linea_id, hoy_local, destino, correo, enviar, dias):
-    with conectar() as conn, conn.cursor() as cur, bloquear_linea(cur, linea_id) as tomado:
-        if not tomado:
-            return
-        cur.execute("SELECT l.*,o.nombre AS compania FROM prepago_lineas l "
-                    "JOIN prepago_operadores o ON o.codigo=l.operador WHERE l.id=%s", (linea_id,))
-        linea = cur.fetchone()
-        ultima_recarga = linea["ultima_recarga"]
-        if not (linea["activo"] and linea["avisar"] and linea["telefono"] and ultima_recarga):
-            return
-        vence = ultima_recarga + dt.timedelta(days=dias)
-        if vence > hoy_local:
-            return
-        cur.execute(
-            "SELECT estado,intento_en FROM prepago_recordatorios WHERE linea_id=%s AND ciclo=%s "
-            "AND estado IN ('enviado','incierto','error') ORDER BY id DESC LIMIT 1", (linea_id, linea["ciclo"]),
-        )
-        previo = cur.fetchone()
-        if previo and (previo["estado"] != "error" or
-                       previo["intento_en"].replace(tzinfo=dt.timezone.utc).astimezone(ZONA).date() >= hoy_local):
-            return
-        cur.execute(
-            "INSERT INTO prepago_recordatorios (linea_id,ciclo,fecha_ultima_recarga,programado,intento_en,destinatario,estado) "
-            "VALUES (%s,%s,%s,%s,UTC_TIMESTAMP(),%s,'incierto')",
-            (linea_id, linea["ciclo"], ultima_recarga, vence, destino),
-        )
-        intento = cur.lastrowid
-        conn.commit()
-        asunto = f"SNW | Recordatorio de recarga prepago — {linea['nombre']} ({linea['compania']})"
-        cuerpo = (
-            f"<p>Recarga pendiente para {escape(linea['nombre'])} ({escape(linea['compania'])}).</p>"
-            f"<p>Número: {escape(linea['telefono'])}<br>Última recarga: {ultima_recarga:%d-%m-%Y}<br>"
-            f"Días transcurridos: {(hoy_local - ultima_recarga).days}</p>"
-            "<p>Entra en SNW → Extras → Recordatorio prepago para abrir el portal del operador. "
-            "Cuando completes la recarga, registra la fecha en SNW.</p>"
-        )
-        estado_envio, error = enviar(destino, asunto, cuerpo, correo)
-        cur.execute("UPDATE prepago_recordatorios SET estado=%s,error=%s,"
-                    "enviado_en=IF(%s='enviado',UTC_TIMESTAMP(),NULL) WHERE id=%s",
-                    (estado_envio, error, estado_envio, intento))
-        conn.commit()
-        if error:
-            log_error(f"recordatorio prepago, línea {linea_id}: {estado_envio} ({error})")
+def _cuerpo_resumen(lineas, pendientes):
+    items_pendientes = []
+    items_otras = []
+    for linea in lineas:
+        ultima = linea["ultima_recarga"]
+        vence = linea["proximo_recordatorio"]
+        detalle = "Sin fecha de recarga registrada"
+        if ultima:
+            detalle = (f"Última recarga: {ultima:%d-%m-%Y} · "
+                       f"Días transcurridos: {linea['dias_transcurridos']} · "
+                       f"Vencimiento del ciclo: {vence:%d-%m-%Y}")
+        if not linea["avisar"]:
+            detalle += " · Avisos desactivados"
+        elif linea["estado_aviso"] == "enviado":
+            detalle += " · Aviso ya enviado"
+        elif linea["estado_aviso"] == "incierto":
+            detalle += " · Entrega del aviso por confirmar"
+        item = (f"<li><strong>{escape(linea['nombre'])}</strong> ({escape(linea['compania'])})"
+                f" · {escape(linea['telefono'])}<br>{detalle}</li>")
+        (items_pendientes if linea["id"] in pendientes else items_otras).append(item)
+    cuerpo = "<h2>Recargas pendientes</h2><ul>" + "".join(items_pendientes) + "</ul>"
+    if items_otras:
+        cuerpo += "<h2>Otras líneas activas</h2><ul>" + "".join(items_otras) + "</ul>"
+    return cuerpo + (
+        "<p>Entra en SNW → Extras → Recordatorio prepago para abrir el portal del operador. "
+        "Cuando completes una recarga, registra la fecha en SNW.</p>"
+    )
 
 
 def revisar_recordatorios(hoy_local=None, enviar=entregar_correo_real):
@@ -384,16 +368,69 @@ def revisar_recordatorios(hoy_local=None, enviar=entregar_correo_real):
     destino = (cfg.get("prepago_correo_destino") or correo["destino"]).strip()
     if not correo_valido(destino) or not correo["host"] or not correo["emisor"]:
         return
-    with conectar() as conn, conn.cursor() as cur:
+    corte = hoy_local - dt.timedelta(days=dias)
+    with conectar() as conn, conn.cursor() as cur, bloquear_linea(cur, "resumen") as tomado, ExitStack() as bloqueos:
+        if not tomado:
+            return
         cur.execute("SELECT id FROM prepago_lineas WHERE activo=1 AND avisar=1 "
                     "AND telefono IS NOT NULL AND ultima_recarga<=%s ORDER BY id",
-                    (hoy_local - dt.timedelta(days=dias),))
-        candidatos = cur.fetchall()
-    for fila in candidatos:
-        try:
-            _procesar_linea(fila["id"], hoy_local, destino, correo, enviar, dias)
-        except Exception as exc:
-            log_error(f"recordatorio prepago, línea {fila['id']}", exc, solo_tipo=True)
+                    (corte,))
+        candidatos = {fila["id"] for fila in cur.fetchall()}
+        if not candidatos:
+            return
+        for linea_id in sorted(candidatos):
+            if not bloqueos.enter_context(bloquear_linea(cur, linea_id)):
+                raise RuntimeError("Hay una línea prepago en edición. Se reintentará el resumen.")
+        # Abrir una nueva vista de lectura después de adquirir los cerrojos.
+        conn.commit()
+        cur.execute(
+            "SELECT l.id,l.nombre,l.telefono,l.avisar,l.ultima_recarga,l.ciclo,o.nombre AS compania,"
+            " r.estado AS estado_aviso,r.intento_en"
+            " FROM prepago_lineas l JOIN prepago_operadores o ON o.codigo=l.operador"
+            " LEFT JOIN prepago_recordatorios r ON r.id=("
+            " SELECT a.id FROM prepago_recordatorios a WHERE a.linea_id=l.id AND a.ciclo=l.ciclo"
+            " AND a.estado IN ('enviado','incierto','error') ORDER BY a.id DESC LIMIT 1)"
+            " WHERE l.activo=1 AND l.telefono IS NOT NULL ORDER BY l.id"
+        )
+        lineas = cur.fetchall()
+        pendientes = {}
+        for linea in lineas:
+            linea.update(calendario(linea["ultima_recarga"], hoy_local, dias))
+            if not (linea["avisar"] and linea["estado"] == "Pendiente"):
+                continue
+            estado = linea["estado_aviso"]
+            if estado in ("enviado", "incierto"):
+                continue
+            if estado == "error" and (
+                linea["intento_en"].replace(tzinfo=dt.timezone.utc).astimezone(ZONA).date() >= hoy_local
+            ):
+                continue
+            if linea["id"] not in candidatos:
+                # Una recarga fue corregida mientras adquiríamos los cerrojos.
+                raise RuntimeError("Cambió el vencimiento de una línea prepago. Se reintentará el resumen.")
+            pendientes[linea["id"]] = linea
+        if not pendientes:
+            return
+
+        cuerpo = _cuerpo_resumen(lineas, pendientes)
+        intentos = []
+        for linea in pendientes.values():
+            cur.execute(
+                "INSERT INTO prepago_recordatorios (linea_id,ciclo,fecha_ultima_recarga,programado,intento_en,destinatario,estado)"
+                " VALUES (%s,%s,%s,%s,UTC_TIMESTAMP(),%s,'incierto')",
+                (linea["id"], linea["ciclo"], linea["ultima_recarga"], linea["proximo_recordatorio"], destino),
+            )
+            intentos.append(cur.lastrowid)
+        conn.commit()
+        estado_envio, error = enviar(destino, "SNW | Recordatorio de recarga prepago", cuerpo, correo)
+        cur.executemany(
+            "UPDATE prepago_recordatorios SET estado=%s,error=%s,"
+            "enviado_en=IF(%s='enviado',UTC_TIMESTAMP(),NULL) WHERE id=%s",
+            [(estado_envio, error, estado_envio, intento) for intento in intentos],
+        )
+        conn.commit()
+        if error:
+            log_error(f"recordatorio prepago, resumen de {len(intentos)} líneas: {estado_envio} ({error})")
 
 
 async def loop_recordatorios():

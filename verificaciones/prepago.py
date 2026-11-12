@@ -169,6 +169,9 @@ class PrepagoMariaDB(unittest.TestCase):
     def test_concurrencia_ciclo_y_reintento(self):
         fecha = self.hoy - dt.timedelta(days=150)
         linea = self.crear("900000004", fecha)
+        otra = self.crear("900000007", fecha)
+        futura = self.crear("900000008", self.hoy)
+        sin_fecha = self.crear("900000009")
         entro = threading.Event()
         liberar = threading.Event()
 
@@ -193,7 +196,17 @@ class PrepagoMariaDB(unittest.TestCase):
         prepago.revisar_recordatorios(self.hoy, smtp)
         smtp.assert_called_once()
         self.assertEqual(smtp.call_args.args[0], "extras@example.test")
+        _, asunto, cuerpo, _ = smtp.call_args.args
+        self.assertEqual(asunto, "SNW | Recordatorio de recarga prepago")
+        vencidas, restantes = cuerpo.split("<h2>Otras líneas activas</h2>")
+        self.assertIn("+56900000004", vencidas)
+        self.assertIn("+56900000007", vencidas)
+        self.assertIn("+56900000008", restantes)
+        self.assertIn("+56900000009", restantes)
         self.assertEqual(prepago.historial(linea, 1)["avisos"][0]["estado"], "enviado")
+        self.assertEqual(prepago.historial(otra, 1)["avisos"][0]["estado"], "enviado")
+        self.assertFalse(prepago.historial(futura, 1)["avisos"])
+        self.assertFalse(prepago.historial(sin_fecha, 1)["avisos"])
         corregida = next(l for l in prepago.estado()["lineas"] if l["id"] == linea)
         corregida["ultima_recarga"] -= dt.timedelta(days=1)
         prepago.guardar_linea(corregida, "pruebas", linea)
@@ -202,12 +215,15 @@ class PrepagoMariaDB(unittest.TestCase):
         prepago.registrar_recarga(linea, self.hoy, "", "pruebas", 2)
 
         fallida = self.crear("900000005", fecha)
+        otra_fallida = self.crear("900000010", fecha)
         smtp = Mock(side_effect=[("error", "SMTPDataError"), ("enviado", None)])
         prepago.revisar_recordatorios(self.hoy, smtp)
         prepago.revisar_recordatorios(self.hoy, smtp)
         self.assertEqual(smtp.call_count, 1)
         prepago.revisar_recordatorios(self.hoy + dt.timedelta(days=1), smtp)
         self.assertEqual([a["estado"] for a in prepago.historial(fallida, 1)["avisos"]],
+                         ["enviado", "error"])
+        self.assertEqual([a["estado"] for a in prepago.historial(otra_fallida, 1)["avisos"]],
                          ["enviado", "error"])
         incierta = self.crear("900000006", fecha)
         smtp = Mock(return_value=("incierto", "SMTPServerDisconnected"))
