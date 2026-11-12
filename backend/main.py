@@ -98,7 +98,7 @@ from snw.reservo import reservo_pacientes
 from snw.reservo import recuperacion_pacientes
 from snw.reservo import reservo_bases
 from snw.seguridad import retencion_datos
-import prepago
+from snw.extras import prepago
 from routes import prepago as rutas_prepago
 from snw.reservo.reservo_catalogo import (
     RESERVO_CLINICAS, CLAVES_TOKEN as CLAVES_TOKEN_RESERVO,

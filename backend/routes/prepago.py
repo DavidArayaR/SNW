@@ -6,7 +6,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-import prepago
+from snw.extras import prepago
 from db import auditoria_registrar
 
 

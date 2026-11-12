@@ -20,7 +20,7 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
-import prepago
+from snw.extras import prepago
 from snw.infraestructura import config_service
 from routes.prepago import registrar
 
@@ -59,7 +59,7 @@ class PrepagoUnitario(unittest.TestCase):
         dias = prepago.plazo_recordatorio({prepago.CLAVE_PLAZO: "90"})
         fecha = dt.date(2026, 1, 1)
         self.assertEqual(prepago.calendario(fecha, fecha, dias)["dias_restantes"], 90)
-        with patch("prepago.config_set") as guardar:
+        with patch("snw.extras.prepago.config_set") as guardar:
             prepago.guardar_plazo(dias)
             guardar.assert_called_once_with({prepago.CLAVE_PLAZO: 90})
 
@@ -89,7 +89,7 @@ class PrepagoUnitario(unittest.TestCase):
 
         app = FastAPI()
         app.include_router(registrar(admin, dev))
-        with TestClient(app) as cliente, patch("prepago.estado", return_value={"lineas": []}):
+        with TestClient(app) as cliente, patch("snw.extras.prepago.estado", return_value={"lineas": []}):
             ruta = "/api/extras/prepago"
             self.assertEqual(cliente.get(ruta).status_code, 403)
             self.assertEqual(cliente.get(ruta, headers={"rol": "admin"}).json(), {"lineas": []})
@@ -97,7 +97,7 @@ class PrepagoUnitario(unittest.TestCase):
                                          json={"codigo": "nuevo", "nombre": "Nuevo"}).status_code, 403)
             self.assertEqual(cliente.post(ruta + "/lineas", headers={"rol": "dev"},
                                           json={"nombre": "Ejemplo"}).status_code, 422)
-            with patch("prepago.guardar_plazo") as guardar, patch("routes.prepago.auditoria_registrar"):
+            with patch("snw.extras.prepago.guardar_plazo") as guardar, patch("routes.prepago.auditoria_registrar"):
                 self.assertEqual(cliente.put(ruta + "/plazo", json={"dias": 90}).status_code, 403)
                 for invalido in (0, 3651, 1.5, True):
                     self.assertEqual(cliente.put(ruta + "/plazo", headers={"rol": "admin"},
