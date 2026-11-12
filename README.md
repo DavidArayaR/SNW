@@ -1019,6 +1019,22 @@ Meta manda **todo** bajo `field: "messages"`; el backend distingue por el conten
 El `wa_id` de Meta viene **sin `+`** (`56993921740`); la comparación con `pacientes.telefono`
 (`+56993921740`) ignora el `+` y los espacios.
 
+### Respuestas manuales en Historial
+
+En el detalle de un envío, abre **Ver mensajes** y pulsa **Responder** junto
+al mensaje entrante. El aviso para el paciente y el mensaje que se abrirá en
+el call center se previsualizan por separado. Las sugerencias de precio
+especial y de terapia se pueden personalizar por clínica en **Configuración →
+Respuestas del sistema**.
+
+El envío requiere permiso de Historial, de acceso a los datos y de call center,
+además de una ventana de atención de WhatsApp abierta con ese emisor. El servidor
+verifica el mensaje seleccionado y añade su texto al enlace de la clínica. Si
+la consulta excede el tamaño del enlace, se solicita una más breve. La
+confirmación se registra en `respuestas_manuales_envios` y la conversación
+conserva el resultado del envío. La aceptación de Meta y la entrega al paciente
+son estados distintos.
+
 ### Estados de entrega
 
 Al enviar se guarda el `whatsapp_message_id` en `log_envios`. Los cambios de estado

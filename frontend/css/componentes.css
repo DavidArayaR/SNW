@@ -757,6 +757,32 @@ tbody tr:last-child td { border-bottom: none; }
   line-height: 1.4;
 }
 .msg-burbuja--entrante { align-self: flex-start; background: var(--chat-in); color: var(--texto); border: 1px solid var(--chat-in-bd); }
+.msg-responder {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  margin: .35rem 0 0 auto;
+  min-height: 26px;
+  padding: .2rem .5rem;
+  font-size: .75rem;
+}
+#modalCallCenterManual { z-index: 1051; }
+.msg-respuesta-form {
+  max-height: 90dvh;
+  overflow-y: auto;
+}
+.msg-respuesta-original {
+  margin: .45rem 0;
+  padding: .6rem .75rem;
+  max-height: 8rem;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  background: var(--chat-in);
+  color: var(--texto);
+  border: 1px solid var(--chat-in-bd);
+  border-radius: .5rem;
+}
 .msg-burbuja--saliente { align-self: flex-end; background: var(--chat-out); border: 1px solid var(--chat-out-bd); }
 .msg-burbuja--interes { border-color: var(--ok-fg); box-shadow: 0 0 0 1px var(--ok-fg) inset; }
 .msg-texto { white-space: pre-wrap; word-break: break-word; }

@@ -295,6 +295,18 @@ CREATE TABLE IF NOT EXISTS tarifas_whatsapp (
 
 -- Log de las respuestas enviadas a pacientes interesados (mensaje de call
 -- center). Se guarda qué número de call center se asignó.
+CREATE TABLE IF NOT EXISTS respuestas_manuales_envios (
+    solicitud_id CHAR(36) PRIMARY KEY,
+    registro_id INT NOT NULL,
+    mensaje_entrante VARCHAR(255) NOT NULL,
+    categoria VARCHAR(30) NOT NULL,
+    centro_codigo VARCHAR(32) NOT NULL,
+    actor VARCHAR(150) NOT NULL,
+    estado ENUM('procesando','aceptado','error','incierto') NOT NULL DEFAULT 'procesando',
+    mensaje_meta VARCHAR(255) DEFAULT NULL,
+    fecha_hora DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) CHARACTER SET utf8mb4;
+
 CREATE TABLE IF NOT EXISTS call_center_log (
   id INT AUTO_INCREMENT PRIMARY KEY,
   paciente_id INT DEFAULT NULL,

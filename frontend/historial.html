@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
   <link rel="stylesheet" href="css/tema.css?v=tokens1">
   <link rel="stylesheet" href="css/styles.css?v=ritmo-historial1">
-  <link rel="stylesheet" href="css/componentes.css?v=fallidos-pendientes1">
+  <link rel="stylesheet" href="css/componentes.css?v=respuesta-por-mensaje1">
   <link rel="stylesheet" href="css/layout.css?v=navcolor1">
   <link rel="stylesheet" href="css/refinamiento.css?v=merge-frontend1">
   <link rel="stylesheet" href="css/estilo-nuevo.css?v=ui-unslop1">
@@ -221,8 +221,22 @@
   </div>
 
   <div id="modalCallCenterManual" class="modal" hidden>
-    <form id="formCallCenterManual" class="modal__card modal__card--detalle" role="dialog" aria-modal="true" aria-labelledby="callCenterManualTitulo">
-      <h3 id="callCenterManualTitulo">Enviar botón de call center</h3>
+    <form id="formCallCenterManual" class="modal__card modal__card--detalle msg-respuesta-form" role="dialog" aria-modal="true" aria-labelledby="callCenterManualTitulo">
+      <h3 id="callCenterManualTitulo">Responder</h3>
+      <p id="callCenterManualContexto" class="field__hint"></p>
+      <blockquote id="callCenterManualOriginal" class="msg-respuesta-original"></blockquote>
+      <div class="field">
+        <label for="callCenterManualCategoria">Tipo de respuesta</label>
+        <select id="callCenterManualCategoria">
+          <optgroup label="Acciones manuales">
+            <option value="general">Enviar botón de call center</option>
+          </optgroup>
+          <optgroup label="Mensajes preparados">
+            <option value="precio_especial">Preguntas sobre el precio especial</option>
+            <option value="precio_terapia">Preguntas sobre el precio de terapia</option>
+          </optgroup>
+        </select>
+      </div>
       <div class="field">
         <label for="callCenterManualMensaje">Mensaje que acompaña al botón</label>
         <textarea id="callCenterManualMensaje" rows="3" maxlength="1000" required></textarea>
@@ -235,20 +249,21 @@
         </select>
       </div>
       <div class="field">
-        <label for="callCenterManualPreparado">Texto que aparecerá al pulsar «Ir a call center»</label>
+        <label for="callCenterManualPreparado">Introducción del mensaje preparado</label>
         <textarea id="callCenterManualPreparado" rows="3" maxlength="500" readonly></textarea>
       </div>
-      <p class="field__hint">El botón abre el chat del CRM de la clínica. El paciente debe haber escrito en las últimas 24 horas.</p>
+      <p id="callCenterManualDestino" class="field__hint"></p>
+      <div id="callCenterManualVista" class="msg-respuesta-original" aria-label="Vista previa del mensaje para call center"></div>
       <p id="callCenterManualError" class="field__hint" role="alert"></p>
       <div class="modal__actions">
         <button type="button" class="btn btn--ghost" id="cancelarCallCenterManual">Cancelar</button>
-        <button type="submit" class="btn btn--primary" id="enviarCallCenterManual">Enviar mensaje y botón</button>
+        <button type="submit" class="btn btn--primary" id="enviarCallCenterManual">Enviar respuesta</button>
       </div>
     </form>
   </div>
 
   <div id="modalMensajes" class="modal" hidden>
-    <div class="modal__card modal__card--detalle" role="dialog" aria-modal="true">
+    <div class="modal__card modal__card--detalle" role="dialog" aria-modal="true" aria-labelledby="mensajesTitulo">
       <h3 id="mensajesTitulo">Mensajes del paciente</h3>
       <div id="msgPacienteCab" class="msg-cab"></div>
       <p class="msg-etiquetas-ayuda">Las etiquetas se sugieren automáticamente. Pulsa una para corregirla; tu revisión quedará guardada y no cambiará el estado del paciente ni los envíos.</p>
@@ -296,7 +311,7 @@
 
   <script src="js/layout.js?v=reservo-nav2"></script>
   <script src="js/pass-toggle.js"></script>
-  <script src="js/historial.js?v=mensaje-preparado-manual1"></script>
+  <script src="js/historial.js?v=respuesta-por-mensaje1"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>

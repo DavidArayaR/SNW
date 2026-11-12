@@ -74,8 +74,10 @@ class _BufferConsolaAccion:
             for linea in lineas:
                 self._archivo.write(self._formatear_linea(canal, linea))
 
-    def contenido(self) -> str:
+    def contenido(self) -> str | None:
         with self._lock:
+            if self._cerrado:
+                return None
             self._archivo.flush()
             posicion = self._archivo.tell()
             self._archivo.seek(0)
@@ -142,11 +144,12 @@ def _instalar_captura_consola_accion() -> None:
 
 
 @contextmanager
-def accion_de_error(accion):
+def accion_de_error(accion, *, captura_independiente=False):
     """Asocia errores y salida de consola a una acción sin cruzar requests."""
     _instalar_captura_consola_accion()
     captura_previa = _CAPTURA_CONSOLA_ACCION.get()
-    captura = captura_previa or _BufferConsolaAccion()
+    captura = (_BufferConsolaAccion() if captura_independiente or captura_previa is None
+               else captura_previa)
     token_accion = _ACCION_ERROR.set(accion)
     token_captura = _CAPTURA_CONSOLA_ACCION.set(captura)
     try:
@@ -154,7 +157,7 @@ def accion_de_error(accion):
     finally:
         _CAPTURA_CONSOLA_ACCION.reset(token_captura)
         _ACCION_ERROR.reset(token_accion)
-        if captura_previa is None:
+        if captura is not captura_previa:
             captura.cerrar()
 
 
@@ -235,8 +238,13 @@ def _guardar_error_archivo(contexto: str, exc: BaseException | None = None,
                 traza += (f"\n  {Path(frame.filename).name}:{frame.lineno} "
                           f"en {frame.name}")
     captura = _CAPTURA_CONSOLA_ACCION.get()
-    consola = captura.contenido() if captura is not None else ""
-    if consola:
+    try:
+        consola = captura.contenido() if captura is not None else ""
+    except (OSError, ValueError):
+        consola = None
+    if consola is None:
+        traza += "\nNo se pudo recuperar la captura de consola de la acción."
+    elif consola:
         traza += (f"\nConsola del backend capturada desde el inicio de la acción "
                   f"({captura.inicio:%Y-%m-%d %H:%M:%S%z}) hasta este error:\n{consola.rstrip()}")
     elif captura is not None:
@@ -1037,6 +1045,16 @@ def asegurar_tabla_config() -> None:
             )
             if not cur.fetchone():
                 cur.execute("ALTER TABLE call_center_log ADD COLUMN vista_mensaje TEXT NULL")
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS respuestas_manuales_envios ("
+                " solicitud_id CHAR(36) PRIMARY KEY, registro_id INT NOT NULL,"
+                " mensaje_entrante VARCHAR(255) NOT NULL, categoria VARCHAR(30) NOT NULL,"
+                " centro_codigo VARCHAR(32) NOT NULL, actor VARCHAR(150) NOT NULL,"
+                " estado ENUM('procesando','aceptado','error','incierto') NOT NULL DEFAULT 'procesando',"
+                " mensaje_meta VARCHAR(255) DEFAULT NULL,"
+                " fecha_hora DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                ") CHARACTER SET utf8mb4"
+            )
             cur.execute(
                 "CREATE TABLE IF NOT EXISTS call_center_prueba_interes ("
                 " mensaje_id VARCHAR(255) PRIMARY KEY,"

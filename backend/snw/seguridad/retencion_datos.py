@@ -735,6 +735,8 @@ def ejecutar_limpieza() -> dict[str, int]:
             ("derivaciones_call_center", lambda c: _anonimizar_derivaciones(c, dias_datos)),
             ("historial_call_center", lambda c: _anonimizar_call_center(c, dias_datos)),
             ("historial_call_center_vencido", lambda c: _borrar_vencidos(c, "call_center_log", "fecha_hora", dias_historial)),
+            ("respuestas_manuales_vencidas", lambda c: _borrar_vencidos(
+                c, "respuestas_manuales_envios", "fecha_hora", dias_historial)),
             ("derivaciones_vencidas", lambda c: _borrar_vencidos(c, "call_center_derivaciones", "creado", dias_historial)),
             ("pacientes", lambda c: _purga_pacientes_dinamicos(c, dias_datos)),
             ("listas_reservo", lambda c: _purga_reservo(c, dias_datos)),

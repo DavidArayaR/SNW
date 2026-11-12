@@ -748,10 +748,8 @@ function pintarDetalle() {
         : d.es_reservo && d.datos_completos
         ? `<button type="button" class="btn btn--sm btn--ghost" data-mensajes-reservo="${Number(d.id)}">Ver mensajes</button>`
         : d.paciente_id && d.datos_completos
-        ? `<button type="button" class="btn btn--sm btn--ghost" data-mensajes="${d.paciente_id}">Ver mensajes</button>` : "";
-      const enviarCC = d.puede_enviar_callcenter
-        ? `<button type="button" class="btn btn--sm btn--ghost" data-callcenter-manual="${Number(d.id)}"${d.callcenter_ventana_abierta ? "" : ' disabled title="El paciente debe haber escrito a esta clínica en las últimas 24 horas"'}>${d.reagendamiento ? "Enviar botón de reagendamiento" : "Enviar botón de call center"}</button>` : "";
-      const celdaMsgs = `<td class="hist-col-msgs">${verMensajes}${enviarCC || (!verMensajes ? "—" : "")}</td>`;
+        ? `<button type="button" class="btn btn--sm btn--ghost" data-registro-conversacion="${Number(d.id)}" data-mensajes="${Number(d.paciente_id)}">Ver mensajes</button>` : "";
+      const celdaMsgs = `<td class="hist-col-msgs">${verMensajes || "—"}</td>`;
       const [claseEntrega, textoEntrega] = estadoEntrega(d);
       const motivo = d.codigo_error === "131042"
         ? "Error 131042: falta configurar la moneda de la cuenta de WhatsApp Business."
@@ -872,26 +870,18 @@ $("#modalDetalle").addEventListener("click", (e) => { if (e.target === $("#modal
 /* ---------- Mensajes del paciente ---------- */
 
 $("#detalleBody").addEventListener("click", (e) => {
-  const reagendar = e.target.closest("[data-mensajes-reagendar]");
-  if (reagendar && detalleActual) {
-    abrirMensajesReagendar(detalleActual.envioId, reagendar.dataset.mensajesReagendar);
-    return;
-  }
-  const reservo = e.target.closest("[data-mensajes-reservo]");
-  if (reservo && detalleActual) {
-    abrirMensajesReservo(detalleActual.envioId, reservo.dataset.mensajesReservo);
-    return;
-  }
-  const cc = e.target.closest("[data-callcenter-manual]");
-  if (cc) {
-    const fila = filasDetalle.find(d => Number(d.id) === Number(cc.dataset.callcenterManual));
-    if (fila && detalleActual) {
-      abrirCallCenterManual(fila, detalleActual);
-    }
-    return;
-  }
-  const btn = e.target.closest("[data-mensajes]");
-  if (btn) abrirMensajes(btn.dataset.mensajes);
+  const boton = e.target.closest("[data-mensajes-reagendar], [data-mensajes-reservo], [data-mensajes]");
+  if (!boton || !detalleActual) return;
+  const { mensajesReagendar, mensajesReservo, mensajes } = boton.dataset;
+  const id = Number(mensajesReagendar || mensajesReservo || boton.dataset.registroConversacion);
+  const fila = filasDetalle.find(d => Number(d.id) === id);
+  const { envioId, ambiente } = detalleActual;
+  const areaId = areaDetalle;
+  let cargar;
+  if (mensajesReagendar) cargar = contexto => abrirMensajesReagendar(envioId, id, contexto);
+  else if (mensajesReservo) cargar = contexto => abrirMensajesReservo(envioId, id, contexto);
+  else cargar = contexto => abrirMensajes(mensajes, contexto);
+  cargar({ envioId, registroId: id, ambiente, areaId, fila, cargar });
 });
 
 let callCenterManualActual = null;
@@ -899,61 +889,96 @@ const ccModo = $("#callCenterManualModo");
 const ccPreparado = $("#callCenterManualPreparado");
 const ccEnviar = $("#enviarCallCenterManual");
 const ccError = $("#callCenterManualError");
+const ccCategoria = $("#callCenterManualCategoria");
+const ccTexto = $("#callCenterManualMensaje");
+const ccCancelar = $("#cancelarCallCenterManual");
 
 function urlCallCenterManual(objetivo) {
-  return `api/notificaciones/historial/${encodeURIComponent(objetivo.envioId)}/call-center/${objetivo.registroId}?ambiente=${encodeURIComponent(objetivo.ambiente)}`;
+  const { envioId, registroId, ambiente, mensajeId } = objetivo;
+  const query = new URLSearchParams({ ambiente, mensaje_id: mensajeId, categoria: ccCategoria.value });
+  return `api/notificaciones/historial/${encodeURIComponent(envioId)}/call-center/${registroId}?${query}`;
+}
+
+function mostrarVistaPreparado() {
+  const datos = callCenterManualActual?.datos;
+  const cierre = datos?.cierre ? `\n\n${datos.cierre}` : "";
+  $("#callCenterManualVista").textContent = datos
+    ? `${ccPreparado.value.trim()}\n\nMensaje original:\n«${datos.consulta}»${cierre}` : "";
 }
 
 function mostrarPreparadoManual() {
+  const objetivo = callCenterManualActual;
+  if (!objetivo?.datos) return;
   const personalizado = ccModo.value === "personalizado";
   ccPreparado.readOnly = !personalizado;
   ccPreparado.required = personalizado;
-  ccPreparado.value = personalizado
-    ? callCenterManualActual.personalizado
-    : callCenterManualActual.predeterminado || "";
+  ccPreparado.value = personalizado ? objetivo.personalizado : objetivo.datos.mensaje_preparado;
+  mostrarVistaPreparado();
 }
 
-async function abrirCallCenterManual(fila, detalle) {
-  const objetivo = { envioId: detalle.envioId, registroId: fila.id, ambiente: detalle.ambiente };
-  callCenterManualActual = objetivo;
-  $("#callCenterManualTitulo").textContent = fila.reagendamiento
-    ? "Enviar botón de reagendamiento" : "Enviar botón de call center";
-  $("#callCenterManualMensaje").value = fila.mensaje_callcenter || "";
-  ccModo.value = "predeterminado";
-  ccModo.disabled = true;
-  ccEnviar.disabled = true;
-  mostrarPreparadoManual();
-  ccError.textContent = "Cargando mensaje preparado…";
-  $("#modalCallCenterManual").hidden = false;
-  $("#callCenterManualMensaje").focus();
+async function cargarVistaCallCenter(objetivo) {
+  const solicitud = ++objetivo.carga;
+  objetivo.datos = null;
+  ccModo.disabled = ccEnviar.disabled = true;
+  ccTexto.readOnly = ccPreparado.readOnly = true;
+  ccTexto.value = ccPreparado.value = "";
+  $("#callCenterManualDestino").textContent = "";
+  mostrarVistaPreparado();
+  ccError.textContent = "Cargando vista previa…";
   try {
     const res = await fetch(urlCallCenterManual(objetivo), { headers: authHeaders(), cache: "no-store" });
+    if (res.status === 401) { window.snwSesionExpirada(); return; }
     const data = await res.json().catch(() => ({}));
-    if (objetivo !== callCenterManualActual) return;
-    if (!res.ok) throw new Error(data.detail || "No se pudo cargar el mensaje preparado.");
-    objetivo.predeterminado = data.mensaje_preparado;
-    objetivo.personalizado = (objetivo.predeterminado || "").slice(0, ccPreparado.maxLength);
-    ccModo.options[0].disabled = !objetivo.predeterminado;
-    if (!objetivo.predeterminado) ccModo.value = "personalizado";
+    if (objetivo !== callCenterManualActual || solicitud !== objetivo.carga) return;
+    if (!res.ok) throw new Error(data.detail || "No se pudo cargar la respuesta.");
+    objetivo.datos = data;
+    objetivo.personalizado = data.mensaje_preparado.slice(0, ccPreparado.maxLength);
+    ccModo.value = "predeterminado";
+    ccTexto.value = data.mensaje;
+    $("#callCenterManualOriginal").textContent = data.consulta;
+    $("#callCenterManualDestino").textContent = `Chat de call center · +${data.numero_call_center}`;
+    $("#callCenterManualContexto").textContent = `${objetivo.paciente} · ${data.clinica}`;
     mostrarPreparadoManual();
-    ccError.textContent = objetivo.predeterminado ? "" : "Escribe un mensaje preparado para continuar.";
-    ccModo.disabled = false;
-    ccEnviar.disabled = false;
+    ccError.textContent = "";
+    ccModo.disabled = ccEnviar.disabled = ccTexto.readOnly = false;
   } catch (err) {
-    if (objetivo === callCenterManualActual) ccError.textContent = err.message;
+    if (objetivo === callCenterManualActual && solicitud === objetivo.carga) ccError.textContent = err.message;
   }
 }
 
-function cerrarCallCenterManual() {
-  $("#modalCallCenterManual").hidden = true;
-  callCenterManualActual = null;
+function abrirCallCenterManual(vista, mensaje, boton) {
+  const contexto = vista.respuestaManual;
+  const objetivo = {
+    ...contexto, boton, mensajeId: String(mensaje.id), carga: 0,
+    paciente: [$("#mensajesTitulo").textContent, telefonoEnmascarado(vista.paciente?.telefono)].join(" · "),
+  };
+  callCenterManualActual = objetivo;
+  const reagendar = !!contexto.fila.reagendamiento;
+  ccCategoria.options[0].text = reagendar ? "Enviar botón de reagendamiento" : "Enviar botón de call center";
+  ccCategoria.querySelector("optgroup:last-child").disabled = reagendar;
+  ccCategoria.value = "general";
+  ccCategoria.disabled = reagendar;
+  $("#callCenterManualContexto").textContent = objetivo.paciente;
+  $("#callCenterManualOriginal").textContent = mensaje.texto || "Mensaje sin texto";
+  $("#modalCallCenterManual").hidden = false;
+  (reagendar ? ccCancelar : ccCategoria).focus();
+  cargarVistaCallCenter(objetivo);
 }
 
+function cerrarCallCenterManual() {
+  const boton = callCenterManualActual?.boton;
+  $("#modalCallCenterManual").hidden = true;
+  callCenterManualActual = null;
+  boton?.focus();
+}
+
+ccCategoria.addEventListener("change", () => cargarVistaCallCenter(callCenterManualActual));
 ccModo.addEventListener("change", mostrarPreparadoManual);
 ccPreparado.addEventListener("input", () => {
   callCenterManualActual.personalizado = ccPreparado.value;
+  mostrarVistaPreparado();
 });
-$("#cancelarCallCenterManual").addEventListener("click", () => {
+ccCancelar.addEventListener("click", () => {
   if (!callCenterManualActual?.enviando) cerrarCallCenterManual();
 });
 $("#modalCallCenterManual").addEventListener("click", e => {
@@ -965,43 +990,48 @@ document.addEventListener("keydown", e => {
 $("#formCallCenterManual").addEventListener("submit", async e => {
   e.preventDefault();
   const objetivo = callCenterManualActual;
-  if (!objetivo || ccEnviar.disabled) return;
-  const mensajePreparado = ccModo.value === "personalizado" ? ccPreparado.value.trim() : null;
-  if (mensajePreparado === "") {
-    ccError.textContent = "Escribe el mensaje preparado o usa el predeterminado.";
-    ccPreparado.focus();
-    return;
-  }
+  if (!objetivo?.datos || ccEnviar.disabled || objetivo.enviando) return;
   objetivo.enviando = true;
-  ccEnviar.disabled = true;
+  ccEnviar.disabled = ccCategoria.disabled = ccModo.disabled = ccCancelar.disabled = true;
+  ccTexto.readOnly = ccPreparado.readOnly = true;
   ccError.textContent = "Enviando…";
   try {
     const res = await fetch(urlCallCenterManual(objetivo), {
       method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ mensaje: $("#callCenterManualMensaje").value.trim(), mensaje_preparado: mensajePreparado }),
+      body: JSON.stringify({
+        mensaje: ccTexto.value.trim(),
+        mensaje_preparado: ccModo.value === "personalizado" ? ccPreparado.value.trim() : null,
+        mensaje_id: objetivo.mensajeId, categoria: ccCategoria.value, solicitud_id: objetivo.datos.solicitud_id,
+      }),
     });
+    if (res.status === 401) { window.snwSesionExpirada(); return; }
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.detail || "No se pudo enviar el mensaje.");
+    if (!res.ok || !data.ok) throw new Error(data.detail || "No se pudo confirmar la respuesta.");
     cerrarCallCenterManual();
     toast(data.mensaje);
+    await objetivo.cargar(objetivo);
   } catch (err) {
     ccError.textContent = err.message;
   } finally {
     objetivo.enviando = false;
-    ccEnviar.disabled = false;
+    ccEnviar.disabled = ccModo.disabled = ccCancelar.disabled = ccTexto.readOnly = false;
+    ccCategoria.disabled = !!objetivo.fila.reagendamiento;
+    ccPreparado.readOnly = ccModo.value !== "personalizado";
   }
 });
 
-async function abrirMensajes(pacienteId) {
+async function abrirMensajes(pacienteId, contexto) {
   try {
-    const qsEsp = areaDetalle != null ? `&area_id=${areaDetalle}` : "";
-    const r = await fetch(`api/pacientes/${pacienteId}/mensajes?ambiente=${ambienteDetalle}${qsEsp}`, {
+    const qs = new URLSearchParams({ ambiente: contexto.ambiente });
+    if (contexto.areaId != null) qs.set("area_id", contexto.areaId);
+    const r = await fetch(`api/pacientes/${pacienteId}/mensajes?${qs}`, {
       headers: authHeaders(), cache: "no-store",
     });
     if (r.status === 401) { window.snwSesionExpirada(); return; }
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.detail || "No se pudieron cargar los mensajes del paciente.");
-    data.audio_url = `api/pacientes/${pacienteId}/audios/transcribir?ambiente=${ambienteDetalle}${qsEsp}`;
+    data.audio_url = `api/pacientes/${pacienteId}/audios/transcribir?${qs}`;
+    data.respuestaManual = contexto;
     renderMensajes(data);
   } catch (error) {
     console.error("[historial.js abrirMensajes()]", error);
@@ -1009,9 +1039,9 @@ async function abrirMensajes(pacienteId) {
   }
 }
 
-async function abrirMensajesReservo(envioId, registroId) {
+async function abrirMensajesReservo(envioId, registroId, contexto) {
   try {
-    const qs = `?ambiente=${encodeURIComponent(ambienteDetalle)}`;
+    const qs = `?ambiente=${encodeURIComponent(contexto.ambiente)}`;
     const r = await fetch(`api/notificaciones/historial/${encodeURIComponent(envioId)}/registros/${encodeURIComponent(registroId)}/mensajes${qs}`, {
       headers: authHeaders(), cache: "no-store",
     });
@@ -1019,6 +1049,7 @@ async function abrirMensajesReservo(envioId, registroId) {
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.detail || "No se pudieron cargar los mensajes del paciente.");
     data.audio_url = `api/notificaciones/historial/${encodeURIComponent(envioId)}/registros/${encodeURIComponent(registroId)}/audios/transcribir${qs}`;
+    data.respuestaManual = contexto;
     renderMensajes(data);
   } catch (error) {
     console.error("[historial.js abrirMensajesReservo()]", error);
@@ -1026,7 +1057,7 @@ async function abrirMensajesReservo(envioId, registroId) {
   }
 }
 
-async function abrirMensajesReagendar(envioId, registroId) {
+async function abrirMensajesReagendar(envioId, registroId, contexto) {
   try {
     const res = await fetch(`api/notificaciones/historial/${encodeURIComponent(envioId)}/reagendamientos/${registroId}/mensajes`, {
       headers: authHeaders(), cache: "no-store",
@@ -1034,6 +1065,7 @@ async function abrirMensajesReagendar(envioId, registroId) {
     const datos = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(datos.detail || "No se pudo cargar la conversación de reagendamiento.");
     datos.audio_url = `api/notificaciones/historial/${encodeURIComponent(envioId)}/reagendamientos/${registroId}/audios/transcribir`;
+    datos.respuestaManual = contexto;
     renderMensajes(datos);
   } catch (err) { console.error("[historial.js abrirMensajesReagendar()]", err); toast(err.message, "error"); }
 }
@@ -1054,6 +1086,7 @@ function renderMensajes(data) {
 
   const hilo = $("#msgHilo");
   const msgs = data.mensajes || [];
+  const respuestaManual = data.respuestaManual?.fila;
   if (!msgs.length) {
     hilo.innerHTML = `<p class="msg-vacio">El paciente todavía no ha escrito ningún mensaje.</p>`;
   } else {
@@ -1071,6 +1104,11 @@ function renderMensajes(data) {
           ` data-etiqueta-id="${Number(m.id)}" data-etiqueta="${clave}"` +
           ` aria-pressed="${(m.etiquetas || []).includes(clave)}">${nombre}</button>`).join("") +
         `</div>` : "";
+      const emisorCoincide = respuestaManual?.reagendamiento || respuestaManual?.es_reservo
+        || (m.emisor_id && m.emisor_id === respuestaManual?.emisor_respuesta);
+      const responder = m.direccion === "entrante" && respuestaManual?.puede_enviar_callcenter && emisorCoincide
+        ? `<button type="button" class="btn btn--sm btn--ghost msg-responder" data-responder="${escaparHtml(String(m.id))}">` +
+          '<i class="fa-solid fa-reply" aria-hidden="true"></i> Responder</button>' : "";
       return `<div class="msg-burbuja msg-burbuja--${m.direccion}${m.interes ? " msg-burbuja--interes" : ""}">` +
         `<div class="msg-texto">${escaparHtml(texto)}</div>` +
         (m.tipo === "audio" ? `<div class="msg-audio">` +
@@ -1080,7 +1118,7 @@ function renderMensajes(data) {
               `<p class="field__hint">Se enviará el audio a Groq para convertirlo a texto.</p>` :
               `<p class="field__hint">Audio antiguo sin referencia disponible. Pide que lo reenvíen.</p>`) +
           `<p class="field__hint" role="status" data-audio-estado></p></div>` : "") +
-        `<div class="msg-meta">${meta}</div>${etiquetas}</div>`;
+        `<div class="msg-meta">${meta}</div>${etiquetas}${responder}</div>`;
     }).join("");
   }
   const estadoInteres = $("#msgInteresEstado");
@@ -1105,6 +1143,14 @@ const ETIQUETAS_MENSAJE = {
 };
 let mensajesVistaActual = null;
 const guardandoEtiquetas = new Set();
+
+$("#msgHilo").addEventListener("click", event => {
+  const boton = event.target.closest("[data-responder]");
+  const vista = mensajesVistaActual;
+  if (!boton || !vista?.respuestaManual) return;
+  const mensaje = vista.mensajes.find(m => m.direccion === "entrante" && String(m.id) === boton.dataset.responder);
+  if (mensaje) abrirCallCenterManual(vista, mensaje, boton);
+});
 
 $("#msgHilo").addEventListener("click", async event => {
   const boton = event.target.closest("[data-transcribir-audio]");

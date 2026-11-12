@@ -27,7 +27,7 @@ import ssl
 
 import httpx
 from snw.whatsapp import audio_transcripcion
-from snw.whatsapp import consultas_ventana
+from snw.whatsapp import consultas_ventana, respuestas_manuales
 from snw.reportes import estadisticas_envio
 from snw.whatsapp.intenciones_call_center import (detectar_automatizacion, es_pregunta_de_precio,
                                     patrones_configurados, tipo_consulta_entrante)
@@ -61,7 +61,7 @@ from db import (
 from snw.mensajeria.motor_envio import (obtener_canal, MotorApiOficial, ResultadoEnvioIncierto,
                          FalloInfraestructuraDespacho)
 from snw.whatsapp.whatsapp_channels import (CENTROS, catalogo_centros, claves_centro, credenciales_centro,
-                               mismo_centro,
+                               mismo_centro, codigo_centro_canonico,
                                app_id_centro, listar_canales, resolver_centro, resolver_phone_id,
                                emisor_webhook_actual)
 from snw.whatsapp.whatsapp_channel_verification import verificar_canal_meta
@@ -2342,6 +2342,22 @@ class EtiquetasRespuestaIn(BaseModel):
     etiquetas: list[str]
 
 
+def _cond_mensajes_ficha(tabla: str, ambiente: str) -> tuple[str, tuple]:
+    cond, args = _cond_tabla_log_segura(tabla, ambiente)
+    if tabla in ("pacientes_prod", "pacientes_dev"):
+        # Las fichas de ambos entornos pueden compartir el mismo ID. Para
+        # filas históricas sin tabla, comprobar también el teléfono.
+        coincide = (
+            f"EXISTS (SELECT 1 FROM {tabla} ficha WHERE ficha.id=log_envios.paciente_id"
+            " AND BINARY REPLACE(REPLACE(ficha.telefono, '+', ''), ' ', '')"
+            " = BINARY REPLACE(REPLACE(log_envios.numero_telefono, '+', ''), ' ', ''))"
+        )
+        cond += f" AND (tabla_pacientes=%s OR {coincide})" if cond else f" AND {coincide}"
+        if args:
+            args += (tabla,)
+    return cond, args
+
+
 def etiquetar_mensaje_paciente(paciente_id: int, mensaje_id: int, body: EtiquetasRespuestaIn,
                               ambiente: str = Query("produccion"),
                               area_id: int | None = Query(None),
@@ -2356,10 +2372,10 @@ def etiquetar_mensaje_paciente(paciente_id: int, mensaje_id: int, body: Etiqueta
         etiquetas.remove("requiere_revision")
     if area_id is None and not (tiene_permiso(sesion, "historial") or tiene_permiso(sesion, "pacientes")):
         raise HTTPException(403, detail="No tienes permiso para acceder a esta sección.")
-    tabla, esp = _resolver_tabla_pacientes(sesion, ambiente, area_id)
+    tabla, _ = _resolver_tabla_pacientes(sesion, ambiente, area_id)
     if not tiene_permiso(sesion, "pacientes_ver_datos"):
         raise HTTPException(403, detail="No tienes permiso para etiquetar mensajes de pacientes.")
-    cond_log, args_log = _cond_tabla_log_segura(tabla if esp else None, ambiente)
+    cond_log, args_log = _cond_mensajes_ficha(tabla, ambiente)
     with conectar(ambiente) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT id FROM log_envios WHERE id = %s AND paciente_id = %s"
@@ -2414,7 +2430,7 @@ def mensajes_paciente(paciente_id: int, ambiente: str = Query("produccion"),
         pac = cur.fetchone()
         if not pac:
             raise HTTPException(404, detail="Paciente no encontrado")
-        cond_log, args_log = _cond_tabla_log_segura(t if _esp else None, ambiente)
+        cond_log, args_log = _cond_mensajes_ficha(t, ambiente)
         cur.execute(
             "SELECT id, fecha_hora, mensaje, plantilla_clave, estado_envio, descripcion_error, wa_phone_id, whatsapp_message_id"
             " FROM log_envios WHERE paciente_id = %s"
@@ -2461,6 +2477,7 @@ def mensajes_paciente(paciente_id: int, ambiente: str = Query("produccion"),
             "texto": txt,
             "plantilla": None if entrante else (f.get("plantilla_clave") or None),
             "estado": f.get("estado_envio"),
+            "emisor_id": f.get("wa_phone_id"),
             "error": f.get("descripcion_error"),
             "interes": entrante and es_mensaje_interes(txt),
             "etiquetas": etiqueta_info["etiquetas"],
@@ -2471,7 +2488,7 @@ def mensajes_paciente(paciente_id: int, ambiente: str = Query("produccion"),
     if ids_autorizados:
         with conectar() as conn, conn.cursor() as cur:
             marcas = ",".join(["%s"] * len(ids_autorizados))
-            cur.execute("SELECT mensaje_id, recibido, audio_media_id, audio_transcripcion"
+            cur.execute("SELECT mensaje_id, recibido, audio_media_id, audio_transcripcion, wa_phone_id"
                         " FROM whatsapp_conversaciones_mensajes WHERE tipo='audio'"
                         f" AND telefono_paciente=%s AND BINARY mensaje_id IN ({marcas})"
                         " ORDER BY recibido LIMIT 500",
@@ -2491,6 +2508,7 @@ def _presentar_audio(fila):
     return {"id": fila["mensaje_id"], "texto": "[Audio recibido]", "tipo": "audio",
             "fecha": fila["recibido"].strftime("%d-%m-%Y %H:%M") if fila.get("recibido") else "01-01-1970 00:00",
             "direccion": "entrante", "etiquetas_editables": False,
+            "emisor_id": fila.get("wa_phone_id"),
             "puede_transcribir": bool(fila.get("audio_media_id")),
             "transcripcion": fila.get("audio_transcripcion")}
 
@@ -2789,7 +2807,8 @@ def _despachar_call_center(pac: dict, ambiente: str, tabla: str | None = None,
                            consulta: str = "", texto_personalizado: str | None = None,
                            emisor_forzado: dict | None = None, automatico: bool = True,
                            referencia: str | None = None, mensaje_prueba: str | None = None,
-                           mensaje_preparado: str | None = None) -> dict:
+                           mensaje_preparado: str | None = None, *,
+                           propagar_incierto: bool = False) -> dict:
     """Envía el mensaje fijo de call center a un paciente y lo registra en el
     historial y en call_center_log. Devuelve {ok, error, telefono}. No lanza.
     Con `tabla` (area) se etiqueta esa tabla y se salta el filtro de
@@ -2829,6 +2848,8 @@ def _despachar_call_center(pac: dict, ambiente: str, tabla: str | None = None,
     try:
         resultado = canal.enviar(telefono, texto, plantilla=datos_plantilla)
     except Exception as e:
+        if propagar_incierto and isinstance(e, ResultadoEnvioIncierto):
+            raise
         log_error(f"_despachar_call_center(pac={pac.get('id')}, {ambiente})", e)
         resultado = (False, None, f"Error inesperado: {e}")
     if len(resultado) == 3:
@@ -3584,6 +3605,20 @@ _RESPUESTAS_SISTEMA = {
                          "Pide la consulta completa en un solo mensaje."),
     "consulta_larga": ("Consulta · pedir un resumen", _AVISO_CONSULTA_LARGA,
                        "Se envía si la consulta supera el máximo admitido."),
+    "manual_precio_especial": ("Respuesta manual · precio especial",
+        "¡Hola! Gracias por escribirnos. En nuestro call center pueden orientarte sobre los valores especiales "
+        "disponibles y sus condiciones. Usa el botón para enviarles tu consulta.",
+        "Texto sugerido para consultas sobre un precio especial desde Historial."),
+    "manual_precio_terapia": ("Respuesta manual · precio de terapia",
+        "¡Hola! Gracias por contactarnos. En nuestro call center pueden orientarte sobre los valores "
+        "actuales de las sesiones de terapia y las opciones de atención. Usa el botón para enviarles tu consulta.",
+        "Texto sugerido para consultas sobre el precio de terapia desde Historial."),
+    "preparado_precio_especial": ("Chat de call center · precio especial",
+        respuestas_manuales.CATEGORIAS["precio_especial"][1],
+        "Introducción del chat de call center. Puedes usar {clinica}. Se agrega el mensaje seleccionado."),
+    "preparado_precio_terapia": ("Chat de call center · precio de terapia",
+        respuestas_manuales.CATEGORIAS["precio_terapia"][1],
+        "Introducción del chat de call center. Puedes usar {clinica}. Se agrega el mensaje seleccionado."),
     "reagendar_consulta": ("Reagendamiento · pedir consulta",
                            "Escríbenos tu consulta para prepararla y abrir el WhatsApp "
                            "del equipo de atención de tu clínica.",
@@ -7208,17 +7243,24 @@ def actualizar_estado_paciente(paciente_id: int, estado: str, ambiente: str, tab
     t = tabla or tabla_pacientes(ambiente)
     if not columna_existe(t, "estado", ambiente):
         return
-    with conectar(ambiente) as conn, conn.cursor() as cur:
-        if estado == "enviado" and whatsapp_message_id:
-            cur.execute(
-                f"UPDATE {t} SET estado = %s WHERE id = %s"
-                " AND NOT EXISTS (SELECT 1 FROM log_envios"
-                " WHERE whatsapp_message_id = %s AND estado_whatsapp = 'failed')",
-                (estado, paciente_id, whatsapp_message_id),
-            )
-        else:
-            cur.execute(f"UPDATE {t} SET estado = %s WHERE id = %s", (estado, paciente_id))
-        conn.commit()
+    sql = f"UPDATE {t} SET estado = %s WHERE id = %s"
+    args = (estado, paciente_id)
+    if estado == "enviado" and whatsapp_message_id:
+        sql += (" AND NOT EXISTS (SELECT 1 FROM log_envios"
+                " WHERE whatsapp_message_id = %s AND estado_whatsapp = 'failed')")
+        args += (whatsapp_message_id,)
+    # El webhook y el despacho pueden escribir a la vez. Se repite solo
+    # esta transacción local, con una conexión nueva y el mismo ID de Meta.
+    for intento in range(3):
+        try:
+            with conectar(ambiente) as conn, conn.cursor() as cur:
+                cur.execute(sql, args)
+                conn.commit()
+            return
+        except pymysql.err.OperationalError as exc:
+            if not exc.args or exc.args[0] != 1213 or intento == 2:
+                raise
+            time.sleep(0.05 * (intento + 1))
 
 
 def limpiar_interes_paciente(paciente_id: int, ambiente: str, tabla: str | None = None) -> None:
@@ -7247,7 +7289,8 @@ def actualizar_telefono(paciente_id: int, telefono: str, ambiente: str, tabla: s
 
 def registrar_historial(paciente_id, nombre, telefono, clave_plantilla, mensaje, estado, error=None,
                         ambiente="produccion", envio_id=None, whatsapp_message_id=None,
-                        area_id=None, tabla_pacientes=None, emisor: dict | None = None) -> None:
+                        area_id=None, tabla_pacientes=None, emisor: dict | None = None, *,
+                        guardar_emisor_sin_id=False) -> None:
     try:
         with conectar(ambiente) as conn, conn.cursor() as cur:
             cols = columnas_tabla("log_envios", ambiente)
@@ -7257,7 +7300,8 @@ def registrar_historial(paciente_id, nombre, telefono, clave_plantilla, mensaje,
                 extra_val = (area_id, tabla_pacientes)
             if "wa_phone_id" in cols:
                 extra_col += ", wa_phone_id"
-                extra_val += (emisor.get("phoneNumberId") if emisor and whatsapp_message_id else None,)
+                extra_val += (emisor.get("phoneNumberId") if emisor and (whatsapp_message_id or guardar_emisor_sin_id)
+                              else None,)
             if "centro_codigo" in cols:
                 extra_col += ", centro_codigo"
                 extra_val += ((emisor or {}).get("codigo"),)
@@ -7349,7 +7393,8 @@ def actualizar_envio_batch(envio_id, ambiente, enviados=None, fallidos=None,
 def procesar_job(job_id: str) -> None:
     """Wrapper: garantiza que cualquier error del envío quede en consola y
     marque el job como fallido en vez de morir en silencio."""
-    with accion_de_error("procesar envío manual"):
+    # El middleware HTTP puede cerrar su captura antes de que termine el envío.
+    with accion_de_error("procesar envío manual", captura_independiente=True):
         try:
             _procesar_job(job_id)
         except Exception as e:
@@ -7533,10 +7578,7 @@ def _procesar_job_api_concurrente(job_id: str, canal: MotorApiOficial) -> None:
                             ambiente=amb, envio_id=envio_id,
                             whatsapp_message_id=message_id if ok else None,
                             area_id=area_id, tabla_pacientes=tabla_area, emisor=emisor)
-        actualizar_estado_paciente(d["id"], "enviado" if ok else "error", amb,
-                                  tabla=tabla_area, whatsapp_message_id=message_id if ok else None)
         if ok:
-            limpiar_interes_paciente(d["id"], amb, tabla=tabla_area)
             with JOBS_LOCK:
                 job["enviados"] += 1
                 marcas = job.setdefault("aceptados_ultimos", [])
@@ -7545,6 +7587,11 @@ def _procesar_job_api_concurrente(job_id: str, canal: MotorApiOficial) -> None:
                     marcas.pop(0)
         else:
             fallido(d, error or "Meta rechazó el mensaje")
+        actualizar_estado_paciente(d["id"], "enviado" if ok else "error", amb,
+                                  tabla=tabla_area, whatsapp_message_id=message_id if ok else None)
+        if ok:
+            limpiar_interes_paciente(d["id"], amb, tabla=tabla_area)
+        else:
             log_error(f"procesar_job {job_id}: envío rechazado: {error}")
 
     siguiente = 0
@@ -7577,7 +7624,8 @@ def _procesar_job_api_concurrente(job_id: str, canal: MotorApiOficial) -> None:
                         futuro.result()
                     except Exception as exc:
                         log_error(f"procesar_job {job_id}: trabajador", exc)
-                        job["detalle"] = "Envío detenido por un error interno. Revisa el registro del servidor."
+                        job["detalle"] = ("Envío detenido por un error interno. Revisa el historial del lote "
+                                          "y verifica los mensajes ya aceptados antes de reintentar.")
                         detener.set()
                 # Los trabajadores ya iniciados se drenan incluso si hay error.
     job["actual"] = ""
@@ -10791,7 +10839,7 @@ def detalle_historial(envio_id: str, ambiente: str = Query("produccion"),
     sql = (
         "SELECT le.id, le.paciente_id, le.nombre_paciente, le.numero_telefono, le.estado_envio,"
         " le.estado_whatsapp, le.mensaje AS mensaje_enviado, le.descripcion_error, le.fecha_hora,"
-        " le.centro_codigo,"
+        " le.centro_codigo, le.wa_phone_id,"
         " EXISTS (SELECT 1 FROM whatsapp_conversaciones_mensajes cm"
         " WHERE BINARY cm.wa_phone_id=BINARY le.wa_phone_id"
         " AND BINARY cm.telefono_paciente=BINARY le.numero_telefono"
@@ -10816,6 +10864,8 @@ def detalle_historial(envio_id: str, ambiente: str = Query("produccion"),
     for f in filas:
         f["es_reservo"] = es_reservo
         centro_cc = f.pop("centro_codigo", None)
+        emisor_cc = f.pop("wa_phone_id", None)
+        f["emisor_respuesta"] = emisor_cc if puede_ver_datos else None
         f["callcenter_ventana_abierta"] = bool(f.get("callcenter_ventana_abierta"))
         f["puede_enviar_callcenter"] = bool(tiene_permiso(sesion, "call_center")
                                              and f.get("paciente_id") and centro_cc)
@@ -10846,12 +10896,16 @@ def detalle_historial(envio_id: str, ambiente: str = Query("produccion"),
 class CallCenterManualIn(BaseModel):
     mensaje: str = Field(..., min_length=1, max_length=1000)
     mensaje_preparado: str | None = Field(None, min_length=1, max_length=500)
+    mensaje_id: str | None = Field(None, min_length=1, max_length=255)
+    categoria: str = Field("general", max_length=30)
+    solicitud_id: uuid.UUID | None = None
 
 
 def _contexto_callcenter_manual_reagendar(envio_id, registro_id):
     with conectar("produccion") as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT r.*, le.wa_phone_id AS emisor_original, le.numero_telefono AS telefono_original,"
+            " le.fecha_hora AS fecha_original,"
             " EXISTS (SELECT 1 FROM whatsapp_conversaciones_mensajes cm"
             " WHERE BINARY cm.wa_phone_id=BINARY le.wa_phone_id"
             " AND BINARY cm.telefono_paciente=BINARY le.numero_telefono"
@@ -10871,7 +10925,8 @@ def _contexto_callcenter_manual_reagendar(envio_id, registro_id):
         raise HTTPException(409, detail="El paciente debe haber escrito a esta clínica en las últimas 24 horas.")
     cfg = config_all(refresh=True)
     canal = resolver_phone_id(cita["emisor_original"], cfg)
-    if not canal or not canal["configured"] or canal["codigo"] != cita["centro_codigo"]:
+    if (not canal or not canal["configured"]
+            or codigo_centro_canonico(canal["codigo"]) != codigo_centro_canonico(cita["centro_codigo"])):
         raise HTTPException(409, detail="La clínica emisora no está disponible.")
     if cfg.get("metodo_envio") != "api_oficial":
         raise HTTPException(409, detail="Activa api_oficial para enviar este mensaje.")
@@ -10902,9 +10957,11 @@ def _enviar_callcenter_manual_reagendar(cita, canal, telefono, numero, texto, pr
         telefono, texto, plantilla={"cta": {"texto": "Ir a call center", "url": url}}))
     registrar_historial(None, cita.get("paciente_nombre") or "", telefono, "reagendar_respuesta",
                         texto, "enviado" if ok else "error", error, ambiente="produccion",
-                        whatsapp_message_id=respuesta_id, tabla_pacientes="paciente_reagendar", emisor=canal)
+                        whatsapp_message_id=respuesta_id, tabla_pacientes="paciente_reagendar", emisor=canal,
+                        guardar_emisor_sin_id=True)
     if not ok:
         raise HTTPException(502, detail="Meta no aceptó el mensaje de reagendamiento.")
+    return respuesta_id
 
 
 def _registro_callcenter_manual(envio_id, registro_id, ambiente, sesion):
@@ -10966,8 +11023,121 @@ def _contexto_callcenter_manual(envio_id, registro_id, ambiente):
     return paciente, emisor, tabla, origen.get("whatsapp_message_id")
 
 
+def _entrada_respuesta_manual(mensaje_id, telefono, emisor, ambiente, *, paciente_id=None, tabla=None,
+                              desde=None):
+    wa_id = emisor["phoneNumberId"]
+    tabla_comun = tabla and tabla != reservo_pacientes.TABLA_LISTA_RESERVO
+    condicion, args_tabla = _cond_tabla_log(tabla) if tabla_comun else ("", ())
+    with conectar(ambiente) as conn, conn.cursor() as cur:
+        if mensaje_id.isascii() and mensaje_id.isdecimal() and desde is None:
+            if len(mensaje_id) > 18:
+                raise HTTPException(404, detail="Mensaje entrante no encontrado.")
+            cur.execute(
+                "SELECT mensaje AS texto FROM log_envios WHERE id=%s AND plantilla_clave='respuesta'"
+                " AND BINARY wa_phone_id=BINARY %s AND numero_telefono=%s"
+                + (" AND paciente_id=%s" if tabla_comun else "") + f" {condicion}",
+                (int(mensaje_id), wa_id, telefono, *((paciente_id,) if tabla_comun else ()), *args_tabla),
+            )
+        else:
+            sql = ("SELECT cm.texto, cm.tipo FROM whatsapp_conversaciones_mensajes cm"
+                   " WHERE BINARY cm.mensaje_id=BINARY %s AND BINARY cm.wa_phone_id=BINARY %s"
+                   " AND cm.telefono_paciente=%s")
+            args = (mensaje_id, wa_id, telefono)
+            if desde is not None:
+                sql += " AND cm.recibido >= %s"
+                args += (desde,)
+            elif tabla_comun:
+                sql += (" AND EXISTS (SELECT 1 FROM log_envios WHERE plantilla_clave='respuesta'"
+                        " AND BINARY whatsapp_message_id=BINARY cm.mensaje_id"
+                        " AND BINARY wa_phone_id=BINARY cm.wa_phone_id"
+                        f" AND paciente_id=%s {condicion})")
+                args += (paciente_id, *args_tabla)
+            cur.execute(sql, args)
+        entrada = cur.fetchone()
+    if not entrada:
+        raise HTTPException(404, detail="Mensaje entrante no encontrado en esta conversación y clínica.")
+    return respuestas_manuales.contexto_original(entrada.get("texto"), entrada.get("tipo"))
+
+
+def _vista_respuesta_manual(envio_id, registro_id, mensaje_id, categoria, ambiente, sesion):
+    if not tiene_permiso(sesion, "pacientes_ver_datos"):
+        raise HTTPException(403, detail="No tienes permiso para responder desde esta conversación.")
+    fila = _registro_callcenter_manual(envio_id, registro_id, ambiente, sesion)
+    reagendar = bool(fila.get("reagendamiento"))
+    cierre = ""
+    if categoria not in respuestas_manuales.CATEGORIAS or (reagendar and categoria != "general"):
+        raise HTTPException(422, detail="Elige una categoría disponible para esta respuesta.")
+    if reagendar:
+        envio_id = reagendar_batches.resolver_envio(envio_id)
+        cita, emisor, telefono, numero = _contexto_callcenter_manual_reagendar(envio_id, registro_id)
+        original = _entrada_respuesta_manual(mensaje_id, telefono, emisor, "produccion",
+                                            desde=cita["fecha_original"])
+        preparado = _preparado_manual_reagendar(cita)
+        if not preparado:
+            preparado = "Hola, quisiera continuar con mi reagendamiento."
+        texto = _respuesta_sistema("reagendar_derivacion", emisor["codigo"])
+        destino = (cita, emisor, telefono, numero)
+    else:
+        paciente, emisor, tabla, _ = _contexto_callcenter_manual(envio_id, registro_id, ambiente)
+        telefono = normalizar_telefono(paciente["telefono"])
+        original = _entrada_respuesta_manual(mensaje_id, telefono, emisor, ambiente,
+                                            paciente_id=paciente["id"], tabla=tabla)
+        numero = re.sub(r"\D", "", config_get(f"{emisor['codigo']}_CRM_PHONE_NUMBER") or "")
+        if not re.fullmatch(r"[1-9]\d{7,14}", numero):
+            raise HTTPException(409, detail="Configura el número CRM de la clínica.")
+        clave, saludo = respuestas_manuales.CATEGORIAS[categoria]
+        texto = renderizar_mensaje(_respuesta_sistema(clave, emisor["codigo"]), paciente)
+        introduccion = (config_get(_clave_respuesta_sistema(emisor["codigo"], f"preparado_{categoria}"))
+                        if categoria != "general" else None)
+        if categoria == "general":
+            formato = config_get(_clave_respuesta_sistema(emisor["codigo"], "preparado_consulta")) or ""
+            if formato.count("{consulta}") == 1:
+                introduccion, _, cierre = formato.partition("{consulta}")
+                introduccion = introduccion.strip()
+                cierre = cierre.strip()
+        preparado = (introduccion or saludo).replace("{clinica}", emisor["nombre"])
+        destino = (paciente, emisor, tabla)
+    return {"clinica": emisor["nombre"], "numero_call_center": numero, "consulta": original,
+            "mensaje": texto, "mensaje_preparado": preparado, "cierre": cierre,
+            "reagendamiento": reagendar}, destino
+
+
+def _reservar_respuesta_manual(solicitud_id, registro_id, mensaje_id, categoria, centro, actor):
+    clave = str(solicitud_id)
+    alcance = (registro_id, mensaje_id, categoria, centro, actor)
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO respuestas_manuales_envios"
+            " (solicitud_id, registro_id, mensaje_entrante, categoria, centro_codigo, actor)"
+            " VALUES (%s,%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE solicitud_id=solicitud_id",
+            (clave, *alcance),
+        )
+        nuevo = cur.rowcount == 1
+        cur.execute("SELECT registro_id, mensaje_entrante, categoria, centro_codigo, actor, estado"
+                    " FROM respuestas_manuales_envios WHERE solicitud_id=%s", (clave,))
+        fila = cur.fetchone()
+        conn.commit()
+    if tuple(fila[k] for k in ("registro_id", "mensaje_entrante", "categoria", "centro_codigo", "actor")) != alcance:
+        raise HTTPException(409, detail="Esta confirmación pertenece a otra respuesta.")
+    if not nuevo and fila["estado"] != "aceptado":
+        raise HTTPException(409, detail="Esta confirmación ya fue procesada o sigue en curso. Revisa el historial.")
+    return nuevo
+
+
+def _terminar_respuesta_manual(solicitud_id, estado, message_id=None):
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("UPDATE respuestas_manuales_envios SET estado=%s, mensaje_meta=%s"
+                    " WHERE solicitud_id=%s", (estado, message_id, str(solicitud_id)))
+        conn.commit()
+
+
 def previsualizar_callcenter_manual(envio_id: int, registro_id: int, ambiente: str = Query("produccion"),
-                                   sesion: dict = Depends(exigir("historial"))):
+                                   sesion: dict = Depends(exigir("historial")), *,
+                                   mensaje_id: str = Query("", max_length=255),
+                                   categoria: str = Query("general", max_length=30)):
+    if isinstance(mensaje_id, str) and mensaje_id:
+        vista, _ = _vista_respuesta_manual(envio_id, registro_id, mensaje_id, categoria, ambiente, sesion)
+        return {**vista, "solicitud_id": str(uuid.uuid4())}
     fila = _registro_callcenter_manual(envio_id, registro_id, ambiente, sesion)
     if fila.get("reagendamiento"):
         cita, _, _, _ = _contexto_callcenter_manual_reagendar(envio_id, registro_id)
@@ -10981,6 +11151,8 @@ def previsualizar_callcenter_manual(envio_id: int, registro_id: int, ambiente: s
 def enviar_callcenter_manual(envio_id: int, registro_id: int, body: CallCenterManualIn,
                             ambiente: str = Query("produccion"),
                             sesion: dict = Depends(exigir("historial"))):
+    if body.mensaje_id is not None:
+        return _enviar_respuesta_contextual(envio_id, registro_id, body, ambiente, sesion)
     fila = _registro_callcenter_manual(envio_id, registro_id, ambiente, sesion)
     texto = body.mensaje.strip()
     if not texto:
@@ -11012,6 +11184,48 @@ def enviar_callcenter_manual(envio_id: int, registro_id: int, body: CallCenterMa
     except Exception as exc:
         log_error("auditar envío manual de call center", exc, solo_tipo=True)
     return {"ok": True, "mensaje": "Meta aceptó el mensaje con el botón de call center."}
+
+
+def _enviar_respuesta_contextual(envio_id, registro_id, body, ambiente, sesion):
+    texto = body.mensaje.strip()
+    if not body.solicitud_id or not texto or (body.mensaje_preparado is not None and not body.mensaje_preparado.strip()):
+        raise HTTPException(422, detail="Completa el mensaje y confirma el envío.")
+    vista, destino = _vista_respuesta_manual(
+        envio_id, registro_id, body.mensaje_id, body.categoria, ambiente, sesion)
+    preparado = respuestas_manuales.preparar_texto(
+        body.mensaje_preparado or vista["mensaje_preparado"], vista["consulta"], vista["cierre"])
+    if not respuestas_manuales.cabe_en_enlace(vista["numero_call_center"], preparado):
+        raise HTTPException(422, detail="El texto supera el tamaño del enlace. Acorta la introducción o pide una consulta más breve.")
+    emisor = destino[1]
+    confirmacion = {"ok": True, "mensaje": "Meta aceptó el mensaje con el botón de call center."}
+    if not _reservar_respuesta_manual(body.solicitud_id, registro_id, body.mensaje_id, body.categoria,
+                                      emisor["codigo"], sesion.get("usuario", "")):
+        return confirmacion
+    try:
+        if vista["reagendamiento"]:
+            meta_id = _enviar_callcenter_manual_reagendar(*destino, texto, preparado)
+        else:
+            paciente, emisor, tabla = destino
+            resultado = _despachar_call_center(paciente, ambiente, tabla=tabla, texto_personalizado=texto,
+                                              emisor_forzado=emisor, automatico=False, mensaje_preparado=preparado,
+                                              propagar_incierto=True)
+            if not resultado["ok"]:
+                raise HTTPException(502, detail="Meta no confirmó la aceptación de esta respuesta.")
+            meta_id = resultado.get("message_id")
+    except HTTPException:
+        _terminar_respuesta_manual(body.solicitud_id, "error")
+        raise
+    except Exception as exc:
+        log_error("respuesta manual: aceptación no confirmada", exc, solo_tipo=True)
+        _terminar_respuesta_manual(body.solicitud_id, "incierto")
+        raise HTTPException(502, detail="No se pudo confirmar el envío. Revisa el historial antes de volver a enviar.") from exc
+    _terminar_respuesta_manual(body.solicitud_id, "aceptado", meta_id)
+    try:
+        auditoria_registrar(sesion.get("usuario", ""), "callcenter_manual", str(registro_id),
+                           f"{emisor['codigo']} · {body.categoria} · {body.solicitud_id}")
+    except Exception as exc:
+        log_error("auditar respuesta manual", exc, solo_tipo=True)
+    return confirmacion
 
 
 class FallidosPendientesIn(BaseModel):
