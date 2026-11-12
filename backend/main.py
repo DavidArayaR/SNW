@@ -94,13 +94,13 @@ from snw.pacientes.telefono import normalizar_telefono
 from snw.pacientes import servicio_areas
 import paciente_reagendar
 import reagendar_batches
-import reservo_pacientes
-import recuperacion_pacientes
-import reservo_bases
+from snw.reservo import reservo_pacientes
+from snw.reservo import recuperacion_pacientes
+from snw.reservo import reservo_bases
 from snw.seguridad import retencion_datos
 import prepago
 from routes import prepago as rutas_prepago
-from reservo_catalogo import (
+from snw.reservo.reservo_catalogo import (
     RESERVO_CLINICAS, CLAVES_TOKEN as CLAVES_TOKEN_RESERVO,
     clave_estado_atendido as clave_estado_atendido_reservo,
     clave_estado_verificado as clave_estado_verificado_reservo,

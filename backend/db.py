@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 from snw.infraestructura.legacy_config_secrets import leer_credencial_antigua
 from snw.pacientes.telefono import normalizar_telefono
 from whatsapp_channels import CENTROS, claves_centro
-from reservo_catalogo import (
+from snw.reservo.reservo_catalogo import (
     RESERVO_CLINICAS, clave_estado_atendido, clave_estado_verificado, clave_umbral_recuperacion,
     clave_cobertura_recuperacion,
     clave_token,
@@ -660,9 +660,9 @@ def asegurar_tabla_config() -> None:
             _migrar_ids_globales_smpt(cur)
             # Tablas aisladas para consultas de solo lectura a Reservo. No se
             # enlazan con campañas ni bases de pacientes de WhatsApp.
-            from reservo_pacientes import configurar_tablas as _configurar_tablas_reservo
+            from snw.reservo.reservo_pacientes import configurar_tablas as _configurar_tablas_reservo
             _configurar_tablas_reservo(cur)
-            from recuperacion_pacientes import configurar_tablas as _configurar_recuperacion
+            from snw.reservo.recuperacion_pacientes import configurar_tablas as _configurar_recuperacion
             _configurar_recuperacion(cur)
             cur.execute(
                 "CREATE TABLE IF NOT EXISTS reagendar_lotes ("

@@ -20,7 +20,7 @@ import httpx
 import pymysql
 from snw.pacientes.telefono import normalizar_telefono
 
-from reservo_catalogo import (
+from snw.reservo.reservo_catalogo import (
     RESERVO_CLINICAS, clave_estado_atendido, clave_estado_verificado,
     clave_token,
 )

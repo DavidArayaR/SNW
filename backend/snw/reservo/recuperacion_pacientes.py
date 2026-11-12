@@ -14,10 +14,10 @@ from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
 from db import config_all, conectar, log_error
-from reservo_catalogo import (RESERVO_CLINICAS, clave_umbral_recuperacion as clave_umbral,
+from snw.reservo.reservo_catalogo import (RESERVO_CLINICAS, clave_umbral_recuperacion as clave_umbral,
                              clave_cobertura_recuperacion as clave_cobertura,
                              clave_token, clave_estado_atendido, clave_estado_verificado)
-from reservo_pacientes import (ClienteReservo, ReservoError, codigo_estado, dividir_periodo,
+from snw.reservo.reservo_pacientes import (ClienteReservo, ReservoError, codigo_estado, dividir_periodo,
                                fecha_atencion_utc, generar_nombre_base, normalizar_cliente_uuid,
                                cliente_valido, _guardar_paciente_cursor, tratamientos_cita, validar_uuid)
 from snw.seguridad.supresion import (bloquear_huella_baja, limpiar_cerrojos_baja_inactivos,
