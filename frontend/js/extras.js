@@ -40,7 +40,7 @@
 
   function pintar() {
     const diasAviso = datos.recordatorio_dias === 1 ? "1 día" : `${datos.recordatorio_dias} días`;
-    $("ayudaPlazo").textContent = `Las líneas nuevas empiezan vencidas. Después de registrar una recarga, el próximo aviso vence en ${diasAviso}.`;
+    $("ayudaPlazo").textContent = `El aviso vence en ${diasAviso} desde la última recarga. Si sigue pendiente, SNW envía un aviso urgente cuatro días después del primer correo.`;
     const activas = datos.lineas.filter((l) => l.activo);
     $("totalActivas").textContent = activas.length;
     $("totalPendientes").textContent = activas.filter((l) => l.estado === "Pendiente").length;
@@ -215,7 +215,7 @@
     const recargas = h.recargas.map((r) => `<li>${fecha(r.fecha)} · ${tipos[r.tipo]} · ${escapar(r.registrado_por)}
       ${r.fecha_anterior ? `<small>(anterior: ${fecha(r.fecha_anterior)})</small>` : ""}
       ${r.observacion ? `<br>${escapar(r.observacion)}` : ""}</li>`).join("");
-    const avisos = h.avisos.map((a) => `<li>${fecha(a.programado)} · ${estados[a.estado]} · ${escapar(a.destinatario)}
+    const avisos = h.avisos.map((a) => `<li>${fecha(a.programado)} · ${a.etapa === "urgente" ? "Aviso urgente" : "Primer aviso"} · ${estados[a.estado]} · ${escapar(a.destinatario)}
       <br><small>Intento: ${fecha(a.intento_en)}${a.enviado_en ? ` · Enviado: ${fecha(a.enviado_en)}` : ""}
       ${a.error ? ` · ${escapar(a.error)}` : ""}</small></li>`).join("");
     $("modalCuerpo").innerHTML = `<h3>Recargas</h3><ul class="extras-historial">${recargas || "<li>Sin recargas en esta página.</li>"}</ul>

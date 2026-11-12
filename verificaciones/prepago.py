@@ -249,10 +249,11 @@ class PrepagoMariaDB(unittest.TestCase):
         smtp.assert_called_once()
         self.assertEqual(prepago.historial(linea_id, 1)["avisos"][0]["programado"], self.hoy)
 
-    def test_aviso_inicial_sin_fecha_y_primera_recarga(self):
-        # Reproduce un esquema instalado antes de admitir avisos sin fecha.
+    def test_migracion_y_lineas_sin_fecha(self):
+        # Reproduce un esquema instalado antes de incorporar las etapas.
         with self.db() as conn, conn.cursor() as cur:
             cur.execute("ALTER TABLE prepago_recordatorios MODIFY fecha_ultima_recarga DATE NOT NULL")
+            cur.execute("ALTER TABLE prepago_recordatorios DROP COLUMN etapa")
         prepago.asegurar_esquema(self.config)
         prepago.asegurar_esquema(self.config)
         iniciales = [self.crear("900000004"), self.crear("900000005")]
@@ -262,18 +263,43 @@ class PrepagoMariaDB(unittest.TestCase):
         self.assertEqual(sin_numero["estado"], "Sin configurar")
         smtp = Mock(return_value=("enviado", None))
         prepago.revisar_recordatorios(self.hoy, smtp)
-        prepago.revisar_recordatorios(self.hoy, smtp)
-        smtp.assert_called_once()
-        pendientes = smtp.call_args.args[2].split("<h2>Otras líneas activas</h2>")[0]
-        self.assertEqual(pendientes.count("Sin fecha de recarga registrada"), 2)
+        smtp.assert_not_called()
         for linea_id in iniciales:
-            aviso = prepago.historial(linea_id, 1)["avisos"][0]
-            self.assertIsNone(aviso["fecha_ultima_recarga"])
-            self.assertEqual(aviso["estado"], "enviado")
+            self.assertFalse(prepago.historial(linea_id, 1)["avisos"])
             prepago.registrar_recarga(linea_id, self.hoy, "", "pruebas", 1)
         lista = {linea["id"]: linea for linea in prepago.estado()["lineas"]}
         self.assertTrue(all(lista[id_]["dias_restantes"] == 150 for id_ in iniciales))
         self.assertTrue(all(lista[id_]["estado"] == "Al día" for id_ in iniciales))
+
+    def test_aviso_urgente_cuatro_dias_despues_solo_para_ciclo_sin_recarga(self):
+        fecha = self.hoy - dt.timedelta(days=150)
+        pendiente = self.crear("900000004", fecha)
+        recargada = self.crear("900000005", fecha)
+        nuevo_vencimiento = self.crear("900000006", fecha + dt.timedelta(days=4))
+        smtp = Mock(return_value=("enviado", None))
+        prepago.revisar_recordatorios(self.hoy - dt.timedelta(days=1), smtp)
+        smtp.assert_not_called()
+        prepago.revisar_recordatorios(self.hoy, smtp)
+        smtp.assert_called_once()
+        self.assertNotIn("URGENTE", smtp.call_args.args[1])
+        prepago.registrar_recarga(recargada, self.hoy, "", "pruebas", 1)
+        prepago.revisar_recordatorios(self.hoy + dt.timedelta(days=3), smtp)
+        smtp.assert_called_once()
+        fecha_urgente = self.hoy + dt.timedelta(days=4)
+        prepago.revisar_recordatorios(fecha_urgente, smtp)
+        prepago.revisar_recordatorios(fecha_urgente, smtp)
+        self.assertEqual(smtp.call_count, 2)
+        self.assertIn("URGENTE", smtp.call_args.args[1])
+        cuerpo = smtp.call_args.args[2].split("<h2>Otras líneas activas</h2>")[0]
+        self.assertIn("+56900000004", cuerpo)
+        self.assertIn("+56900000006", cuerpo)
+        self.assertNotIn("+56900000005", cuerpo)
+        self.assertIn("Recarga urgente", cuerpo)
+        avisos = prepago.historial(pendiente, 1)["avisos"]
+        self.assertEqual([a["etapa"] for a in avisos], ["urgente", "inicial"])
+        self.assertEqual(avisos[0]["programado"], fecha_urgente)
+        for linea_id in (recargada, nuevo_vencimiento):
+            self.assertEqual([a["etapa"] for a in prepago.historial(linea_id, 1)["avisos"]], ["inicial"])
 
 
 if __name__ == "__main__":
