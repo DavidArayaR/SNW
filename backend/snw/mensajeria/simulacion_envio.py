@@ -15,7 +15,8 @@ def datos_ejemplo(envio_id, fecha):
         (20, "sin_seleccion", "entregados", False), (30, "sin_seleccion", "sin_confirmacion", False)):
         facturables = cantidad
         segmentos.append(dict(cantidad=cantidad, resultado=resultado, entrega=entrega,
-            visto_sin_respuesta=visto, facturables=facturables, costo=facturables * 60))
+            visto_sin_respuesta=visto, respondio=respondio_segmento(resultado, entrega, visto),
+            facturables=facturables, costo=facturables * 60))
     botones = []
     for texto, accion, resultado, entrega, pacientes, clics in (
         ("Me interesa", "interes", "interes", "read", 75, 94),
@@ -67,6 +68,10 @@ def crear(solicitud_id: str, usuario: str):
     return datos
 
 
+def respondio_segmento(resultado, entrega, visto):
+    return resultado != "sin_seleccion" or (entrega == "leidos" and not visto)
+
+
 def obtener(envio_id):
     with conectar() as conn, conn.cursor() as cur:
         cur.execute("SELECT datos_json FROM envios_simulaciones WHERE envio_id=%s", (envio_id,))
@@ -77,6 +82,8 @@ def obtener(envio_id):
     # Actualizar también demostraciones guardadas con el criterio anterior,
     # conservando sus conteos y sin reescribir los datos persistidos.
     for segmento in datos["segmentos"]:
+        segmento.setdefault("respondio", respondio_segmento(
+            segmento["resultado"], segmento["entrega"], segmento["visto_sin_respuesta"]))
         segmento["facturables"] = segmento["cantidad"]
         segmento["costo"] = segmento["cantidad"] * 60
     total = sum(s["cantidad"] for s in datos["segmentos"])

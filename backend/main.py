@@ -11666,6 +11666,7 @@ def obtener_estadisticas_envio(envio_id: int, sesion: dict = Depends(solo_admin)
             "entrega": "leidos" if celda.get("estado_whatsapp") == "read" else "entregados"
                        if celda.get("estado_whatsapp") == "delivered" else "sin_confirmacion",
             "visto_sin_respuesta": bool(celda.get("estado_whatsapp") == "read" and not celda["respondio"]),
+            "respondio": bool(celda["respondio"]),
             "costo": round(importe, 4) if importe is not None else None, "facturables": mensajes})
     datos["segmentos"] = segmentos
     interesados = datos["interacciones"]["interes"]["pacientes"]
