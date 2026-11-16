@@ -845,7 +845,12 @@ def _procesar(conn, cur, job):
                     cliente, a, b, atendido, job["creado_en"], seleccionados,
                 )
                 if b > fin_cohorte and sin_uuid:
-                    raise ReservoError("El historial posterior contiene atenciones sin identidad verificable.")
+                    raise ReservoError(
+                        f"Reservo devolvió atenciones sin identificador de paciente válido "
+                        f"(cliente.uuid) del {a:%d-%m-%Y} al {b:%d-%m-%Y}. "
+                        f"Atenciones afectadas en ese tramo: {sin_uuid}. "
+                        "Revisa la ficha vinculada a esas citas en Reservo y vuelve a procesar.",
+                    )
                 if filas and b <= fin_cohorte:
                     cur.executemany(
                         "INSERT INTO recuperacion_cohorte (solicitud,cliente_uuid,ultima_atencion,"
