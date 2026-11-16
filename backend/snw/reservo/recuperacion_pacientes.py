@@ -396,6 +396,25 @@ def _solicitud_contactos(cur, usuario, solicitud_id, *, bloquear=False):
     return solicitud
 
 
+def borrar_analisis(usuario, solicitud_id):
+    with conectar() as conn, conn.cursor() as cur:
+        solicitud = _solicitud_contactos(cur, usuario, solicitud_id, bloquear=True)
+        if solicitud["estado"] in ("PENDIENTE", "PROCESANDO"):
+            raise HTTPException(409, detail="Espera a que termine el análisis antes de borrarlo.")
+        args = (solicitud["id"],)
+        cur.execute("SELECT estado FROM recuperacion_revision_contactos WHERE solicitud=%s FOR UPDATE", args)
+        revision = cur.fetchone()
+        if revision and revision["estado"] in ("PENDIENTE", "PROCESANDO"):
+            raise HTTPException(409, detail="Espera a que termine la comprobación de contactos antes de borrar el análisis.")
+        cur.execute("SELECT b.area_id FROM recuperacion_publicaciones p"
+                    " JOIN reservo_bases_contacto b ON b.id=p.base_id WHERE p.solicitud=%s", args)
+        publicacion = cur.fetchone()
+        if publicacion and publicacion["area_id"] is None:
+            raise HTTPException(409, detail="Completa la publicación de la base antes de borrar el análisis.")
+        cur.execute("DELETE FROM recuperacion_solicitudes WHERE id=%s", args)
+        conn.commit()
+
+
 def _contactos(cur, solicitud, *, bloquear=False):
     if solicitud["estado"] != "ANALIZADA":
         raise HTTPException(409, detail="La revisión requiere un análisis terminado.")

@@ -218,18 +218,19 @@
     if (evento.key === "Escape") cerrarConfirmacion();
   }
 
-  function mostrarConfirmacion(boton) {
+  function mostrarConfirmacion(boton, { titulo, mensaje, accion, confirmarAccion }) {
     if (confirmacionActiva?.boton === boton) { cerrarConfirmacion(); return; }
     cerrarConfirmacion(false);
     const panel = document.createElement("div");
     panel.className = "reservo-confirmacion";
     panel.setAttribute("role", "dialog");
     panel.setAttribute("aria-labelledby", "reservoConfirmarTitulo");
-    panel.innerHTML = '<strong id="reservoConfirmarTitulo">¿Deshacer esta búsqueda?</strong>' +
-      '<p>Se quitarán los pacientes exclusivos de las búsquedas deshechas. Los de búsquedas vigentes se conservarán.</p>' +
+    panel.innerHTML = '<strong id="reservoConfirmarTitulo"></strong><p></p>' +
       '<div class="reservo-confirmacion__acciones">' +
       '<button type="button" class="btn btn--ghost" data-volver>Volver</button>' +
-      '<button type="button" class="btn btn--danger" data-confirmar>Confirmar deshacer</button></div>';
+      '<button type="button" class="btn btn--danger" data-confirmar></button></div>';
+    panel.querySelector("strong").textContent = titulo;
+    panel.querySelector("p").textContent = mensaje;
     document.body.append(panel);
     confirmacionActiva = { panel, boton };
     ubicarConfirmacion();
@@ -239,7 +240,8 @@
     window.addEventListener("resize", ubicarConfirmacion);
     panel.querySelector("[data-volver]").addEventListener("click", () => cerrarConfirmacion());
     const confirmar = panel.querySelector("[data-confirmar]");
-    confirmar.addEventListener("click", () => deshacer(boton.dataset.deshacer, confirmar));
+    confirmar.textContent = accion;
+    confirmar.addEventListener("click", () => confirmarAccion(confirmar));
     confirmar.focus();
   }
 
@@ -381,7 +383,12 @@
     ui.syncs.querySelectorAll("[data-reintentar]").forEach((boton) =>
       boton.addEventListener("click", () => reintentar(boton.dataset.reintentar, boton)));
     ui.syncs.querySelectorAll("[data-deshacer]").forEach((boton) =>
-      boton.addEventListener("click", () => mostrarConfirmacion(boton)));
+      boton.addEventListener("click", () => mostrarConfirmacion(boton, {
+        titulo: "¿Deshacer esta búsqueda?",
+        mensaje: "Se quitarán los pacientes exclusivos de las búsquedas deshechas. Los de búsquedas vigentes se conservarán.",
+        accion: "Confirmar deshacer",
+        confirmarAccion: (confirmar) => deshacer(boton.dataset.deshacer, confirmar),
+      })));
     ui.syncs.querySelectorAll("[data-guardar-base]").forEach((boton) =>
       boton.addEventListener("click", () => abrirModalGuardar(boton.dataset.guardarBase)));
     ui.syncs.querySelectorAll("[data-descargar-csv]").forEach((boton) =>
@@ -748,13 +755,18 @@
         if (navegacion.at(-1)) params.set("cursor", navegacion.at(-1));
         const data = await request(`${ruta}/solicitudes?${params}`);
         if (consulta !== consultaHistorial) return;
+        if (!data.items?.length && navegacion.length > 1) {
+          return await cargarHistorial(navegacion.slice(0, -1));
+        }
+        if (confirmacionActiva && historial.contains(confirmacionActiva.boton)) cerrarConfirmacion(false);
         cursores = navegacion;
         cursorSiguiente = data.siguiente_cursor;
         $("#recuperacionPagina").textContent = `Página ${cursores.length}`;
         historial.innerHTML = (data.items || []).map((fila) =>
           `<tr><td>${escapar(nombreClinica(fila.clinica_codigo))}</td><td>${escapar(periodo(fila))}</td>` +
           `<td>${Number(fila.meses_inactividad)} meses</td><td data-rec-estado>${escapar(etiquetas[fila.estado] || fila.estado)}</td>` +
-          `<td><button class="btn btn--ghost" type="button" data-rec-id="${escapar(fila.solicitud_id)}">Ver detalle</button></td></tr>`
+          `<td><div class="reservo-acciones"><button class="btn btn--ghost" type="button" data-rec-id="${escapar(fila.solicitud_id)}">Ver detalle</button>` +
+          `<button class="btn btn--danger" type="button" data-rec-borrar="${escapar(fila.solicitud_id)}"${activa(fila.estado) ? " disabled" : ""}>Borrar análisis</button></div></td></tr>`
         ).join("") || '<tr><td colspan="5" class="reservo-vacio">Todavía no hay solicitudes.</td></tr>';
       } catch (error) {
         if (consulta === consultaHistorial) avisar(error.message, "error");
@@ -779,8 +791,11 @@
           + (avance ? ` · ${avance.tramos} tramos y ${avance.paginas} páginas revisadas` : "");
         if (estado.textContent !== resumen) estado.textContent = resumen;
         for (const boton of historial.querySelectorAll("[data-rec-id]")) {
-          if (boton.dataset.recId === id) boton.closest("tr").querySelector("[data-rec-estado]").textContent =
-            etiquetas[fila.estado] || fila.estado;
+          if (boton.dataset.recId !== id) continue;
+          const filaHistorial = boton.closest("tr");
+          filaHistorial.querySelector("[data-rec-estado]").textContent = etiquetas[fila.estado] || fila.estado;
+          const borrar = filaHistorial.querySelector("[data-rec-borrar]");
+          if (!borrar.dataset.borrando) borrar.disabled = activa(fila.estado);
         }
         if (activa(fila.estado)) {
           temporizador = setTimeout(() => consultarDetalle(id, false), 5000);
@@ -1003,7 +1018,40 @@
         validarFormulario();
       }
     });
+    async function borrarAnalisis(boton) {
+      const id = boton.dataset.recBorrar;
+      boton.disabled = true;
+      boton.dataset.borrando = "true";
+      cerrarConfirmacion(false);
+      try {
+        await request(`${ruta}/solicitudes/${encodeURIComponent(id)}`, { method: "DELETE" });
+        if (seleccion === id) {
+          clearTimeout(temporizador);
+          secuencia++;
+          seleccion = null;
+          detalle.hidden = true;
+        }
+        avisar("Análisis borrado.", "success");
+        await cargarHistorial();
+      } catch (error) {
+        delete boton.dataset.borrando;
+        boton.disabled = false;
+        boton.focus();
+        avisar(error.message, "error");
+      }
+    }
+
     historial.addEventListener("click", (evento) => {
+      const borrar = evento.target.closest("[data-rec-borrar]");
+      if (borrar && !borrar.disabled) {
+        mostrarConfirmacion(borrar, {
+          titulo: "¿Borrar este análisis?",
+          mensaje: "Se eliminarán el análisis y su resultado del historial. La base publicada se conserva.",
+          accion: "Confirmar borrado",
+          confirmarAccion: () => borrarAnalisis(borrar),
+        });
+        return;
+      }
       const boton = evento.target.closest("[data-rec-id]");
       if (boton) abrirSolicitud(boton.dataset.recId);
     });

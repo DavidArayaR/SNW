@@ -5995,6 +5995,12 @@ def obtener_solicitud_recuperacion(solicitud_id: str, sesion: dict = Depends(sol
     return recuperacion_pacientes.obtener(sesion["usuario"], solicitud_id)
 
 
+def borrar_analisis_recuperacion(solicitud_id: str, sesion: dict = Depends(solo_admin)):
+    usuario = sesion["usuario"]
+    recuperacion_pacientes.borrar_analisis(usuario, solicitud_id)
+    auditoria_registrar(usuario, "recuperacion_borrada", solicitud_id)
+
+
 def obtener_resultado_recuperacion(solicitud_id: str, sesion: dict = Depends(solo_admin)):
     return recuperacion_pacientes.obtener_resultado(sesion["usuario"], solicitud_id)
 
