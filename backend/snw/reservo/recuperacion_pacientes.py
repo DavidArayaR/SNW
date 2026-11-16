@@ -22,7 +22,7 @@ from snw.reservo.reservo_catalogo import (RESERVO_CLINICAS, clave_umbral_recuper
 from snw.reservo.reservo_pacientes import (ClienteReservo, ReservoError, codigo_estado, dividir_periodo,
                                fecha_atencion_utc, generar_nombre_base, normalizar_cliente_uuid,
                                cliente_valido, _guardar_paciente_cursor, tratamientos_cita, validar_uuid)
-from snw.seguridad.supresion import (bloquear_huella_baja, limpiar_cerrojos_baja_inactivos,
+from snw.seguridad.supresion import (bloquear_huella_baja, huella_telefono, limpiar_cerrojos_baja_inactivos,
                        telefonos_bloqueados_para_envio)
 from snw.pacientes.telefono import normalizar_telefono
 from snw.pacientes.servicio_areas import TABLA_RE
@@ -83,7 +83,7 @@ def configurar_tablas(cur):
     cur.execute(
         "CREATE TABLE IF NOT EXISTS recuperacion_revision_contactos ("
         " solicitud BIGINT UNSIGNED PRIMARY KEY, estado VARCHAR(16) NOT NULL,"
-        " resultado TEXT NULL, error VARCHAR(255) NULL, comparacion TEXT NULL,"
+        " resultado TEXT NULL, error VARCHAR(255) NULL, comparacion TEXT NULL, candidatos_publicables LONGTEXT NULL,"
         " KEY idx_rec_revision_estado (estado, solicitud),"
         " FOREIGN KEY (solicitud) REFERENCES recuperacion_solicitudes(id) ON DELETE CASCADE"
         ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
@@ -91,6 +91,9 @@ def configurar_tablas(cur):
     cur.execute("SHOW COLUMNS FROM recuperacion_revision_contactos LIKE 'comparacion'")
     if not cur.fetchone():
         cur.execute("ALTER TABLE recuperacion_revision_contactos ADD comparacion TEXT NULL")
+    cur.execute("SHOW COLUMNS FROM recuperacion_revision_contactos LIKE 'candidatos_publicables'")
+    if not cur.fetchone():
+        cur.execute("ALTER TABLE recuperacion_revision_contactos ADD candidatos_publicables LONGTEXT NULL")
     cur.execute(
         "CREATE TABLE IF NOT EXISTS recuperacion_publicaciones ("
         " solicitud BIGINT UNSIGNED PRIMARY KEY, base_id INT NULL UNIQUE,"
@@ -480,7 +483,7 @@ def _seleccionar_bases(cur, solicitud, comparacion):
 
 def _comparar_bases(solicitud, comparacion, telefonos):
     if comparacion.modo == "ninguna":
-        return None
+        return None, set()
     with conectar() as conn, conn.cursor() as cur:
         bases = _seleccionar_bases(cur, solicitud, comparacion)
         coincidencias = set()
@@ -497,7 +500,7 @@ def _comparar_bases(solicitud, comparacion, telefonos):
                             hallados.add(tel)
             coincidencias.update(hallados)
             detalle.append({"nombre": base["nombre_visible"], "coincidencias": len(hallados)})
-    return {"total": len(coincidencias), "bases": detalle}
+    return {"total": len(coincidencias), "bases": detalle}, coincidencias
 
 
 def solicitar_revision_contactos(usuario, solicitud_id, comparacion=None):
@@ -517,7 +520,8 @@ def solicitar_revision_contactos(usuario, solicitud_id, comparacion=None):
         _seleccionar_bases(cur, solicitud, comparacion)
         cur.execute(
             "INSERT INTO recuperacion_revision_contactos (solicitud,estado,comparacion) VALUES (%s,'PENDIENTE',%s)"
-            " ON DUPLICATE KEY UPDATE estado='PENDIENTE',resultado=NULL,error=NULL,comparacion=VALUES(comparacion)",
+            " ON DUPLICATE KEY UPDATE estado='PENDIENTE',resultado=NULL,error=NULL,"
+            " comparacion=VALUES(comparacion),candidatos_publicables=NULL",
             (solicitud["id"], comparacion.model_dump_json()),
         )
         conn.commit()
@@ -559,10 +563,12 @@ def procesar_revision_contactos():
                 comparacion = job.get("comparacion")
                 opciones = ComparacionBasesIn.model_validate_json(comparacion) if comparacion else None
                 resultado = revisar_contactos(job["usuario"], job["solicitud_id"], opciones)
+                candidatos = resultado.pop("_candidatos_publicables", None)
                 estado, error = "COMPLETADA", None
             except Exception as exc:
                 log_error(f"comprobar contactos de recuperación #{job['id']}", exc, solo_tipo=True)
                 resultado, estado = None, "ERROR"
+                candidatos = None
                 if isinstance(exc, ReservoError):
                     error = exc.categoria
                 elif isinstance(exc, HTTPException):
@@ -571,8 +577,10 @@ def procesar_revision_contactos():
                     error = "No se pudieron comprobar los contactos. Puedes volver a intentarlo."
                 error = error[:255]
             cur.execute(
-                "UPDATE recuperacion_revision_contactos SET estado=%s,resultado=%s,error=%s WHERE solicitud=%s",
-                (estado, json.dumps(resultado) if resultado is not None else None, error, job["id"]),
+                "UPDATE recuperacion_revision_contactos SET estado=%s,resultado=%s,error=%s,"
+                " candidatos_publicables=%s WHERE solicitud=%s",
+                (estado, json.dumps(resultado) if resultado is not None else None, error,
+                 json.dumps(candidatos) if candidatos is not None else None, job["id"]),
             )
             conn.commit()
             return True
@@ -601,14 +609,19 @@ def revisar_contactos(usuario, solicitud_id, comparacion=None):
             unicos, conteos = _contactos(cur, solicitud)
     bloqueados = telefonos_bloqueados_para_envio(set(unicos)) if unicos else set()
     disponibles = unicos.keys() - bloqueados
+    resumen, coincidencias = _comparar_bases(solicitud, comparacion, disponibles) if comparacion else (None, set())
+    publicables = disponibles - coincidencias
     nombre = generar_nombre_base(CLINICAS[solicitud["clinica_codigo"]], "pacientes_inactivos",
                                  fecha_periodo=date(solicitud["anio"], solicitud["mes"], 1))
     return {
         "solicitud_id": solicitud_id, "nombre_propuesto": nombre["nombre"],
         "fuente_contactos": "fichas_reservo_sincronizadas",
-        "conteos": {**conteos, "bloqueados": len(bloqueados), "contactos_sin_bloqueo": len(disponibles)},
-        "publicacion_disponible": bool(disponibles),
-        "comparacion": _comparar_bases(solicitud, comparacion, disponibles) if comparacion else None,
+        "conteos": {**conteos, "bloqueados": len(bloqueados), "contactos_sin_bloqueo": len(disponibles),
+                    "excluidos_por_bases": len(coincidencias), "contactos_publicables": len(publicables)},
+        "publicacion_disponible": bool(publicables),
+        "comparacion": resumen,
+        "_candidatos_publicables": sorted(huella_telefono(tel) for tel in publicables)
+        if resumen is not None else None,
     }
 
 
@@ -663,7 +676,21 @@ def publicar_base(usuario, solicitud_id):
                 if existente["base_id"] is None:
                     raise HTTPException(409, detail="La base de esta solicitud fue eliminada.")
                 return {"lista_generada_id": existente["base_id"], "contactos": existente["contactos"]}, False
+            cur.execute("SELECT estado,comparacion,candidatos_publicables FROM recuperacion_revision_contactos"
+                        " WHERE solicitud=%s FOR UPDATE", (solicitud["id"],))
+            revision = cur.fetchone()
+            permitidos = None
+            if revision:
+                opciones = ComparacionBasesIn.model_validate_json(revision["comparacion"] or "{}")
+                if revision["estado"] != "COMPLETADA" or (
+                    opciones.modo != "ninguna" and revision["candidatos_publicables"] is None
+                ):
+                    raise HTTPException(409, detail="Vuelve a comprobar los contactos antes de publicar.")
+                if opciones.modo != "ninguna":
+                    permitidos = set(json.loads(revision["candidatos_publicables"]))
             candidatos, _ = _contactos(cur, solicitud, bloquear=True)
+            if permitidos is not None:
+                candidatos = {tel: fila for tel, fila in candidatos.items() if huella_telefono(tel) in permitidos}
             bloqueados = telefonos_bloqueados_para_envio(set(candidatos)) if candidatos else set()
             filas, cerrojos = [], []
             for tel in sorted(candidatos.keys() - bloqueados):
@@ -717,6 +744,9 @@ def publicar_base(usuario, solicitud_id):
                         " VALUES (%s,%s,%s)", (solicitud["id"], base_id, len(filas)))
             cur.execute("UPDATE recuperacion_solicitudes SET estado='COMPLETADA',version=version+1 WHERE id=%s",
                         (solicitud["id"],))
+            if permitidos is not None:
+                cur.execute("UPDATE recuperacion_revision_contactos SET candidatos_publicables=NULL WHERE solicitud=%s",
+                            (solicitud["id"],))
             limpiar_cerrojos_baja_inactivos(cur, cerrojos)
             conn.commit()
             return {"lista_generada_id": base_id, "contactos": len(filas)}, True

@@ -864,6 +864,7 @@
 
     modoComparacion.addEventListener("change", async () => {
       coincidencias.replaceChildren();
+      publicar.hidden = true;
       panelBasesComparacion.hidden = modoComparacion.value !== "seleccion";
       if (panelBasesComparacion.hidden) return;
       const version = secuencia;
@@ -886,7 +887,10 @@
         if (version === secuencia && modoComparacion.value === "seleccion") basesComparacion.textContent = error.message;
       }
     });
-    basesComparacion.addEventListener("change", () => coincidencias.replaceChildren());
+    basesComparacion.addEventListener("change", () => {
+      coincidencias.replaceChildren();
+      publicar.hidden = true;
+    });
 
     async function revisarContactos() {
       if (revisar.disabled || !seleccion) return;
@@ -920,13 +924,17 @@
         const datos = revision.resultado;
         publicar.hidden = !datos.publicacion_disponible;
         contactoAviso.textContent = datos.publicacion_disponible
-          ? `Puedes publicar ${Number(datos.conteos.contactos_sin_bloqueo).toLocaleString("es-CL")} pacientes en ${datos.nombre_propuesto}.`
-          : "No hay contactos disponibles para publicar.";
+          ? `Puedes publicar ${Number(datos.conteos.contactos_publicables).toLocaleString("es-CL")} pacientes en ${datos.nombre_propuesto}.`
+          : datos.conteos.excluidos_por_bases
+            ? "Todos los contactos sin bloqueo ya están en las bases comparadas."
+            : "No hay contactos disponibles para publicar.";
         conteos("#recuperacionContactos", datos.conteos, { pacientes_inactivos: "Pacientes inactivos",
           sin_ficha_local: "Sin ficha local", telefonos_invalidos: "Teléfonos inválidos",
           atenciones_recientes: "Con atención posterior al umbral",
           telefonos_compartidos: "Contactos con teléfono compartido", bloqueados: "Bloqueados",
-          contactos_sin_bloqueo: "Contactos sin bloqueo" });
+          contactos_sin_bloqueo: "Disponibles antes de comparar",
+          excluidos_por_bases: "Excluidos por estar en otras bases",
+          contactos_publicables: "Pacientes para publicar" });
         if (datos.comparacion) {
           const { total, bases } = datos.comparacion;
           const resumen = document.createElement("li");
