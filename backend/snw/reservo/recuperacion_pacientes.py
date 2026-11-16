@@ -72,6 +72,14 @@ def configurar_tablas(cur):
     if not cur.fetchone():
         cur.execute("ALTER TABLE recuperacion_solicitudes ADD tratamientos_json TEXT NULL")
     cur.execute(
+        "CREATE TABLE IF NOT EXISTS recuperacion_revision_contactos ("
+        " solicitud BIGINT UNSIGNED PRIMARY KEY, estado VARCHAR(16) NOT NULL,"
+        " resultado TEXT NULL, error VARCHAR(255) NULL,"
+        " KEY idx_rec_revision_estado (estado, solicitud),"
+        " FOREIGN KEY (solicitud) REFERENCES recuperacion_solicitudes(id) ON DELETE CASCADE"
+        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+    )
+    cur.execute(
         "CREATE TABLE IF NOT EXISTS recuperacion_publicaciones ("
         " solicitud BIGINT UNSIGNED PRIMARY KEY, base_id INT NULL UNIQUE,"
         " contactos INT UNSIGNED NOT NULL,"
@@ -414,6 +422,89 @@ def _contactos(cur, solicitud, *, bloquear=False):
     return unicos, {"pacientes_inactivos": inactivos, "sin_ficha_local": sin_ficha,
                     "telefonos_invalidos": invalidos, "telefonos_compartidos": compartidos,
                     "atenciones_recientes": activos_recientes}
+
+
+def solicitar_revision_contactos(usuario, solicitud_id):
+    with conectar() as conn, conn.cursor() as cur:
+        solicitud = _solicitud_contactos(cur, usuario, solicitud_id, bloquear=True)
+        if solicitud["estado"] != "ANALIZADA":
+            raise HTTPException(409, detail="La revisión requiere un análisis terminado.")
+        cur.execute("SELECT estado FROM recuperacion_revision_contactos WHERE solicitud=%s FOR UPDATE",
+                    (solicitud["id"],))
+        revision = cur.fetchone()
+        if revision and revision["estado"] in ("PENDIENTE", "PROCESANDO"):
+            return {"estado": revision["estado"]}
+        cur.execute(
+            "INSERT INTO recuperacion_revision_contactos (solicitud,estado) VALUES (%s,'PENDIENTE')"
+            " ON DUPLICATE KEY UPDATE estado='PENDIENTE',resultado=NULL,error=NULL",
+            (solicitud["id"],),
+        )
+        conn.commit()
+    return {"estado": "PENDIENTE"}
+
+
+def estado_revision_contactos(usuario, solicitud_id):
+    with conectar() as conn, conn.cursor() as cur:
+        solicitud = _solicitud_contactos(cur, usuario, solicitud_id)
+        cur.execute("SELECT estado,resultado,error FROM recuperacion_revision_contactos WHERE solicitud=%s",
+                    (solicitud["id"],))
+        revision = cur.fetchone()
+    if not revision:
+        raise HTTPException(404, detail="Todavía no se ha solicitado comprobar los contactos.")
+    return {"estado": revision["estado"],
+            "resultado": json.loads(revision["resultado"]) if revision["resultado"] else None,
+            "error": revision["error"]}
+
+
+def procesar_revision_contactos():
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute("SELECT GET_LOCK('snw-recuperacion-contactos',0) AS adquirido")
+        if not cur.fetchone()["adquirido"]:
+            return False
+        try:
+            cur.execute(
+                "SELECT s.id,s.usuario,s.solicitud_id FROM recuperacion_revision_contactos r"
+                " JOIN recuperacion_solicitudes s ON s.id=r.solicitud"
+                " WHERE r.estado IN ('PROCESANDO','PENDIENTE')"
+                " ORDER BY (r.estado='PROCESANDO') DESC,r.solicitud LIMIT 1"
+            )
+            job = cur.fetchone()
+            if not job:
+                return False
+            cur.execute("UPDATE recuperacion_revision_contactos SET estado='PROCESANDO' WHERE solicitud=%s",
+                        (job["id"],))
+            conn.commit()
+            try:
+                resultado = revisar_contactos(job["usuario"], job["solicitud_id"])
+                estado, error = "COMPLETADA", None
+            except Exception as exc:
+                log_error(f"comprobar contactos de recuperación #{job['id']}", exc, solo_tipo=True)
+                resultado, estado = None, "ERROR"
+                if isinstance(exc, ReservoError):
+                    error = exc.categoria
+                elif isinstance(exc, HTTPException):
+                    error = str(exc.detail)
+                else:
+                    error = "No se pudieron comprobar los contactos. Puedes volver a intentarlo."
+                error = error[:255]
+            cur.execute(
+                "UPDATE recuperacion_revision_contactos SET estado=%s,resultado=%s,error=%s WHERE solicitud=%s",
+                (estado, json.dumps(resultado) if resultado is not None else None, error, job["id"]),
+            )
+            conn.commit()
+            return True
+        finally:
+            cur.execute("SELECT RELEASE_LOCK('snw-recuperacion-contactos')")
+
+
+async def loop_revision_contactos():
+    while True:
+        try:
+            if not await asyncio.to_thread(procesar_revision_contactos):
+                await asyncio.sleep(3)
+        except Exception as exc:
+            log_error("worker de revisión de contactos de recuperación", exc, solo_tipo=True)
+            await asyncio.sleep(10)
 
 
 def revisar_contactos(usuario, solicitud_id):

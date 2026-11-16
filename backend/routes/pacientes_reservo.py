@@ -10,6 +10,7 @@ RUTAS = (
     ("/api/v1/recuperacion-pacientes/solicitudes/{solicitud_id}/resultado", "GET", "obtener_resultado_recuperacion", None),
     ("/api/v1/recuperacion-pacientes/solicitudes/{solicitud_id}/pacientes.csv", "GET", "descargar_base_recuperacion_csv", None),
     ("/api/v1/recuperacion-pacientes/solicitudes/{solicitud_id}/revision-contactos", "GET", "revisar_contactos_recuperacion", None),
+    ("/api/v1/recuperacion-pacientes/solicitudes/{solicitud_id}/revision-contactos", "POST", "solicitar_revision_contactos_recuperacion", 202),
     ("/api/v1/recuperacion-pacientes/solicitudes/{solicitud_id}/publicar", "POST", "publicar_base_recuperacion", None),
     ("/api/reservo/configuracion", "GET", "listar_configuracion_reservo", None),
     ("/api/reservo/clinicas/{codigo}/probar", "POST", "probar_conexion_reservo", None),

@@ -6030,7 +6030,11 @@ def descargar_base_recuperacion_csv(solicitud_id: str, sesion: dict = Depends(so
 
 
 def revisar_contactos_recuperacion(solicitud_id: str, sesion: dict = Depends(solo_admin)):
-    return recuperacion_pacientes.revisar_contactos(sesion["usuario"], solicitud_id)
+    return recuperacion_pacientes.estado_revision_contactos(sesion["usuario"], solicitud_id)
+
+
+def solicitar_revision_contactos_recuperacion(solicitud_id: str, sesion: dict = Depends(solo_admin)):
+    return recuperacion_pacientes.solicitar_revision_contactos(sesion["usuario"], solicitud_id)
 
 
 def consultar_tratamientos_recuperacion(body: recuperacion_pacientes.ConsultaTratamientosIn,
@@ -10150,6 +10154,7 @@ async def _arrancar_scheduler_programados() -> None:
         if esquema_reservo_listo:
             asyncio.create_task(reservo_pacientes.loop_trabajos())
             asyncio.create_task(recuperacion_pacientes.loop_trabajos())
+            asyncio.create_task(recuperacion_pacientes.loop_revision_contactos())
             asyncio.create_task(recuperacion_pacientes.loop_consultas_tratamientos())
         else:
             print("[RESERVO] Worker inactivo: falta instalar el esquema de Pacientes Reservo.",

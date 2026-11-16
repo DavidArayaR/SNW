@@ -858,8 +858,18 @@
       contactoAviso.textContent = "Revisando contactos…";
       $("#recuperacionContactos").replaceChildren();
       try {
-        const datos = await request(`${ruta}/solicitudes/${encodeURIComponent(seleccion)}/revision-contactos`);
+        const url = `${ruta}/solicitudes/${encodeURIComponent(seleccion)}/revision-contactos`;
+        let revision = await request(url, { method: "POST" });
+        while (version === secuencia && ["PENDIENTE", "PROCESANDO"].includes(revision.estado)) {
+          contactoAviso.textContent = revision.estado === "PENDIENTE"
+            ? "Comprobación en cola…" : "Comprobando contactos y completando fichas de Reservo…";
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          if (version !== secuencia) return;
+          revision = await request(url);
+        }
         if (version !== secuencia) return;
+        if (!revision.resultado) throw new Error(revision.error || "No se pudieron comprobar los contactos.");
+        const datos = revision.resultado;
         publicar.hidden = !datos.publicacion_disponible;
         contactoAviso.textContent = datos.publicacion_disponible
           ? `Puedes publicar ${Number(datos.conteos.contactos_sin_bloqueo).toLocaleString("es-CL")} pacientes en ${datos.nombre_propuesto}.`
