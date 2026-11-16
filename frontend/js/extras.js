@@ -92,7 +92,7 @@
         <small>${escapar([l.compania, l.sistema, clinica].filter(Boolean).join(" · "))}</small>
         <div class="extras-telefono">
           <span>${escapar(l.telefono || "Sin número asignado")}</span>
-          ${l.telefono ? '<button class="btn btn--ghost extras-copiar" type="button" data-accion="copiar" title="Copiar número" aria-label="Copiar número"><i class="fa-regular fa-copy" aria-hidden="true"></i></button>' : ""}
+          ${l.telefono ? '<button class="btn btn--ghost extras-copiar" type="button" data-accion="copiar" title="Copiar número sin +56" aria-label="Copiar número sin +56"><i class="fa-regular fa-copy" aria-hidden="true"></i></button>' : ""}
         </div>
       </th>
       <td class="extras-fecha" role="cell">
@@ -289,7 +289,7 @@
       if (boton.dataset.accion === "recarga") registrarRecarga(l);
       if (boton.dataset.accion === "historial") await historial(l);
       if (boton.dataset.accion === "copiar") {
-        await navigator.clipboard.writeText(l.telefono);
+        await navigator.clipboard.writeText(l.telefono.replace(/^\+56/, ""));
         mensaje("estado", "Número copiado.");
       }
     } catch (error) {
