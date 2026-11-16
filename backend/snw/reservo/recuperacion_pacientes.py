@@ -164,15 +164,15 @@ def listar_clinicas():
 def registrar_consulta_tratamientos(usuario, body):
     codigo = _clinica(body.clinica_codigo)
     desde = date(body.anio, body.mes, 1)
-    if desde >= datetime.now(ZONA).date().replace(day=1):
+    hasta = datetime.now(ZONA).date()
+    if desde >= hasta.replace(day=1):
         raise HTTPException(422, detail="Selecciona un mes histórico completo.")
-    hasta = desde.replace(day=monthrange(body.anio, body.mes)[1])
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT id FROM recuperacion_consultas_tratamientos WHERE usuario=%s AND clinica_codigo=%s"
-            " AND desde=%s AND (estado IN ('PENDIENTE','PROCESANDO')"
+            " AND desde=%s AND hasta=%s AND (estado IN ('PENDIENTE','PROCESANDO')"
             " OR (estado='COMPLETADA' AND finalizado_en>=UTC_TIMESTAMP()-INTERVAL 30 MINUTE))"
-            " ORDER BY creado_en DESC LIMIT 1", (usuario, codigo, desde),
+            " ORDER BY creado_en DESC LIMIT 1", (usuario, codigo, desde, hasta),
         )
         anterior = cur.fetchone()
         if anterior:
