@@ -5999,6 +5999,36 @@ def obtener_resultado_recuperacion(solicitud_id: str, sesion: dict = Depends(sol
     return recuperacion_pacientes.obtener_resultado(sesion["usuario"], solicitud_id)
 
 
+def descargar_base_recuperacion_csv(solicitud_id: str, sesion: dict = Depends(solo_admin)):
+    usuario = sesion["usuario"]
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT b.id, b.area_id, a.nombre_tabla_base"
+            " FROM recuperacion_solicitudes s"
+            " JOIN recuperacion_publicaciones p ON p.solicitud=s.id"
+            " JOIN reservo_bases_contacto b ON b.id=p.base_id AND b.origen='RECUPERACION'"
+            " LEFT JOIN areas a ON a.id=b.area_id"
+            " WHERE s.usuario=%s AND s.solicitud_id=%s",
+            (usuario, solicitud_id),
+        )
+        base = cur.fetchone()
+    if not base:
+        raise HTTPException(404, detail="No hay una base de recuperación disponible para esta solicitud.")
+    if base["area_id"] is None:
+        raise HTTPException(409, detail="Publica la base antes de descargar el CSV.")
+    base_id = int(base["id"])
+    tabla = f"pacientes_reservo_{base_id}"
+    if base["nombre_tabla_base"] != tabla or not servicio_areas.tabla_fisica_existe(tabla):
+        raise HTTPException(404, detail="La base publicada ya no está disponible.")
+    auditoria_registrar(usuario, "recuperacion_csv_descargado", str(base_id))
+    return _csv_pacientes_reservo(
+        f"SELECT nombre AS paciente_nombre, apellido AS paciente_apellido,"
+        f" telefono AS paciente_telefono, tratamiento_ultima_atencion AS tratamiento,"
+        f" fecha_ultima_atencion FROM {tabla} ORDER BY id",
+        (), f"recuperacion-base-{base_id}.csv", incluir_sin_nombre=True,
+    )
+
+
 def revisar_contactos_recuperacion(solicitud_id: str, sesion: dict = Depends(solo_admin)):
     return recuperacion_pacientes.revisar_contactos(sesion["usuario"], solicitud_id)
 
@@ -6285,7 +6315,19 @@ def descargar_sincronizacion_reservo_csv(job_id: int, sesion: dict = Depends(sol
 
     uids = [item["uuid"] for item in tratamientos]
     marcadores = ",".join("%s" for _ in uids)
+    auditoria_registrar(sesion.get("usuario") or "", "reservo_consulta_csv_descargado", str(job_id))
+    return _csv_pacientes_reservo(
+        "SELECT p.paciente_nombre,p.paciente_apellido,p.paciente_telefono,p.fecha_ultima_atencion,"
+        "GROUP_CONCAT(DISTINCT t.tratamiento_nombre ORDER BY t.tratamiento_nombre SEPARATOR ', ') AS tratamiento "
+        "FROM reservo_sincronizacion_pacientes sp JOIN reservo_pacientes p ON p.id=sp.paciente_id "
+        "LEFT JOIN reservo_paciente_tratamientos t ON t.paciente_id=p.id "
+        f"AND t.tratamiento_uuid IN ({marcadores}) WHERE sp.job_id=%s "
+        "GROUP BY p.id,p.paciente_nombre,p.paciente_apellido,p.paciente_telefono,p.fecha_ultima_atencion ORDER BY p.id",
+        (*uids, job_id), f"reservo-consulta-{int(job_id)}.csv",
+    )
 
+
+def _csv_pacientes_reservo(sql, parametros, archivo, *, incluir_sin_nombre=False):
     def celda_segura(valor, longitud):
         texto = str(valor or "").strip()
         prefijo = "'" if texto.lstrip().startswith(("=", "+", "-", "@")) else ""
@@ -6302,27 +6344,19 @@ def descargar_sincronizacion_reservo_csv(job_id: int, sesion: dict = Depends(sol
         buffer.seek(0)
         buffer.truncate(0)
         with conectar() as conn, conn.cursor(pymysql.cursors.SSDictCursor) as cur:
-            cur.execute(
-                "SELECT p.paciente_nombre,p.paciente_apellido,p.paciente_telefono,p.fecha_ultima_atencion,"
-                "GROUP_CONCAT(DISTINCT t.tratamiento_nombre ORDER BY t.tratamiento_nombre SEPARATOR ', ') AS tratamiento "
-                "FROM reservo_sincronizacion_pacientes sp JOIN reservo_pacientes p ON p.id=sp.paciente_id "
-                "LEFT JOIN reservo_paciente_tratamientos t ON t.paciente_id=p.id "
-                f"AND t.tratamiento_uuid IN ({marcadores}) WHERE sp.job_id=%s "
-                "GROUP BY p.id,p.paciente_nombre,p.paciente_apellido,p.paciente_telefono,p.fecha_ultima_atencion ORDER BY p.id",
-                (*uids, job_id),
-            )
+            cur.execute(sql, parametros)
             while True:
                 filas = cur.fetchmany(500)
                 if not filas:
                     break
                 for fila in filas:
                     telefono = normalizar_telefono(str(fila.get("paciente_telefono") or ""))
-                    if not telefono or not str(fila.get("paciente_nombre") or "").strip():
+                    if not telefono or (not incluir_sin_nombre and not str(fila.get("paciente_nombre") or "").strip()):
                         continue
                     fecha = fila.get("fecha_ultima_atencion")
-                    fecha_local = (fecha.replace(tzinfo=datetime.timezone.utc)
-                                   .astimezone(ZoneInfo("America/Santiago")).date().isoformat()
-                                   if fecha else "")
+                    if isinstance(fecha, datetime.datetime):
+                        fecha = fecha.replace(tzinfo=datetime.timezone.utc).astimezone(ZoneInfo("America/Santiago")).date()
+                    fecha_local = fecha.isoformat() if fecha else ""
                     escritor.writerow([celda_segura(fila.get("paciente_nombre"), 150),
                         celda_segura(fila.get("paciente_apellido"), 150), telefono[1:],
                         celda_segura(fila.get("tratamiento"), 500), fecha_local])
@@ -6332,9 +6366,8 @@ def descargar_sincronizacion_reservo_csv(job_id: int, sesion: dict = Depends(sol
                 buffer.seek(0)
                 buffer.truncate(0)
 
-    auditoria_registrar(sesion.get("usuario") or "", "reservo_consulta_csv_descargado", str(job_id))
     return StreamingResponse(generar_csv(), media_type="text/csv; charset=utf-8", headers={
-        "Content-Disposition": f'attachment; filename="reservo-consulta-{int(job_id)}.csv"',
+        "Content-Disposition": f'attachment; filename="{archivo}"',
         "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
     })
 

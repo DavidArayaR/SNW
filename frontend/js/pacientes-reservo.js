@@ -2,6 +2,25 @@
   const $ = (selector) => document.querySelector(selector);
   const token = () => localStorage.getItem("snw_token") || "";
   const headers = (extra = {}) => ({ Authorization: `Bearer ${token()}`, ...extra });
+  async function descargarCsv(ruta, archivo) {
+    const respuesta = await fetch(ruta, { headers: headers(), cache: "no-store" });
+    if (respuesta.status === 401) {
+      window.snwSesionExpirada();
+      throw new Error("La sesión expiró.");
+    }
+    if (!respuesta.ok) {
+      const detalle = await respuesta.json().catch(() => ({}));
+      throw new Error(detalle.detail || "No se pudo descargar el CSV.");
+    }
+    const url = URL.createObjectURL(await respuesta.blob());
+    const enlace = document.createElement("a");
+    enlace.href = url;
+    enlace.download = archivo;
+    document.body.appendChild(enlace);
+    enlace.click();
+    enlace.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }
   const escapar = (valor) => {
     const nodo = document.createElement("span");
     nodo.textContent = valor == null ? "" : String(valor);
@@ -370,22 +389,7 @@
         const id = Number(boton.dataset.descargarCsv);
         boton.disabled = true;
         try {
-          const respuesta = await fetch(`api/reservo/sincronizaciones/${id}/pacientes.csv`, {
-            headers: headers(), cache: "no-store",
-          });
-          if (respuesta.status === 401) { window.snwSesionExpirada(); return; }
-          if (!respuesta.ok) {
-            const detalle = await respuesta.json().catch(() => ({}));
-            throw new Error(detalle.detail || "No se pudo descargar el CSV.");
-          }
-          const url = URL.createObjectURL(await respuesta.blob());
-          const enlace = document.createElement("a");
-          enlace.href = url;
-          enlace.download = `reservo-consulta-${id}.csv`;
-          document.body.appendChild(enlace);
-          enlace.click();
-          enlace.remove();
-          setTimeout(() => URL.revokeObjectURL(url), 60000);
+          await descargarCsv(`api/reservo/sincronizaciones/${id}/pacientes.csv`, `reservo-consulta-${id}.csv`);
           mostrarAviso("CSV descargado con los pacientes que tienen teléfono chileno válido.", "success");
         } catch (error) {
           mostrarAviso(error.message || "No se pudo descargar el CSV.", "error");
@@ -588,6 +592,7 @@
     const revisar = $("#recuperacionRevisar");
     const publicar = $("#recuperacionPublicar");
     const abrirBase = $("#recuperacionAbrirBase");
+    const descargarBase = $("#recuperacionDescargarCsv");
     const contactoAviso = $("#recuperacionContactosAviso");
     const nombresMes = new Intl.DateTimeFormat("es-CL", { month: "long", timeZone: "UTC" });
     const meses = Array.from({ length: 12 }, (_, i) => nombresMes.format(new Date(Date.UTC(2000, i, 1))));
@@ -782,6 +787,7 @@
         conteos("#recuperacionConteos", resultado.conteos, { pacientes_analizados: "Pacientes analizados",
           pacientes_inactivos: "Pacientes inactivos", citas_sin_uuid: "Citas sin identificador" });
         revisar.hidden = fila.estado !== "ANALIZADA";
+        descargarBase.hidden = true;
         if (comprobar && fila.estado === "ANALIZADA") revisarContactos();
         if (resultado.publicacion_pendiente) {
           abrirBase.hidden = true;
@@ -792,6 +798,8 @@
           publicar.hidden = true;
           abrirBase.href = `pacientes.html?base_reservo=${encodeURIComponent(resultado.lista_generada_id)}`;
           abrirBase.hidden = false;
+          descargarBase.dataset.baseId = resultado.lista_generada_id;
+          descargarBase.hidden = false;
           contactoAviso.textContent = `Base publicada con ${Number(resultado.contactos_publicados).toLocaleString("es-CL")} pacientes.`;
         } else if (fila.estado === "COMPLETADA") {
           contactoAviso.textContent = "La base publicada ya no está disponible.";
@@ -823,8 +831,25 @@
       publicar.disabled = false;
       abrirBase.hidden = true;
       abrirBase.removeAttribute("href");
+      descargarBase.hidden = true;
+      descargarBase.disabled = false;
       consultarDetalle(id, true, 0, comprobar);
     }
+
+    descargarBase.addEventListener("click", async () => {
+      if (!seleccion || descargarBase.hidden || descargarBase.disabled) return;
+      const version = secuencia;
+      descargarBase.disabled = true;
+      try {
+        await descargarCsv(`${ruta}/solicitudes/${encodeURIComponent(seleccion)}/pacientes.csv`,
+          `recuperacion-base-${descargarBase.dataset.baseId}.csv`);
+        avisar("CSV de recuperación descargado.", "success");
+      } catch (error) {
+        avisar(error.message, "error");
+      } finally {
+        if (version === secuencia) descargarBase.disabled = false;
+      }
+    });
 
     async function revisarContactos() {
       const version = secuencia;
