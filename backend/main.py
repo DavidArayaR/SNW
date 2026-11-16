@@ -6033,8 +6033,13 @@ def revisar_contactos_recuperacion(solicitud_id: str, sesion: dict = Depends(sol
     return recuperacion_pacientes.estado_revision_contactos(sesion["usuario"], solicitud_id)
 
 
-def solicitar_revision_contactos_recuperacion(solicitud_id: str, sesion: dict = Depends(solo_admin)):
-    return recuperacion_pacientes.solicitar_revision_contactos(sesion["usuario"], solicitud_id)
+def solicitar_revision_contactos_recuperacion(solicitud_id: str, sesion: dict = Depends(solo_admin),
+                                              body: recuperacion_pacientes.ComparacionBasesIn | None = None):
+    return recuperacion_pacientes.solicitar_revision_contactos(sesion["usuario"], solicitud_id, body)
+
+
+def listar_bases_comparacion_recuperacion(solicitud_id: str, sesion: dict = Depends(solo_admin)):
+    return recuperacion_pacientes.listar_bases_comparacion(sesion["usuario"], solicitud_id)
 
 
 def consultar_tratamientos_recuperacion(body: recuperacion_pacientes.ConsultaTratamientosIn,

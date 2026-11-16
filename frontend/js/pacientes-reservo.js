@@ -590,6 +590,11 @@
     const titulo = $("#recuperacionDetalleTitulo");
     const estado = $("#recuperacionEstado");
     const revisar = $("#recuperacionRevisar");
+    const comparacion = $("#recuperacionComparacion");
+    const modoComparacion = $("#recuperacionModoComparacion");
+    const panelBasesComparacion = $("#recuperacionBasesComparacion");
+    const basesComparacion = $("#recuperacionListaBases");
+    const coincidencias = $("#recuperacionCoincidencias");
     const publicar = $("#recuperacionPublicar");
     const abrirBase = $("#recuperacionAbrirBase");
     const descargarBase = $("#recuperacionDescargarCsv");
@@ -761,7 +766,7 @@
       }
     }
 
-    async function consultarDetalle(id, enfocar = false, reintentos = 0, comprobar = false) {
+    async function consultarDetalle(id, enfocar = false, reintentos = 0) {
       const version = secuencia;
       const url = `${ruta}/solicitudes/${encodeURIComponent(id)}`;
       try {
@@ -778,7 +783,7 @@
             etiquetas[fila.estado] || fila.estado;
         }
         if (activa(fila.estado)) {
-          temporizador = setTimeout(() => consultarDetalle(id, false, 0, comprobar), 5000);
+          temporizador = setTimeout(() => consultarDetalle(id, false), 5000);
           return;
         }
         const resultado = await request(`${url}/resultado`);
@@ -787,8 +792,8 @@
         conteos("#recuperacionConteos", resultado.conteos, { pacientes_analizados: "Pacientes analizados",
           pacientes_inactivos: "Pacientes inactivos", citas_sin_uuid: "Citas sin identificador" });
         revisar.hidden = fila.estado !== "ANALIZADA";
+        comparacion.hidden = revisar.hidden;
         descargarBase.hidden = true;
-        if (comprobar && fila.estado === "ANALIZADA") revisarContactos();
         if (resultado.publicacion_pendiente) {
           abrirBase.hidden = true;
           publicar.hidden = false;
@@ -808,13 +813,13 @@
         if (version !== secuencia) return;
         estado.textContent = error.message;
         if (!enfocar && reintentos < 3 && error.message !== "La sesión expiró.") {
-          temporizador = setTimeout(() => consultarDetalle(id, false, reintentos + 1, comprobar),
+          temporizador = setTimeout(() => consultarDetalle(id, false, reintentos + 1),
             5000 * 2 ** (reintentos + 1));
         }
       }
     }
 
-    function abrirSolicitud(id, comprobar = false) {
+    function abrirSolicitud(id) {
       clearTimeout(temporizador);
       secuencia++;
       seleccion = id;
@@ -824,6 +829,12 @@
       contactoAviso.textContent = "";
       $("#recuperacionConteos").replaceChildren();
       $("#recuperacionContactos").replaceChildren();
+      coincidencias.replaceChildren();
+      comparacion.hidden = true;
+      comparacion.disabled = false;
+      modoComparacion.value = "clinica";
+      panelBasesComparacion.hidden = true;
+      basesComparacion.replaceChildren();
       revisar.hidden = true;
       revisar.disabled = false;
       publicar.hidden = true;
@@ -833,7 +844,7 @@
       abrirBase.removeAttribute("href");
       descargarBase.hidden = true;
       descargarBase.disabled = false;
-      consultarDetalle(id, true, 0, comprobar);
+      consultarDetalle(id, true);
     }
 
     descargarBase.addEventListener("click", async () => {
@@ -851,15 +862,52 @@
       }
     });
 
-    async function revisarContactos() {
+    modoComparacion.addEventListener("change", async () => {
+      coincidencias.replaceChildren();
+      panelBasesComparacion.hidden = modoComparacion.value !== "seleccion";
+      if (panelBasesComparacion.hidden) return;
       const version = secuencia;
+      basesComparacion.textContent = "Cargando bases…";
+      try {
+        const bases = await request(`${ruta}/solicitudes/${encodeURIComponent(seleccion)}/bases-comparacion`);
+        if (version !== secuencia || modoComparacion.value !== "seleccion") return;
+        basesComparacion.replaceChildren();
+        if (!bases.length) basesComparacion.textContent = "No hay bases disponibles.";
+        for (const base of bases) {
+          const etiqueta = document.createElement("label");
+          etiqueta.className = "reservo-tratamiento";
+          const opcion = document.createElement("input");
+          opcion.type = "checkbox";
+          opcion.value = base.id;
+          etiqueta.append(opcion, ` ${base.nombre} · ${base.clinica_codigo ? nombreClinica(base.clinica_codigo) : "Sin clínica asignada"}`);
+          basesComparacion.append(etiqueta);
+        }
+      } catch (error) {
+        if (version === secuencia && modoComparacion.value === "seleccion") basesComparacion.textContent = error.message;
+      }
+    });
+    basesComparacion.addEventListener("change", () => coincidencias.replaceChildren());
+
+    async function revisarContactos() {
+      if (revisar.disabled || !seleccion) return;
+      const version = secuencia;
+      const modo = modoComparacion.value;
+      const areas = modo === "seleccion"
+        ? [...basesComparacion.querySelectorAll("input:checked")].map(input => Number(input.value)) : [];
+      if (modo === "seleccion" && !areas.length) {
+        contactoAviso.textContent = "Selecciona al menos una base para comparar.";
+        return;
+      }
       revisar.disabled = true;
+      comparacion.disabled = true;
       publicar.hidden = true;
       contactoAviso.textContent = "Revisando contactos…";
       $("#recuperacionContactos").replaceChildren();
+      coincidencias.replaceChildren();
       try {
         const url = `${ruta}/solicitudes/${encodeURIComponent(seleccion)}/revision-contactos`;
-        let revision = await request(url, { method: "POST" });
+        let revision = await request(url, { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ modo, areas }) });
         while (version === secuencia && ["PENDIENTE", "PROCESANDO"].includes(revision.estado)) {
           contactoAviso.textContent = revision.estado === "PENDIENTE"
             ? "Comprobación en cola…" : "Comprobando contactos y completando fichas de Reservo…";
@@ -879,10 +927,23 @@
           atenciones_recientes: "Con atención posterior al umbral",
           telefonos_compartidos: "Contactos con teléfono compartido", bloqueados: "Bloqueados",
           contactos_sin_bloqueo: "Contactos sin bloqueo" });
+        if (datos.comparacion) {
+          const { total, bases } = datos.comparacion;
+          const resumen = document.createElement("li");
+          resumen.textContent = bases.length
+            ? `${total.toLocaleString("es-CL")} contactos ya están en las bases comparadas.`
+            : "No hay bases asociadas a esta clínica para comparar.";
+          coincidencias.append(resumen);
+          for (const base of bases) {
+            const fila = document.createElement("li");
+            fila.textContent = `${base.nombre} · ${base.coincidencias.toLocaleString("es-CL")} coincidencias`;
+            coincidencias.append(fila);
+          }
+        }
       } catch (error) {
         if (version === secuencia) contactoAviso.textContent = error.message;
       } finally {
-        if (version === secuencia) revisar.disabled = false;
+        if (version === secuencia) revisar.disabled = comparacion.disabled = false;
       }
     }
     revisar.addEventListener("click", revisarContactos);
@@ -925,7 +986,7 @@
           headers: { "Content-Type": "application/json", "Idempotency-Key": intentos.get(body) } });
         intentos.delete(body);
         avisar("Solicitud registrada.", "success");
-        abrirSolicitud(fila.solicitud_id, true);
+        abrirSolicitud(fila.solicitud_id);
         await cargarHistorial([null]);
       } catch (error) {
         avisar(error.message, "error");

@@ -75,9 +75,21 @@
               <h3 id="recuperacionDetalleTitulo" tabindex="-1"></h3>
               <p id="recuperacionEstado" role="status" aria-live="polite"></p>
               <ul id="recuperacionConteos"></ul>
+              <fieldset id="recuperacionComparacion" class="field" hidden>
+                <label for="recuperacionModoComparacion">Comparar contactos con</label>
+                <select id="recuperacionModoComparacion">
+                  <option value="clinica">Bases de la misma clínica</option>
+                  <option value="seleccion">Elegir bases</option>
+                  <option value="ninguna">Ninguna base</option>
+                </select>
+                <div id="recuperacionBasesComparacion" hidden>
+                  <div id="recuperacionListaBases" class="reservo-tratamientos" aria-label="Bases para comparar"></div>
+                </div>
+              </fieldset>
               <button id="recuperacionRevisar" class="btn btn--ghost" type="button" hidden>Comprobar contactos</button>
               <p id="recuperacionContactosAviso" role="status" aria-live="polite"></p>
               <ul id="recuperacionContactos"></ul>
+              <ul id="recuperacionCoincidencias"></ul>
               <button id="recuperacionPublicar" class="btn btn--primary" type="button" hidden>Publicar base de pacientes</button>
               <a id="recuperacionAbrirBase" class="btn btn--ghost" hidden>Ver base en Pacientes</a>
               <button id="recuperacionDescargarCsv" class="btn btn--ghost" type="button" hidden>
@@ -217,7 +229,7 @@
     </section>
   </div>
   <script src="js/layout.js?v=reservo-nav2"></script>
-  <script src="js/pacientes-reservo.js?v=revision-contactos1"></script>
+  <script src="js/pacientes-reservo.js?v=comparar-bases1"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>
