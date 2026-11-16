@@ -32,6 +32,7 @@ from snw.whatsapp.whatsapp_channels import mismo_centro
 RUTA = "/api/v1/recuperacion-pacientes"
 ZONA = ZoneInfo("America/Santiago")
 CLINICAS = {("VS" if codigo == "MVYS" else codigo): codigo for codigo in RESERVO_CLINICAS}
+_ESTADO_EXCLUIDO_COMPARACION = "enviado"
 _CAMPOS = (
     "id, solicitud_id, clinica_codigo, anio, mes, meses_inactividad, "
     "fecha_referencia, estado, version, creado_en, tratamientos_json"
@@ -493,14 +494,15 @@ def _comparar_bases(solicitud, comparacion, telefonos):
             hallados = set()
             if telefonos:
                 with conn.cursor(SSDictCursor) as filas:
-                    filas.execute(f"SELECT telefono FROM `{tabla}`")
+                    filas.execute(f"SELECT telefono FROM `{tabla}` WHERE estado=%s",
+                                  (_ESTADO_EXCLUIDO_COMPARACION,))
                     for fila in filas:
                         tel = normalizar_telefono(fila["telefono"] or "")
                         if tel in telefonos:
                             hallados.add(tel)
             coincidencias.update(hallados)
             detalle.append({"nombre": base["nombre_visible"], "coincidencias": len(hallados)})
-    return {"total": len(coincidencias), "bases": detalle}, coincidencias
+    return {"total": len(coincidencias), "bases": detalle, "estado": _ESTADO_EXCLUIDO_COMPARACION}, coincidencias
 
 
 def solicitar_revision_contactos(usuario, solicitud_id, comparacion=None):
@@ -676,14 +678,19 @@ def publicar_base(usuario, solicitud_id):
                 if existente["base_id"] is None:
                     raise HTTPException(409, detail="La base de esta solicitud fue eliminada.")
                 return {"lista_generada_id": existente["base_id"], "contactos": existente["contactos"]}, False
-            cur.execute("SELECT estado,comparacion,candidatos_publicables FROM recuperacion_revision_contactos"
+            cur.execute("SELECT estado,comparacion,candidatos_publicables,"
+                        " JSON_UNQUOTE(JSON_EXTRACT(resultado,'$.comparacion.estado')) AS estado_comparado"
+                        " FROM recuperacion_revision_contactos"
                         " WHERE solicitud=%s FOR UPDATE", (solicitud["id"],))
             revision = cur.fetchone()
             permitidos = None
             if revision:
                 opciones = ComparacionBasesIn.model_validate_json(revision["comparacion"] or "{}")
                 if revision["estado"] != "COMPLETADA" or (
-                    opciones.modo != "ninguna" and revision["candidatos_publicables"] is None
+                    opciones.modo != "ninguna" and (
+                        revision["candidatos_publicables"] is None
+                        or revision["estado_comparado"] != _ESTADO_EXCLUIDO_COMPARACION
+                    )
                 ):
                     raise HTTPException(409, detail="Vuelve a comprobar los contactos antes de publicar.")
                 if opciones.modo != "ninguna":

@@ -926,25 +926,25 @@
         contactoAviso.textContent = datos.publicacion_disponible
           ? `Puedes publicar ${Number(datos.conteos.contactos_publicables).toLocaleString("es-CL")} pacientes en ${datos.nombre_propuesto}.`
           : datos.conteos.excluidos_por_bases
-            ? "Todos los contactos sin bloqueo ya están en las bases comparadas."
+            ? "Todos los contactos sin bloqueo figuran como Enviado en las bases comparadas."
             : "No hay contactos disponibles para publicar.";
         conteos("#recuperacionContactos", datos.conteos, { pacientes_inactivos: "Pacientes inactivos",
           sin_ficha_local: "Sin ficha local", telefonos_invalidos: "Teléfonos inválidos",
           atenciones_recientes: "Con atención posterior al umbral",
           telefonos_compartidos: "Contactos con teléfono compartido", bloqueados: "Bloqueados",
           contactos_sin_bloqueo: "Disponibles antes de comparar",
-          excluidos_por_bases: "Excluidos por estar en otras bases",
+          excluidos_por_bases: "Excluidos por figurar como Enviado en otras bases",
           contactos_publicables: "Pacientes para publicar" });
         if (datos.comparacion) {
           const { total, bases } = datos.comparacion;
           const resumen = document.createElement("li");
           resumen.textContent = bases.length
-            ? `${total.toLocaleString("es-CL")} contactos ya están en las bases comparadas.`
+            ? `${total.toLocaleString("es-CL")} contactos figuran como Enviado en las bases comparadas.`
             : "No hay bases asociadas a esta clínica para comparar.";
           coincidencias.append(resumen);
           for (const base of bases) {
             const fila = document.createElement("li");
-            fila.textContent = `${base.nombre} · ${base.coincidencias.toLocaleString("es-CL")} coincidencias`;
+            fila.textContent = `${base.nombre} · ${base.coincidencias.toLocaleString("es-CL")} coincidencias con estado Enviado`;
             coincidencias.append(fila);
           }
         }
