@@ -905,17 +905,26 @@ function urlCallCenterManual(objetivo) {
 
 function mostrarVistaPreparado() {
   const datos = callCenterManualActual?.datos;
-  const introduccion = ccEditor.hidden ? datos?.mensaje_preparado : ccPreparado.value.trim();
-  const cierre = datos?.cierre ? `\n\n${datos.cierre}` : "";
-  $("#callCenterManualVista").textContent = datos
-    ? `${introduccion}\n\nMensaje original:\n«${datos.consulta}»${cierre}` : "";
+  const vista = $("#callCenterManualVista");
+  if (!datos) {
+    vista.textContent = "";
+    return;
+  }
+  const introduccion = ccEditor.hidden ? datos.mensaje_preparado : ccPreparado.value.trim();
+  const original = datos.incluir_mensaje_original === false ? "" : `\n\nMensaje original:\n«${datos.consulta}»`;
+  const cierre = datos.cierre ? `\n\n${datos.cierre}` : "";
+  vista.textContent = `${introduccion}${original}${cierre}`;
 }
 
 function editarPreparadoManual(editar) {
   ccEditor.hidden = !editar;
   ccPreparado.required = editar;
   ccEditar.setAttribute("aria-expanded", String(editar));
-  ccEditar.textContent = editar ? "Restaurar introducción" : "Editar introducción";
+  const campo = callCenterManualActual?.datos?.incluir_mensaje_original === false
+    ? "mensaje preparado" : "introducción";
+  ccEditar.textContent = `${editar ? "Restaurar" : "Editar"} ${campo}`;
+  $("#callCenterManualPreparadoRotulo").textContent = campo === "introducción"
+    ? "Introducción del mensaje" : "Mensaje preparado";
   mostrarVistaPreparado();
 }
 
@@ -974,7 +983,7 @@ async function cargarVistaCallCenter(objetivo) {
     $("#callCenterManualOriginal").textContent = data.consulta;
     $("#callCenterManualDestino").textContent = `Destino: +${data.numero_call_center}`;
     $("#callCenterManualContexto").textContent = `${objetivo.paciente} · ${data.clinica}`;
-    mostrarVistaPreparado();
+    editarPreparadoManual(false);
     ccEstado.textContent = "";
     ccVistas.hidden = ccEnviar.disabled = false;
     ccTexto.required = true;

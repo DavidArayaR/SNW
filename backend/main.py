@@ -11151,7 +11151,9 @@ def _vista_respuesta_manual(envio_id, registro_id, mensaje_id, categoria, ambien
     fila = _registro_callcenter_manual(envio_id, registro_id, ambiente, sesion)
     reagendar = bool(fila.get("reagendamiento"))
     cierre = ""
-    if categoria != "general" and (reagendar or categoria not in respuestas_manuales.CATEGORIAS):
+    if categoria != "general" and (reagendar or (
+        categoria != "interes" and categoria not in respuestas_manuales.CATEGORIAS
+    )):
         raise HTTPException(422, detail="Elige una categoría disponible para esta respuesta.")
     if reagendar:
         envio_id = reagendar_batches.resolver_envio(envio_id)
@@ -11164,7 +11166,7 @@ def _vista_respuesta_manual(envio_id, registro_id, mensaje_id, categoria, ambien
         texto = _respuesta_sistema("reagendar_derivacion", emisor["codigo"])
         destino = (cita, emisor, telefono, numero)
     else:
-        paciente, emisor, tabla, _ = _contexto_callcenter_manual(envio_id, registro_id, ambiente)
+        paciente, emisor, tabla, referencia = _contexto_callcenter_manual(envio_id, registro_id, ambiente)
         telefono = normalizar_telefono(paciente["telefono"])
         original = _entrada_respuesta_manual(mensaje_id, telefono, emisor, ambiente,
                                             paciente_id=paciente["id"], tabla=tabla)
@@ -11180,6 +11182,9 @@ def _vista_respuesta_manual(envio_id, registro_id, mensaje_id, categoria, ambien
                 introduccion, _, cierre = formato.partition("{consulta}")
                 cierre = cierre.strip()
             introduccion = introduccion.strip() or "Hola, quisiera comunicarme con el call center de {clinica}."
+        elif categoria == "interes":
+            texto = _respuesta_sistema("interes", codigo)
+            introduccion = _mensaje_preparado_callcenter(paciente, emisor, referencia=referencia)
         else:
             texto = _respuesta_sistema(f"manual_{categoria}", codigo)
             introduccion = _respuesta_sistema(f"preparado_{categoria}", codigo)
@@ -11188,7 +11193,7 @@ def _vista_respuesta_manual(envio_id, registro_id, mensaje_id, categoria, ambien
         destino = (paciente, emisor, tabla)
     return {"clinica": emisor["nombre"], "numero_call_center": numero, "consulta": original,
             "mensaje": texto, "mensaje_preparado": preparado, "cierre": cierre,
-            "reagendamiento": reagendar}, destino
+            "reagendamiento": reagendar, "incluir_mensaje_original": categoria != "interes"}, destino
 
 
 def _reservar_respuesta_manual(solicitud_id, registro_id, mensaje_id, categoria, centro, actor):
@@ -11227,6 +11232,8 @@ def previsualizar_callcenter_manual(envio_id: int, registro_id: int, ambiente: s
     if isinstance(mensaje_id, str) and mensaje_id:
         vista, _ = _vista_respuesta_manual(envio_id, registro_id, mensaje_id, categoria, ambiente, sesion)
         categorias = [] if vista["reagendamiento"] else [
+            {"codigo": "interes", "grupo": "Interés", "etiqueta": "Enviar botón de call center"},
+        ] + [
             {"codigo": codigo, "grupo": respuesta.grupo, "etiqueta": respuesta.etiqueta}
             for codigo, respuesta in respuestas_manuales.CATEGORIAS.items()
         ]
@@ -11285,8 +11292,9 @@ def _enviar_respuesta_contextual(envio_id, registro_id, body, ambiente, sesion):
         raise HTTPException(422, detail="Completa el mensaje y confirma el envío.")
     vista, destino = _vista_respuesta_manual(
         envio_id, registro_id, body.mensaje_id, body.categoria, ambiente, sesion)
-    preparado = respuestas_manuales.preparar_texto(
-        body.mensaje_preparado or vista["mensaje_preparado"], vista["consulta"], vista["cierre"])
+    preparado = (body.mensaje_preparado or vista["mensaje_preparado"]).strip()
+    if vista["incluir_mensaje_original"]:
+        preparado = respuestas_manuales.preparar_texto(preparado, vista["consulta"], vista["cierre"])
     if not respuestas_manuales.cabe_en_enlace(vista["numero_call_center"], preparado):
         raise HTTPException(422, detail="El texto supera el tamaño del enlace. Acorta la introducción o pide una consulta más breve.")
     emisor = destino[1]
