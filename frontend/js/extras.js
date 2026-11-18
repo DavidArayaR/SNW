@@ -49,6 +49,10 @@
     return iso ? iso.slice(0, 10).split("-").reverse().join("-") : "—";
   }
 
+  function telefonoVisible(telefono) {
+    return (telefono || "").replace(/^\+56(?=[0-9]{9}$)/, "+56 ");
+  }
+
   function pintar() {
     const diasAviso = datos.recordatorio_dias === 1 ? "1 día" : `${datos.recordatorio_dias} días`;
     $("ayudaPlazo").textContent = `El aviso vence en ${diasAviso} desde la última recarga. Si sigue pendiente, SNW envía un aviso urgente cuatro días después del primer correo.`;
@@ -67,7 +71,7 @@
     const lineas = datos.lineas.filter((l) => {
       const clinica = datos.clinicas[l.clinica] || "";
       const texto = `${l.nombre} ${l.telefono || ""} ${l.compania} ${clinica}`.toLocaleLowerCase("es");
-      if (!texto.includes(busqueda)) return false;
+      if (!texto.includes(busqueda) && !telefonoVisible(l.telefono).includes(busqueda)) return false;
       if (filtro === "todas") return true;
       if (filtro === "0") return !l.activo;
       if (!l.activo) return false;
@@ -102,7 +106,7 @@
         <strong>${escapar(l.nombre)}</strong>
         <small>${escapar([l.compania, l.sistema, clinica].filter(Boolean).join(" · "))}</small>
         <div class="extras-telefono">
-          <span>${escapar(l.telefono || "Sin número asignado")}</span>
+          <span>${escapar(telefonoVisible(l.telefono) || "Sin número asignado")}</span>
           ${l.telefono ? '<button class="btn btn--ghost extras-copiar" type="button" data-accion="copiar" title="Copiar número sin +56" aria-label="Copiar número sin +56"><i class="fa-regular fa-copy" aria-hidden="true"></i></button>' : ""}
         </div>
       </th>
@@ -186,7 +190,7 @@
       <div class="extras-form-grid">
         <label class="field"><span>Nombre</span><input name="nombre" type="text" required maxlength="80" value="${escapar(l?.nombre)}"></label>
         <label class="field"><span>Número móvil</span><input name="telefono" type="tel" maxlength="24" ${l?.semilla ? "" : "required"}
-            placeholder="+56 9" value="${escapar(l?.telefono)}"></label>
+            placeholder="+56 987654321" value="${escapar(telefonoVisible(l?.telefono))}"></label>
         <label class="field"><span>Compañía</span><select name="operador" required>${opciones(ops, l?.operador || "wom")}</select></label>
         <label class="field"><span>Sistema o uso</span><select name="sistema">${opciones(["SNW", "CRM", "Personal", "Otro"].map((s) => [s, s]), l?.sistema || "Otro")}</select></label>
         <label class="field"><span>Clínica</span><select name="clinica">${opciones([["", "Sin clínica"], ...Object.entries(datos.clinicas)], l?.clinica || "")}</select></label>
@@ -205,7 +209,7 @@
 
   function registrarRecarga(l) {
     abrir("Registrar recarga", `<form>
-      <p>${escapar(l.nombre)} · ${escapar(l.telefono)}</p>
+      <p>${escapar(l.nombre)} · ${escapar(telefonoVisible(l.telefono))}</p>
       <label class="field"><span>Fecha real de recarga</span><input name="fecha" type="date" required min="1900-01-01"
           max="${datos.hoy}" value="${datos.hoy}"></label>
       <p class="extras-status">Primero recarga el número en el operador. Una vez confirmada la recarga, registra aquí la fecha real.</p>

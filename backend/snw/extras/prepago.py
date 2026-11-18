@@ -450,8 +450,9 @@ def _cuerpo_resumen(lineas, pendientes, enlaces_recarga=None):
             detalle += " · Aviso ya enviado"
         elif linea["estado_aviso"] == "incierto":
             detalle += " · Entrega del aviso por confirmar"
+        telefono = re.sub(r"^\+56(?=[0-9]{9}$)", "+56 ", linea["telefono"])
         item = (f"<strong>{escape(linea['nombre'])}</strong> ({escape(linea['compania'])})"
-                f" · {escape(linea['telefono'])}<br>{detalle}")
+                f" · {escape(telefono)}<br>{detalle}")
         if etapa:
             portal = linea.get("url_recarga") or ""
             recargar = (_boton_correo(portal, "1. Ir a recargar", "#08796b") if portal.startswith("https://") else
