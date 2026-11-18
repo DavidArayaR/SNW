@@ -65,7 +65,8 @@ def config_correo() -> dict:
 def html_a_texto(html: str) -> str:
     """Versión texto plano de un HTML (para el multipart/alternative).
     Los filtros antispam penalizan los correos solo-HTML."""
-    texto = re.sub(r"<br\s*/?>", "\n", html or "", flags=re.I)
+    texto = re.sub(r"<head\b[^>]*>.*?</head\s*>", "", html or "", flags=re.I | re.S)
+    texto = re.sub(r"<br\s*/?>", "\n", texto, flags=re.I)
     texto = re.sub(r"</(p|div|h\d|li|tr)\s*>", "\n\n", texto, flags=re.I)
     texto = re.sub(r"<[^>]+>", "", texto)
     texto = _html_mod.unescape(texto)

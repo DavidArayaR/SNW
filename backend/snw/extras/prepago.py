@@ -429,6 +429,17 @@ def _boton_correo(url, texto, fondo):
             f'font-weight:bold;text-decoration:none;">{texto}</a>')
 
 
+def _html_correo_prepago(cuerpo):
+    return (
+        '<!doctype html><html lang="es"><head><meta charset="utf-8">'
+        '<meta name="format-detection" content="telephone=no">'
+        '<style>.prepago-numero a[href^="tel:"],.prepago-numero a[x-apple-data-detectors]'
+        '{color:inherit!important;text-decoration:none!important;pointer-events:none!important;'
+        'user-select:text!important;-webkit-user-select:text!important}</style>'
+        '</head><body>' + cuerpo + '</body></html>'
+    )
+
+
 def _cuerpo_resumen(lineas, pendientes, enlaces_recarga=None):
     items_pendientes = []
     items_otras = []
@@ -450,9 +461,15 @@ def _cuerpo_resumen(lineas, pendientes, enlaces_recarga=None):
             detalle += " · Aviso ya enviado"
         elif linea["estado_aviso"] == "incierto":
             detalle += " · Entrega del aviso por confirmar"
-        telefono = re.sub(r"^\+56(?=[0-9]{9}$)", "+56 ", linea["telefono"])
+        telefono = linea["telefono"]
+        chileno = re.fullmatch(r"(\+56) ?([0-9]{9})", telefono)
+        if chileno:
+            prefijo, local = chileno.groups()
+            telefono = f"<span>{prefijo}</span> <span>{local}</span>"
+        else:
+            telefono = escape(telefono)
         item = (f"<strong>{escape(linea['nombre'])}</strong> ({escape(linea['compania'])})"
-                f" · {escape(telefono)}<br>{detalle}")
+                f' · <span class="prepago-numero">{telefono}</span><br>{detalle}')
         if etapa:
             portal = linea.get("url_recarga") or ""
             recargar = (_boton_correo(portal, "1. Ir a recargar", "#08796b") if portal.startswith("https://") else
@@ -578,7 +595,7 @@ def enviar_recordatorio_prueba(destino):
             + _cuerpo_resumen(lineas, etapas, enlaces)
         )
         conn.commit()
-    return entregar_correo_real(destino, f"[Prueba] {_asunto_recordatorio(etapas)}", cuerpo, correo)
+    return entregar_correo_real(destino, f"[Prueba] {_asunto_recordatorio(etapas)}", _html_correo_prepago(cuerpo), correo)
 
 
 def revisar_recordatorios(hoy_local=None, enviar=entregar_correo_real):
@@ -640,7 +657,7 @@ def revisar_recordatorios(hoy_local=None, enviar=entregar_correo_real):
             intentos.append(cur.lastrowid)
         cuerpo = _cuerpo_resumen(lineas, etapas, enlaces)
         conn.commit()
-        estado_envio, error = enviar(destinatarios, asunto, cuerpo, correo)
+        estado_envio, error = enviar(destinatarios, asunto, _html_correo_prepago(cuerpo), correo)
         cur.executemany(
             "UPDATE prepago_recordatorios SET estado=%s,error=%s,"
             "enviado_en=IF(%s='enviado',UTC_TIMESTAMP(),NULL) WHERE id=%s",
