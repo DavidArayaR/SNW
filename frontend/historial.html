@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
   <link rel="stylesheet" href="css/tema.css?v=tokens1">
   <link rel="stylesheet" href="css/styles.css?v=ritmo-historial1">
-  <link rel="stylesheet" href="css/componentes.css?v=responder-guiado1">
+  <link rel="stylesheet" href="css/componentes.css?v=filtros-historial1">
   <link rel="stylesheet" href="css/layout.css?v=navcolor1">
   <link rel="stylesheet" href="css/refinamiento.css?v=merge-frontend1">
   <link rel="stylesheet" href="css/estilo-nuevo.css?v=ui-unslop1">
@@ -47,24 +47,34 @@
 
       <div class="stats" id="stats"></div>
 
-      <div class="toolbar-pacientes">
-        <label for="selBaseHist">Base de datos:</label>
-        <select id="selBaseHist" class="badge badge--select" aria-label="Base de datos">
-          <option value="todos">Todas</option>
-        </select>
-        <label for="selOrigenHist">Tipo de envío:</label>
-        <select id="selOrigenHist" class="badge badge--select" aria-label="Tipo de envío">
-          <option value="todos">Todos</option>
-          <option value="manual">Manuales</option>
-          <option value="programado">Programados</option>
-          <option value="reagendamiento">Reagendamientos</option>
-        </select>
-        <label for="selCentroHist">Centro emisor:</label>
-        <select id="selCentroHist" class="badge badge--select" aria-label="Centro emisor">
-          <option value="todos">Todos los centros</option>
-        </select>
-        <input type="search" id="buscador" placeholder="Buscar por base de datos o plantilla..." maxlength="100" autocomplete="off">
-        <span id="contador" class="contador-sel"></span>
+      <div class="toolbar-pacientes historial-controles">
+        <div class="historial-controles__filtros">
+          <div class="historial-controles__campo">
+            <label for="selBaseHist">Base de datos</label>
+            <select id="selBaseHist" class="badge badge--select">
+              <option value="todos">Todas</option>
+            </select>
+          </div>
+          <div class="historial-controles__campo">
+            <label for="selOrigenHist">Tipo de envío</label>
+            <select id="selOrigenHist" class="badge badge--select">
+              <option value="todos">Todos</option>
+              <option value="manual">Manuales</option>
+              <option value="programado">Programados</option>
+              <option value="reagendamiento">Reagendamientos</option>
+            </select>
+          </div>
+          <div class="historial-controles__campo">
+            <label for="selCentroHist">Centro emisor</label>
+            <select id="selCentroHist" class="badge badge--select">
+              <option value="todos">Todos los centros</option>
+            </select>
+          </div>
+          <div class="historial-controles__campo">
+            <label for="buscador">Buscar</label>
+            <input type="search" id="buscador" placeholder="Base de datos o plantilla" maxlength="100" autocomplete="off">
+          </div>
+        </div>
         <span class="pag-grupo">
           <span id="pagInfoHist" class="pag-info"></span>
           <span class="pag-fila pag-navegacion">
@@ -84,6 +94,7 @@
             </select>
           </span>
         </span>
+        <span id="contador" class="contador-sel"></span>
       </div>
 
       <div class="tabla-wrap" id="tablaHistorialWrap">

@@ -81,6 +81,34 @@
   flex-wrap: wrap;
 }
 
+.historial-controles { container-type: inline-size; }
+.historial-controles__filtros {
+  flex: 0 0 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.historial-controles__campo {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.historial-controles__campo :is(select, #buscador) {
+  width: 100%;
+  min-width: 0;
+  height: 42px;
+}
+.historial-controles__campo select { text-align: start; }
+@container (min-width: 52rem) {
+  .historial-controles__filtros {
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.5fr);
+  }
+}
+@container (max-width: 27rem) {
+  .historial-controles__filtros { grid-template-columns: minmax(0, 1fr); }
+}
+
 /* Grupo de paginación dentro de la barra: info + navegación completa +
    Por página, todo en la misma fila del buscador. */
 .pag-grupo {
