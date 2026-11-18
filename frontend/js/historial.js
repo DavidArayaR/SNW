@@ -997,22 +997,23 @@ async function cargarVistaCallCenter(objetivo) {
 
 function abrirCallCenterManual(vista, mensaje, boton) {
   const contexto = vista.respuestaManual;
+  const reagendar = !!contexto.fila.reagendamiento;
   const objetivo = {
-    ...contexto, boton, mensajeId: String(mensaje.id), carga: 0, categoria: "general",
+    ...contexto, boton, mensajeId: String(mensaje.id), carga: 0,
+    categoria: reagendar ? "reagendamiento" : "general",
     paciente: [inicialesPaciente([vista.paciente?.nombre, vista.paciente?.apellido].filter(Boolean).join(" ")),
       telefonoEnmascarado(vista.paciente?.telefono)].join(" · "),
   };
   callCenterManualActual = objetivo;
-  const reagendar = !!contexto.fila.reagendamiento;
   ccOpciones.replaceChildren(opcionRespuestaManual("general", "Respuesta general"));
-  ccCategoria.hidden = reagendar;
+  ccCategoria.hidden = false;
   ccCategoria.disabled = ccEditar.disabled = ccCancelar.disabled = false;
   ccTexto.readOnly = ccPreparado.readOnly = false;
-  $("#callCenterManualTitulo").textContent = reagendar ? "Responder sobre el reagendamiento" : "Responder al paciente";
+  $("#callCenterManualTitulo").textContent = "Responder al paciente";
   $("#callCenterManualContexto").textContent = objetivo.paciente;
   $("#callCenterManualOriginal").textContent = mensaje.texto || "Mensaje sin texto";
   $("#modalCallCenterManual").hidden = false;
-  (reagendar ? ccCancelar : ccOpciones.querySelector("input")).focus();
+  ccOpciones.querySelector("input").focus();
   cargarVistaCallCenter(objetivo);
 }
 
