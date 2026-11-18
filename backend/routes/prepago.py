@@ -43,6 +43,10 @@ class DestinoIn(BaseModel):
     correo: str = Field("", max_length=prepago.MAX_DESTINATARIOS_TEXTO)
 
 
+class DestinoPruebaIn(BaseModel):
+    correo: str = Field(min_length=1, max_length=254)
+
+
 class PlazoIn(BaseModel):
     dias: int = Field(strict=True, ge=1, le=prepago.MAX_DIAS)
 
@@ -67,6 +71,17 @@ def registrar(solo_admin, solo_dev):
     @router.get("/simulacion")
     def simular(_sesion: dict = Depends(solo_admin)):
         return prepago.simular_recordatorio()
+
+    @router.post("/simulacion/enviar")
+    def enviar_prueba(body: DestinoPruebaIn, sesion: dict = Depends(solo_admin)):
+        estado, _ = ejecutar(prepago.enviar_recordatorio_prueba, body.correo)
+        if estado != "enviado":
+            detalle = ("No se pudo confirmar la entrega. Revisa tu bandeja antes de volver a intentarlo."
+                       if estado == "incierto" else
+                       "El servidor de correo no aceptó la prueba. Revisa la configuración SMTP.")
+            raise HTTPException(502, detalle)
+        auditoria_registrar(sesion["usuario"], "prepago_prueba", "recordatorios")
+        return {"ok": True}
 
     @router.post("/lineas", status_code=201)
     def crear_linea(body: LineaIn, sesion: dict = Depends(solo_admin)):

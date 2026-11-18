@@ -296,14 +296,38 @@
         ? "No hay avisos por enviar hoy. Este ejemplo usa tus líneas con avisos habilitados."
         : "Vista previa con los avisos que corresponden hoy.";
       cuerpo.innerHTML = `<div class="extras-vista-correo">
-        <p class="extras-status">${contexto} La simulación no envía correos.</p>
-        <p><strong>Para</strong> ${escapar(vista.destinatarios.join(", ") || "Sin destinatarios configurados")}</p>
+        <p class="extras-status">${contexto}</p>
+        <p><strong>Destinatarios del aviso automático</strong> ${escapar(vista.destinatarios.join(", ") || "Sin destinatarios configurados")}</p>
         <p><strong>Asunto</strong> ${escapar(vista.asunto)}</p>
         <iframe title="Contenido del recordatorio" sandbox></iframe>
+        <form>
+          <label class="field"><span>Correo para recibir la prueba</span>
+            <input type="email" name="correo" maxlength="254" required>
+          </label>
+          <div class="extras-actions"><button class="btn btn--primary" type="submit">Enviar correo de prueba</button></div>
+        </form>
       </div>`;
       cuerpo.querySelector("iframe").srcdoc = '<!doctype html><html lang="es"><meta charset="utf-8">' +
         '<style>body{font:1rem/1.5 system-ui,sans-serif;color:#24303c;padding:.5rem .75rem}li{margin-bottom:1rem}</style>' +
         `<body inert>${vista.html}</body></html>`;
+      const form = cuerpo.querySelector("form");
+      const boton = form.querySelector('[type="submit"]');
+      form.addEventListener("submit", async (evento) => {
+        evento.preventDefault();
+        if (boton.disabled) return;
+        boton.disabled = true;
+        mensaje("modalEstado", "Enviando correo de prueba…");
+        try {
+          await pedir("/simulacion/enviar", "POST", { correo: form.elements.correo.value.trim() });
+          if (modal.open && apertura === versionModal) {
+            mensaje("modalEstado", "El servidor de correo aceptó la prueba. Revisa tu bandeja de entrada.");
+          }
+        } catch (error) {
+          if (modal.open && apertura === versionModal) mensaje("modalEstado", error.message, true);
+        } finally {
+          boton.disabled = false;
+        }
+      });
     } catch (error) {
       if (modal.open && apertura === versionModal) {
         $("modalCuerpo").replaceChildren();

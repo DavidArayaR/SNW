@@ -478,6 +478,21 @@ def simular_recordatorio():
             "html": _cuerpo_resumen(lineas, etapas) if etapas else "", "es_ejemplo": es_ejemplo}
 
 
+def enviar_recordatorio_prueba(destino):
+    destino = destino.strip()
+    if not correo_valido(destino):
+        raise ValueError("Ingresa un correo válido para recibir la prueba.")
+    correo = config_correo()
+    if not correo["host"] or not correo["emisor"]:
+        raise RuntimeError("Configura el servidor SMTP y el correo emisor para enviar la prueba.")
+    vista = simular_recordatorio()
+    if not vista["html"]:
+        raise RuntimeError("Agrega una línea activa con número y avisos habilitados para enviar la prueba.")
+    cuerpo = ("<p><strong>Correo de prueba.</strong> No necesitas recargar ni registrar una recarga por este aviso.</p>"
+              + vista["html"])
+    return entregar_correo_real(destino, f"[Prueba] {vista['asunto']}", cuerpo, correo)
+
+
 def revisar_recordatorios(hoy_local=None, enviar=entregar_correo_real):
     hoy_local = hoy_local or hoy()
     cfg = config_all(refresh=True)
