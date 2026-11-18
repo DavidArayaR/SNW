@@ -2,7 +2,9 @@
 
 import asyncio
 import datetime as dt
+import hashlib
 import re
+import secrets
 from collections import Counter
 from contextlib import ExitStack, contextmanager
 from html import escape
@@ -19,6 +21,7 @@ from snw.whatsapp.whatsapp_channels import catalogo_centros, codigo_centro_canon
 
 DIAS = 150
 DIAS_AVISO_URGENTE = 4
+DIAS_ENLACE_RECARGA = 7
 MAX_DIAS = 3650
 MAX_DESTINATARIOS_TEXTO = 65535
 CLAVE_PLAZO = "prepago_recordatorio_dias"
@@ -68,6 +71,12 @@ ESQUEMA = (
         destinatario TEXT NOT NULL, estado VARCHAR(20) NOT NULL,
         error VARCHAR(100) NULL,
         INDEX prepago_avisos_ciclo (linea_id, ciclo, id),
+        FOREIGN KEY (linea_id) REFERENCES prepago_lineas(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
+    """CREATE TABLE IF NOT EXISTS prepago_enlaces_recarga (
+        huella BINARY(32) PRIMARY KEY, linea_id BIGINT UNSIGNED NOT NULL,
+        version INT UNSIGNED NOT NULL, expira_en DATETIME NOT NULL,
+        INDEX prepago_enlaces_expiracion (expira_en),
         FOREIGN KEY (linea_id) REFERENCES prepago_lineas(id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
 )
@@ -329,19 +338,73 @@ def guardar_linea(datos, actor, linea_id=None):
     return linea_id
 
 
-def registrar_recarga(linea_id, fecha, observacion, actor, version):
+def _guardar_recarga(cur, linea, fecha, observacion, actor):
     fecha_valida(fecha)
+    anterior = linea["ultima_recarga"]
+    if anterior and fecha <= anterior:
+        raise ValueError("La fecha debe ser posterior a la última recarga. Para corregirla, usa Editar.")
+    linea_id = linea["id"]
+    _registrar_fecha(cur, linea_id, fecha, anterior, "recarga", actor, observacion.strip())
+    cur.execute("UPDATE prepago_lineas SET ultima_recarga=%s,ciclo=ciclo+1,version=version+1 WHERE id=%s",
+                (fecha, linea_id))
+
+
+def registrar_recarga(linea_id, fecha, observacion, actor, version):
     with conectar() as conn, conn.cursor() as cur, bloquear_linea(cur, linea_id, 2) as tomado:
         if not tomado:
             raise RuntimeError("La línea está ocupada. Inténtalo nuevamente.")
         linea = _linea_actual(cur, linea_id, version)
-        anterior = linea["ultima_recarga"]
-        if anterior and fecha <= anterior:
-            raise ValueError("La fecha debe ser posterior a la última recarga. Para corregirla, usa Editar.")
-        _registrar_fecha(cur, linea_id, fecha, anterior, "recarga", actor, observacion.strip())
-        cur.execute("UPDATE prepago_lineas SET ultima_recarga=%s,ciclo=ciclo+1,version=version+1 WHERE id=%s",
-                    (fecha, linea_id))
+        _guardar_recarga(cur, linea, fecha, observacion, actor)
         conn.commit()
+
+
+def _huella_enlace(token):
+    if not re.fullmatch(r"[A-Za-z0-9_-]{43}", token):
+        raise LookupError("El enlace no está disponible. Puede haber vencido o ya haberse usado.")
+    return hashlib.sha256(token.encode("ascii")).digest()
+
+
+def _emitir_enlace(cur, linea):
+    token = secrets.token_urlsafe(32)
+    cur.execute("INSERT INTO prepago_enlaces_recarga (huella,linea_id,version,expira_en)"
+                " VALUES (%s,%s,%s,DATE_ADD(UTC_TIMESTAMP(), INTERVAL %s DAY))",
+                (_huella_enlace(token), linea["id"], linea["version"], DIAS_ENLACE_RECARGA))
+    return token
+
+
+def _buscar_enlace(cur, huella, *, bloquear=False):
+    cur.execute(
+        "SELECT l.id,l.nombre,l.telefono,l.ultima_recarga"
+        " FROM prepago_enlaces_recarga e JOIN prepago_lineas l ON l.id=e.linea_id"
+        " WHERE e.huella=%s AND e.expira_en>UTC_TIMESTAMP() AND e.version=l.version"
+        " AND l.activo=1 AND l.avisar=1 AND l.telefono IS NOT NULL"
+        + (" FOR UPDATE" if bloquear else ""), (huella,),
+    )
+    linea = cur.fetchone()
+    if not linea:
+        raise LookupError("El enlace no está disponible. Puede haber vencido, haberse usado o cambiado la línea.")
+    return linea
+
+
+def ver_recarga_correo(token):
+    huella = _huella_enlace(token)
+    with conectar() as conn, conn.cursor() as cur:
+        linea = _buscar_enlace(cur, huella)
+    return {"linea": linea["nombre"], "ultimos_digitos": linea["telefono"][-4:],
+            "ultima_recarga": linea["ultima_recarga"], "hoy": hoy()}
+
+
+def confirmar_recarga_correo(token, fecha):
+    huella = _huella_enlace(token)
+    with conectar() as conn, conn.cursor() as cur:
+        linea_id = _buscar_enlace(cur, huella)["id"]
+        with bloquear_linea(cur, linea_id, 2) as tomado:
+            if not tomado:
+                raise RuntimeError("La línea está ocupada. Inténtalo nuevamente.")
+            linea = _buscar_enlace(cur, huella, bloquear=True)
+            _guardar_recarga(cur, linea, fecha, "", "enlace_correo")
+            cur.execute("DELETE FROM prepago_enlaces_recarga WHERE huella=%s", (huella,))
+            conn.commit()
 
 
 def historial(linea_id, pagina):
@@ -366,7 +429,7 @@ def _boton_correo(url, texto, fondo):
             f'font-weight:bold;text-decoration:none;">{texto}</a>')
 
 
-def _cuerpo_resumen(lineas, pendientes):
+def _cuerpo_resumen(lineas, pendientes, enlaces_recarga=None):
     items_pendientes = []
     items_otras = []
     pagina_prepago = f"{url_base()}/extras.html"
@@ -393,9 +456,9 @@ def _cuerpo_resumen(lineas, pendientes):
             portal = linea.get("url_recarga") or ""
             recargar = (_boton_correo(portal, "1. Ir a recargar", "#08796b") if portal.startswith("https://") else
                         "<p>1. Recarga en el canal oficial de tu operador.</p>")
-            registrar = _boton_correo(
-                f"{pagina_prepago}?registrar_recarga={linea['id']}", "2. Registrar recarga", "#334155",
-            )
+            url_registro = (enlaces_recarga or {}).get(linea["id"],
+                                                      f"{pagina_prepago}?registrar_recarga={linea['id']}")
+            registrar = _boton_correo(url_registro, "2. Registrar recarga", "#334155")
             items_pendientes.append(f"<li>{item}<div>{recargar}{registrar}</div></li>")
         else:
             items_otras.append(f"<li>{item}</li>")
@@ -433,7 +496,7 @@ def _aviso_pendiente(linea, hoy_local):
 
 def _preparar_recordatorio(cur, hoy_local, dias):
     cur.execute(
-        "SELECT l.id,l.nombre,l.telefono,l.avisar,l.ultima_recarga,l.ciclo,o.nombre AS compania,o.url_recarga,"
+        "SELECT l.id,l.nombre,l.telefono,l.avisar,l.ultima_recarga,l.ciclo,l.version,o.nombre AS compania,o.url_recarga,"
         " r.estado AS estado_aviso,r.intento_en AS intento_inicial,r.enviado_en AS enviado_inicial,"
         " r.programado AS programado_inicial,u.estado AS estado_urgente,u.intento_en AS intento_urgente"
         " FROM prepago_lineas l JOIN prepago_operadores o ON o.codigo=l.operador"
@@ -510,6 +573,8 @@ def revisar_recordatorios(hoy_local=None, enviar=entregar_correo_real):
     with conectar() as conn, conn.cursor() as cur, bloquear_linea(cur, "resumen") as tomado, ExitStack() as bloqueos:
         if not tomado:
             return
+        cur.execute("DELETE FROM prepago_enlaces_recarga WHERE expira_en<=UTC_TIMESTAMP()")
+        conn.commit()
         cur.execute(
             "SELECT l.id FROM prepago_lineas l WHERE l.activo=1 AND l.avisar=1"
             " AND l.telefono IS NOT NULL AND l.ultima_recarga IS NOT NULL"
@@ -534,13 +599,20 @@ def revisar_recordatorios(hoy_local=None, enviar=entregar_correo_real):
             return
 
         etapas = {linea_id: aviso[0] for linea_id, aviso in pendientes.items()}
-        cuerpo = _cuerpo_resumen(lineas, etapas)
         asunto = _asunto_recordatorio(etapas)
+        base = url_base()
+        partes = urlsplit(base)
+        local = partes.scheme == "http" and partes.hostname in ("localhost", "127.0.0.1", "::1")
+        if not partes.hostname or partes.query or partes.fragment or (partes.scheme != "https" and not local):
+            raise ValueError("Configura una URL base HTTPS para enviar enlaces de recarga por correo.")
         intentos = []
+        enlaces = {}
         for linea in lineas:
             if linea["id"] not in pendientes:
                 continue
             etapa, fecha = pendientes[linea["id"]]
+            token = _emitir_enlace(cur, linea)
+            enlaces[linea["id"]] = f"{base}/prepago-recarga.html#{token}"
             cur.execute(
                 "INSERT INTO prepago_recordatorios"
                 " (linea_id,ciclo,fecha_ultima_recarga,programado,etapa,intento_en,destinatario,estado)"
@@ -548,6 +620,7 @@ def revisar_recordatorios(hoy_local=None, enviar=entregar_correo_real):
                 (linea["id"], linea["ciclo"], linea["ultima_recarga"], fecha, etapa, destino),
             )
             intentos.append(cur.lastrowid)
+        cuerpo = _cuerpo_resumen(lineas, etapas, enlaces)
         conn.commit()
         estado_envio, error = enviar(destinatarios, asunto, cuerpo, correo)
         cur.executemany(

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex, nofollow">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+  <title>SNW · Registrar recarga prepago</title>
+  <link rel="stylesheet" href="css/tema.css?v=tokens1">
+  <link rel="stylesheet" href="css/auth.css?v=auth2">
+  <script defer src="js/tema.js?v=scrollbar1"></script>
+  <script defer src="js/prepago-recarga.js"></script>
+</head>
+<body class="pagina-auth pagina-reset">
+  <main class="card">
+    <h1>Registrar recarga prepago</h1>
+    <p class="sub" id="linea"></p>
+    <form id="formRecarga" method="post" hidden>
+      <p>Confirma solo después de que el operador haya aceptado la recarga.</p>
+      <label for="fecha">Fecha real de la recarga</label>
+      <input id="fecha" type="date" min="1900-01-01" required>
+      <button type="submit">Confirmar registro</button>
+    </form>
+    <p class="nota" id="estado" role="status">Verificando enlace…</p>
+  </main>
+</body>
+</html>

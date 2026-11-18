@@ -4,7 +4,7 @@ import datetime as dt
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 from snw.extras import prepago
 from db import auditoria_registrar
@@ -47,6 +47,14 @@ class DestinoPruebaIn(BaseModel):
     correo: str = Field(min_length=1, max_length=254)
 
 
+class EnlaceRecargaIn(BaseModel):
+    token: SecretStr
+
+
+class ConfirmarRecargaCorreoIn(EnlaceRecargaIn):
+    fecha: dt.date
+
+
 class PlazoIn(BaseModel):
     dias: int = Field(strict=True, ge=1, le=prepago.MAX_DIAS)
 
@@ -67,6 +75,15 @@ def registrar(solo_admin, solo_dev):
     @router.get("")
     def estado(_sesion: dict = Depends(solo_admin)):
         return prepago.estado()
+
+    @router.post("/recarga-correo/ver")
+    def ver_recarga_correo(body: EnlaceRecargaIn):
+        return ejecutar(prepago.ver_recarga_correo, body.token.get_secret_value())
+
+    @router.post("/recarga-correo/confirmar")
+    def confirmar_recarga_correo(body: ConfirmarRecargaCorreoIn):
+        ejecutar(prepago.confirmar_recarga_correo, body.token.get_secret_value(), body.fecha)
+        return {"ok": True}
 
     @router.get("/simulacion")
     def simular(_sesion: dict = Depends(solo_admin)):
