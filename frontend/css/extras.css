@@ -141,6 +141,15 @@
 .extras-status:empty { display: none; }
 .extras-status[data-error="true"] { color: var(--danger-fg); }
 .extras-dialog-status:not(:empty) { padding: 0 1.25rem 1.25rem; }
+.extras-vista-correo { display: grid; gap: .65rem; overflow-wrap: anywhere; }
+.extras-vista-correo p { margin: 0; }
+.extras-vista-correo iframe {
+  width: 100%;
+  height: min(55dvh, 30rem);
+  border: 1px solid var(--borde);
+  border-radius: .65rem;
+  background: #fff;
+}
 .extras-historial { margin: 0; padding-inline-start: 1.3rem; overflow-wrap: anywhere; }
 .extras-historial li + li { margin-top: .6rem; }
 .extras-etiqueta-movil { display: none; }

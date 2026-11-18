@@ -4,7 +4,7 @@
   const $ = (id) => document.getElementById(id);
   const api = "/api/extras/prepago";
   const modal = $("modal");
-  const botonesAjustes = ["agregar", "destino", "operadores", "plazo"];
+  const botonesAjustes = ["agregar", "destino", "operadores", "plazo", "simularAviso"];
   let datos;
   let versionModal = 0;
 
@@ -280,6 +280,37 @@
     guardarFormulario((_, body) => pedir("/destino", "PUT", body), "Correos de aviso actualizados.");
   };
   $("revisarCorreo").onclick = () => $("destino").click();
+
+  $("simularAviso").onclick = async () => {
+    abrir("Simular recordatorio", '<p class="extras-status" role="status">Preparando vista previa…</p>');
+    const apertura = versionModal;
+    try {
+      const vista = await pedir("/simulacion");
+      if (!modal.open || apertura !== versionModal) return;
+      const cuerpo = $("modalCuerpo");
+      if (!vista.html) {
+        cuerpo.textContent = "Agrega una línea activa con número y avisos habilitados para simular el recordatorio.";
+        return;
+      }
+      const contexto = vista.es_ejemplo
+        ? "No hay avisos por enviar hoy. Este ejemplo usa tus líneas con avisos habilitados."
+        : "Vista previa con los avisos que corresponden hoy.";
+      cuerpo.innerHTML = `<div class="extras-vista-correo">
+        <p class="extras-status">${contexto} La simulación no envía correos.</p>
+        <p><strong>Para</strong> ${escapar(vista.destinatarios.join(", ") || "Sin destinatarios configurados")}</p>
+        <p><strong>Asunto</strong> ${escapar(vista.asunto)}</p>
+        <iframe title="Contenido del recordatorio" sandbox></iframe>
+      </div>`;
+      cuerpo.querySelector("iframe").srcdoc = '<!doctype html><html lang="es"><meta charset="utf-8">' +
+        '<style>body{font:1rem/1.5 system-ui,sans-serif;color:#24303c;padding:.5rem .75rem}li{margin-bottom:1rem}</style>' +
+        `<body inert>${vista.html}</body></html>`;
+    } catch (error) {
+      if (modal.open && apertura === versionModal) {
+        $("modalCuerpo").replaceChildren();
+        mensaje("modalEstado", error.message, true);
+      }
+    }
+  };
 
   $("lineas").onclick = async (evento) => {
     const boton = evento.target.closest("[data-accion]");

@@ -431,6 +431,53 @@ def _aviso_pendiente(linea, hoy_local):
     return etapa, fecha
 
 
+def _preparar_recordatorio(cur, hoy_local, dias):
+    cur.execute(
+        "SELECT l.id,l.nombre,l.telefono,l.avisar,l.ultima_recarga,l.ciclo,o.nombre AS compania,o.url_recarga,"
+        " r.estado AS estado_aviso,r.intento_en AS intento_inicial,r.enviado_en AS enviado_inicial,"
+        " r.programado AS programado_inicial,u.estado AS estado_urgente,u.intento_en AS intento_urgente"
+        " FROM prepago_lineas l JOIN prepago_operadores o ON o.codigo=l.operador"
+        " LEFT JOIN prepago_recordatorios r ON r.id=("
+        " SELECT a.id FROM prepago_recordatorios a WHERE a.linea_id=l.id AND a.ciclo=l.ciclo"
+        " AND a.etapa='inicial' AND a.fecha_ultima_recarga IS NOT NULL"
+        " AND a.estado IN ('enviado','incierto','error') ORDER BY a.id DESC LIMIT 1)"
+        " LEFT JOIN prepago_recordatorios u ON u.id=("
+        " SELECT a.id FROM prepago_recordatorios a WHERE a.linea_id=l.id AND a.ciclo=l.ciclo"
+        " AND a.etapa='urgente' AND a.estado IN ('enviado','incierto','error') ORDER BY a.id DESC LIMIT 1)"
+        " WHERE l.activo=1 AND l.telefono IS NOT NULL ORDER BY l.id"
+    )
+    lineas = cur.fetchall()
+    pendientes = {}
+    for linea in lineas:
+        linea.update(calendario(linea["ultima_recarga"], hoy_local, dias))
+        aviso = _aviso_pendiente(linea, hoy_local)
+        if aviso is not None:
+            pendientes[linea["id"]] = aviso
+    return lineas, pendientes
+
+
+def _asunto_recordatorio(etapas):
+    prefijo = "SNW | URGENTE: " if "urgente" in etapas.values() else "SNW | "
+    return f"{prefijo}Recordatorio de recarga prepago de CRM y SNW"
+
+
+def simular_recordatorio():
+    cfg = config_all(refresh=True)
+    with conectar() as conn, conn.cursor() as cur:
+        lineas, pendientes = _preparar_recordatorio(cur, hoy(), plazo_recordatorio(cfg))
+    etapas = {linea_id: aviso[0] for linea_id, aviso in pendientes.items()}
+    es_ejemplo = not etapas
+    if es_ejemplo:
+        etapas = {linea["id"]: "inicial" for linea in lineas if linea["avisar"]}
+    destino = str(cfg.get("prepago_correo_destino") or "").strip() or str(cfg.get("correo_destino") or "")
+    try:
+        destinatarios = _destinatarios(destino)
+    except ValueError:
+        destinatarios = []
+    return {"asunto": _asunto_recordatorio(etapas), "destinatarios": destinatarios,
+            "html": _cuerpo_resumen(lineas, etapas) if etapas else "", "es_ejemplo": es_ejemplo}
+
+
 def revisar_recordatorios(hoy_local=None, enviar=entregar_correo_real):
     hoy_local = hoy_local or hoy()
     cfg = config_all(refresh=True)
@@ -464,38 +511,16 @@ def revisar_recordatorios(hoy_local=None, enviar=entregar_correo_real):
                 raise RuntimeError("Hay una línea prepago en edición. Se reintentará el resumen.")
         # Abrir una nueva vista de lectura después de adquirir los cerrojos.
         conn.commit()
-        cur.execute(
-            "SELECT l.id,l.nombre,l.telefono,l.avisar,l.ultima_recarga,l.ciclo,o.nombre AS compania,o.url_recarga,"
-            " r.estado AS estado_aviso,r.intento_en AS intento_inicial,r.enviado_en AS enviado_inicial,"
-            " r.programado AS programado_inicial,u.estado AS estado_urgente,u.intento_en AS intento_urgente"
-            " FROM prepago_lineas l JOIN prepago_operadores o ON o.codigo=l.operador"
-            " LEFT JOIN prepago_recordatorios r ON r.id=("
-            " SELECT a.id FROM prepago_recordatorios a WHERE a.linea_id=l.id AND a.ciclo=l.ciclo"
-            " AND a.etapa='inicial' AND a.fecha_ultima_recarga IS NOT NULL"
-            " AND a.estado IN ('enviado','incierto','error') ORDER BY a.id DESC LIMIT 1)"
-            " LEFT JOIN prepago_recordatorios u ON u.id=("
-            " SELECT a.id FROM prepago_recordatorios a WHERE a.linea_id=l.id AND a.ciclo=l.ciclo"
-            " AND a.etapa='urgente' AND a.estado IN ('enviado','incierto','error') ORDER BY a.id DESC LIMIT 1)"
-            " WHERE l.activo=1 AND l.telefono IS NOT NULL ORDER BY l.id"
-        )
-        lineas = cur.fetchall()
-        pendientes = {}
-        for linea in lineas:
-            linea.update(calendario(linea["ultima_recarga"], hoy_local, dias))
-            aviso = _aviso_pendiente(linea, hoy_local)
-            if aviso is None:
-                continue
-            if linea["id"] not in candidatos:
-                # Una recarga fue corregida mientras adquiríamos los cerrojos.
-                raise RuntimeError("Cambió el vencimiento de una línea prepago. Se reintentará el resumen.")
-            pendientes[linea["id"]] = aviso
+        lineas, pendientes = _preparar_recordatorio(cur, hoy_local, dias)
+        if pendientes.keys() - candidatos:
+            # Una recarga fue corregida mientras adquiríamos los cerrojos.
+            raise RuntimeError("Cambió el vencimiento de una línea prepago. Se reintentará el resumen.")
         if not pendientes:
             return
 
         etapas = {linea_id: aviso[0] for linea_id, aviso in pendientes.items()}
         cuerpo = _cuerpo_resumen(lineas, etapas)
-        prefijo = "SNW | URGENTE: " if "urgente" in etapas.values() else "SNW | "
-        asunto = f"{prefijo}Recordatorio de recarga prepago de CRM y SNW"
+        asunto = _asunto_recordatorio(etapas)
         intentos = []
         for linea in lineas:
             if linea["id"] not in pendientes:

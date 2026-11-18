@@ -64,6 +64,10 @@ def registrar(solo_admin, solo_dev):
     def estado(_sesion: dict = Depends(solo_admin)):
         return prepago.estado()
 
+    @router.get("/simulacion")
+    def simular(_sesion: dict = Depends(solo_admin)):
+        return prepago.simular_recordatorio()
+
     @router.post("/lineas", status_code=201)
     def crear_linea(body: LineaIn, sesion: dict = Depends(solo_admin)):
         actor = sesion["usuario"]
