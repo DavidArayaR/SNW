@@ -181,7 +181,7 @@ def patrones_configurados(valor: str) -> dict[str, tuple[str, ...]]:
             continue
         limpias = tuple(dict.fromkeys(normalizar(f) for f in frases
                                      if isinstance(f, str) and 4 <= len(f) <= 80
-                                     and not re.search(r"\d|@", f)))[:30]
+                                     and not re.search(r"\d|@", f)))
         resultado[motivo] = limpias
     return resultado
 

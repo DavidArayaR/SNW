@@ -6705,11 +6705,11 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
             except ValueError:
                 raise HTTPException(422, detail="Los patrones deben ser JSON válido.")
             if not isinstance(catalogo_patrones, dict) or any(k not in MOTIVOS or not isinstance(frases, list)
-                                                    or len(frases) > 30 or any(not isinstance(f, str)
+                                                    or any(not isinstance(f, str)
                                                     or not 4 <= len(f) <= 80 or re.search(r"\d|@", f)
                                                     for f in frases)
                                                     for k, frases in catalogo_patrones.items()):
-                raise HTTPException(422, detail="Patrones inválidos: usa motivos conocidos y hasta 30 frases de 4 a 80 caracteres, sin datos personales.")
+                raise HTTPException(422, detail="Patrones inválidos: usa motivos conocidos y frases de 4 a 80 caracteres, sin datos personales.")
             # Conservar el texto original para editarlo; el clasificador
             # normaliza una copia al comparar las respuestas recibidas.
             v = json.dumps(catalogo_patrones, ensure_ascii=False)

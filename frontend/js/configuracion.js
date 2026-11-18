@@ -331,7 +331,7 @@ function htmlEditorPatrones(clave, valor) {
   const grupos = CATEGORIAS_PATRONES.map(([motivo, titulo]) => {
     const id = `patrones_${motivo}`;
     return `<div class="config-patrones__grupo">` +
-      `<label for="${id}">${escaparHtml(titulo)} <span class="config-patrones__contador" data-contador-patron="${motivo}">0/30</span></label>` +
+      `<label for="${id}">${escaparHtml(titulo)} <span class="config-patrones__contador" data-contador-patron="${motivo}">0 frases</span></label>` +
       `<textarea id="${id}" data-patron="${motivo}" rows="3" placeholder="Una frase por línea" spellcheck="true">${escaparHtml((obj?.[motivo] || []).join("\n"))}</textarea>` +
       `<p class="config-patrones__error" data-error-patron="${motivo}" hidden></p></div>`;
   }).join("");
@@ -398,13 +398,12 @@ function actualizarEditorPatrones(wrap) {
     const textarea = editor.querySelector(`[data-patron="${motivo}"]`);
     const frases = textarea.value.split(/\r?\n/).map((f) => f.trim()).filter(Boolean);
     const error = editor.querySelector(`[data-error-patron="${motivo}"]`);
-    const mensaje = frases.length > 30 ? "Máximo 30 frases por categoría." :
-      frases.some((f) => f.length < 4 || f.length > 80 || /[\d@]/.test(f))
+    const mensaje = frases.some((f) => f.length < 4 || f.length > 80 || /[\d@]/.test(f))
         ? "Cada frase debe tener entre 4 y 80 caracteres, sin números ni @." : "";
     error.textContent = mensaje;
     error.hidden = !mensaje;
     textarea.setAttribute("aria-invalid", mensaje ? "true" : "false");
-    editor.querySelector(`[data-contador-patron="${motivo}"]`).textContent = `${frases.length}/30`;
+    editor.querySelector(`[data-contador-patron="${motivo}"]`).textContent = `${frases.length} ${frases.length === 1 ? "frase" : "frases"}`;
     if (mensaje) valido = false;
     if (frases.length) obj[motivo] = frases;
   }
@@ -423,8 +422,7 @@ function actualizarJsonPatrones(wrap) {
   if (obj && !mensaje) {
     for (const [motivo] of CATEGORIAS_PATRONES) {
       const frases = obj[motivo] || [];
-      if (frases.length > 30) mensaje = `${motivo}: máximo 30 frases.`;
-      else if (frases.some((f) => f.length < 4 || f.length > 80 || /[\d@]/.test(f))) {
+      if (frases.some((f) => f.length < 4 || f.length > 80 || /[\d@]/.test(f))) {
         mensaje = `${motivo}: cada frase debe tener entre 4 y 80 caracteres, sin números ni @.`;
       }
       if (mensaje) break;
