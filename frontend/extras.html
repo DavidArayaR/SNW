@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="css/layout.css?v=navcolor1">
   <link rel="stylesheet" href="css/refinamiento.css?v=merge-frontend1">
   <link rel="stylesheet" href="css/estilo-nuevo.css?v=ui-unslop1">
-  <link rel="stylesheet" href="css/extras.css?v=simular-recordatorio1">
+  <link rel="stylesheet" href="css/extras.css?v=prepago-topbar1">
   <script src="js/tema.js?v=scrollbar1"></script>
 </head>
 <body data-pagina="extras">
@@ -25,16 +25,14 @@
           <i class="fa-solid fa-bars" aria-hidden="true"></i>
         </button>
         <h1 class="app-topbar__titulo">Extras</h1>
+        <div class="msg-tabs extras-tabs" role="tablist" aria-label="Utilidades">
+          <button class="msg-tab activo" type="button" role="tab" id="tabPrepago"
+                  aria-selected="true" aria-controls="panelPrepago">Recordatorio prepago</button>
+        </div>
       </header>
       <main class="layout layout--ancho extras-layout" id="extras" hidden>
         <section class="panel">
-          <div class="panel__head">
-            <div class="extras-tabs" role="tablist" aria-label="Utilidades">
-              <button class="btn btn--primary" type="button" role="tab" id="tabPrepago"
-                      aria-selected="true" aria-controls="panelPrepago">Recordatorio prepago</button>
-            </div>
-          </div>
-          <div class="extras-body" role="tabpanel" id="panelPrepago" aria-labelledby="tabPrepago">
+          <div class="extras-body" role="tabpanel" id="panelPrepago" aria-labelledby="tabPrepago" tabindex="0">
             <div class="extras-heading">
               <div>
                 <h2>Recargas de tus líneas</h2>
@@ -95,6 +93,7 @@
       </main>
     </div>
   </div>
+  <div class="toast extras-toast" id="toastExtras" role="status" aria-atomic="true"></div>
   <dialog class="panel extras-dialog" id="modal" aria-labelledby="modalTitulo">
     <div class="panel__head">
       <h2 id="modalTitulo"></h2>
@@ -102,8 +101,9 @@
     </div>
     <div class="extras-body" id="modalCuerpo"></div>
     <p class="extras-status extras-dialog-status" id="modalEstado" role="status"></p>
+    <div class="toast extras-toast" id="toastModal" role="status" aria-atomic="true"></div>
   </dialog>
   <script src="js/layout.js?v=reservo-nav2"></script>
-  <script src="js/extras.js?v=correo-prueba-prepago1"></script>
+  <script src="js/extras.js?v=toast-correo-prueba1"></script>
 </body>
 </html>

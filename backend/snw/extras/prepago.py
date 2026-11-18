@@ -524,14 +524,19 @@ def _asunto_recordatorio(etapas):
     return f"{prefijo}Recordatorio de recarga prepago de CRM y SNW"
 
 
-def simular_recordatorio():
-    cfg = config_all(refresh=True)
-    with conectar() as conn, conn.cursor() as cur:
-        lineas, pendientes = _preparar_recordatorio(cur, hoy(), plazo_recordatorio(cfg))
+def _preparar_simulacion(cur, cfg):
+    lineas, pendientes = _preparar_recordatorio(cur, hoy(), plazo_recordatorio(cfg))
     etapas = {linea_id: aviso[0] for linea_id, aviso in pendientes.items()}
     es_ejemplo = not etapas
     if es_ejemplo:
         etapas = {linea["id"]: "inicial" for linea in lineas if linea["avisar"]}
+    return lineas, etapas, es_ejemplo
+
+
+def simular_recordatorio():
+    cfg = config_all(refresh=True)
+    with conectar() as conn, conn.cursor() as cur:
+        lineas, etapas, es_ejemplo = _preparar_simulacion(cur, cfg)
     destino = str(cfg.get("prepago_correo_destino") or "").strip() or str(cfg.get("correo_destino") or "")
     try:
         destinatarios = _destinatarios(destino)
@@ -541,6 +546,18 @@ def simular_recordatorio():
             "html": _cuerpo_resumen(lineas, etapas) if etapas else "", "es_ejemplo": es_ejemplo}
 
 
+def _generar_enlaces_recarga(cur, lineas, etapas):
+    base = url_base()
+    partes = urlsplit(base)
+    local = partes.scheme == "http" and partes.hostname in ("localhost", "127.0.0.1", "::1")
+    if not partes.hostname or partes.query or partes.fragment or (partes.scheme != "https" and not local):
+        raise ValueError("Configura una URL base HTTPS para enviar enlaces de recarga por correo.")
+    return {
+        linea["id"]: f"{base}/prepago-recarga.html#{_emitir_enlace(cur, linea)}"
+        for linea in lineas if linea["id"] in etapas
+    }
+
+
 def enviar_recordatorio_prueba(destino):
     destino = destino.strip()
     if not correo_valido(destino):
@@ -548,12 +565,19 @@ def enviar_recordatorio_prueba(destino):
     correo = config_correo()
     if not correo["host"] or not correo["emisor"]:
         raise RuntimeError("Configura el servidor SMTP y el correo emisor para enviar la prueba.")
-    vista = simular_recordatorio()
-    if not vista["html"]:
-        raise RuntimeError("Agrega una línea activa con número y avisos habilitados para enviar la prueba.")
-    cuerpo = ("<p><strong>Correo de prueba.</strong> No necesitas recargar ni registrar una recarga por este aviso.</p>"
-              + vista["html"])
-    return entregar_correo_real(destino, f"[Prueba] {vista['asunto']}", cuerpo, correo)
+    cfg = config_all(refresh=True)
+    with conectar() as conn, conn.cursor() as cur:
+        lineas, etapas, _ = _preparar_simulacion(cur, cfg)
+        if not etapas:
+            raise RuntimeError("Agrega una línea activa con número y avisos habilitados para enviar la prueba.")
+        enlaces = _generar_enlaces_recarga(cur, lineas, etapas)
+        cuerpo = (
+            "<p><strong>Correo de prueba.</strong> Los enlaces de registro están activos. "
+            "Confirma el registro solo si el operador ya aceptó la recarga.</p>"
+            + _cuerpo_resumen(lineas, etapas, enlaces)
+        )
+        conn.commit()
+    return entregar_correo_real(destino, f"[Prueba] {_asunto_recordatorio(etapas)}", cuerpo, correo)
 
 
 def revisar_recordatorios(hoy_local=None, enviar=entregar_correo_real):
@@ -600,19 +624,12 @@ def revisar_recordatorios(hoy_local=None, enviar=entregar_correo_real):
 
         etapas = {linea_id: aviso[0] for linea_id, aviso in pendientes.items()}
         asunto = _asunto_recordatorio(etapas)
-        base = url_base()
-        partes = urlsplit(base)
-        local = partes.scheme == "http" and partes.hostname in ("localhost", "127.0.0.1", "::1")
-        if not partes.hostname or partes.query or partes.fragment or (partes.scheme != "https" and not local):
-            raise ValueError("Configura una URL base HTTPS para enviar enlaces de recarga por correo.")
+        enlaces = _generar_enlaces_recarga(cur, lineas, etapas)
         intentos = []
-        enlaces = {}
         for linea in lineas:
             if linea["id"] not in pendientes:
                 continue
             etapa, fecha = pendientes[linea["id"]]
-            token = _emitir_enlace(cur, linea)
-            enlaces[linea["id"]] = f"{base}/prepago-recarga.html#{token}"
             cur.execute(
                 "INSERT INTO prepago_recordatorios"
                 " (linea_id,ciclo,fecha_ultima_recarga,programado,etapa,intento_en,destinatario,estado)"

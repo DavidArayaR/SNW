@@ -7,6 +7,7 @@
   const botonesAjustes = ["agregar", "destino", "operadores", "plazo", "simularAviso"];
   let datos;
   let versionModal = 0;
+  let temporizadorToast;
 
   function escapar(valor) {
     return String(valor ?? "").replace(/[&<>"']/g, (c) => (
@@ -17,6 +18,16 @@
   function mensaje(id, texto, error = false) {
     $(id).textContent = texto;
     $(id).dataset.error = error;
+  }
+
+  function mostrarResultadoPrueba(texto, tipo) {
+    const actual = $(modal.open ? "toastModal" : "toastExtras");
+    const otro = $(modal.open ? "toastExtras" : "toastModal");
+    clearTimeout(temporizadorToast);
+    otro.classList.remove("visible");
+    actual.textContent = texto;
+    actual.className = `toast extras-toast visible toast--${tipo}`;
+    temporizadorToast = setTimeout(() => actual.classList.remove("visible"), tipo === "error" ? 8000 : 4000);
   }
 
   async function pedir(ruta = "", metodo = "GET", cuerpo) {
@@ -130,6 +141,7 @@
 
   function abrir(titulo, contenido) {
     versionModal += 1;
+    $("toastModal").classList.remove("visible");
     $("ajustes").open = false;
     $("modalTitulo").textContent = titulo;
     $("modalCuerpo").innerHTML = contenido;
@@ -302,8 +314,9 @@
         <iframe title="Contenido del recordatorio" sandbox></iframe>
         <form>
           <label class="field"><span>Correo para recibir la prueba</span>
-            <input type="email" name="correo" maxlength="254" required>
+            <input type="email" name="correo" maxlength="254" aria-describedby="ayudaCorreoPrueba" required>
           </label>
+          <p class="extras-status" id="ayudaCorreoPrueba">La prueba incluye enlaces activos. Confirma una recarga solo si ya la realizaste.</p>
           <div class="extras-actions"><button class="btn btn--primary" type="submit">Enviar correo de prueba</button></div>
         </form>
       </div>`;
@@ -319,12 +332,11 @@
         mensaje("modalEstado", "Enviando correo de prueba…");
         try {
           await pedir("/simulacion/enviar", "POST", { correo: form.elements.correo.value.trim() });
-          if (modal.open && apertura === versionModal) {
-            mensaje("modalEstado", "El servidor de correo aceptó la prueba. Revisa tu bandeja de entrada.");
-          }
+          mostrarResultadoPrueba("Correo de prueba aceptado. Revisa tu bandeja de entrada.", "ok");
         } catch (error) {
-          if (modal.open && apertura === versionModal) mensaje("modalEstado", error.message, true);
+          mostrarResultadoPrueba(error.message, "error");
         } finally {
+          if (modal.open && apertura === versionModal) mensaje("modalEstado", "");
           boton.disabled = false;
         }
       });
