@@ -40,7 +40,7 @@ class OperadorIn(BaseModel):
 
 
 class DestinoIn(BaseModel):
-    correo: str = Field("", max_length=254)
+    correo: str = Field("", max_length=prepago.MAX_DESTINATARIOS_TEXTO)
 
 
 class PlazoIn(BaseModel):

@@ -269,14 +269,15 @@
   };
   $("destino").onclick = () => {
     abrir("Correo de aviso", `<form>
-      <label class="field"><span>Correo para recordatorios</span><input type="email" name="correo" maxlength="254"
-          value="${escapar(datos.destino)}"></label>
+      <label class="field"><span>Correos para recordatorios</span><input type="email" name="correo" multiple
+          value="${escapar(datos.destino)}" aria-describedby="ayudaCorreosPrepago"></label>
+      <p class="extras-status" id="ayudaCorreosPrepago">Separa las direcciones con comas. Todas recibirán el mismo resumen.</p>
       <p class="extras-status">${datos.destino_general
         ? `Si lo dejas vacío, se usará el correo administrativo (${escapar(datos.destino_general)}).`
         : "Configura un destinatario para activar los avisos."}</p>
       <div class="extras-actions">${guardar}</div>
     </form>`);
-    guardarFormulario((_, body) => pedir("/destino", "PUT", body), "Correo de aviso actualizado.");
+    guardarFormulario((_, body) => pedir("/destino", "PUT", body), "Correos de aviso actualizados.");
   };
   $("revisarCorreo").onclick = () => $("destino").click();
 

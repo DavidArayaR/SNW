@@ -20,6 +20,7 @@ from snw.whatsapp.whatsapp_channels import catalogo_centros, codigo_centro_canon
 DIAS = 150
 DIAS_AVISO_URGENTE = 4
 MAX_DIAS = 3650
+MAX_DESTINATARIOS_TEXTO = 65535
 CLAVE_PLAZO = "prepago_recordatorio_dias"
 ZONA = ZoneInfo("America/Santiago")
 OPERADORES = (
@@ -64,7 +65,7 @@ ESQUEMA = (
         ciclo INT UNSIGNED NOT NULL, fecha_ultima_recarga DATE NULL, programado DATE NOT NULL,
         etapa VARCHAR(8) NOT NULL DEFAULT 'inicial',
         intento_en DATETIME NOT NULL, enviado_en DATETIME NULL,
-        destinatario VARCHAR(254) NOT NULL, estado VARCHAR(20) NOT NULL,
+        destinatario TEXT NOT NULL, estado VARCHAR(20) NOT NULL,
         error VARCHAR(100) NULL,
         INDEX prepago_avisos_ciclo (linea_id, ciclo, id),
         FOREIGN KEY (linea_id) REFERENCES prepago_lineas(id)
@@ -91,6 +92,8 @@ def asegurar_esquema(config=None):
                 cur.execute("ALTER TABLE prepago_recordatorios MODIFY fecha_ultima_recarga DATE NULL")
             if "etapa" not in columnas:
                 cur.execute("ALTER TABLE prepago_recordatorios ADD etapa VARCHAR(8) NOT NULL DEFAULT 'inicial'")
+            if columnas["destinatario"]["Type"].lower() == "varchar(254)":
+                cur.execute("ALTER TABLE prepago_recordatorios MODIFY destinatario TEXT NOT NULL")
         cur.executemany(
             "INSERT INTO prepago_operadores (codigo,nombre,dominio,url_recarga) VALUES (%s,%s,%s,%s)"
             " ON DUPLICATE KEY UPDATE codigo=VALUES(codigo)", OPERADORES,
@@ -194,11 +197,22 @@ def correo_valido(correo):
     return len(correo) <= 254 and re.fullmatch(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+", correo)
 
 
+def _destinatarios(correo):
+    destinos = {}
+    if correo.strip():
+        for direccion in correo.split(","):
+            direccion = direccion.strip()
+            if not correo_valido(direccion):
+                raise ValueError("Ingresa correos válidos separados por comas.")
+            destinos.setdefault(direccion.casefold(), direccion)
+    return list(destinos.values())
+
+
 def guardar_destino(correo):
-    correo = correo.strip()
-    if correo and not correo_valido(correo):
-        raise ValueError("Ingresa un correo electrónico válido.")
-    config_set({"prepago_correo_destino": correo})
+    destino = ", ".join(_destinatarios(correo))
+    if len(destino) > MAX_DESTINATARIOS_TEXTO:
+        raise ValueError("La lista de correos es demasiado larga.")
+    config_set({"prepago_correo_destino": destino})
 
 
 def estado():
@@ -206,6 +220,10 @@ def estado():
     dias = plazo_recordatorio(cfg)
     destino = str(cfg.get("prepago_correo_destino") or "").strip()
     destino_general = str(cfg.get("correo_destino") or "").strip()
+    try:
+        destinatarios = _destinatarios(destino or destino_general)
+    except ValueError:
+        destinatarios = []
     fecha = hoy()
     with conectar() as conn, conn.cursor() as cur:
         cur.execute("SELECT l.*,o.nombre AS compania,o.url_recarga FROM prepago_lineas l "
@@ -221,7 +239,7 @@ def estado():
             "recordatorio_dias": dias, "recordatorio_dias_max": MAX_DIAS,
             "clinicas": catalogo_centros(cfg, incluir_inactivas=True),
             "destino": destino, "destino_general": destino_general,
-            "correo_listo": bool(correo_valido(destino or destino_general)
+            "correo_listo": bool(destinatarios
                                 and str(cfg.get("smtp_host") or "").strip()
                                 and str(cfg.get("correo_emisor") or "").strip())}
 
@@ -400,9 +418,14 @@ def revisar_recordatorios(hoy_local=None, enviar=entregar_correo_real):
     cfg = config_all(refresh=True)
     dias = plazo_recordatorio(cfg)
     correo = config_correo()
-    destino = (cfg.get("prepago_correo_destino") or correo["destino"]).strip()
-    if not correo_valido(destino) or not correo["host"] or not correo["emisor"]:
+    destino = str(cfg.get("prepago_correo_destino") or "").strip() or correo["destino"]
+    try:
+        destinatarios = _destinatarios(destino)
+    except ValueError:
         return
+    if not destinatarios or not correo["host"] or not correo["emisor"]:
+        return
+    destino = ", ".join(destinatarios)
     corte = hoy_local - dt.timedelta(days=dias)
     with conectar() as conn, conn.cursor() as cur, bloquear_linea(cur, "resumen") as tomado, ExitStack() as bloqueos:
         if not tomado:
@@ -453,8 +476,8 @@ def revisar_recordatorios(hoy_local=None, enviar=entregar_correo_real):
 
         etapas = {linea_id: aviso[0] for linea_id, aviso in pendientes.items()}
         cuerpo = _cuerpo_resumen(lineas, etapas)
-        asunto = ("SNW | URGENTE: Recordatorio de recarga prepago" if "urgente" in etapas.values()
-                  else "SNW | Recordatorio de recarga prepago")
+        prefijo = "SNW | URGENTE: " if "urgente" in etapas.values() else "SNW | "
+        asunto = f"{prefijo}Recordatorio de recarga prepago de CRM y SNW"
         intentos = []
         for linea in lineas:
             if linea["id"] not in pendientes:
@@ -468,7 +491,7 @@ def revisar_recordatorios(hoy_local=None, enviar=entregar_correo_real):
             )
             intentos.append(cur.lastrowid)
         conn.commit()
-        estado_envio, error = enviar(destino, asunto, cuerpo, correo)
+        estado_envio, error = enviar(destinatarios, asunto, cuerpo, correo)
         cur.executemany(
             "UPDATE prepago_recordatorios SET estado=%s,error=%s,"
             "enviado_en=IF(%s='enviado',UTC_TIMESTAMP(),NULL) WHERE id=%s",

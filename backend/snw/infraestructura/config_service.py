@@ -107,24 +107,26 @@ def enviar_correo(destino: str, subject: str, html: str) -> bool:
     return estado == "enviado"
 
 
-def entregar_correo_real(destino: str, subject: str, html: str, c: dict) -> tuple[str, str | None]:
+def entregar_correo_real(destino: str | list[str], subject: str, html: str, c: dict) -> tuple[str, str | None]:
     """Informa si es seguro volver a intentar una entrega real por SMTP."""
     estado = "error"
     if not c["host"] or not c["emisor"] or not destino:
         return estado, "SMTP sin configurar"
     try:
-        mensaje = armar_mensaje(subject, c["emisor"], destino, html)
+        destinatarios = [destino] if isinstance(destino, str) else destino
+        mensaje = armar_mensaje(subject, c["emisor"], ", ".join(destinatarios), html)
         with smtplib.SMTP(c["host"], c["port"], timeout=15) as servidor:
             if c["tls"]:
                 servidor.starttls(context=ssl.create_default_context())
             if c["user"]:
                 servidor.login(c["user"], c["pwd"])
             estado = "incierto"
-            servidor.sendmail(c["emisor"], destino, mensaje.as_string())
+            rechazados = servidor.sendmail(c["emisor"], destinatarios, mensaje.as_string())
             estado = "enviado"
     except Exception as exc:
         if estado != "enviado":
             if isinstance(exc, (smtplib.SMTPRecipientsRefused, smtplib.SMTPSenderRefused, smtplib.SMTPDataError)):
                 estado = "error"
             return estado, type(exc).__name__
-    return estado, None
+    error = f"SMTP rechazó {len(rechazados)} de {len(destinatarios)} destinatarios" if rechazados else None
+    return estado, error
