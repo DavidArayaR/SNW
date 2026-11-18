@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 from pymysql.err import IntegrityError
 
-from snw.infraestructura.config_service import config_correo, entregar_correo_real
+from snw.infraestructura.config_service import config_correo, entregar_correo_real, url_base
 from db import conectar, config_all, config_set, log_error
 from snw.pacientes.telefono import normalizar_telefono
 from snw.whatsapp.whatsapp_channels import catalogo_centros, codigo_centro_canonico
@@ -360,9 +360,16 @@ def historial(linea_id, pagina):
                 "mas": len(recargas) > 30 or len(avisos) > 30}
 
 
+def _boton_correo(url, texto, fondo):
+    return (f'<a href="{escape(url, quote=True)}" style="display:inline-block;margin:4px 8px 4px 0;'
+            f'padding:10px 14px;border-radius:6px;background:{fondo};color:#fff;'
+            f'font-weight:bold;text-decoration:none;">{texto}</a>')
+
+
 def _cuerpo_resumen(lineas, pendientes):
     items_pendientes = []
     items_otras = []
+    pagina_prepago = f"{url_base()}/extras.html"
     for linea in lineas:
         ultima = linea["ultima_recarga"]
         vence = linea["proximo_recordatorio"]
@@ -380,16 +387,27 @@ def _cuerpo_resumen(lineas, pendientes):
             detalle += " · Aviso ya enviado"
         elif linea["estado_aviso"] == "incierto":
             detalle += " · Entrega del aviso por confirmar"
-        item = (f"<li><strong>{escape(linea['nombre'])}</strong> ({escape(linea['compania'])})"
-                f" · {escape(linea['telefono'])}<br>{detalle}</li>")
-        (items_pendientes if etapa else items_otras).append(item)
-    cuerpo = "<h2>Recargas pendientes</h2><ul>" + "".join(items_pendientes) + "</ul>"
+        item = (f"<strong>{escape(linea['nombre'])}</strong> ({escape(linea['compania'])})"
+                f" · {escape(linea['telefono'])}<br>{detalle}")
+        if etapa:
+            portal = linea.get("url_recarga") or ""
+            recargar = (_boton_correo(portal, "1. Ir a recargar", "#08796b") if portal.startswith("https://") else
+                        "<p>1. Recarga en el canal oficial de tu operador.</p>")
+            registrar = _boton_correo(
+                f"{pagina_prepago}?registrar_recarga={linea['id']}", "2. Registrar recarga", "#334155",
+            )
+            items_pendientes.append(f"<li>{item}<div>{recargar}{registrar}</div></li>")
+        else:
+            items_otras.append(f"<li>{item}</li>")
+    cuerpo = (
+        "<h2>Recargas pendientes</h2>"
+        "<p>Primero recarga el número en el portal de su operador. Una vez confirmada la recarga, "
+        "registra en SNW la fecha en que la hiciste.</p>"
+        "<ul>" + "".join(items_pendientes) + "</ul>"
+    )
     if items_otras:
         cuerpo += "<h2>Otras líneas activas</h2><ul>" + "".join(items_otras) + "</ul>"
-    return cuerpo + (
-        "<p>Entra en SNW → Extras → Recordatorio prepago para abrir el portal del operador. "
-        "Cuando completes una recarga, registra la fecha en SNW.</p>"
-    )
+    return cuerpo
 
 
 def _fecha_chile(fecha_utc):
@@ -447,7 +465,7 @@ def revisar_recordatorios(hoy_local=None, enviar=entregar_correo_real):
         # Abrir una nueva vista de lectura después de adquirir los cerrojos.
         conn.commit()
         cur.execute(
-            "SELECT l.id,l.nombre,l.telefono,l.avisar,l.ultima_recarga,l.ciclo,o.nombre AS compania,"
+            "SELECT l.id,l.nombre,l.telefono,l.avisar,l.ultima_recarga,l.ciclo,o.nombre AS compania,o.url_recarga,"
             " r.estado AS estado_aviso,r.intento_en AS intento_inicial,r.enviado_en AS enviado_inicial,"
             " r.programado AS programado_inicial,u.estado AS estado_urgente,u.intento_en AS intento_urgente"
             " FROM prepago_lineas l JOIN prepago_operadores o ON o.codigo=l.operador"

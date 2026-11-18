@@ -196,7 +196,7 @@
       <p>${escapar(l.nombre)} · ${escapar(l.telefono)}</p>
       <label class="field"><span>Fecha real de recarga</span><input name="fecha" type="date" required min="1900-01-01"
           max="${datos.hoy}" value="${datos.hoy}"></label>
-      <p class="extras-status">El próximo aviso se calcula desde esta fecha.</p>
+      <p class="extras-status">Primero recarga el número en el operador. Una vez confirmada la recarga, registra aquí la fecha real.</p>
       <label class="field"><span>Observación (opcional)</span><textarea name="observacion" maxlength="500" rows="2"></textarea></label>
       <div class="extras-actions"><button class="btn btn--primary" type="submit">Confirmar recarga</button></div>
     </form>`);
@@ -309,5 +309,12 @@
   for (const id of botonesAjustes) $(id).disabled = true;
   $("extras").hidden = false;
   mensaje("estado", "Cargando líneas…");
-  cargar().then(() => mensaje("estado", ""), (error) => mensaje("estado", error.message, true));
+  cargar().then(() => {
+    mensaje("estado", "");
+    const id = new URLSearchParams(location.search).get("registrar_recarga");
+    if (!id) return;
+    const linea = datos.lineas.find((l) => String(l.id) === id && l.telefono);
+    if (linea) registrarRecarga(linea);
+    else mensaje("estado", "La línea del aviso ya no está disponible para registrar una recarga.", true);
+  }, (error) => mensaje("estado", error.message, true));
 }());
