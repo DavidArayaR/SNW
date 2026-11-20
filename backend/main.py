@@ -10051,7 +10051,7 @@ async def _procesar_cita_reagendar(cita: dict, plantillas_por_centro: dict) -> N
                 paciente_reagendar.marcar_fallo(cita, "YA_ENVIADO_HOY")
                 return
         precio = _precio_reagendamiento(plantilla)
-        ok, message_id, _error, resultado = await servicio.enviar(
+        ok, message_id, error, resultado = await servicio.enviar(
             telefono, vista["cuerpo"], plantilla=plantilla,
             variables=vista["ejemplos"])
         if ok:
@@ -10060,7 +10060,7 @@ async def _procesar_cita_reagendar(cita: dict, plantillas_por_centro: dict) -> N
         else:
             paciente_reagendar.marcar_fallo(
                 cita, "META_RECHAZO" if resultado == "failed" else "META_TEMPORAL",
-                reintentar=resultado != "failed")
+                reintentar=resultado != "failed", detalle=servicio.ultimo_error_meta or error)
     except (ResultadoEnvioIncierto, httpx.TimeoutException, httpx.TransportError) as exc:
         log_error("reagendar: resultado incierto", exc)
         paciente_reagendar.marcar_fallo(cita, "RESULTADO_INCIERTO")
@@ -10622,7 +10622,10 @@ def _detalle_historial_reagendar(envio_id: int, sesion: dict) -> list[dict]:
             " r.paciente_telefono_normalizado AS numero_telefono,"
             " CASE WHEN r.estado_envio='ERROR' THEN 'error' ELSE 'pendiente' END AS estado_envio,"
             " NULL AS estado_whatsapp, NULL AS mensaje_enviado,"
-            " r.ultimo_error_codigo AS descripcion_error, r.importado_en AS fecha_hora,"
+            " COALESCE(NULLIF(r.ultimo_error_detalle,''), CASE r.ultimo_error_codigo"
+            " WHEN 'META_RECHAZO' THEN 'Rechazo de Meta: sin motivo registrado'"
+            " ELSE r.ultimo_error_codigo END) AS descripcion_error,"
+            " r.importado_en AS fecha_hora,"
             " r.whatsapp_opt_out, NULL AS ultima_accion, NULL AS mensaje_respuesta"
             " FROM reagendar_batches b JOIN paciente_reagendar r ON r.lote_id=b.lote_id"
             " AND r.centro_codigo=b.centro_codigo WHERE b.envio_id=%s AND r.log_envio_id IS NULL"
@@ -12809,7 +12812,7 @@ def listar_citas_reagendar(centro: str | None = Query(None),
             " r.inicio_cita, r.lote_id, r.plantilla_clave, r.modo_prueba,"
             " r.estado_envio, r.intentos_envio, r.whatsapp_opt_out, r.envio_id,"
             " r.log_envio_id, d.estado AS destinatario_estado,"
-            " r.ultimo_error_codigo, r.importado_en, le.estado_whatsapp,"
+            " r.ultimo_error_codigo, r.ultimo_error_detalle, r.importado_en, le.estado_whatsapp,"
             " le.descripcion_error AS error_entrega,"
             " r.enviado_en, r.whatsapp_message_id, le.entregado_en AS recibido_en,"
             f" {ultima_respuesta} AS ultima_respuesta"

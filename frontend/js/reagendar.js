@@ -542,7 +542,9 @@
                              r.estado_envio, r.intentos_envio,
                              fechaHoraChile(r.recibido_en),
                              etiquetasRespuesta.get(r.ultima_respuesta ?? "SIN_RESPUESTA") ?? r.ultima_respuesta,
-                             r.error_entrega || r.ultimo_error_codigo]) celda(tr, valor);
+                             r.error_entrega || r.ultimo_error_detalle ||
+                             (r.ultimo_error_codigo === "META_RECHAZO"
+                               ? "Rechazo de Meta · Sin motivo registrado" : r.ultimo_error_codigo)]) celda(tr, valor);
         const acciones = document.createElement("td");
         if (r.puede_reintentar) {
           const etiqueta = document.createElement("label");

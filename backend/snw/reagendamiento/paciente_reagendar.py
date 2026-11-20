@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 import pymysql
 from snw.reagendamiento import reagendar_batches
 
-from db import conectar, config_all, config_get
+from db import _texto_log_seguro, conectar, config_all, config_get
 from snw.seguridad.supresion import huella_telefono
 from snw.pacientes.telefono import normalizar_telefono
 from snw.whatsapp.whatsapp_channels import catalogo_centros
@@ -1153,20 +1153,21 @@ def registrar_lote(cita: dict, plantilla: dict, canal: dict) -> int:
     return lote_id
 
 
-def marcar_fallo(cita: dict, codigo: str, *, reintentar: bool = False) -> None:
+def marcar_fallo(cita: dict, codigo: str, *, reintentar: bool = False, detalle: str | None = None) -> None:
     """Los resultados inciertos nunca se reintentan automáticamente."""
     estado = "REINTENTO" if reintentar and cita["intentos_envio"] < 3 else "ERROR"
     if codigo == "YA_ENVIADO_HOY":
         estado = "OMITIDO"
     demora = min(3600, 60 * 2 ** max(0, cita["intentos_envio"] - 1))
+    detalle = _texto_log_seguro(" ".join(detalle.split()), limite=255) if detalle else None
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE paciente_reagendar SET estado_envio=%s, reserva_token=NULL,"
-            " reservado_en=NULL, ultimo_error_codigo=%s,"
+            " reservado_en=NULL, ultimo_error_codigo=%s, ultimo_error_detalle=%s,"
             " proximo_reintento_en=CASE WHEN %s='REINTENTO'"
             " THEN DATE_ADD(UTC_TIMESTAMP(), INTERVAL %s SECOND) ELSE NULL END"
             " WHERE id=%s AND reserva_token=%s AND estado_envio='PROCESANDO'",
-            (estado, codigo, estado, demora, cita["id"], cita["reserva_token"]))
+            (estado, codigo, detalle, estado, demora, cita["id"], cita["reserva_token"]))
         if cur.rowcount and cita.get("paciente_telefono_normalizado"):
             cur.execute("UPDATE reagendar_destinatarios SET estado=%s"
                         " WHERE telefono=%s AND modo_prueba=0 AND cita_id=%s"

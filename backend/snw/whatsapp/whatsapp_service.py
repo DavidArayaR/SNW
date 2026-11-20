@@ -384,10 +384,11 @@ def _hash_evento(payload: dict) -> str:
 class ErrorWhatsApp(Exception):
     """Error controlado de la integración con Meta. No rompe el sistema."""
 
-    def __init__(self, codigo: int, tipo: str, mensaje: str):
+    def __init__(self, codigo: int, tipo: str, mensaje: str, *, detalle_meta: str = ""):
         self.codigo = codigo
         self.tipo = tipo
         self.message = mensaje
+        self.detalle_meta = detalle_meta
         super().__init__(f"Tipo {tipo} (código {codigo}): {mensaje}")
 
 
@@ -626,9 +627,13 @@ class WhatsAppApiClient:
         if resp.status_code in (200, 201):
             return resp.json()
         detalle = ""
+        detalle_meta = ""
         subcodigo = None
         try:
             err = resp.json().get("error", {})
+            datos_error = err.get("error_data")
+            if isinstance(datos_error, dict) and isinstance(datos_error.get("details"), str):
+                detalle_meta = datos_error["details"].strip()
             detalle = (err.get("error_user_msg")
                        or err.get("error_user_title")
                        or err.get("message")
@@ -646,7 +651,8 @@ class WhatsAppApiClient:
         es_temporal = (tipo.lower() == "transient"
                        or resp.status_code in (429, 5)
                        or es_error_throttle(resp.status_code, codigo_msg, subcodigo))
-        raise ErrorWhatsApp(codigo_msg, "transient" if es_temporal else "permanent", detalle)
+        raise ErrorWhatsApp(codigo_msg, "transient" if es_temporal else "permanent", detalle,
+                            detalle_meta=detalle_meta)
 
 
 def json_short(texto: str) -> str:
@@ -666,6 +672,7 @@ class WhatsAppService:
     def __init__(self, phone_number_id: str | None = None):
         self._phone_number_id = phone_number_id
         self.ultimo_estado_meta: str | None = None
+        self.ultimo_error_meta: str | None = None
         self._cliente_lote: httpx.Client | None = None
         self._continuar_lote: Callable[[], bool] | None = None
 
@@ -1163,6 +1170,7 @@ class WhatsAppService:
         valores reales del paciente; en caso contrario, texto libre.
         """
         self.ultimo_estado_meta = None
+        self.ultimo_error_meta = None
         if esta_bloqueado_para_envio(telefono, permitir_aviso_baja=permitir_aviso_baja):
             return False, None, "Paciente excluido por su preferencia de contacto", "failed"
         autorizado, problema = await self._validar_canal_antes_envio()
@@ -1230,6 +1238,7 @@ class WhatsAppService:
         try:
             data = await self.cliente.enviar(payload_)
         except ErrorWhatsApp as e:
+            self.ultimo_error_meta = f"Meta ({e.codigo}): {e.detalle_meta or e.message}"
             destino_log = "número de prueba" if es_prueba else telefono
             log_error(f"envío a {destino_log} (template={nombre_template or 'texto libre'})", e)
             return False, None, e.message, "failed" if e.tipo == "permanent" else "sent"
