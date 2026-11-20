@@ -352,6 +352,22 @@ _TEL_MATCH = (
 )
 
 
+def _es_deadlock(exc: Exception) -> bool:
+    return isinstance(exc, OperationalError) and bool(exc.args) and exc.args[0] == 1213
+
+
+def _reintentar_deadlock(operacion, *args):
+    # Cada operación abre su propia conexión y confirma al terminar. MySQL
+    # revierte la transacción que devuelve 1213 antes de un nuevo intento.
+    for intento in range(3):
+        try:
+            return operacion(*args)
+        except OperationalError as exc:
+            if not _es_deadlock(exc) or intento == 2:
+                raise
+            time.sleep(random.uniform(0.04, 0.08) * (intento + 1))
+
+
 def es_solicitud_eliminar(texto: str) -> bool:
     """Acepta mayúsculas, tildes y espacios sin confundir frases más largas."""
     plano = unicodedata.normalize("NFKD", (texto or "").casefold())
@@ -1837,6 +1853,8 @@ class WhatsAppService:
             except Exception as exc:
                 # Una tabla opcional puede no existir; otros fallos deben quedar
                 # visibles y no confundirse con un teléfono inexistente.
+                if _es_deadlock(exc):
+                    raise
                 if getattr(exc, "args", ()) and exc.args[0] == 1146:
                     continue
                 errores.append(type(exc).__name__)
@@ -1890,127 +1908,137 @@ class WhatsAppService:
                             automatica: str = "", mensaje_id: str | None = None,
                             referencia_meta_id: str | None = None,
                             gestionada_reagendar: bool = False) -> str:
-        match = _TEL_MATCH.format(col="telefono")
         try:
-            with conectar() as conn, conn.cursor() as cur:
-                pacientes = self._pacientes_con_tel(cur, telefono)
-                if not pacientes:
-                    if referencia_meta_id and not gestionada_reagendar:
-                        emisor_actual = EMISOR_WEBHOOK.get() or {}
-                        centro = emisor_actual.get("codigo") or "desconocido"
-                        if esta_suprimido(telefono):
-                            print(f"[INFO] webhook (centro={centro}): respuesta contextual omitida por supresión del paciente.",
-                                  flush=True)
-                            return "sin_cliente"
-                        cur.execute(
-                            "SELECT 1 FROM log_envios"
-                            " WHERE BINARY whatsapp_message_id=BINARY %s AND wa_phone_id=%s LIMIT 1",
-                            (referencia_meta_id, emisor_actual.get("phoneNumberId")),
-                        )
-                        referencia = ("El mensaje original está en el historial de esta clínica."
-                                      if cur.fetchone()
-                                      else "El mensaje original no se encontró en el historial de esta clínica.")
-                        log_error(f"webhook (centro={centro}): respuesta sin asociar. "
-                                  "El teléfono del remitente no coincide con una ficha en las bases consultadas "
-                                  f"y no tiene supresión activa registrada. {referencia}")
-                    return "sin_cliente"
-                emisor = EMISOR_WEBHOOK.get()
-                if emisor:
-                    # El contexto del botón señala el mensaje de campaña exacto.
-                    # La comparación normalizada también cubre teléfonos antiguos
-                    # guardados sin '+' o con espacios.
-                    def buscar_origen(condicion: str, parametros: tuple) -> dict:
-                        cur.execute(
-                            "SELECT COALESCE(le.tabla_pacientes, e.tabla_pacientes,"
-                            " e.base_datos) AS tabla_pacientes, le.paciente_id"
-                            " FROM log_envios le LEFT JOIN envios e ON e.id = le.envio_id"
-                            " WHERE le.wa_phone_id = %s AND "
-                            + _TEL_MATCH.format(col="le.numero_telefono")
-                            + " AND le.paciente_id IS NOT NULL AND " + condicion
-                            + " ORDER BY le.id DESC LIMIT 1",
-                            (emisor["phoneNumberId"], telefono, *parametros),
-                        )
-                        return cur.fetchone() or {}
-
-                    origen = (buscar_origen("BINARY le.whatsapp_message_id = BINARY %s",
-                                            (referencia_meta_id,)) if referencia_meta_id else {})
-                    if not origen:
-                        origen = buscar_origen(
-                            "le.envio_id IS NOT NULL AND le.estado_envio = 'enviado'",
-                            (),
-                        )
-                    if origen:
-                        pacientes = [p for p in pacientes if p["tabla"] == origen.get("tabla_pacientes")
-                                     and p["id"] == origen.get("paciente_id")]
-                        if not pacientes:
-                            log_error("webhook: respuesta sin paciente vinculado al envío"
-                                      f" (centro={emisor.get('codigo') or 'desconocido'})")
-                            return "sin_base_inequivoca"
-                    elif len(pacientes) > 1:
-                        # Conversación directa sin campaña: se conservó arriba,
-                        # pero no se atribuye arbitrariamente a una base.
-                        if referencia_meta_id:
-                            log_error("webhook: respuesta contextual con varias bases posibles"
-                                      f" (centro={emisor.get('codigo') or 'desconocido'})")
-                        return "sin_base_inequivoca"
-                for p in pacientes:
-                    if not automatica:
-                        cur.execute(f"UPDATE {p['tabla']} SET estado = 'enviado' WHERE {match}", (telefono,))
-                    # Una respuesta real deja sin efecto una corrección manual previa.
-                    if not automatica:
-                        try:
-                            cur.execute(
-                                f"UPDATE {p['tabla']} SET respuesta_manual = NULL"
-                                f" WHERE {match} AND respuesta_manual IS NOT NULL",
-                                (telefono,),
-                            )
-                        except Exception:
-                            pass  # esquema sin la columna
-                    # El mismo teléfono puede estar en varias bases. Cada una
-                    # necesita su propia señal para la ficha y estadísticas.
-                    esp = servicio_areas.area_por_tabla(p["tabla"])
-                    emisor = EMISOR_WEBHOOK.get()
-                    cur.execute(
-                        "INSERT INTO log_envios (envio_id, paciente_id, nombre_paciente, numero_telefono,"
-                        " mensaje, plantilla_clave, estado_envio, respuesta, descripcion_error,"
-                        " area_id, tabla_pacientes, centro_codigo, wa_phone_id, numero_emisor,"
-                        " whatsapp_message_id)"
-                        " VALUES (NULL, %s, %s, %s, %s, 'respuesta', 'enviado', %s, %s, %s, %s, %s, %s, %s, %s)",
-                        (p["id"], p["nombre"], p["telefono"], (texto or "")[:2000],
-                         "pendiente" if automatica else "respondio",
-                         automatica if automatica else None,
-                         esp["id"] if esp else None, p["tabla"],
-                         (emisor or {}).get("codigo"), (emisor or {}).get("phoneNumberId"),
-                         (emisor or {}).get("phoneNumber"), mensaje_id),
-                    )
-                    respuesta_id = cur.lastrowid
-                    try:
-                        clasificacion = clasificar(texto)
-                        ofensa = clasificacion.ofensa
-                        detalle = json.dumps({
-                            "categoria": ofensa.categoria,
-                            "confianza": ofensa.confianza,
-                            "terminos": ofensa.terminos,
-                            "accion_recomendada": ofensa.accion_recomendada,
-                            "motivos_consulta": clasificacion.motivos,
-                            "interes": es_mensaje_interes(texto),
-                            "baja": self._es_baja(texto),
-                        }, ensure_ascii=False)
-                        cur.execute(
-                            "INSERT IGNORE INTO respuesta_etiquetas"
-                            " (log_envio_id, etiquetas, origen, actualizado_por, ofensa_detalle)"
-                            " VALUES (%s, %s, 'automatico', 'sistema', %s)",
-                            (respuesta_id, json.dumps(etiquetas_automaticas(texto, clasificacion),
-                                                     ensure_ascii=False), detalle),
-                        )
-                    except Exception as exc:
-                        # La anotación no debe impedir conservar la respuesta.
-                        log_error("etiquetas_automaticas: no se pudo guardar", exc)
-                conn.commit()
-            return "registrada"
-        except Exception as e:
-            log_error("_registrar_respuesta", e)
+            return _reintentar_deadlock(
+                self._guardar_respuesta, telefono, texto, automatica, mensaje_id,
+                referencia_meta_id, gestionada_reagendar,
+            )
+        except Exception as exc:
+            log_error("_registrar_respuesta", exc, solo_tipo=True)
             return "error"
+
+    def _guardar_respuesta(self, telefono, texto, automatica, mensaje_id,
+                           referencia_meta_id, gestionada_reagendar) -> str:
+        match = _TEL_MATCH.format(col="telefono")
+        with conectar() as conn, conn.cursor() as cur:
+            pacientes = self._pacientes_con_tel(cur, telefono)
+            if not pacientes:
+                if referencia_meta_id and not gestionada_reagendar:
+                    emisor_actual = EMISOR_WEBHOOK.get() or {}
+                    centro = emisor_actual.get("codigo") or "desconocido"
+                    if esta_suprimido(telefono):
+                        print(f"[INFO] webhook (centro={centro}): respuesta contextual omitida por supresión del paciente.",
+                              flush=True)
+                        return "sin_cliente"
+                    cur.execute(
+                        "SELECT 1 FROM log_envios"
+                        " WHERE BINARY whatsapp_message_id=BINARY %s AND wa_phone_id=%s LIMIT 1",
+                        (referencia_meta_id, emisor_actual.get("phoneNumberId")),
+                    )
+                    referencia = ("El mensaje original está en el historial de esta clínica."
+                                  if cur.fetchone()
+                                  else "El mensaje original no se encontró en el historial de esta clínica.")
+                    log_error(f"webhook (centro={centro}): respuesta sin asociar. "
+                              "El teléfono del remitente no coincide con una ficha en las bases consultadas "
+                              f"y no tiene supresión activa registrada. {referencia}")
+                return "sin_cliente"
+            emisor = EMISOR_WEBHOOK.get()
+            if emisor:
+                # El contexto del botón señala el mensaje de campaña exacto.
+                # La comparación normalizada también cubre teléfonos antiguos
+                # guardados sin '+' o con espacios.
+                def buscar_origen(condicion: str, parametros: tuple) -> dict:
+                    cur.execute(
+                        "SELECT COALESCE(le.tabla_pacientes, e.tabla_pacientes,"
+                        " e.base_datos) AS tabla_pacientes, le.paciente_id"
+                        " FROM log_envios le LEFT JOIN envios e ON e.id = le.envio_id"
+                        " WHERE le.wa_phone_id = %s AND "
+                        + _TEL_MATCH.format(col="le.numero_telefono")
+                        + " AND le.paciente_id IS NOT NULL AND " + condicion
+                        + " ORDER BY le.id DESC LIMIT 1",
+                        (emisor["phoneNumberId"], telefono, *parametros),
+                    )
+                    return cur.fetchone() or {}
+
+                origen = (buscar_origen("BINARY le.whatsapp_message_id = BINARY %s",
+                                        (referencia_meta_id,)) if referencia_meta_id else {})
+                if not origen:
+                    origen = buscar_origen(
+                        "le.envio_id IS NOT NULL AND le.estado_envio = 'enviado'",
+                        (),
+                    )
+                if origen:
+                    pacientes = [p for p in pacientes if p["tabla"] == origen.get("tabla_pacientes")
+                                 and p["id"] == origen.get("paciente_id")]
+                    if not pacientes:
+                        log_error("webhook: respuesta sin paciente vinculado al envío"
+                                  f" (centro={emisor.get('codigo') or 'desconocido'})")
+                        return "sin_base_inequivoca"
+                elif len(pacientes) > 1:
+                    # Conversación directa sin campaña: se conservó arriba,
+                    # pero no se atribuye arbitrariamente a una base.
+                    if referencia_meta_id:
+                        log_error("webhook: respuesta contextual con varias bases posibles"
+                                  f" (centro={emisor.get('codigo') or 'desconocido'})")
+                    return "sin_base_inequivoca"
+            for p in pacientes:
+                if not automatica:
+                    cur.execute(f"UPDATE {p['tabla']} SET estado = 'enviado' WHERE {match}", (telefono,))
+                # Una respuesta real deja sin efecto una corrección manual previa.
+                if not automatica:
+                    try:
+                        cur.execute(
+                            f"UPDATE {p['tabla']} SET respuesta_manual = NULL"
+                            f" WHERE {match} AND respuesta_manual IS NOT NULL",
+                            (telefono,),
+                        )
+                    except MySQLError as exc:
+                        if not exc.args or exc.args[0] != 1054:
+                            raise
+                # El mismo teléfono puede estar en varias bases. Cada una
+                # necesita su propia señal para la ficha y estadísticas.
+                esp = servicio_areas.area_por_tabla(p["tabla"])
+                emisor = EMISOR_WEBHOOK.get()
+                cur.execute(
+                    "INSERT INTO log_envios (envio_id, paciente_id, nombre_paciente, numero_telefono,"
+                    " mensaje, plantilla_clave, estado_envio, respuesta, descripcion_error,"
+                    " area_id, tabla_pacientes, centro_codigo, wa_phone_id, numero_emisor,"
+                    " whatsapp_message_id)"
+                    " VALUES (NULL, %s, %s, %s, %s, 'respuesta', 'enviado', %s, %s, %s, %s, %s, %s, %s, %s)",
+                    (p["id"], p["nombre"], p["telefono"], (texto or "")[:2000],
+                     "pendiente" if automatica else "respondio",
+                     automatica if automatica else None,
+                     esp["id"] if esp else None, p["tabla"],
+                     (emisor or {}).get("codigo"), (emisor or {}).get("phoneNumberId"),
+                     (emisor or {}).get("phoneNumber"), mensaje_id),
+                )
+                respuesta_id = cur.lastrowid
+                try:
+                    clasificacion = clasificar(texto)
+                    ofensa = clasificacion.ofensa
+                    detalle = json.dumps({
+                        "categoria": ofensa.categoria,
+                        "confianza": ofensa.confianza,
+                        "terminos": ofensa.terminos,
+                        "accion_recomendada": ofensa.accion_recomendada,
+                        "motivos_consulta": clasificacion.motivos,
+                        "interes": es_mensaje_interes(texto),
+                        "baja": self._es_baja(texto),
+                    }, ensure_ascii=False)
+                    cur.execute(
+                        "INSERT IGNORE INTO respuesta_etiquetas"
+                        " (log_envio_id, etiquetas, origen, actualizado_por, ofensa_detalle)"
+                        " VALUES (%s, %s, 'automatico', 'sistema', %s)",
+                        (respuesta_id, json.dumps(etiquetas_automaticas(texto, clasificacion),
+                                                 ensure_ascii=False), detalle),
+                    )
+                except Exception as exc:
+                    if _es_deadlock(exc):
+                        raise
+                    # La anotación no debe impedir conservar la respuesta.
+                    log_error("etiquetas_automaticas: no se pudo guardar", exc)
+            conn.commit()
+        return "registrada"
 
     def _registrar_baja(self, telefono: str, aviso: bool | None = None,
                        simulada: bool = False) -> None:
@@ -2167,97 +2195,90 @@ class WhatsAppService:
         (opt-out, corrección manual y señal 'pegajosa' de baja en el historial).
         Deja registrado a qué oferta/plantilla respondió, para el historial y
         para volver a poder mandarle plantillas al cabo de una semana."""
-        match = _TEL_MATCH.format(col="telefono")
         try:
-            from snw.reagendamiento.paciente_reagendar import marcar_opt_out_reagendar
-            with conectar() as conn, conn.cursor() as cur:
-                huella, huella_activa = bloquear_huella_baja(cur, telefono)
-                huellas_temporales = [] if huella_activa else [huella]
-                cur.execute("SELECT estado FROM supresion_telefonos"
-                            " WHERE huella=%s FOR UPDATE", (huella,))
-                supresion = cur.fetchone()
-                if supresion and supresion.get("estado") != "exento":
-                    limpiar_cerrojos_baja_inactivos(cur, huellas_temporales)
-                    conn.commit()
-                    return
-                marcar_opt_out_reagendar(telefono, False, cur=cur)
-                pacientes = self._pacientes_con_tel(cur, telefono)
-                if not pacientes:
-                    if huella_activa:
-                        retirar_huella_baja(cur, huella)
-                    limpiar_cerrojos_baja_inactivos(cur, huellas_temporales)
-                    conn.commit()
-                    return
-                if huella_activa:
-                    retirar_huella_baja(cur, huella)
-                for p in pacientes:
-                    clave_oferta = self._ultima_plantilla_ofertada(cur, p["id"], p["tabla"])
-                    venia_de_baja = bool(p.get("whatsapp_opt_out"))
-                    for sql, params in (
-                        (f"UPDATE {p['tabla']} SET interesado = 1, no_interesado = 0 WHERE {match}", (telefono,)),
-                        (f"UPDATE {p['tabla']} SET whatsapp_opt_out = 0 WHERE {match}", (telefono,)),
-                        # El propio paciente se retracta: se libera el bloqueo.
-                        (f"UPDATE {p['tabla']} SET opt_out_explicito = 0 WHERE {match}", (telefono,)),
-                        (f"UPDATE {p['tabla']} SET interes_plantilla_clave = %s, interes_fecha = NOW() WHERE {match}",
-                         (clave_oferta, telefono)),
-                    ):
-                        try:
-                            cur.execute(sql, params)
-                        except Exception:
-                            pass  # esquema sin esa columna
-                    # Solo registra la fecha si el paciente realmente venía de
-                    # baja; un interés de alguien que nunca se dio de baja no
-                    # necesita ese dato de trazabilidad.
-                    if venia_de_baja:
-                        try:
-                            cur.execute(f"UPDATE {p['tabla']} SET ultimo_reintegro = NOW() WHERE {match}", (telefono,))
-                        except Exception:
-                            pass  # esquema sin la columna
-                    # Anula la señal 'pegajosa' de baja del historial del paciente.
-                    cond_t, args_t = self._cond_tabla(p["tabla"])
-                    cur.execute(
-                        "UPDATE log_envios SET respuesta = 'respondio'"
-                        f" WHERE paciente_id = %s AND respuesta = 'baja' {cond_t}",
-                        (p["id"], *args_t),
-                    )
-                # La oferta se documenta una vez; la respuesta en sí ya queda
-                # registrada por tabla en _registrar_respuesta.
-                p0 = pacientes[0]
-                clave_oferta0 = self._ultima_plantilla_ofertada(cur, p0["id"], p0["tabla"])
-                esp0 = servicio_areas.area_por_tabla(p0["tabla"])
-                cur.execute(
-                    "INSERT INTO log_envios (envio_id, paciente_id, nombre_paciente, numero_telefono,"
-                    " mensaje, plantilla_clave, estado_envio, respuesta, descripcion_error,"
-                    " area_id, tabla_pacientes)"
-                    " VALUES (NULL, %s, %s, %s, %s, 'interes_boton', 'enviado', 'respondio', NULL, %s, %s)",
-                    (p0["id"], p0["nombre"], p0["telefono"],
-                     f"Interesado en la oferta del {_hoy_es()}, plantilla '{clave_oferta0 or '—'}'.",
-                     esp0["id"] if esp0 else None, p0["tabla"] if esp0 else None),
-                )
-                cur.execute("DELETE FROM campania_consultas WHERE telefono = %s", (telefono,))
+            _reintentar_deadlock(self._guardar_interes, telefono)
+        except Exception as exc:
+            log_error("_registrar_interes", exc, solo_tipo=True)
+
+    def _guardar_interes(self, telefono: str) -> None:
+        match = _TEL_MATCH.format(col="telefono")
+        from snw.reagendamiento.paciente_reagendar import marcar_opt_out_reagendar
+        with conectar() as conn, conn.cursor() as cur:
+            huella, huella_activa = bloquear_huella_baja(cur, telefono)
+            huellas_temporales = [] if huella_activa else [huella]
+            cur.execute("SELECT estado FROM supresion_telefonos"
+                        " WHERE huella=%s FOR UPDATE", (huella,))
+            supresion = cur.fetchone()
+            if supresion and supresion.get("estado") != "exento":
                 limpiar_cerrojos_baja_inactivos(cur, huellas_temporales)
                 conn.commit()
-        except Exception as e:
-            log_error(f"_registrar_interes({telefono})", e)
+                return
+            marcar_opt_out_reagendar(telefono, False, cur=cur)
+            pacientes = self._pacientes_con_tel(cur, telefono)
+            if not pacientes:
+                if huella_activa:
+                    retirar_huella_baja(cur, huella)
+                limpiar_cerrojos_baja_inactivos(cur, huellas_temporales)
+                conn.commit()
+                return
+            if huella_activa:
+                retirar_huella_baja(cur, huella)
+            for p in pacientes:
+                clave_oferta = self._ultima_plantilla_ofertada(cur, p["id"], p["tabla"])
+                venia_de_baja = bool(p.get("whatsapp_opt_out"))
+                for sql, params in (
+                    (f"UPDATE {p['tabla']} SET interesado = 1, no_interesado = 0 WHERE {match}", (telefono,)),
+                    (f"UPDATE {p['tabla']} SET whatsapp_opt_out = 0 WHERE {match}", (telefono,)),
+                    # El propio paciente se retracta: se libera el bloqueo.
+                    (f"UPDATE {p['tabla']} SET opt_out_explicito = 0 WHERE {match}", (telefono,)),
+                    (f"UPDATE {p['tabla']} SET interes_plantilla_clave = %s, interes_fecha = NOW() WHERE {match}",
+                     (clave_oferta, telefono)),
+                ):
+                    try:
+                        cur.execute(sql, params)
+                    except MySQLError as exc:
+                        if not exc.args or exc.args[0] != 1054:
+                            raise
+                # Solo registra la fecha si el paciente realmente venía de
+                # baja; un interés de alguien que nunca se dio de baja no
+                # necesita ese dato de trazabilidad.
+                if venia_de_baja:
+                    try:
+                        cur.execute(f"UPDATE {p['tabla']} SET ultimo_reintegro = NOW() WHERE {match}", (telefono,))
+                    except MySQLError as exc:
+                        if not exc.args or exc.args[0] != 1054:
+                            raise
+                # Anula la señal 'pegajosa' de baja del historial del paciente.
+                cond_t, args_t = self._cond_tabla(p["tabla"])
+                cur.execute(
+                    "UPDATE log_envios SET respuesta = 'respondio'"
+                    f" WHERE paciente_id = %s AND respuesta = 'baja' {cond_t}",
+                    (p["id"], *args_t),
+                )
+            # La oferta se documenta una vez; la respuesta en sí ya queda
+            # registrada por tabla en _registrar_respuesta.
+            p0 = pacientes[0]
+            clave_oferta0 = self._ultima_plantilla_ofertada(cur, p0["id"], p0["tabla"])
+            esp0 = servicio_areas.area_por_tabla(p0["tabla"])
+            cur.execute(
+                "INSERT INTO log_envios (envio_id, paciente_id, nombre_paciente, numero_telefono,"
+                " mensaje, plantilla_clave, estado_envio, respuesta, descripcion_error,"
+                " area_id, tabla_pacientes)"
+                " VALUES (NULL, %s, %s, %s, %s, 'interes_boton', 'enviado', 'respondio', NULL, %s, %s)",
+                (p0["id"], p0["nombre"], p0["telefono"],
+                 f"Interesado en la oferta del {_hoy_es()}, plantilla '{clave_oferta0 or '—'}'.",
+                 esp0["id"] if esp0 else None, p0["tabla"] if esp0 else None),
+            )
+            cur.execute("DELETE FROM campania_consultas WHERE telefono = %s", (telefono,))
+            limpiar_cerrojos_baja_inactivos(cur, huellas_temporales)
+            conn.commit()
 
     def _registrar_no_interes(self, telefono: str) -> None:
-        """El paciente indicó (botón 'No me interesa') que esta oferta puntual
-        no le interesa: a diferencia de una baja, sigue pudiendo recibir
-        futuras plantillas (al cabo de una semana)."""
-        for intento in range(3):
-            try:
-                self._guardar_no_interes(telefono)
-                return
-            except OperationalError as exc:
-                if exc.args and exc.args[0] == 1213 and intento < 2:
-                    time.sleep(0.05 * (intento + 1))
-                    continue
-                codigo = exc.args[0] if exc.args else "desconocido"
-                log_error(f"webhook: no se pudo guardar «No me interesa» (MySQL {codigo})", exc, solo_tipo=True)
-                return
-            except Exception as exc:
-                log_error("webhook: no se pudo guardar «No me interesa»", exc, solo_tipo=True)
-                return
+        """Registra el rechazo de la oferta y conserva la suscripción."""
+        try:
+            _reintentar_deadlock(self._guardar_no_interes, telefono)
+        except Exception as exc:
+            log_error("webhook: no se pudo guardar «No me interesa»", exc, solo_tipo=True)
 
     def _guardar_no_interes(self, telefono: str) -> None:
         match = _TEL_MATCH.format(col="telefono")
