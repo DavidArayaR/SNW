@@ -273,6 +273,10 @@ td.campo-id { color: var(--texto-suave); font-family: Consolas, monospace; }
 .pacientes-sincronizar__bases { margin-block: 1rem; border: 1px solid var(--borde); border-radius: 8px; padding: .75rem; }
 .pacientes-sincronizar__bases > div { display: grid; gap: .65rem; max-height: 32dvh; overflow: auto; }
 .pacientes-sincronizar__bases label { display: flex; align-items: center; gap: .65rem; overflow-wrap: anywhere; }
+.pacientes-sincronizar--historial { width: min(900px, calc(100% - 2rem)); max-width: 900px; }
+.pacientes-sincronizar--historial table { min-width: 620px; }
+.pacientes-sincronizar--historial tr.sinc-grupo:not(:first-child) { border-top: 2px solid var(--borde); }
+.pacientes-sincronizar--historial :is(th, td).sinc-numero { text-align: center; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .estado-programado { background: var(--info-bg, var(--warn-bg)); color: var(--info-fg, var(--warn-fg)); border: 1px solid var(--info-bd, var(--warn-bd)); }
 .estado-error { background: var(--danger-bg); color: var(--danger-fg); border: 1px solid var(--danger-bd); }
 

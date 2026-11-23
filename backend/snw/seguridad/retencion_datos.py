@@ -160,15 +160,16 @@ def _ejecutar_paso(conn, nombre: str, funcion, resultado: dict) -> None:
 
 
 def _borrar_vencidos(cur, tabla: str, columna: str, dias: int,
-                     condicion_extra: str = "") -> int:
+                     condicion_extra: str = "", *, utc: bool = False) -> int:
     if not _existe_tabla(cur, tabla) or columna not in _columnas(cur, tabla):
         return 0
+    reloj = "UTC_TIMESTAMP()" if utc else "NOW()"
     borrados = 0
     while borrados < _MAX_FILAS_POR_EJECUCION:
         limite = min(_BATCH, _MAX_FILAS_POR_EJECUCION - borrados)
         cur.execute(
             f"DELETE FROM `{tabla}` WHERE `{columna}` < "
-            f"DATE_SUB(NOW(), INTERVAL {int(dias)} DAY){condicion_extra} LIMIT {limite}"
+            f"DATE_SUB({reloj}, INTERVAL {int(dias)} DAY){condicion_extra} LIMIT {limite}"
         )
         n = max(0, int(cur.rowcount))
         borrados += n
@@ -751,6 +752,7 @@ def ejecutar_limpieza() -> dict[str, int]:
             ("cuotas_antiguas", lambda c: _limpiar_cuotas_antiguas(c, 90)),
             ("pares_despacho", lambda c: _borrar_vencidos(c, "wa_despacho_pares", "proximo_turno", 1)),
             ("auditoria_usuarios", lambda c: _borrar_vencidos(c, "usuarios_auditoria", "fecha_hora", dias_auditoria)),
+            ("sincronizaciones_pacientes", lambda c: _borrar_vencidos(c, "pacientes_sincronizaciones", "creado", dias_auditoria, utc=True)),
             ("simulaciones", lambda c: _borrar_vencidos(c, "envios_simulaciones", "creado", dias_datos)),
         )
         try:

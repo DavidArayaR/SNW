@@ -73,6 +73,13 @@ CREATE TABLE IF NOT EXISTS envios (
   INDEX idx_envios_reservo_lista (reservo_lista_id)
 );
 
+CREATE TABLE IF NOT EXISTS pacientes_sincronizaciones (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  creado DATETIME NOT NULL,
+  bases LONGTEXT NOT NULL,
+  INDEX idx_pacientes_sinc_creado (creado)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS log_envios (
   id INT AUTO_INCREMENT PRIMARY KEY,
   envio_id INT DEFAULT NULL,

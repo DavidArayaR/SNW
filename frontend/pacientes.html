@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="css/tema.css?v=tokens1">
   <link rel="stylesheet" href="css/styles.css">
   <link rel="stylesheet" href="css/componentes.css?v=paginador-cinco1">
-  <link rel="stylesheet" href="css/pacientes.css?v=sincronizar-enviados1">
+  <link rel="stylesheet" href="css/pacientes.css?v=historial-sincronizaciones1">
   <link rel="stylesheet" href="css/layout.css?v=navcolor1">
   <link rel="stylesheet" href="css/admin.css?v=volver-bases1">
   <link rel="stylesheet" href="css/refinamiento.css?v=merge-frontend1">
@@ -53,6 +53,9 @@
               <button id="btnActualizar" class="btn btn--ghost" type="button">Actualizar</button>
               <button id="btnSincronizarPacientes" class="btn btn--ghost" type="button" hidden>
                 <i class="fa-solid fa-rotate" aria-hidden="true"></i> Sincronizar pacientes
+              </button>
+              <button id="btnHistorialSincronizaciones" class="btn btn--ghost" type="button" hidden>
+                <i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> Historial de sincronizaciones
               </button>
             </div>
           </div>
@@ -429,6 +432,31 @@
     </form>
   </dialog>
 
+  <dialog id="modalHistorialSincronizaciones" class="modal__card pacientes-sincronizar pacientes-sincronizar--historial" aria-labelledby="tituloHistorialSincronizaciones">
+    <h3 id="tituloHistorialSincronizaciones">Historial de sincronizaciones</h3>
+    <p id="avisoHistorialSincronizaciones" role="status"></p>
+    <div class="tabla-wrap" id="tablaHistorialSincronizaciones" hidden>
+      <table aria-label="Estados de envío antes y después de sincronizar">
+        <thead>
+          <tr>
+            <th scope="col">Fecha</th>
+            <th scope="col">Base de datos</th>
+            <th scope="col">Pendientes<br><small>Antes → Después</small></th>
+            <th scope="col">Enviados<br><small>Antes → Después</small></th>
+            <th scope="col">Sincronizados</th>
+          </tr>
+        </thead>
+        <tbody id="filasHistorialSincronizaciones"></tbody>
+      </table>
+    </div>
+    <div class="modal__actions">
+      <span id="paginaHistorialSincronizaciones" class="pag-info">Página 1</span>
+      <button id="anteriorHistorialSincronizaciones" class="btn btn--ghost" type="button" aria-label="Página anterior" disabled><i class="fa-solid fa-angle-left" aria-hidden="true"></i></button>
+      <button id="siguienteHistorialSincronizaciones" class="btn btn--ghost" type="button" aria-label="Página siguiente" disabled><i class="fa-solid fa-angle-right" aria-hidden="true"></i></button>
+      <form method="dialog"><button class="btn btn--ghost" type="submit">Cerrar</button></form>
+    </div>
+  </dialog>
+
   <div id="modalConfirmarMasivo" class="modal" hidden>
     <div class="modal__card" role="dialog" aria-modal="true">
       <h3 id="masivoTitulo">Confirmar cambio</h3>
@@ -443,7 +471,7 @@
   <script src="js/layout.js?v=reservo-nav2"></script>
   <script src="js/pass-toggle.js"></script>
   <script src="js/csv-chunks.js?v=csv-codificacion1"></script>
-  <script src="js/pacientes.js?v=sincronizar-enviados1"></script>
+  <script src="js/pacientes.js?v=historial-sincronizaciones1"></script>
   <script src="js/reagendar.js?v=motivo-error-meta1"></script>
   <script src="js/pacientes-tabs.js?v=aplazar-flotante1"></script>
   <script>

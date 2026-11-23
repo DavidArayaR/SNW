@@ -2092,35 +2092,49 @@ def sincronizar_pacientes(body: SincronizarPacientesIn, sesion: dict = Depends(s
     claves = set(body.bases)
     if len(claves) < 2:
         raise HTTPException(422, detail="Selecciona al menos dos bases distintas.")
-    bases = set()
+    bases = {}
     with conectar("produccion") as conn, conn.cursor() as cur:
         for clave in sorted(claves):
             if clave == "prod":
                 tabla, lista_id = tabla_pacientes("produccion"), None
+                nombre = tabla
             else:
                 tipo, _, identificador = clave.partition(":")
                 if tipo not in ("esp", "reservo") or not re.fullmatch(r"[1-9][0-9]{0,9}", identificador):
                     raise HTTPException(422, detail="Selecciona bases de producción válidas.")
                 base_id = int(identificador)
                 if tipo == "esp":
-                    tabla, _ = _resolver_tabla_pacientes(sesion, "produccion", base_id)
+                    tabla, area = _resolver_tabla_pacientes(sesion, "produccion", base_id)
+                    nombre = area.get("nombre_visible") or tabla
                     lista_id = None
                 else:
-                    cur.execute("SELECT id FROM reservo_bases_contacto WHERE id=%s AND area_id IS NULL",
+                    cur.execute("SELECT nombre FROM reservo_bases_contacto WHERE id=%s AND area_id IS NULL",
                                 (base_id,))
-                    if not cur.fetchone():
+                    lista = cur.fetchone()
+                    if not lista:
                         raise HTTPException(404, detail="Una base de Reservo ya no está en el selector. Actualiza la lista.")
                     tabla, lista_id = reservo_pacientes.TABLA_LISTA_RESERVO, base_id
+                    nombre = lista["nombre"]
             if tabla == tabla_pacientes("desarrollo") or not columna_existe(tabla, "estado", "produccion"):
                 raise HTTPException(422, detail="Una base seleccionada no admite sincronización de estados.")
-            bases.add((tabla, lista_id))
+            bases[(tabla, lista_id)] = nombre
         if len(bases) < 2:
             raise HTTPException(422, detail="Selecciona al menos dos bases distintas.")
-        actualizados = sincronizar_estados.propagar_enviados(cur, sorted(bases))
+        cambios = sincronizar_estados.propagar_enviados(cur, sorted(bases))
+        detalle = [{"nombre": bases[base], **resultado} for base, resultado in cambios.items()]
+        sincronizar_estados.registrar_historial(cur, detalle)
         conn.commit()
+    actualizados = sum(base["actualizados"] for base in detalle)
     auditoria_registrar(sesion.get("usuario", ""), "pacientes_sincronizados", "pacientes",
                         f"{len(bases)} bases seleccionadas; {actualizados} fichas actualizadas")
     return {"actualizados": actualizados}
+
+
+def historial_sincronizaciones_pacientes(pagina: int = Query(1, ge=1),
+                                        limite: int = Query(10, ge=1, le=100),
+                                        sesion: dict = Depends(solo_admin)):
+    with conectar("produccion") as conn, conn.cursor() as cur:
+        return sincronizar_estados.listar_historial(cur, pagina, limite)
 
 
 def actualizar_estado_pacientes(body: EstadoPacientesBulkIn, ambiente: str = Query("produccion"),

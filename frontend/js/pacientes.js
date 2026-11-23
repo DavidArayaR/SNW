@@ -1043,6 +1043,71 @@ const otrasBasesSincronizar = $("#otrasBasesSincronizarPacientes");
 const confirmarSincronizar = $("#confirmarSincronizarPacientes");
 const cancelarSincronizar = $("#cancelarSincronizarPacientes");
 const estadoSincronizar = $("#estadoSincronizarPacientes");
+const btnHistorialSincronizaciones = $("#btnHistorialSincronizaciones");
+const modalHistorialSincronizaciones = $("#modalHistorialSincronizaciones");
+const anteriorSincronizaciones = $("#anteriorHistorialSincronizaciones");
+const siguienteSincronizaciones = $("#siguienteHistorialSincronizaciones");
+let paginaSincronizaciones = 1;
+let solicitudSincronizaciones = 0;
+
+async function cargarHistorialSincronizaciones(pagina) {
+  const solicitud = ++solicitudSincronizaciones;
+  const aviso = $("#avisoHistorialSincronizaciones");
+  const tabla = $("#tablaHistorialSincronizaciones");
+  const anteriorDeshabilitado = anteriorSincronizaciones.disabled;
+  const siguienteDeshabilitado = siguienteSincronizaciones.disabled;
+  anteriorSincronizaciones.disabled = true;
+  siguienteSincronizaciones.disabled = true;
+  aviso.textContent = "Cargando sincronizaciones…";
+  try {
+    const respuesta = await fetch(`api/pacientes/sincronizaciones?pagina=${pagina}`, {
+      headers: authHeaders(), cache: "no-store",
+    });
+    if (solicitud !== solicitudSincronizaciones) return;
+    if (respuesta.status === 401) { window.snwSesionExpirada(); return; }
+    if (!respuesta.ok) throw new Error();
+    const historial = await respuesta.json();
+    if (solicitud !== solicitudSincronizaciones) return;
+    const numero = new Intl.NumberFormat("es-CL");
+    const fecha = new Intl.DateTimeFormat("es-CL", {
+      dateStyle: "short", timeStyle: "short", timeZone: "America/Santiago",
+    });
+    $("#filasHistorialSincronizaciones").innerHTML = historial.items.map((evento) =>
+      evento.bases.map((base, indice) => {
+        const momento = indice === 0
+          ? `<td rowspan="${evento.bases.length}">${escaparHtml(fecha.format(new Date(evento.fecha)))}</td>`
+          : "";
+        return `<tr${indice === 0 ? ' class="sinc-grupo"' : ""}>${momento}` +
+          `<th scope="row">${escaparHtml(base.nombre)}</th>` +
+          `<td class="sinc-numero">${numero.format(base.antes.pendientes)} → ${numero.format(base.despues.pendientes)}</td>` +
+          `<td class="sinc-numero">${numero.format(base.antes.enviados)} → ${numero.format(base.despues.enviados)}</td>` +
+          `<td class="sinc-numero"><strong>${numero.format(base.actualizados)}</strong></td></tr>`;
+      }).join("")
+    ).join("");
+    paginaSincronizaciones = pagina;
+    tabla.hidden = !historial.items.length;
+    aviso.textContent = historial.items.length ? "" : "No hay sincronizaciones registradas en esta página.";
+    $("#paginaHistorialSincronizaciones").textContent = `Página ${pagina}`;
+    anteriorSincronizaciones.disabled = pagina <= 1;
+    siguienteSincronizaciones.disabled = !historial.hay_siguiente;
+  } catch {
+    if (solicitud !== solicitudSincronizaciones) return;
+    aviso.textContent = "No se pudo cargar el historial. Vuelve a intentarlo.";
+    anteriorSincronizaciones.disabled = anteriorDeshabilitado;
+    siguienteSincronizaciones.disabled = siguienteDeshabilitado;
+  }
+}
+
+if (btnHistorialSincronizaciones && window.snwEsPrivilegiado) {
+  btnHistorialSincronizaciones.hidden = false;
+  btnHistorialSincronizaciones.addEventListener("click", () => {
+    $("#tablaHistorialSincronizaciones").hidden = true;
+    modalHistorialSincronizaciones.showModal();
+    cargarHistorialSincronizaciones(1);
+  });
+  anteriorSincronizaciones.addEventListener("click", () => cargarHistorialSincronizaciones(paginaSincronizaciones - 1));
+  siguienteSincronizaciones.addEventListener("click", () => cargarHistorialSincronizaciones(paginaSincronizaciones + 1));
+}
 
 btnSincronizarPacientes?.addEventListener("click", () => {
   const actual = selBasePac.selectedOptions[0];

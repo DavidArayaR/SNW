@@ -1341,6 +1341,14 @@ def asegurar_tabla_config() -> None:
             if cur.fetchone() is None:
                 cur.execute("ALTER TABLE programado_destinatarios ADD INDEX idx_pd_telefono (telefono, prog_id)")
             cur.execute(
+                "CREATE TABLE IF NOT EXISTS pacientes_sincronizaciones ("
+                " id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,"
+                " creado DATETIME NOT NULL,"
+                " bases LONGTEXT NOT NULL,"
+                " INDEX idx_pacientes_sinc_creado (creado)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+            cur.execute(
                 "CREATE TABLE IF NOT EXISTS whatsapp_avisos_unicos ("
                 "  telefono VARCHAR(32) NOT NULL,"
                 "  tipo VARCHAR(32) NOT NULL,"
