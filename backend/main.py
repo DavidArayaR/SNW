@@ -1540,7 +1540,7 @@ def slug(texto: str) -> str:
     return t[:40] or "plantilla"
 
 
-def from_pacientes(ambiente: str, tabla: str | None = None) -> str:
+def from_pacientes(ambiente: str, tabla: str | None = None, *, incluir_reservas: bool = True) -> str:
     """Cláusula FROM + LEFT JOIN sobre la tabla de pacientes del entorno
     (o la tabla explícita de una area)."""
     t = tabla or tabla_pacientes(ambiente)
@@ -1551,6 +1551,7 @@ def from_pacientes(ambiente: str, tabla: str | None = None) -> str:
         "   SELECT l2.id FROM log_envios l2"
         f"   WHERE l2.paciente_id = p.id{filtro_log} ORDER BY l2.id DESC LIMIT 1"
         ")"
+        + (reservas_programadas.unir_reservas_para_lectura_sql() if incluir_reservas else "")
     )
 
 
@@ -1656,7 +1657,7 @@ def _pacientes_baja_bloqueada(cur, tabla: str, ambiente: str, ids: list[int]) ->
     return {r["id"] for r in cur.fetchall()}
 
 
-def expr_select_pacientes(ambiente: str, tabla: str | None = None) -> str:
+def expr_select_pacientes(ambiente: str, tabla: str | None = None, *, incluir_reservas: bool = True) -> str:
     """Genera las expresiones SELECT de la tabla pacientes adaptándose a las
     columnas reales existentes (soporta bases con esquema mínimo). Con `tabla`
     se lee una tabla de area en vez de la del entorno."""
@@ -1667,7 +1668,7 @@ def expr_select_pacientes(ambiente: str, tabla: str | None = None) -> str:
     for campo in ("tratamiento_ultima_atencion", "fecha_ultima_atencion"):
         exprs.append(f"p.{campo}" if campo in cols else f"NULL AS {campo}")
     estado = "COALESCE(NULLIF(p.estado, ''), 'pendiente')" if "estado" in cols else "'pendiente'"
-    exprs.append(reservas_programadas.estado_sql(estado) + " AS estado")
+    exprs.append((reservas_programadas.estado_sql(estado) if incluir_reservas else estado) + " AS estado")
     if "fecha_actualizacion" in cols:
         exprs.append("p.fecha_actualizacion")
     else:
@@ -1924,6 +1925,8 @@ def listar_pacientes_pagina(ambiente: str = Query("produccion"),
        interes not in ("todos", "interesado", "no_interesado"):
         raise HTTPException(422, detail="Filtro de pacientes inválido.")
     filtro_sql, args = _filtro_pagina_pacientes(t, ambiente, sesion, q, estado, respuesta, interes)
+    union_reservas = reservas_programadas.unir_reservas_para_lectura_sql()
+    union_filtro = union_reservas if estado != "todos" else ""
     numeros_editables = _numeros_prueba_editables("produccion" if esp else ambiente)
     with conectar(ambiente) as conn, conn.cursor() as cur:
         if incluir_resumen:
@@ -1938,7 +1941,7 @@ def listar_pacientes_pagina(ambiente: str = Query("produccion"),
                 f" SUM({ex_respuesta} = 'baja') AS baja,"
                 f" SUM({ex_interes} = 1) AS interesado,"
                 f" SUM({ex_no_interes} = 1) AS no_interesado"
-                f" FROM {t} p")
+                f" FROM {t} p{union_reservas}")
             resumen = {k: int(v or 0) for k, v in (cur.fetchone() or {}).items()}
         else:
             resumen = None
@@ -1947,7 +1950,7 @@ def listar_pacientes_pagina(ambiente: str = Query("produccion"),
             if not filtro_sql and resumen is not None:
                 total = resumen.get("total", 0)
             else:
-                cur.execute(f"SELECT COUNT(*) AS total FROM {t} p{filtro_sql}", args)
+                cur.execute(f"SELECT COUNT(*) AS total FROM {t} p{union_filtro}{filtro_sql}", args)
                 total = int((cur.fetchone() or {}).get("total") or 0)
         orden = "p.id"
         orden_args = ()
@@ -1957,7 +1960,7 @@ def listar_pacientes_pagina(ambiente: str = Query("produccion"),
             orden_args = tuple(sorted(numeros_editables))
         # Elegir primero IDs evita calcular el último envío y los mensajes
         # correlacionados de los miles de registros que no están en pantalla.
-        cur.execute(f"SELECT p.id FROM {t} p{filtro_sql}"
+        cur.execute(f"SELECT p.id FROM {t} p{union_filtro}{filtro_sql}"
                     f" ORDER BY {orden} LIMIT %s OFFSET %s",
                     (*args, *orden_args, limite, (pagina - 1) * limite))
         ids = [int(f["id"]) for f in (cur.fetchall() or [])]
@@ -8059,7 +8062,8 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         tiene_opt_out = columna_existe(t, "whatsapp_opt_out", amb_q)
         tiene_estado = columna_existe(t, "estado", amb_q)
 
-        base_select = "SELECT " + expr_select_pacientes(amb_q, tabla=t) + from_pacientes(amb_q, tabla=t)
+        base_select = ("SELECT " + expr_select_pacientes(amb_q, tabla=t, incluir_reservas=False)
+                       + from_pacientes(amb_q, tabla=t, incluir_reservas=False))
 
         cond = []
         params = _parametros_envio_anterior(emisor)

@@ -850,6 +850,8 @@ def listar_pacientes_base_contacto(lista_id: int, pagina: int = 1,
     termino = " ".join(str(q or "").split()).strip()[:100]
     condiciones = ["lista_id=%s"]
     estado_sql = reservas_programadas.estado_sql("COALESCE(NULLIF(p.estado,''),'pendiente')")
+    union_reservas = reservas_programadas.unir_reservas_para_lectura_sql()
+    union_filtro = union_reservas if estado != "todos" else ""
     parametros: list = [int(lista_id)]
     if termino:
         condiciones.append(
@@ -880,7 +882,8 @@ def listar_pacientes_base_contacto(lista_id: int, pagina: int = 1,
         base = cur.fetchone()
         if not base:
             raise LookupError("No se encontró la base de Reservo.")
-        cur.execute(f"SELECT COUNT(*) AS total FROM reservo_lista_pacientes p WHERE {filtro}", parametros)
+        cur.execute(f"SELECT COUNT(*) AS total FROM reservo_lista_pacientes p{union_filtro} WHERE {filtro}",
+                    parametros)
         total = int((cur.fetchone() or {}).get("total") or 0)
         cur.execute(
             "SELECT COUNT(*) AS total,"
@@ -892,14 +895,14 @@ def listar_pacientes_base_contacto(lista_id: int, pagina: int = 1,
             f"SUM(CASE WHEN ({respuesta_sql})='baja' THEN 1 ELSE 0 END) AS bajas,"
             "SUM(CASE WHEN interesado=1 THEN 1 ELSE 0 END) AS interesados,"
             "SUM(CASE WHEN no_interesado=1 THEN 1 ELSE 0 END) AS no_interesados "
-            "FROM reservo_lista_pacientes p WHERE lista_id=%s", (int(lista_id),)
+            f"FROM reservo_lista_pacientes p{union_reservas} WHERE lista_id=%s", (int(lista_id),)
         )
         resumen = cur.fetchone() or {}
         cur.execute(
             "SELECT id,cliente_uuid,nombre,apellido,telefono,telefono_valido,"
             f"tratamiento_ultima_atencion,fecha_ultima_atencion,{estado_sql} AS estado,whatsapp_opt_out,"
             "respuesta_manual,interesado,no_interesado,fecha_actualizacion "
-            f"FROM reservo_lista_pacientes p WHERE {filtro} ORDER BY id LIMIT %s OFFSET %s",
+            f"FROM reservo_lista_pacientes p{union_reservas} WHERE {filtro} ORDER BY id LIMIT %s OFFSET %s",
             (*parametros, por_pagina, (pagina-1)*por_pagina),
         )
         filas = cur.fetchall()

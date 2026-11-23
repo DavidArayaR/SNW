@@ -445,6 +445,11 @@ async function cargar(mostrarFeedback = false) {
   if (controlCargaPacientes) controlCargaPacientes.abort();
   const control = new AbortController();
   controlCargaPacientes = control;
+  let tiempoAgotado = false;
+  const temporizador = setTimeout(() => {
+    tiempoAgotado = true;
+    control.abort();
+  }, 20000);
   mostrarCargaPacientes(true);
   try {
     // Si no hay preferencia guardada, usar el entorno global de la configuración como default
@@ -567,10 +572,15 @@ async function cargar(mostrarFeedback = false) {
     if (mostrarFeedback) toast("Pacientes actualizados correctamente.");
   } catch (err) {
     if (solicitud !== solicitudPacientes) return;
+    if (tiempoAgotado) {
+      toast("La carga de pacientes tardó demasiado. Pulsa Actualizar para reintentar.", "error");
+      return;
+    }
     if (err?.name === "AbortError") return;
     console.error("[pacientes] cargar:", err);
     toast(err?.message || "Error al cargar pacientes.", "error");
   } finally {
+    clearTimeout(temporizador);
     if (solicitud === solicitudPacientes) {
       controlCargaPacientes = null;
       mostrarCargaPacientes(false);

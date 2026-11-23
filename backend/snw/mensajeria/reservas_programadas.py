@@ -13,30 +13,39 @@ def telefono_sql(columna: str) -> str:
     )
 
 
-def existe_reserva_sql(telefono: str, programado_actual: str = "0", *, solo_por_enviar: bool = False) -> str:
+def existe_reserva_sql(telefono: str, programado_actual: str = "0") -> str:
     # Acepta también las representaciones históricas del número. Mantiene
     # pd.telefono sin funciones para poder usar su índice. Si ya había
     # reservas superpuestas, tiene prioridad la primera que se creó.
     telefono = f"(CONVERT(({telefono}) USING utf8mb4) COLLATE utf8mb4_unicode_ci)"
-    pendiente = (
-        " AND (ep.estado<>'enviando' OR NOT EXISTS (SELECT 1 FROM envios e"
-        " JOIN log_envios le ON le.envio_id=e.id WHERE e.programado_id=ep.id"
-        f" AND le.numero_telefono={telefono} AND le.estado_envio='enviado'))"
-        if solo_por_enviar else ""
-    )
     return (
         "EXISTS (SELECT 1 FROM programado_destinatarios pd"
         " JOIN envios_programados ep ON ep.id=pd.prog_id"
         f" WHERE pd.telefono IN ({telefono}, SUBSTRING({telefono},2),"
         f" SUBSTRING({telefono},4), CONCAT('56',SUBSTRING({telefono},5)), SUBSTRING({telefono},5))"
         " AND ep.estado IN ('pendiente','aprobado','enviando')"
-        f" AND ({programado_actual}=0 OR ep.id<{programado_actual}){pendiente})"
+        f" AND ({programado_actual}=0 OR ep.id<{programado_actual}))"
     )
 
 
-def estado_sql(estado: str, columna_telefono: str = "p.telefono") -> str:
-    reserva = existe_reserva_sql(telefono_sql(columna_telefono), solo_por_enviar=True)
-    return f"CASE WHEN {reserva} THEN 'programado' ELSE {estado} END"
+def unir_reservas_para_lectura_sql() -> str:
+    """Agrupa la cohorte activa una vez, sin releerla por paciente o contador."""
+    telefono_reserva = f"CONVERT(({telefono_sql('pd.telefono')}) USING utf8mb4) COLLATE utf8mb4_unicode_ci"
+    telefono_paciente = f"CONVERT(({telefono_sql('p.telefono')}) USING utf8mb4) COLLATE utf8mb4_unicode_ci"
+    return (
+        f" LEFT JOIN (SELECT DISTINCT {telefono_reserva} AS telefono_reservado"
+        " FROM envios_programados ep JOIN programado_destinatarios pd ON pd.prog_id=ep.id"
+        " WHERE ep.estado IN ('pendiente','aprobado','enviando') AND pd.telefono<>''"
+        " AND (ep.estado<>'enviando' OR NOT EXISTS (SELECT 1 FROM envios e"
+        " JOIN log_envios le ON le.envio_id=e.id"
+        f" WHERE e.programado_id=ep.id AND le.numero_telefono={telefono_reserva}"
+        " AND le.estado_envio='enviado'))"
+        f") reserva_paciente ON reserva_paciente.telefono_reservado={telefono_paciente}"
+    )
+
+
+def estado_sql(estado: str) -> str:
+    return f"CASE WHEN reserva_paciente.telefono_reservado IS NOT NULL THEN 'programado' ELSE {estado} END"
 
 
 def telefono_reservado(cur, telefono: str) -> bool:
