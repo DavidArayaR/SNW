@@ -7541,13 +7541,15 @@ def _emisor_vigente(emisor: dict | None) -> bool:
 
 def _paciente_habilitado_antes_de_enviar(paciente_id: int, telefono: str,
                                           ambiente: str, tabla: str, emisor: dict | None = None) -> bool:
-    """Revalida baja, borrado y la espera antes del envío."""
+    """Revalida bajas, borrados y envíos previos antes del despacho."""
     try:
         with conectar(ambiente) as conn, conn.cursor() as cur:
             cond = "id = %(paciente_id)s"
-            params = {**_parametros_espera(emisor), "paciente_id": paciente_id}
+            params = {"paciente_id": paciente_id}
             if ambiente != "desarrollo" and emisor:
-                cond += " AND " + _condicion_espera_plantilla("p")
+                params.update(_parametros_envio_anterior(emisor))
+                params["telefono_destino"] = normalizar_telefono(telefono)
+                cond += " AND " + _condicion_sin_envio_anterior("%(telefono_destino)s")
             cur.execute(f"SELECT p.telefono, p.whatsapp_opt_out FROM {tabla} p WHERE " + cond, params)
             fila = cur.fetchone()
         return bool(fila and not fila.get("whatsapp_opt_out")
@@ -7620,7 +7622,7 @@ def _procesar_job_api_concurrente(job_id: str, canal: MotorApiOficial) -> None:
                 fallido(d, "Número suprimido")
                 return
             if not _paciente_habilitado_antes_de_enviar(d["id"], d["telefono"], amb, tabla, emisor):
-                fallido(d, "Paciente dado de baja o ya no disponible")
+                fallido(d, "Paciente no disponible: baja, envío anterior o registro modificado")
                 return
             bloqueo = _restriccion_envio_desarrollo(amb, tabla_area, d["telefono"])
             if bloqueo:
@@ -7826,7 +7828,8 @@ def _procesar_job(job_id: str) -> None:
         if not _paciente_habilitado_antes_de_enviar(
                 d["id"], d["telefono"], amb, t_esp or tabla_pacientes(amb), emisor):
             job["fallidos"] += 1
-            job["errores"].append({"id": d["id"], "detalle": "Paciente dado de baja o ya no disponible"})
+            job["errores"].append({"id": d["id"],
+                                   "detalle": "Paciente no disponible: baja, envío anterior o registro modificado"})
             continue
         bloqueo_numero = _restriccion_envio_desarrollo(amb, t_esp, d["telefono"])
         if bloqueo_numero:
@@ -8046,7 +8049,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         base_select = "SELECT " + expr_select_pacientes(amb_q, tabla=t) + from_pacientes(amb_q, tabla=t)
 
         cond = []
-        params = _parametros_espera(emisor)
+        params = _parametros_envio_anterior(emisor)
         if body.pacientes:
             params.update({f"pac_{i}": int(pid) for i, pid in enumerate(body.pacientes)})
             cond.append("p.id IN (" + ", ".join(f"%(pac_{i})s" for i in range(len(body.pacientes))) + ")")
@@ -8057,7 +8060,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
         if amb_q != "desarrollo":
             if tiene_estado:
                 cond.append("p.estado <> 'error'")
-            cond.append(_condicion_espera_plantilla())
+            cond.append(_condicion_sin_envio_anterior())
         if tiene_opt_out:
             cond.append("p.whatsapp_opt_out = 0")
         if columna_existe(t, "respuesta", amb_q):
@@ -8469,33 +8472,33 @@ def confirmar_envio(token: str, background_tasks: BackgroundTasks, sesion: dict 
 """)
 
 
-def _condicion_espera_plantilla(alias: str = "p") -> str:
-    """Excluye envíos recientes de la misma clínica, salvo a números de prueba."""
-    telefono = f"REPLACE(REPLACE(REPLACE(REPLACE(REPLACE({alias}.telefono, ' ', ''), '-', ''), '(', ''), ')', ''), '+', '')"
-    normalizado = (f"CASE WHEN LENGTH({telefono})=11 AND LEFT({telefono},3)='569' THEN CONCAT('+',{telefono}) "
-                   f"WHEN LENGTH({telefono})=10 AND LEFT({telefono},2)='56' THEN CONCAT('+569',SUBSTRING({telefono},3)) "
-                   f"WHEN LENGTH({telefono})=9 AND LEFT({telefono},1)='9' THEN CONCAT('+56',{telefono}) "
-                   f"WHEN LENGTH({telefono})=8 AND LEFT({telefono},1)='9' THEN CONCAT('+569',{telefono}) ELSE '' END")
+def _condicion_sin_envio_anterior(telefono_normalizado: str | None = None) -> str:
+    """Excluye envíos previos de la misma clínica, salvo a números de prueba."""
+    if telefono_normalizado is None:
+        telefono = "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(p.telefono, ' ', ''), '-', ''), '(', ''), ')', ''), '+', '')"
+        telefono_normalizado = (
+            f"CASE WHEN LENGTH({telefono})=11 AND LEFT({telefono},3)='569' THEN CONCAT('+',{telefono}) "
+            f"WHEN LENGTH({telefono})=10 AND LEFT({telefono},2)='56' THEN CONCAT('+569',SUBSTRING({telefono},3)) "
+            f"WHEN LENGTH({telefono})=9 AND LEFT({telefono},1)='9' THEN CONCAT('+56',{telefono}) "
+            f"WHEN LENGTH({telefono})=8 AND LEFT({telefono},1)='9' THEN CONCAT('+569',{telefono}) ELSE '' END"
+        )
     # Mantener la columna indexada intacta; la colación explícita evita conflictos
     # entre tablas creadas con distintas configuraciones de MySQL.
-    return ("(FIND_IN_SET("
-            f"CONVERT(({normalizado}) USING utf8mb4) COLLATE utf8mb4_unicode_ci, "
-            "CONVERT(%(espera_numeros_prueba)s USING utf8mb4) COLLATE utf8mb4_unicode_ci"
+    comparable = f"CONVERT(({telefono_normalizado}) USING utf8mb4) COLLATE utf8mb4_unicode_ci"
+    return (f"(FIND_IN_SET({comparable}, "
+            "CONVERT(%(numeros_prueba)s USING utf8mb4) COLLATE utf8mb4_unicode_ci"
             ") > 0 OR NOT EXISTS (SELECT 1 FROM log_envios le WHERE le.numero_telefono = "
-            f"CONVERT(({normalizado}) USING utf8mb4) COLLATE utf8mb4_unicode_ci "
+            f"{comparable} "
             "AND le.envio_id IS NOT NULL AND le.estado_envio='enviado' "
             "AND le.whatsapp_message_id IS NOT NULL AND COALESCE(le.estado_whatsapp,'') <> 'failed' "
-            "AND (le.centro_codigo=%(espera_centro)s OR "
-            "(le.wa_phone_id=%(espera_phone)s AND %(espera_phone)s <> '')) "
-            "AND le.fecha_hora > DATE_SUB(%(espera_fecha)s, INTERVAL 24 HOUR) "
-            "AND le.fecha_hora <= %(espera_fecha)s))")
+            "AND (le.centro_codigo=%(centro_envio_anterior)s OR "
+            "(le.wa_phone_id=%(phone_envio_anterior)s AND %(phone_envio_anterior)s <> ''))))")
 
 
-def _parametros_espera(emisor: dict | None, fecha=None) -> dict:
-    return {"espera_centro": (emisor or {}).get("codigo") or "",
-            "espera_phone": (emisor or {}).get("phoneNumberId") or "",
-            "espera_fecha": fecha or datetime.datetime.now(),
-            "espera_numeros_prueba": ",".join(sorted(
+def _parametros_envio_anterior(emisor: dict | None) -> dict:
+    return {"centro_envio_anterior": (emisor or {}).get("codigo") or "",
+            "phone_envio_anterior": (emisor or {}).get("phoneNumberId") or "",
+            "numeros_prueba": ",".join(sorted(
                 _numeros_prueba_editables("desarrollo") |
                 _numeros_prueba_editables("produccion")
             ))}
@@ -8527,8 +8530,8 @@ def _filtrar_tratamientos_reservo(condiciones, parametros, tratamientos, *, tabl
 
 def _contar_elegibles_tabla(t: str, amb_q: str, amb: str,
                             reservo_lista_id: int | None = None, emisor: dict | None = None,
-                            fecha=None, tratamientos=()) -> tuple[int, int]:
-    """(total, elegibles) de una tabla. Producción respeta errores y la espera;
+                            tratamientos=()) -> tuple[int, int]:
+    """(total, elegibles) de una tabla. Producción excluye errores y envíos previos;
     desarrollo permite reenviar sin importar estado, siempre entre números de prueba."""
     with conectar(amb) as conn, conn.cursor() as cur:
         lista_reservo = t == reservo_pacientes.TABLA_LISTA_RESERVO
@@ -8544,15 +8547,16 @@ def _contar_elegibles_tabla(t: str, amb_q: str, amb: str,
             conds.append("p.telefono_valido=1")
         if not es_desarrollo and columna_existe(t, "estado", amb_q):
             conds.append("p.estado <> 'error'")
-        if not es_desarrollo and emisor:
-            conds.append(_condicion_espera_plantilla())
         if columna_existe(t, "whatsapp_opt_out", amb_q):
             conds.append("p.whatsapp_opt_out = 0")
         if columna_existe(t, "respuesta", amb_q):
             conds.append("(p.respuesta IS NULL OR p.respuesta <> 'baja')")
         if lista_reservo:
             conds.insert(0, "p.lista_id=%(lista_id)s")
-        parametros = {**_parametros_espera(emisor, fecha), "lista_id": reservo_lista_id}
+        parametros = {"lista_id": reservo_lista_id}
+        if not es_desarrollo and emisor:
+            parametros.update(_parametros_envio_anterior(emisor))
+            conds.append(_condicion_sin_envio_anterior())
         _filtrar_tratamientos_reservo(conds, parametros, tratamientos, tabla=t, ambiente=amb_q)
         cur.execute(
             f"SELECT p.telefono FROM {t} p"
@@ -8611,15 +8615,14 @@ def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensaj
     else:
         t = tabla_pacientes(amb)
         amb_q = amb
-    fecha_elegibilidad = None
     if body.programado_para:
         try:
-            fecha_elegibilidad = datetime.datetime.strptime(body.programado_para, "%Y-%m-%dT%H:%M")
+            datetime.datetime.strptime(body.programado_para, "%Y-%m-%dT%H:%M")
         except ValueError:
             raise HTTPException(422, detail="Fecha y hora de envío inválidas.")
     emisor_elegibilidad = resolver_centro(body.centro) if body.centro in catalogo_centros() else None
     total, elegibles = _contar_elegibles_tabla(
-        t, amb_q, amb, lista_id, emisor_elegibilidad, fecha_elegibilidad, body.tratamientos)
+        t, amb_q, amb, lista_id, emisor_elegibilidad, body.tratamientos)
     # Los que ya están tomados por un programado activo no se pueden preelegir
     # de nuevo: son los que quedan libres para este envío/horario.
     try:
@@ -8934,10 +8937,10 @@ def _contar_reservados_prog(t: str, amb: str, amb_q: str,
 
 def _preelegir_pacientes_prog(t: str, amb: str, amb_q: str, n: int, cur=None,
                               reservo_lista_id: int | None = None, emisor: dict | None = None,
-                              fecha=None, tratamientos=()) -> list[dict]:
+                              tratamientos=()) -> list[dict]:
     """Primeros N pacientes libres: sin opt-out ni baja y no preelegidos por
     otro programado activo. En desarrollo se permite cualquier estado; en
-    producción respeta errores y la espera. Orden estable por id.
+    producción excluye errores y envíos previos. Orden estable por id.
 
     Si se pasa `cur` (la misma transacción que va a guardar la lista) la lectura
     se hace con FOR UPDATE: dos programados creados a la vez se serializan y no
@@ -8954,7 +8957,7 @@ def _preelegir_pacientes_prog(t: str, amb: str, amb_q: str, n: int, cur=None,
     if not solo_pruebas and columna_existe(t, "estado", amb_q):
         cond.append("p.estado <> 'error'")
     if not solo_pruebas and emisor:
-        cond.append(_condicion_espera_plantilla())
+        cond.append(_condicion_sin_envio_anterior())
     if columna_existe(t, "whatsapp_opt_out", amb_q):
         cond.append("p.whatsapp_opt_out = 0")
     if columna_existe(t, "respuesta", amb_q):
@@ -8967,7 +8970,9 @@ def _preelegir_pacientes_prog(t: str, amb: str, amb_q: str, n: int, cur=None,
         " ('pendiente', 'aprobado', 'enviando')"
         + (" AND ep.reservo_lista_id = %(lista_id)s" if lista_reservo else "") + ")"
     )
-    params = {"t": t, "amb": amb_q, **_parametros_espera(emisor, fecha)}
+    params = {"t": t, "amb": amb_q}
+    if not solo_pruebas and emisor:
+        params.update(_parametros_envio_anterior(emisor))
     _filtrar_tratamientos_reservo(cond, params, tratamientos, tabla=t, ambiente=amb_q)
     where = (" WHERE " + " AND ".join(cond)) if cond else ""
     sql = (f"SELECT p.id, p.nombre, p.apellido, p.telefono FROM {t} p{where}"
@@ -9014,7 +9019,7 @@ def _liberar_destinatarios_prog(prog_id: int) -> None:
 
 def _revivir_destinatarios_prog(tabla: str, amb: str, amb_q: str,
                                  ids: list[int], reservo_lista_id: int | None = None, emisor: dict | None = None) -> tuple[list[dict], list[dict]]:
-    """Revalida lista congelada: producción respeta errores y la espera;
+    """Revalida lista congelada: producción excluye errores y envíos previos;
     desarrollo permite cualquier estado. En ambos casos excluye bajas/opt-out."""
     if not ids:
         return [], []
@@ -9027,7 +9032,7 @@ def _revivir_destinatarios_prog(tabla: str, amb: str, amb_q: str,
     if columna_existe(tabla, "respuesta", amb_q):
         cols.append("p.respuesta")
     cond = ["p.id IN (" + ", ".join(f"%(pid_{i})s" for i in range(len(ids))) + ")"]
-    args = {**_parametros_espera(emisor), **{f"pid_{i}": int(pid) for i, pid in enumerate(ids)}}
+    args = {f"pid_{i}": int(pid) for i, pid in enumerate(ids)}
     if lista_reservo:
         if reservo_lista_id is None:
             return [], [{"id": pid, "nombre": "", "motivo": "No se pudo identificar la base Reservo"}
@@ -9038,7 +9043,8 @@ def _revivir_destinatarios_prog(tabla: str, amb: str, amb_q: str,
         if columna_existe(tabla, "estado", amb_q):
             cond.append("p.estado <> 'error'")
         if emisor:
-            cond.append(_condicion_espera_plantilla())
+            args.update(_parametros_envio_anterior(emisor))
+            cond.append(_condicion_sin_envio_anterior())
     with conectar(amb) as conn, conn.cursor() as cur:
         cur.execute(
             f"SELECT {', '.join(cols)} FROM {tabla} p WHERE " + " AND ".join(cond),
@@ -9050,7 +9056,7 @@ def _revivir_destinatarios_prog(tabla: str, amb: str, amb_q: str,
     for pid in ids:
         r = por_id.get(pid)
         if r is None:
-            excluidos.append({"id": pid, "nombre": "", "motivo": "No disponible: error, envío reciente o registro eliminado"})
+            excluidos.append({"id": pid, "nombre": "", "motivo": "No disponible: error, envío anterior o registro eliminado"})
         elif r.get("whatsapp_opt_out") or (r.get("respuesta") or "") == "baja":
             excluidos.append({"id": pid, "nombre": " ".join(
                 x for x in [r.get("nombre"), r.get("apellido")] if x),
@@ -9260,7 +9266,7 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
     # Tope real: elegibles libres (en desarrollo incluye todos los estados),
     # sin repetir destinatarios ya reservados ni superar el cupo de Meta.
     amb_q = "produccion" if esp is not None else amb
-    _, elegibles = _contar_elegibles_tabla(tabla, amb_q, amb, lista_id, emisor, cuando, body.tratamientos)
+    _, elegibles = _contar_elegibles_tabla(tabla, amb_q, amb, lista_id, emisor, body.tratamientos)
     try:
         reservados = _contar_reservados_prog(tabla, amb, amb_q, lista_id, body.tratamientos)
     except Exception as e:
@@ -9268,8 +9274,7 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
         reservados = 0
     libres = max(0, elegibles - reservados)
     etiqueta_elegibles = ("pacientes de prueba elegibles" if amb == "desarrollo"
-                          else "pacientes con teléfono válido" if lista_reservo
-                          else "pacientes pendientes")
+                          else "pacientes elegibles")
     info_limite = None
     if amb == "produccion" and config_get("metodo_envio", "").strip() == "api_oficial":
         info_limite = _limite_mensajeria_fecha(cuando.date(), emisor["phoneNumberId"])
@@ -9285,9 +9290,7 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
             if elegibles <= 0:
                 mensaje = ("No hay pacientes de prueba elegibles en esta base para programar."
                            if amb == "desarrollo"
-                           else "No hay pacientes con teléfono válido en esta base de Reservo."
-                           if lista_reservo
-                           else "No hay pacientes pendientes en esta base para programar.")
+                           else "No hay pacientes elegibles en esta base. Revisa los envíos previos, las bajas y los errores.")
                 raise HTTPException(422, detail=mensaje)
             raise HTTPException(422, detail=(
                 f"No quedan pacientes libres: los {elegibles} {etiqueta_elegibles} de esta base "
@@ -9349,7 +9352,7 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
     with conectar() as conn, conn.cursor() as cur:
         preelegidos = _preelegir_pacientes_prog(
             tabla, amb, amb_q, n_preelegir, cur=cur, reservo_lista_id=lista_id,
-            emisor=emisor, fecha=cuando, tratamientos=body.tratamientos)
+            emisor=emisor, tratamientos=body.tratamientos)
         if not preelegidos:
             conn.rollback()
             raise HTTPException(422, detail=(
@@ -9850,8 +9853,8 @@ def _ejecutar_programado(f: dict) -> None:
         f.get("tabla") or nombre_base(amb_prog), amb_prog, amb_q,
         [p["id"] for p in cohorte], f.get("reservo_lista_id"), emisor)
     if not vivos:
-        motivo = (f"Los {len(cohorte)} destinatarios preelegidos ya no se pueden contactar "
-                  f"({len(excluidos)} dados de baja). No se envió nada. Reprograma el envío.")
+        motivo = (f"Los {len(cohorte)} destinatarios preelegidos ya no son elegibles. "
+                  "Revisa los envíos anteriores, las bajas y el estado de la base.")
         _marcar_prog(f["id"], "error", motivo)
         _avisar_creador_prog(f, motivo)
         return
@@ -9903,7 +9906,7 @@ def _ejecutar_programado(f: dict) -> None:
     threading.Thread(target=lambda: asyncio.run(bg()), daemon=True).start()
     if excluidos:
         motivo = (f"Enviado a {len(vivos)} de los {len(cohorte)} pacientes preelegidos: "
-                  f"{len(excluidos)} quedaron fuera (se dieron de baja o ya no estaban en la base).")
+                  f"{len(excluidos)} quedaron fuera por un envío anterior, una baja u otro cambio en la base.")
         _marcar_prog(f["id"], "enviado", motivo, job_id)
         _avisar_creador_prog(
             f, motivo,
