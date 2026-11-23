@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="css/tema.css?v=tokens1">
   <link rel="stylesheet" href="css/styles.css">
   <link rel="stylesheet" href="css/componentes.css?v=paginador-cinco1">
-  <link rel="stylesheet" href="css/pacientes.css?v=reservas-programadas1">
+  <link rel="stylesheet" href="css/pacientes.css?v=sincronizar-enviados1">
   <link rel="stylesheet" href="css/layout.css?v=navcolor1">
   <link rel="stylesheet" href="css/admin.css?v=volver-bases1">
   <link rel="stylesheet" href="css/refinamiento.css?v=merge-frontend1">
@@ -51,6 +51,9 @@
                 <i class="fa-solid fa-sliders"></i> <span>Ocultar filtros</span>
               </button>
               <button id="btnActualizar" class="btn btn--ghost" type="button">Actualizar</button>
+              <button id="btnSincronizarPacientes" class="btn btn--ghost" type="button" hidden>
+                <i class="fa-solid fa-rotate" aria-hidden="true"></i> Sincronizar pacientes
+              </button>
             </div>
           </div>
 
@@ -409,6 +412,23 @@
     </div>
   </div>
 
+  <dialog id="modalSincronizarPacientes" class="modal__card pacientes-sincronizar" aria-labelledby="tituloSincronizarPacientes">
+    <form id="formSincronizarPacientes">
+      <h3 id="tituloSincronizarPacientes">Sincronizar pacientes</h3>
+      <p>Las fichas pendientes pasarán a «Enviado» si el mismo teléfono figura como enviado en alguna de las bases seleccionadas.</p>
+      <p id="baseSincronizarPacientes"></p>
+      <fieldset class="pacientes-sincronizar__bases">
+        <legend>Otras bases de producción</legend>
+        <div id="otrasBasesSincronizarPacientes"></div>
+      </fieldset>
+      <p id="estadoSincronizarPacientes" role="status" hidden></p>
+      <div class="modal__actions">
+        <button id="cancelarSincronizarPacientes" class="btn btn--ghost" type="button">Cancelar</button>
+        <button id="confirmarSincronizarPacientes" class="btn btn--primary" type="submit" disabled>Sincronizar</button>
+      </div>
+    </form>
+  </dialog>
+
   <div id="modalConfirmarMasivo" class="modal" hidden>
     <div class="modal__card" role="dialog" aria-modal="true">
       <h3 id="masivoTitulo">Confirmar cambio</h3>
@@ -423,7 +443,7 @@
   <script src="js/layout.js?v=reservo-nav2"></script>
   <script src="js/pass-toggle.js"></script>
   <script src="js/csv-chunks.js?v=csv-codificacion1"></script>
-  <script src="js/pacientes.js?v=carga-reservas2"></script>
+  <script src="js/pacientes.js?v=sincronizar-enviados1"></script>
   <script src="js/reagendar.js?v=motivo-error-meta1"></script>
   <script src="js/pacientes-tabs.js?v=aplazar-flotante1"></script>
   <script>

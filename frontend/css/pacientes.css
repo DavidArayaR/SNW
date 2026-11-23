@@ -268,6 +268,11 @@ td.campo-id { color: var(--texto-suave); font-family: Consolas, monospace; }
 
 .estado-pendiente { background: var(--warn-bg); color: var(--warn-fg); border: 1px solid var(--warn-bd); }
 .estado-enviado { background: var(--ok-bg); color: var(--ok-fg); border: 1px solid var(--ok-bd); }
+.pacientes-sincronizar { width: min(480px, calc(100% - 2rem)); max-width: 480px; margin: auto; }
+.pacientes-sincronizar::backdrop { background: var(--overlay); }
+.pacientes-sincronizar__bases { margin-block: 1rem; border: 1px solid var(--borde); border-radius: 8px; padding: .75rem; }
+.pacientes-sincronizar__bases > div { display: grid; gap: .65rem; max-height: 32dvh; overflow: auto; }
+.pacientes-sincronizar__bases label { display: flex; align-items: center; gap: .65rem; overflow-wrap: anywhere; }
 .estado-programado { background: var(--info-bg, var(--warn-bg)); color: var(--info-fg, var(--warn-fg)); border: 1px solid var(--info-bd, var(--warn-bd)); }
 .estado-error { background: var(--danger-bg); color: var(--danger-fg); border: 1px solid var(--danger-bd); }
 

@@ -97,6 +97,7 @@ const tablaSelectorBases = $("#tablaSelectorBases");
 const filtroClinicaBases = $("#filtroClinicaBases");
 let baseElegidaSesion = false;
 let baseReservoEnlace = new URLSearchParams(location.search).get("base_reservo");
+const btnSincronizarPacientes = $("#btnSincronizarPacientes");
 
 // Solo lectura para cuentas sin permiso de gestión (el usuario normal ve su
 // base pero no la edita: sin checks, sin edición inline, sin CSV ni borrado;
@@ -276,6 +277,9 @@ function mostrarBaseSeleccionada(mostrar) {
   const volver = $("#btnVolverBases");
   if (selector) selector.hidden = mostrar;
   if (volver) volver.hidden = !mostrar;
+  if (btnSincronizarPacientes) {
+    btnSincronizarPacientes.hidden = !mostrar || !window.snwEsPrivilegiado || selBasePac?.value === "dev";
+  }
   for (const selector of ["#filtrosWrap", "#toolbarPacientes", "#tablaPacientesWrap", "#btnToggleFiltros"]) {
     const elemento = $(selector);
     if (elemento) elemento.hidden = !mostrar;
@@ -1032,6 +1036,73 @@ statsEl.addEventListener("click", (e) => {
 window.snwConCooldown($("#btnActualizar"), async () => {
   await cargarBasesPac();
   await cargar(true);
+});
+
+const modalSincronizarPacientes = $("#modalSincronizarPacientes");
+const otrasBasesSincronizar = $("#otrasBasesSincronizarPacientes");
+const confirmarSincronizar = $("#confirmarSincronizarPacientes");
+const cancelarSincronizar = $("#cancelarSincronizarPacientes");
+const estadoSincronizar = $("#estadoSincronizarPacientes");
+
+btnSincronizarPacientes?.addEventListener("click", () => {
+  const actual = selBasePac.selectedOptions[0];
+  if (!actual || !actual.value || actual.value === "dev") return;
+  $("#baseSincronizarPacientes").textContent = `Base abierta: ${actual.textContent}`;
+  const opciones = [...selBasePac.options].filter(({ value, disabled }) =>
+    value && !disabled && value !== actual.value && value !== "dev");
+  otrasBasesSincronizar.replaceChildren(...opciones.map((opcion) => {
+    const label = document.createElement("label");
+    const check = document.createElement("input");
+    check.type = "checkbox";
+    check.value = opcion.value;
+    label.append(check, document.createTextNode(opcion.textContent));
+    return label;
+  }));
+  if (!opciones.length) otrasBasesSincronizar.textContent = "No hay otras bases disponibles.";
+  estadoSincronizar.hidden = true;
+  confirmarSincronizar.disabled = true;
+  modalSincronizarPacientes.showModal();
+});
+otrasBasesSincronizar?.addEventListener("change", () => {
+  confirmarSincronizar.disabled = !otrasBasesSincronizar.querySelector("input:checked");
+});
+cancelarSincronizar?.addEventListener("click", () => modalSincronizarPacientes.close());
+modalSincronizarPacientes?.addEventListener("cancel", (evento) => {
+  if (cancelarSincronizar.disabled) evento.preventDefault();
+});
+$("#formSincronizarPacientes")?.addEventListener("submit", async (evento) => {
+  evento.preventDefault();
+  if (confirmarSincronizar.disabled) return;
+  const checks = [...otrasBasesSincronizar.querySelectorAll("input")];
+  const bases = [selBasePac.value, ...checks.filter((check) => check.checked).map((check) => check.value)];
+  confirmarSincronizar.disabled = true;
+  cancelarSincronizar.disabled = true;
+  checks.forEach((check) => { check.disabled = true; });
+  estadoSincronizar.textContent = "Sincronizando pacientes…";
+  estadoSincronizar.hidden = false;
+  try {
+    const respuesta = await fetch("api/pacientes/sincronizar", {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ bases }),
+    });
+    if (respuesta.status === 401) { window.snwSesionExpirada(); return; }
+    const datos = await respuesta.json().catch(() => ({}));
+    if (!respuesta.ok) throw new Error(typeof datos.detail === "string" ? datos.detail : "No se pudo sincronizar.");
+    modalSincronizarPacientes.close();
+    const cantidad = Number(datos.actualizados) || 0;
+    toast(cantidad ? `Fichas actualizadas a «Enviado»: ${cantidad.toLocaleString("es-CL")}.`
+      : "No había fichas pendientes por actualizar.");
+    resumenPacientes = null;
+    consultaPacientesAnterior = null;
+    await cargar();
+  } catch (error) {
+    estadoSincronizar.textContent = error.message || "No se pudo sincronizar.";
+  } finally {
+    checks.forEach((check) => { check.disabled = false; });
+    cancelarSincronizar.disabled = false;
+    confirmarSincronizar.disabled = !checks.some((check) => check.checked);
+  }
 });
 
 // --- Paginación: extremos, pasos, salto directo y tamaño (10–100) -----------
