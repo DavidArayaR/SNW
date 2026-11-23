@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS pacientes_sincronizaciones (
 CREATE TABLE IF NOT EXISTS pacientes_sincronizaciones_diarias (
   fecha DATE PRIMARY KEY,
   sincronizacion_id BIGINT UNSIGNED NOT NULL UNIQUE,
+  finalizada TINYINT(1) NOT NULL DEFAULT 1,
   FOREIGN KEY (sincronizacion_id) REFERENCES pacientes_sincronizaciones(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

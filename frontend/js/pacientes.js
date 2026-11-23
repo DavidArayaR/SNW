@@ -1074,7 +1074,7 @@ async function cargarHistorialSincronizaciones(pagina) {
     });
     $("#filasHistorialSincronizaciones").innerHTML = historial.items.map((evento) => {
       const momento = escaparHtml(fecha.format(new Date(evento.fecha)));
-      const tipo = evento.fecha_automatica ? "Automática" : "Manual";
+      const tipo = evento.en_curso ? "Automática · En curso" : evento.fecha_automatica ? "Automática" : "Manual";
       const cabecera = `${momento}<br><small>${tipo}</small>`;
       if (!evento.bases.length) {
         return `<tr class="sinc-grupo"><td>${cabecera}</td><td colspan="4">Sin bases compatibles para sincronizar.</td></tr>`;

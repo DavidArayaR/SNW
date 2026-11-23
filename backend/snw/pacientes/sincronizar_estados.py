@@ -13,6 +13,7 @@ from snw.pacientes.servicio_areas import tabla_valida
 
 _CHILE = ZoneInfo("America/Santiago")
 _HORA_DIARIA = dt.time(23, 59)
+_PAUSA_SEGUNDOS = 60
 _CLINICAS = {"SMPT": "SMPT", "MS": "MS", "MVYS": "MVYS", "VYS": "MVYS", "VS": "MVYS"}
 
 
@@ -27,6 +28,16 @@ def bloquear(cur):
     finally:
         if tomado:
             cur.execute("SELECT RELEASE_LOCK(%s)", (clave,))
+
+
+def segundos_de_espera(cur) -> int:
+    """Usa la última confirmación, compartida entre todas las instancias."""
+    cur.execute(
+        "SELECT TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), DATE_ADD(creado, INTERVAL %s SECOND)) AS segundos"
+        " FROM pacientes_sincronizaciones ORDER BY creado DESC LIMIT 1",
+        (_PAUSA_SEGUNDOS,),
+    )
+    return max(0, int((cur.fetchone() or {}).get("segundos") or 0))
 
 
 def propagar_enviados(cur, bases: list[tuple[str, int | None]]) -> dict[tuple[str, int | None], dict]:
@@ -81,21 +92,24 @@ def propagar_enviados(cur, bases: list[tuple[str, int | None]]) -> dict[tuple[st
         cur.execute("DROP TEMPORARY TABLE tmp_sincronizar_enviados")
 
 
-def registrar_historial(cur, bases: list[dict], fecha_automatica: dt.date | None = None) -> None:
+def registrar_historial(cur, bases: list[dict], fecha_automatica: dt.date | None = None,
+                        *, finalizada: bool = True) -> None:
     cur.execute(
         "INSERT INTO pacientes_sincronizaciones (creado, bases) VALUES (UTC_TIMESTAMP(), %s)",
         (json.dumps(bases, ensure_ascii=False),),
     )
     if fecha_automatica is not None:
         cur.execute(
-            "INSERT INTO pacientes_sincronizaciones_diarias (fecha, sincronizacion_id) VALUES (%s, %s)",
-            (fecha_automatica, cur.lastrowid),
+            "INSERT INTO pacientes_sincronizaciones_diarias (fecha, sincronizacion_id, finalizada)"
+            " VALUES (%s, %s, %s)",
+            (fecha_automatica, cur.lastrowid, finalizada),
         )
 
 
 def listar_historial(cur, pagina: int, limite: int) -> dict:
     cur.execute(
-        "SELECT h.id, h.creado, h.bases, d.fecha AS fecha_automatica FROM pacientes_sincronizaciones h"
+        "SELECT h.id, h.creado, h.bases, d.fecha AS fecha_automatica, d.finalizada"
+        " FROM pacientes_sincronizaciones h"
         " LEFT JOIN pacientes_sincronizaciones_diarias d ON d.sincronizacion_id=h.id"
         " ORDER BY h.id DESC LIMIT %s OFFSET %s",
         (limite + 1, (pagina - 1) * limite),
@@ -106,6 +120,7 @@ def listar_historial(cur, pagina: int, limite: int) -> dict:
         bases = json.loads(fila["bases"])
         items.append({"id": fila["id"], "fecha": fila["creado"].isoformat() + "Z",
                       "fecha_automatica": fila["fecha_automatica"],
+                      "en_curso": fila["finalizada"] == 0,
                       "bases": bases, "actualizados": sum(base["actualizados"] for base in bases)})
     return {"items": items, "hay_siguiente": len(filas) > limite}
 
@@ -158,24 +173,46 @@ def _bases_por_clinica(cur) -> dict:
 
 
 def _ejecutar_diaria(fecha: dt.date, permitir_primera: bool) -> bool:
-    """Completa la última fecha vencida una sola vez, incluso entre procesos."""
+    """Procesa como máximo una clínica por turno y conserva el avance diario."""
     with conectar() as conn, conn.cursor() as cur, bloquear(cur) as tomado:
         if not tomado:
             return False
-        cur.execute("SELECT MAX(fecha) AS ultima FROM pacientes_sincronizaciones_diarias")
-        ultima = cur.fetchone()["ultima"]
-        if (ultima and ultima >= fecha) or (ultima is None and not permitir_primera):
+        cur.execute(
+            "SELECT d.fecha, d.finalizada, d.sincronizacion_id, h.bases"
+            " FROM pacientes_sincronizaciones_diarias d"
+            " JOIN pacientes_sincronizaciones h ON h.id=d.sincronizacion_id"
+            " ORDER BY d.fecha DESC LIMIT 1"
+        )
+        ultima = cur.fetchone()
+        if (not ultima and not permitir_primera) or (ultima and ultima["finalizada"] and ultima["fecha"] >= fecha):
             return True
-        detalle = []
-        for clinica, bases in sorted(_bases_por_clinica(cur).items()):
-            if len(bases) < 2:
-                continue
+        if segundos_de_espera(cur):
+            return False
+        activa = ultima if ultima and not ultima["finalizada"] else None
+        fecha_activa = activa["fecha"] if activa else fecha
+        detalle = json.loads(activa["bases"]) if activa else []
+        completadas = {base["clinica"] for base in detalle}
+        pendientes = [(clinica, bases) for clinica, bases in sorted(_bases_por_clinica(cur).items())
+                      if len(bases) >= 2 and clinica not in completadas]
+        if pendientes:
+            clinica, bases = pendientes[0]
             cambios = propagar_enviados(cur, sorted(bases))
             detalle.extend({"nombre": bases[base], "clinica": clinica, **resultado}
                            for base, resultado in cambios.items())
-        registrar_historial(cur, detalle, fecha)
+        finalizada = len(pendientes) <= 1
+        if activa:
+            cur.execute(
+                "UPDATE pacientes_sincronizaciones SET bases=%s, creado=UTC_TIMESTAMP() WHERE id=%s",
+                (json.dumps(detalle, ensure_ascii=False), activa["sincronizacion_id"]),
+            )
+            cur.execute(
+                "UPDATE pacientes_sincronizaciones_diarias SET finalizada=%s WHERE fecha=%s",
+                (finalizada, fecha_activa),
+            )
+        else:
+            registrar_historial(cur, detalle, fecha_activa, finalizada=finalizada)
         conn.commit()
-    return True
+    return finalizada and fecha_activa == fecha
 
 
 def _fecha_diaria_vencida(ahora: dt.datetime) -> dt.date:

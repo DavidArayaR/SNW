@@ -2096,6 +2096,12 @@ def sincronizar_pacientes(body: SincronizarPacientesIn, sesion: dict = Depends(s
     with conectar("produccion") as conn, conn.cursor() as cur, sincronizar_estados.bloquear(cur) as tomado:
         if not tomado:
             raise HTTPException(409, detail="Ya hay una sincronización en curso. Inténtalo cuando termine.")
+        espera = sincronizar_estados.segundos_de_espera(cur)
+        if espera:
+            raise HTTPException(
+                429, detail=f"Espera {espera} s antes de iniciar otra sincronización.",
+                headers={"Retry-After": str(espera)},
+            )
         for clave in sorted(claves):
             if clave == "prod":
                 tabla, lista_id = tabla_pacientes("produccion"), None

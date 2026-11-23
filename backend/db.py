@@ -1352,9 +1352,20 @@ def asegurar_tabla_config() -> None:
                 "CREATE TABLE IF NOT EXISTS pacientes_sincronizaciones_diarias ("
                 " fecha DATE PRIMARY KEY,"
                 " sincronizacion_id BIGINT UNSIGNED NOT NULL UNIQUE,"
+                " finalizada TINYINT(1) NOT NULL DEFAULT 1,"
                 " FOREIGN KEY (sincronizacion_id) REFERENCES pacientes_sincronizaciones(id) ON DELETE CASCADE"
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
             )
+            cur.execute("SHOW COLUMNS FROM pacientes_sincronizaciones_diarias LIKE 'finalizada'")
+            if not cur.fetchone():
+                try:
+                    cur.execute(
+                        "ALTER TABLE pacientes_sincronizaciones_diarias"
+                        " ADD COLUMN finalizada TINYINT(1) NOT NULL DEFAULT 1"
+                    )
+                except pymysql.err.OperationalError as exc:
+                    if exc.args[0] != 1060:  # Otro proceso añadió la columna.
+                        raise
             cur.execute(
                 "CREATE TABLE IF NOT EXISTS whatsapp_avisos_unicos ("
                 "  telefono VARCHAR(32) NOT NULL,"
