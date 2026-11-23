@@ -591,6 +591,7 @@ function render() {
 
   for (const p of enPagina) {
     const editable = puedeEditarPaciente(p);
+    const estadoEditable = editable && p.estado !== "programado";
     const seleccionable = puedeSeleccionarPaciente(p);
     const nombreCompleto = [p.nombre, p.apellido].filter(Boolean).join(" ");
     const tr = document.createElement("tr");
@@ -632,7 +633,7 @@ function render() {
       `<td class="campo-tratamiento" title="${escaparHtml(p.tratamiento_ultima_atencion || "")}">${escaparHtml(p.tratamiento_ultima_atencion || "—")}</td>` +
       `<td class="campo-fecha-atencion">${escaparHtml(p.fecha_ultima_atencion || "—")}</td>` +
       `<td class="campo-estado">` +
-        `<span class="estado-badge estado-${escaparHtml(p.estado)}"${editable ? ` data-editable data-id="${p.id}" title="Click para cambiar estado"` : ` title="${PUEDE_GESTIONAR_PAC ? "Solo se edita en números de prueba" : "Sin permiso para editar"}"`}>${escaparHtml(p.estado)}</span>` +
+        `<span class="estado-badge estado-${escaparHtml(p.estado)}"${estadoEditable ? ` data-editable data-id="${p.id}" title="Click para cambiar estado"` : ""}>${p.estado === "programado" ? "Programado" : escaparHtml(p.estado)}</span>` +
         `<select class="estado-select" data-id="${p.id}" hidden>` +
           `<option value="pendiente"${p.estado === "pendiente" ? " selected" : ""}>pendiente</option>` +
           `<option value="enviado"${p.estado === "enviado" ? " selected" : ""}>enviado</option>` +
@@ -706,6 +707,7 @@ function render() {
   statsEl.innerHTML =
     statCard("neutral", "fa-users", esActivoEstado("todos"), 'data-estado="todos"', "Total", conteo.total || 0) +
     statCard("warn", "fa-clock", esActivoEstado("pendiente"), 'data-estado="pendiente"', "Pendientes", conteo.pendiente || 0) +
+    statCard("neutral", "fa-calendar", esActivoEstado("programado"), 'data-estado="programado"', "Programados", conteo.programado || 0) +
     statCard("ok", "fa-paper-plane", esActivoEstado("enviado"), 'data-estado="enviado"', "Enviados", conteo.enviado || 0) +
     statCard("danger", "fa-triangle-exclamation", esActivoEstado("error"), 'data-estado="error"', "Errores", conteo.error || 0) +
     statCard("neutral", "fa-comment-slash", esActivoResp("pendiente"), 'data-respuesta="pendiente"', "Sin resp.", conteoResp.sin_respuesta || 0) +
@@ -740,7 +742,7 @@ function renderBaseReservo() {
       `<td class="campo-tel"${telefonoTitulo}>${escaparHtml(p.telefono || "—")}</td>` +
       `<td class="campo-tratamiento" title="${escaparHtml(p.tratamiento_ultima_atencion || "")}">${escaparHtml(p.tratamiento_ultima_atencion || "—")}</td>` +
       `<td class="campo-fecha-atencion">${escaparHtml(String(p.fecha_ultima_atencion || "—").slice(0, 10))}</td>` +
-      `<td class="campo-estado"><span class="estado-badge estado-${escaparHtml(estado)}">${escaparHtml(estado)}</span></td>` +
+      `<td class="campo-estado"><span class="estado-badge estado-${escaparHtml(estado)}">${estado === "programado" ? "Programado" : escaparHtml(estado)}</span></td>` +
       `<td class="campo-error campo-error--vacio">—</td>` +
       `<td class="campo-respuesta"><span class="respuesta-badge respuesta-${escaparHtml(respuesta)}">${escaparHtml(respuestaLabels[respuesta] || respuesta)}</span></td>` +
       `<td class="campo-fecha">${escaparHtml(p.actualizado || "—")}</td>`;
@@ -759,6 +761,7 @@ function renderBaseReservo() {
   statsEl.innerHTML =
     statCard("neutral", "fa-users", esActivoEstado("todos"), 'data-estado="todos"', "Total", resumen.total) +
     statCard("warn", "fa-clock", esActivoEstado("pendiente"), 'data-estado="pendiente"', "Pendientes", resumen.pendientes) +
+    statCard("neutral", "fa-calendar", esActivoEstado("programado"), 'data-estado="programado"', "Programados", resumen.programados) +
     statCard("ok", "fa-paper-plane", esActivoEstado("enviado"), 'data-estado="enviado"', "Enviados", resumen.enviados) +
     statCard("danger", "fa-triangle-exclamation", esActivoEstado("error"), 'data-estado="error"', "Errores", resumen.errores) +
     statCard("neutral", "fa-comment-slash", esActivoResp("pendiente"), 'data-respuesta="pendiente"', "Sin resp.", resumen.sin_respuesta) +

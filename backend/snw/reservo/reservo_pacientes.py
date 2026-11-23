@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 import pymysql
+from snw.mensajeria import reservas_programadas
 from snw.pacientes.telefono import normalizar_telefono
 
 from snw.reservo.reservo_catalogo import (
@@ -842,12 +843,13 @@ def listar_pacientes_base_contacto(lista_id: int, pagina: int = 1,
                                    estado: str = "todos", respuesta: str = "todas",
                                    interes: str = "todos") -> dict:
     pagina, por_pagina = max(1, int(pagina)), min(100, max(1, int(por_pagina)))
-    if estado not in ("todos", "pendiente", "enviado", "error") or \
+    if estado not in ("todos", "pendiente", "programado", "enviado", "error") or \
        respuesta not in ("todas", "pendiente", "respondio", "no_interesado", "baja") or \
        interes not in ("todos", "interesado", "no_interesado"):
         raise ValueError("Filtro de pacientes inválido.")
     termino = " ".join(str(q or "").split()).strip()[:100]
     condiciones = ["lista_id=%s"]
+    estado_sql = reservas_programadas.estado_sql("COALESCE(NULLIF(p.estado,''),'pendiente')")
     parametros: list = [int(lista_id)]
     if termino:
         condiciones.append(
@@ -857,7 +859,7 @@ def listar_pacientes_base_contacto(lista_id: int, pagina: int = 1,
         )
         parametros.append(f"%{termino.casefold()}%")
     if estado != "todos":
-        condiciones.append("COALESCE(NULLIF(estado,''),'pendiente')=%s")
+        condiciones.append(f"({estado_sql})=%s")
         parametros.append(estado)
     respuesta_sql = (
         "CASE WHEN whatsapp_opt_out=1 THEN 'baja' "
@@ -878,25 +880,26 @@ def listar_pacientes_base_contacto(lista_id: int, pagina: int = 1,
         base = cur.fetchone()
         if not base:
             raise LookupError("No se encontró la base de Reservo.")
-        cur.execute(f"SELECT COUNT(*) AS total FROM reservo_lista_pacientes WHERE {filtro}", parametros)
+        cur.execute(f"SELECT COUNT(*) AS total FROM reservo_lista_pacientes p WHERE {filtro}", parametros)
         total = int((cur.fetchone() or {}).get("total") or 0)
         cur.execute(
             "SELECT COUNT(*) AS total,"
-            "SUM(CASE WHEN COALESCE(NULLIF(estado,''),'pendiente')='pendiente' THEN 1 ELSE 0 END) AS pendientes,"
-            "SUM(CASE WHEN estado='enviado' THEN 1 ELSE 0 END) AS enviados,"
-            "SUM(CASE WHEN estado='error' THEN 1 ELSE 0 END) AS errores,"
+            f"SUM(({estado_sql})='pendiente') AS pendientes,"
+            f"SUM(({estado_sql})='programado') AS programados,"
+            f"SUM(({estado_sql})='enviado') AS enviados,"
+            f"SUM(({estado_sql})='error') AS errores,"
             f"SUM(CASE WHEN ({respuesta_sql})='pendiente' THEN 1 ELSE 0 END) AS sin_respuesta,"
             f"SUM(CASE WHEN ({respuesta_sql})='baja' THEN 1 ELSE 0 END) AS bajas,"
             "SUM(CASE WHEN interesado=1 THEN 1 ELSE 0 END) AS interesados,"
             "SUM(CASE WHEN no_interesado=1 THEN 1 ELSE 0 END) AS no_interesados "
-            "FROM reservo_lista_pacientes WHERE lista_id=%s", (int(lista_id),)
+            "FROM reservo_lista_pacientes p WHERE lista_id=%s", (int(lista_id),)
         )
         resumen = cur.fetchone() or {}
         cur.execute(
             "SELECT id,cliente_uuid,nombre,apellido,telefono,telefono_valido,"
-            "tratamiento_ultima_atencion,fecha_ultima_atencion,estado,whatsapp_opt_out,"
+            f"tratamiento_ultima_atencion,fecha_ultima_atencion,{estado_sql} AS estado,whatsapp_opt_out,"
             "respuesta_manual,interesado,no_interesado,fecha_actualizacion "
-            f"FROM reservo_lista_pacientes WHERE {filtro} ORDER BY id LIMIT %s OFFSET %s",
+            f"FROM reservo_lista_pacientes p WHERE {filtro} ORDER BY id LIMIT %s OFFSET %s",
             (*parametros, por_pagina, (pagina-1)*por_pagina),
         )
         filas = cur.fetchall()

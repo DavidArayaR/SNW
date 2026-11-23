@@ -268,6 +268,7 @@ td.campo-id { color: var(--texto-suave); font-family: Consolas, monospace; }
 
 .estado-pendiente { background: var(--warn-bg); color: var(--warn-fg); border: 1px solid var(--warn-bd); }
 .estado-enviado { background: var(--ok-bg); color: var(--ok-fg); border: 1px solid var(--ok-bd); }
+.estado-programado { background: var(--info-bg, var(--warn-bg)); color: var(--info-fg, var(--warn-fg)); border: 1px solid var(--info-bd, var(--warn-bd)); }
 .estado-error { background: var(--danger-bg); color: var(--danger-fg); border: 1px solid var(--danger-bd); }
 
 .estado-select {

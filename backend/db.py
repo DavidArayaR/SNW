@@ -1333,9 +1333,13 @@ def asegurar_tabla_config() -> None:
                   telefono VARCHAR(32) NOT NULL DEFAULT '',
                   creado DATETIME DEFAULT CURRENT_TIMESTAMP,
                   INDEX idx_pd_prog (prog_id),
-                  INDEX idx_pd_paciente (paciente_id)
+                  INDEX idx_pd_paciente (paciente_id),
+                  INDEX idx_pd_telefono (telefono, prog_id)
                 ) CHARACTER SET utf8mb4
             """)
+            cur.execute("SHOW INDEX FROM programado_destinatarios WHERE Key_name='idx_pd_telefono'")
+            if cur.fetchone() is None:
+                cur.execute("ALTER TABLE programado_destinatarios ADD INDEX idx_pd_telefono (telefono, prog_id)")
             cur.execute(
                 "CREATE TABLE IF NOT EXISTS whatsapp_avisos_unicos ("
                 "  telefono VARCHAR(32) NOT NULL,"

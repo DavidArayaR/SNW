@@ -3067,9 +3067,9 @@ async function actualizarResumenConf() {
     const lim = data.limite_mensajeria || null;
     const esProd = baseSeleccionadaConf() === "produccion" || espId != null || listaReservoId != null;
     const limAplicable = esProd ? lim : null;
-    const pendientes = Number(data.pendientes) || 0;
-    dd.textContent = `Disponibles en esta base: ${new Intl.NumberFormat("es-CL").format(pendientes)} pacientes.`;
-    configurarLimiteConf(pendientes, limAplicable);
+    const libres = Number(data.libres) || 0;
+    dd.textContent = textoDisponiblesBase(libres, Number(data.reservados) || 0);
+    configurarLimiteConf(libres, limAplicable);
     mostrarAvisoLimiteConf(limAplicable);
 
     tarifaCostoManualConf = data.costo || null;
@@ -3884,6 +3884,12 @@ function revisarLimiteProg(avisar = false) {
   return errores.length === 0;
 }
 
+function textoDisponiblesBase(libres, reservados) {
+  const formato = new Intl.NumberFormat("es-CL");
+  return `Disponibles en esta base: ${formato.format(libres)} pacientes.` +
+    (reservados ? ` Programados: ${formato.format(reservados)}.` : "");
+}
+
 function aplicarCupoProg() {
   const inpL = $("#inpProgLimite");
   const nota = $("#progLimiteNota");
@@ -3894,7 +3900,7 @@ function aplicarCupoProg() {
     disponiblesBase.hidden = !c;
     if (c) {
       const libres = Number(c.libres ?? c.pendientes) || 0;
-      disponiblesBase.textContent = `Disponibles en esta base: ${new Intl.NumberFormat("es-CL").format(libres)} pacientes.`;
+      disponiblesBase.textContent = textoDisponiblesBase(libres, c.reservados);
     }
   }
   if (nota) {
@@ -3985,7 +3991,7 @@ async function cargarCupoProg(forzar = false) {
       pendientes: Number(d.pendientes) || 0,
       // Los que ya tienen otro programado activo no se pueden preelegir otra vez.
       reservados: Number(d.reservados) || 0,
-      libres: Number(d.libres ?? d.pendientes) || 0,
+      libres: Number(d.libres) || 0,
       disponibles: lim ? Number(lim.disponibles) : null,
       tier: lim ? lim.tier : 0,
       usados: lim ? lim.usados_24h : 0,
@@ -4400,7 +4406,7 @@ function marcarProgsActualizando(on) {
 }
 
 const ESTADO_PROG_LABEL = {
-  pendiente: "Pendiente", aprobado: "Aprobado", rechazado: "Rechazado",
+  pendiente: "Pendiente de aprobación", aprobado: "Programado", rechazado: "Rechazado",
   cancelado: "Cancelado", enviando: "Enviando", enviado: "Enviado", error: "Error",
 };
 

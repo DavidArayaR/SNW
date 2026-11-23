@@ -1,4 +1,5 @@
 ﻿import asyncio
+
 import datetime
 import contextvars
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
@@ -32,7 +33,7 @@ from snw.whatsapp import consultas_ventana, respuestas_manuales
 from snw.reportes import estadisticas_envio
 from snw.whatsapp.intenciones_call_center import (detectar_automatizacion, es_pregunta_de_precio,
                                     patrones_configurados, tipo_consulta_entrante)
-from snw.mensajeria import simulacion_envio
+from snw.mensajeria import reservas_programadas, simulacion_envio
 import pymysql
 from fastapi import (BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException,
                      Query, Request, UploadFile, status)
@@ -1665,10 +1666,8 @@ def expr_select_pacientes(ambiente: str, tabla: str | None = None) -> str:
     exprs = ["p.id", "p.nombre", "p.apellido", "p.telefono"]
     for campo in ("tratamiento_ultima_atencion", "fecha_ultima_atencion"):
         exprs.append(f"p.{campo}" if campo in cols else f"NULL AS {campo}")
-    if "estado" in cols:
-        exprs.append("COALESCE(NULLIF(p.estado, ''), 'pendiente') AS estado")
-    else:
-        exprs.append("'pendiente' AS estado")
+    estado = "COALESCE(NULLIF(p.estado, ''), 'pendiente')" if "estado" in cols else "'pendiente'"
+    exprs.append(reservas_programadas.estado_sql(estado) + " AS estado")
     if "fecha_actualizacion" in cols:
         exprs.append("p.fecha_actualizacion")
     else:
@@ -1875,7 +1874,7 @@ def _expresiones_filtro_pacientes(t: str, ambiente: str) -> tuple[str, str, str,
         tiene_interes={"interesado", "no_interesado"} <= cols, mostrar_no_interesado=True)
     interesado = "COALESCE(p.interesado, 0)" if "interesado" in cols else "0"
     no_interesado = "COALESCE(p.no_interesado, 0)" if "no_interesado" in cols else "0"
-    return estado, respuesta, interesado, no_interesado
+    return reservas_programadas.estado_sql(estado), respuesta, interesado, no_interesado
 
 
 def _filtro_pagina_pacientes(t: str, ambiente: str, sesion: dict, q: str,
@@ -1920,7 +1919,7 @@ def listar_pacientes_pagina(ambiente: str = Query("produccion"),
                            sesion: dict = Depends(sesion_actual)):
     """Solo los registros de la página solicitada; totales agregados sin listar PII."""
     t, esp = _tabla_lectura_pacientes(sesion, ambiente, area_id)
-    if estado not in ("todos", "pendiente", "enviado", "error") or \
+    if estado not in ("todos", "pendiente", "programado", "enviado", "error") or \
        respuesta not in ("todas", "pendiente", "respondio", "no_interesado", "baja") or \
        interes not in ("todos", "interesado", "no_interesado"):
         raise HTTPException(422, detail="Filtro de pacientes inválido.")
@@ -1932,6 +1931,7 @@ def listar_pacientes_pagina(ambiente: str = Query("produccion"),
             cur.execute(
                 "SELECT COUNT(*) AS total,"
                 f" SUM({ex_estado} = 'pendiente') AS pendiente,"
+                f" SUM({ex_estado} = 'programado') AS programado,"
                 f" SUM({ex_estado} = 'enviado') AS enviado,"
                 f" SUM({ex_estado} = 'error') AS error,"
                 f" SUM({ex_respuesta} = 'pendiente') AS sin_respuesta,"
@@ -4877,6 +4877,9 @@ def enviar_prueba_plantilla(plantilla_id: int, body: PruebaPlantillaIn,
     ambiente = config_get("entorno", "desarrollo").strip().lower()
     if telefono is None or telefono not in _numeros_prueba_editables(ambiente):
         raise HTTPException(403, detail="Elige un número de prueba autorizado en Configuración.")
+    with conectar() as conn, conn.cursor() as cur:
+        if reservas_programadas.telefono_reservado(cur, telefono):
+            raise HTTPException(409, detail="El número está reservado para un envío programado.")
     if (config_get("metodo_envio") or "").strip() != "api_oficial":
         raise HTTPException(400, detail="Activa api_oficial para enviar una prueba real.")
     centro_plantilla = plantilla.get("centro_codigo")
@@ -7492,6 +7495,12 @@ def procesar_job(job_id: str) -> None:
                                       enviados=job.get("enviados", 0),
                                       fallidos=job.get("fallidos", 0),
                                       invalidos=job.get("invalidos"), estado="error")
+        finally:
+            job = JOBS.get(job_id)
+            if job and job.get("programado_id"):
+                estado = {"completado": "enviado", "cancelado": "cancelado"}.get(job.get("estado"), "error")
+                motivo = job.get("detalle") or job.get("nota_programado") or ""
+                _marcar_prog(job["programado_id"], estado, motivo, job_id)
 
 
 def _exigir_centro_envio(codigo: str | None) -> dict:
@@ -7540,15 +7549,17 @@ def _emisor_vigente(emisor: dict | None) -> bool:
 
 
 def _paciente_habilitado_antes_de_enviar(paciente_id: int, telefono: str,
-                                          ambiente: str, tabla: str, emisor: dict | None = None) -> bool:
+                                          ambiente: str, tabla: str, emisor: dict | None = None,
+                                          *, programado_id: int | None = None) -> bool:
     """Revalida bajas, borrados y envíos previos antes del despacho."""
     try:
         with conectar(ambiente) as conn, conn.cursor() as cur:
-            cond = "id = %(paciente_id)s"
-            params = {"paciente_id": paciente_id}
+            cond = "id = %(paciente_id)s AND NOT " + reservas_programadas.existe_reserva_sql(
+                "%(telefono_destino)s", "%(programado_id)s")
+            params = {"paciente_id": paciente_id, "telefono_destino": normalizar_telefono(telefono),
+                      "programado_id": programado_id or 0}
             if ambiente != "desarrollo" and emisor:
                 params.update(_parametros_envio_anterior(emisor))
-                params["telefono_destino"] = normalizar_telefono(telefono)
                 cond += " AND " + _condicion_sin_envio_anterior("%(telefono_destino)s")
             cur.execute(f"SELECT p.telefono, p.whatsapp_opt_out FROM {tabla} p WHERE " + cond, params)
             fila = cur.fetchone()
@@ -7621,8 +7632,9 @@ def _procesar_job_api_concurrente(job_id: str, canal: MotorApiOficial) -> None:
             if esta_suprimido(d["telefono"]):
                 fallido(d, "Número suprimido")
                 return
-            if not _paciente_habilitado_antes_de_enviar(d["id"], d["telefono"], amb, tabla, emisor):
-                fallido(d, "Paciente no disponible: baja, envío anterior o registro modificado")
+            if not _paciente_habilitado_antes_de_enviar(
+                    d["id"], d["telefono"], amb, tabla, emisor, programado_id=job.get("programado_id")):
+                fallido(d, "Paciente no disponible: reserva, baja, envío anterior o registro modificado")
                 return
             bloqueo = _restriccion_envio_desarrollo(amb, tabla_area, d["telefono"])
             if bloqueo:
@@ -7826,10 +7838,11 @@ def _procesar_job(job_id: str) -> None:
             job["errores"].append({"id": d["id"], "detalle": "Número suprimido"})
             continue
         if not _paciente_habilitado_antes_de_enviar(
-                d["id"], d["telefono"], amb, t_esp or tabla_pacientes(amb), emisor):
+                d["id"], d["telefono"], amb, t_esp or tabla_pacientes(amb), emisor,
+                programado_id=job.get("programado_id")):
             job["fallidos"] += 1
             job["errores"].append({"id": d["id"],
-                                   "detalle": "Paciente no disponible: baja, envío anterior o registro modificado"})
+                                   "detalle": "Paciente no disponible: reserva, baja, envío anterior o registro modificado"})
             continue
         bloqueo_numero = _restriccion_envio_desarrollo(amb, t_esp, d["telefono"])
         if bloqueo_numero:
@@ -8050,6 +8063,9 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
 
         cond = []
         params = _parametros_envio_anterior(emisor)
+        params["programado_id"] = sesion.get("programado_id") or 0
+        cond.append("NOT " + reservas_programadas.existe_reserva_sql(
+            reservas_programadas.telefono_sql("p.telefono"), "%(programado_id)s"))
         if body.pacientes:
             params.update({f"pac_{i}": int(pid) for i, pid in enumerate(body.pacientes)})
             cond.append("p.id IN (" + ", ".join(f"%(pac_{i})s" for i in range(len(body.pacientes))) + ")")
@@ -8274,6 +8290,7 @@ def iniciar_envio(body: EnvioIn, background_tasks: BackgroundTasks,
             "plantilla": plantilla,
             "destinatarios": destinatarios,
             "envio_id": envio_id,
+            "programado_id": sesion.get("programado_id"),
             "pausado": False,
             "usuario": sesion.get("usuario", ""),
             "nombre_enviador": sesion.get("nombre", "Usuario"),
@@ -8475,13 +8492,7 @@ def confirmar_envio(token: str, background_tasks: BackgroundTasks, sesion: dict 
 def _condicion_sin_envio_anterior(telefono_normalizado: str | None = None) -> str:
     """Excluye envíos previos de la misma clínica, salvo a números de prueba."""
     if telefono_normalizado is None:
-        telefono = "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(p.telefono, ' ', ''), '-', ''), '(', ''), ')', ''), '+', '')"
-        telefono_normalizado = (
-            f"CASE WHEN LENGTH({telefono})=11 AND LEFT({telefono},3)='569' THEN CONCAT('+',{telefono}) "
-            f"WHEN LENGTH({telefono})=10 AND LEFT({telefono},2)='56' THEN CONCAT('+569',SUBSTRING({telefono},3)) "
-            f"WHEN LENGTH({telefono})=9 AND LEFT({telefono},1)='9' THEN CONCAT('+56',{telefono}) "
-            f"WHEN LENGTH({telefono})=8 AND LEFT({telefono},1)='9' THEN CONCAT('+569',{telefono}) ELSE '' END"
-        )
+        telefono_normalizado = reservas_programadas.telefono_sql("p.telefono")
     # Mantener la columna indexada intacta; la colación explícita evita conflictos
     # entre tablas creadas con distintas configuraciones de MySQL.
     comparable = f"CONVERT(({telefono_normalizado}) USING utf8mb4) COLLATE utf8mb4_unicode_ci"
@@ -8530,8 +8541,8 @@ def _filtrar_tratamientos_reservo(condiciones, parametros, tratamientos, *, tabl
 
 def _contar_elegibles_tabla(t: str, amb_q: str, amb: str,
                             reservo_lista_id: int | None = None, emisor: dict | None = None,
-                            tratamientos=()) -> tuple[int, int]:
-    """(total, elegibles) de una tabla. Producción excluye errores y envíos previos;
+                            tratamientos=()) -> tuple[int, int, int]:
+    """(total, elegibles, reservados) de una tabla. Producción excluye errores y envíos previos;
     desarrollo permite reenviar sin importar estado, siempre entre números de prueba."""
     with conectar(amb) as conn, conn.cursor() as cur:
         lista_reservo = t == reservo_pacientes.TABLA_LISTA_RESERVO
@@ -8558,18 +8569,18 @@ def _contar_elegibles_tabla(t: str, amb_q: str, amb: str,
             parametros.update(_parametros_envio_anterior(emisor))
             conds.append(_condicion_sin_envio_anterior())
         _filtrar_tratamientos_reservo(conds, parametros, tratamientos, tabla=t, ambiente=amb_q)
+        reserva = reservas_programadas.existe_reserva_sql(reservas_programadas.telefono_sql("p.telefono"))
         cur.execute(
-            f"SELECT p.telefono FROM {t} p"
+            f"SELECT p.telefono, {reserva} AS reservado FROM {t} p"
             + (" WHERE " + " AND ".join(conds) if conds else ""),
             parametros,
         )
-        telefonos = [r.get("telefono") or "" for r in cur.fetchall()]
+        filas = cur.fetchall()
         if es_desarrollo:
             autorizados = _numeros_prueba_editables("desarrollo")
-            elegibles = sum(normalizar_telefono(tel) in autorizados for tel in telefonos)
-        else:
-            elegibles = len(telefonos)
-    return total, elegibles
+            filas = [r for r in filas if normalizar_telefono(r.get("telefono") or "") in autorizados]
+        return total, len(filas), sum(bool(r["reservado"]) for r in filas)
+
 
 
 def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensajeria"))):
@@ -8621,15 +8632,8 @@ def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensaj
         except ValueError:
             raise HTTPException(422, detail="Fecha y hora de envío inválidas.")
     emisor_elegibilidad = resolver_centro(body.centro) if body.centro in catalogo_centros() else None
-    total, elegibles = _contar_elegibles_tabla(
+    total, elegibles, reservados = _contar_elegibles_tabla(
         t, amb_q, amb, lista_id, emisor_elegibilidad, body.tratamientos)
-    # Los que ya están tomados por un programado activo no se pueden preelegir
-    # de nuevo: son los que quedan libres para este envío/horario.
-    try:
-        reservados = _contar_reservados_prog(t, amb, amb_q, lista_id, body.tratamientos)
-    except Exception as e:
-        log_error("contar_reservados_prog", e)
-        reservados = 0
     libres = max(0, elegibles - reservados)
 
     costo = None
@@ -8637,7 +8641,7 @@ def contar_destinatarios(body: DestinosIn, sesion: dict = Depends(exigir("mensaj
     # un usuario normal no la recibe aunque pueda consultar destinatarios.
     puede_ver_costo = _es_privilegiado(sesion) or sesion.get("rol") == "supervisor"
     if plantilla_preview is not None and puede_ver_costo:
-        costo = _costo_estimado_por_clave(plantilla_preview.get("clave", ""), elegibles)
+        costo = _costo_estimado_por_clave(plantilla_preview.get("clave", ""), libres)
 
     aplica_limite_meta = (
         amb == "produccion" and config_get("metodo_envio", "").strip() == "api_oficial"
@@ -8906,35 +8910,6 @@ class ProgCrearIn(BaseModel):
 # promoción dos veces. Los pacientes que se den de baja después se excluyen al
 # enviar y se avisa (nunca se escribe a quien pidió la baja).
 
-_ESTADOS_PROG_RESERVAN = ("pendiente", "aprobado", "enviando")
-
-
-def _contar_reservados_prog(t: str, amb: str, amb_q: str,
-                            reservo_lista_id: int | None = None, tratamientos=()) -> int:
-    """Pacientes de la base que ya están tomados por otro programado activo."""
-    with conectar(amb) as conn, conn.cursor() as cur:
-        parametros = {"tabla": t, "ambiente": amb_q, "lista": reservo_lista_id}
-        condiciones = []
-        if reservo_lista_id is not None:
-            condiciones.append("ep.reservo_lista_id=%(lista)s")
-        _filtrar_tratamientos_reservo(condiciones, parametros, tratamientos, tabla=t, ambiente=amb_q)
-        cur.execute(
-            "SELECT DISTINCT pd.paciente_id, pd.telefono FROM programado_destinatarios pd"
-            " JOIN envios_programados ep ON ep.id = pd.prog_id"
-            + (f" JOIN {t} p ON p.id=pd.paciente_id" if tratamientos else "")
-            + " WHERE ep.tabla = %(tabla)s AND ep.ambiente = %(ambiente)s AND ep.estado IN"
-            " ('pendiente', 'aprobado', 'enviando')"
-            + (" AND " + " AND ".join(condiciones) if condiciones else ""),
-            parametros,
-        )
-        filas = cur.fetchall()
-    if amb_q == "desarrollo":
-        autorizados = _numeros_prueba_editables("desarrollo")
-        return len({int(f["paciente_id"]) for f in filas
-                    if normalizar_telefono(f.get("telefono") or "") in autorizados})
-    return len({int(f["paciente_id"]) for f in filas})
-
-
 def _preelegir_pacientes_prog(t: str, amb: str, amb_q: str, n: int, cur=None,
                               reservo_lista_id: int | None = None, emisor: dict | None = None,
                               tratamientos=()) -> list[dict]:
@@ -8962,15 +8937,9 @@ def _preelegir_pacientes_prog(t: str, amb: str, amb_q: str, n: int, cur=None,
         cond.append("p.whatsapp_opt_out = 0")
     if columna_existe(t, "respuesta", amb_q):
         cond.append("(p.respuesta IS NULL OR p.respuesta <> 'baja')")
-    # Fuera los que ya tienen otro programado vivo en esta misma base.
-    cond.append(
-        "p.id NOT IN (SELECT pd.paciente_id FROM programado_destinatarios pd"
-        " JOIN envios_programados ep ON ep.id = pd.prog_id"
-        " WHERE ep.tabla = %(t)s AND ep.ambiente = %(amb)s AND ep.estado IN"
-        " ('pendiente', 'aprobado', 'enviando')"
-        + (" AND ep.reservo_lista_id = %(lista_id)s" if lista_reservo else "") + ")"
-    )
-    params = {"t": t, "amb": amb_q}
+    cond.append("NOT " + reservas_programadas.existe_reserva_sql(
+        reservas_programadas.telefono_sql("p.telefono")))
+    params = {}
     if not solo_pruebas and emisor:
         params.update(_parametros_envio_anterior(emisor))
     _filtrar_tratamientos_reservo(cond, params, tratamientos, tabla=t, ambiente=amb_q)
@@ -9167,8 +9136,9 @@ def _prog_costo_estimado(f: dict, plantilla_nombre: str = "",
             return None
         if elegibles is None:
             amb_q = "produccion" if f.get("area_id") is not None else amb
-            _, elegibles = _contar_elegibles_tabla(
+            _, elegibles, reservados = _contar_elegibles_tabla(
                 tabla, amb_q, amb, f.get("reservo_lista_id"))
+            elegibles -= reservados
             # Programados antiguos sin lista preelegida: no estimar el costo
             # sobre toda la base cuando se configuró una cantidad menor.
             if f.get("limite") is not None:
@@ -9266,12 +9236,7 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
     # Tope real: elegibles libres (en desarrollo incluye todos los estados),
     # sin repetir destinatarios ya reservados ni superar el cupo de Meta.
     amb_q = "produccion" if esp is not None else amb
-    _, elegibles = _contar_elegibles_tabla(tabla, amb_q, amb, lista_id, emisor, body.tratamientos)
-    try:
-        reservados = _contar_reservados_prog(tabla, amb, amb_q, lista_id, body.tratamientos)
-    except Exception as e:
-        log_error("contar_reservados_prog", e)
-        reservados = 0
+    _, elegibles, reservados = _contar_elegibles_tabla(tabla, amb_q, amb, lista_id, emisor, body.tratamientos)
     libres = max(0, elegibles - reservados)
     etiqueta_elegibles = ("pacientes de prueba elegibles" if amb == "desarrollo"
                           else "pacientes elegibles")
@@ -9350,32 +9315,35 @@ def crear_programado(body: ProgCrearIn, sesion: dict = Depends(exigir("mensajeri
             f"se complete."))
 
     with conectar() as conn, conn.cursor() as cur:
-        preelegidos = _preelegir_pacientes_prog(
-            tabla, amb, amb_q, n_preelegir, cur=cur, reservo_lista_id=lista_id,
-            emisor=emisor, tratamientos=body.tratamientos)
-        if not preelegidos:
-            conn.rollback()
-            raise HTTPException(422, detail=(
-                f"No quedan pacientes libres en esta base: los {elegibles} {etiqueta_elegibles} ya están "
-                f"preelegidos por otros envíos programados activos. Cancela alguno o espera a que "
-                f"se complete."))
-        cur.execute(
-            "INSERT INTO envios_programados (area_id, reservo_lista_id, tabla, ambiente, plantilla_id, plantilla_nombre,"
-            " limite, programado_para, estado, creador, creador_nombre, decidido_por, token,"
-            " centro_codigo, wa_phone_id, numero_emisor)"
-            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-            (esp["id"] if esp else None, lista_id, tabla, amb, plantilla["id"], plantilla.get("nombre") or "",
-             limite, cuando.strftime("%Y-%m-%d %H:%M"), estado, creador,
-             (sesion.get("nombre") or "Usuario"), (creador if directo else ""), token,
-             emisor["codigo"], emisor["phoneNumberId"], emisor["phoneNumber"]),
-        )
-        prog_id = cur.lastrowid
-        cur.executemany(
-            "INSERT INTO programado_destinatarios (prog_id, paciente_id, nombre, telefono)"
-            " VALUES (%s, %s, %s, %s)",
-            [(prog_id, p["id"], p["nombre"][:150], p["telefono"][:32]) for p in preelegidos],
-        )
-        conn.commit()
+        with reservas_programadas.bloqueo_creacion(cur) as tomado:
+            if not tomado:
+                raise HTTPException(409, detail="Hay otro envío reservando pacientes. Inténtalo de nuevo.")
+            preelegidos = _preelegir_pacientes_prog(
+                tabla, amb, amb_q, n_preelegir, cur=cur, reservo_lista_id=lista_id,
+                emisor=emisor, tratamientos=body.tratamientos)
+            if len(preelegidos) != n_preelegir:
+                conn.rollback()
+                raise HTTPException(422, detail=(
+                    "La disponibilidad de la base cambió. Actualiza el cupo y elige una nueva cantidad."))
+            cur.execute(
+                "INSERT INTO envios_programados (area_id, reservo_lista_id, tabla, ambiente, plantilla_id, plantilla_nombre,"
+                " limite, programado_para, estado, creador, creador_nombre, decidido_por, token,"
+                " centro_codigo, wa_phone_id, numero_emisor)"
+                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (esp["id"] if esp else None, lista_id, tabla, amb, plantilla["id"], plantilla.get("nombre") or "",
+                 limite, cuando.strftime("%Y-%m-%d %H:%M"), estado, creador,
+                 (sesion.get("nombre") or "Usuario"), (creador if directo else ""), token,
+                 emisor["codigo"], emisor["phoneNumberId"], emisor["phoneNumber"]),
+            )
+            prog_id = cur.lastrowid
+            cur.executemany(
+                "INSERT INTO programado_destinatarios (prog_id, paciente_id, nombre, telefono)"
+                " VALUES (%s, %s, %s, %s)",
+                [(prog_id, p["id"], p["nombre"][:150],
+                  (normalizar_telefono(p["telefono"]) or p["telefono"])[:32])
+                 for p in preelegidos],
+            )
+            conn.commit()
 
     if not directo:
         if not esp:
@@ -9901,19 +9869,19 @@ def _ejecutar_programado(f: dict) -> None:
         return
     job_id = (resp or {}).get("job_id")
     if not job_id:
-        _marcar_prog(f["id"], "enviado", "sin destinatarios")
+        _marcar_prog(f["id"], "error", "Sin destinatarios disponibles")
         return
+    if excluidos:
+        JOBS[job_id]["nota_programado"] = (
+            f"{len(excluidos)} de {len(cohorte)} destinatarios preelegidos quedaron fuera "
+            "por un envío anterior, una baja u otro cambio en la base.")
+    _marcar_prog(f["id"], "enviando", "", job_id)
     threading.Thread(target=lambda: asyncio.run(bg()), daemon=True).start()
     if excluidos:
-        motivo = (f"Enviado a {len(vivos)} de los {len(cohorte)} pacientes preelegidos: "
-                  f"{len(excluidos)} quedaron fuera por un envío anterior, una baja u otro cambio en la base.")
-        _marcar_prog(f["id"], "enviado", motivo, job_id)
         _avisar_creador_prog(
-            f, motivo,
-            titulo="Tu envío programado salió a menos pacientes de lo previsto",
+            f, JOBS[job_id]["nota_programado"],
+            titulo="Tu envío programado inició con menos destinatarios",
             asunto=f"[SNW] Envío programado de {f.get('creador') or ''}: {len(excluidos)} pacientes excluidos")
-        return
-    _marcar_prog(f["id"], "enviado", "", job_id)
 
 
 def _revisar_programados() -> None:
@@ -10049,6 +10017,10 @@ async def _procesar_cita_reagendar(cita: dict, plantillas_por_centro: dict) -> N
                         " AND reserva_token=%s AND estado_envio='PROCESANDO'",
                         (cita["id"], cita["reserva_token"]))
             if not cur.fetchone():
+                return
+            if reservas_programadas.telefono_reservado(cur, telefono):
+                paciente_reagendar.marcar_fallo(
+                    cita, "RESERVADO_PROGRAMADO", detalle="El número está reservado para un envío programado.")
                 return
             if paciente_reagendar.reagendamiento_enviado_hoy(cur, telefono):
                 paciente_reagendar.marcar_fallo(cita, "YA_ENVIADO_HOY")
@@ -12844,6 +12816,9 @@ async def enviar_prueba_reagendamiento(cita_id: int, sesion: dict = Depends(solo
     telefono = normalizar_telefono(cita.get("paciente_telefono_normalizado") or "")
     if not telefono or not es_numero_prueba(telefono):
         raise HTTPException(403, detail="Solo se puede enviar a números de prueba configurados.")
+    with conectar() as conn, conn.cursor() as cur:
+        if reservas_programadas.telefono_reservado(cur, telefono):
+            raise HTTPException(409, detail="El número está reservado para un envío programado.")
     if cita.get("whatsapp_opt_out") or esta_suprimido(telefono) or esta_de_baja(telefono):
         raise HTTPException(409, detail="El número está dado de baja o suprimido.")
     cfg = config_all(refresh=True)

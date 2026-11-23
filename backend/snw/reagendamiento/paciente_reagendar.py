@@ -657,7 +657,8 @@ def motivo_no_reintentar(cita: dict, *, permitir_incierto: bool = False) -> str 
         if cita.get("estado_whatsapp") != "failed":
             return "Meta aceptó el mensaje, pero no confirmó un fallo de entrega."
     elif cita.get("ultimo_error_codigo") not in (
-            "META_RECHAZO", "ENVIO_DESACTIVADO", "CANAL_NO_DISPONIBLE", "PLANTILLA_INVALIDA"):
+            "META_RECHAZO", "ENVIO_DESACTIVADO", "CANAL_NO_DISPONIBLE", "PLANTILLA_INVALIDA",
+            "RESERVADO_PROGRAMADO"):
         return "El resultado es incierto o requiere corregir los datos antes de reenviar."
     return None
 
