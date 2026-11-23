@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="css/styles.css?v=estado-prueba-meta1">
   <link rel="stylesheet" href="css/componentes.css?v=paginador-cinco1">
   <link rel="stylesheet" href="css/layout.css?v=navcolor1">
-  <link rel="stylesheet" href="css/mensajeria.css?v=respuestas-plantilla1">
+  <link rel="stylesheet" href="css/mensajeria.css?v=formato-whatsapp1">
   <link rel="stylesheet" href="css/calendario.css?v=base1">
   <link rel="stylesheet" href="css/calendario-programados.css?v=programados2">
   <link rel="stylesheet" href="css/refinamiento.css?v=merge-frontend1">
@@ -130,6 +130,16 @@
 
         <div class="field field--mensaje">
           <label for="inpMensaje">Mensaje</label>
+          <div id="formatoMensaje" class="tpl-formato" role="group" aria-label="Formato de WhatsApp" hidden>
+            <button type="button" class="btn btn--ghost" data-formato="negrita" title="Negrita" aria-label="Negrita"><i class="fa-solid fa-bold" aria-hidden="true"></i></button>
+            <button type="button" class="btn btn--ghost" data-formato="cursiva" title="Cursiva" aria-label="Cursiva"><i class="fa-solid fa-italic" aria-hidden="true"></i></button>
+            <button type="button" class="btn btn--ghost" data-formato="tachado" title="Tachado" aria-label="Tachado"><i class="fa-solid fa-strikethrough" aria-hidden="true"></i></button>
+            <button type="button" class="btn btn--ghost" data-formato="viñetas" title="Lista con viñetas" aria-label="Lista con viñetas"><i class="fa-solid fa-list-ul" aria-hidden="true"></i></button>
+            <button type="button" class="btn btn--ghost" data-formato="numerada" title="Lista numerada" aria-label="Lista numerada"><i class="fa-solid fa-list-ol" aria-hidden="true"></i></button>
+            <button type="button" class="btn btn--ghost" data-formato="cita" title="Cita" aria-label="Cita"><i class="fa-solid fa-quote-left" aria-hidden="true"></i></button>
+            <button type="button" class="btn btn--ghost" data-formato="codigo" title="Código en línea" aria-label="Código en línea"><i class="fa-solid fa-code" aria-hidden="true"></i></button>
+            <button type="button" class="btn btn--ghost" data-formato="mono" title="Monoespaciado" aria-label="Monoespaciado"><i class="fa-solid fa-font" aria-hidden="true"></i></button>
+          </div>
           <div class="tpl-mensaje__campo">
             <textarea id="inpMensaje" rows="7" placeholder="Escribe aquí el mensaje que recibirán los pacientes..."></textarea>
             <button type="button" id="btnAbrirIA" class="tpl-ia__abrir" aria-label="Generar mensaje con IA" title="Generar mensaje con IA" aria-controls="panelIA" aria-expanded="false" hidden>
@@ -630,7 +640,7 @@
   <script src="js/layout.js?v=reservo-nav2"></script>
   <script src="js/pass-toggle.js"></script>
   <script src="js/plantilla-ia.js?v=sin-confirmacion1"></script>
-  <script src="js/app.js?v=reservas-programadas1"></script>
+  <script src="js/app.js?v=formato-whatsapp1"></script>
   <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
 </body>
 </html>

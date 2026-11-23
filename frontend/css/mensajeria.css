@@ -98,6 +98,24 @@
 .tpl-ia__abrir[hidden] { display: none; }
 .field--mensaje .wildcards { margin: 8px 0 4px; padding: 9px 11px; }
 .field--mensaje .wildcards[hidden] { display: none; }
+.tpl-formato {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 2px 0 6px;
+}
+.tpl-formato[hidden] { display: none; }
+.tpl-formato .btn {
+  min-width: 36px;
+  min-height: 36px;
+  padding: 4px 7px;
+}
+.bubble .wa-cita {
+  display: inline-block;
+  border-inline-start: 3px solid var(--borde);
+  padding-inline-start: 8px;
+  color: var(--texto-suave);
+}
 .tpl-ia {
   position: absolute;
   z-index: 30;

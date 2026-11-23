@@ -633,7 +633,7 @@ function aplicarModoSoloLecturaPlantillas() {
   if (PUEDE_EDITAR_PLANTILLAS) return;
   [btnGuardar, $("#btnCancelar"), $("#btnNuevaEmpty"), avisoNombrePermanente,
    document.querySelector(".field__hint.atajos")].forEach((el) => el && (el.hidden = true));
-  document.querySelectorAll(".wildcards").forEach((el) => (el.hidden = true));
+  document.querySelectorAll(".wildcards, #formatoMensaje").forEach((el) => (el.hidden = true));
 }
 
 function authHeaders(extra = {}) {
@@ -914,16 +914,70 @@ function escaparHtml(texto) {
   return div.innerHTML;
 }
 
-// Convierte el formato de WhatsApp (*negrita*, _cursiva_, ~tachado~,
-// ```monoespaciado```) a HTML para la vista previa. Se escapa primero el
-// texto para evitar inyección de HTML.
-function formatearWhatsApp(texto) {
-  let html = escaparHtml(texto);
-  html = html.replace(/```([\s\S]+?)```/g, "<code>$1</code>");
+function formatearWhatsAppLinea(html) {
   html = html.replace(/(^|[\s(>])\*(\S(?:[^*\n]*\S)?)\*(?=$|[\s).,!?<])/g, "$1<strong>$2</strong>");
   html = html.replace(/(^|[\s(>])_(\S(?:[^_\n]*\S)?)_(?=$|[\s).,!?<])/g, "$1<em>$2</em>");
   html = html.replace(/(^|[\s(>])~(\S(?:[^~\n]*\S)?)~(?=$|[\s).,!?<])/g, "$1<del>$2</del>");
-  return html; // el contenedor .bubble ya usa white-space: pre-wrap para los saltos de línea
+  return html;
+}
+
+function formatearWhatsApp(texto) {
+  // El código se escapa y se guarda aparte para que sus marcas y saltos de
+  // línea no se procesen como otros formatos.
+  const codigos = [];
+  const limpio = texto.replace(/\0/g, "\uFFFD").replace(/```([\s\S]+?)```|`([^`\n]+)`/g,
+    (_, mono, linea) => "\0" + (codigos.push(escaparHtml(mono ?? linea)) - 1) + "\0");
+  return limpio.split("\n").map((linea) => {
+    if (linea.startsWith("> ")) {
+      return '<span class="wa-cita">' + formatearWhatsAppLinea(escaparHtml(linea.slice(2))) + "</span>";
+    }
+    return formatearWhatsAppLinea(escaparHtml(linea.replace(/^[-*] /, "• ")));
+  }).join("\n").replace(/\0(\d+)\0/g, (_, i) => "<code>" + codigos[Number(i)] + "</code>");
+}
+
+const MARCAS_FORMATO_WHATSAPP = { negrita: "*", cursiva: "_", tachado: "~", codigo: "`", mono: "```" };
+const PREFIJOS_FORMATO_WHATSAPP = { "viñetas": /^[-*] /, numerada: /^\d+\. /, cita: /^> / };
+
+function editarFormatoWhatsApp(texto, inicio, fin, formato) {
+  const marca = MARCAS_FORMATO_WHATSAPP[formato];
+  const seleccion = texto.slice(inicio, fin);
+  if (marca) {
+    const longitud = marca.length;
+    if (texto.slice(0, inicio).endsWith(marca) && texto.slice(fin).startsWith(marca) &&
+        (formato === "mono" || !seleccion.includes("\n"))) {
+      return { inicio: inicio - longitud, fin: fin + longitud, reemplazo: seleccion,
+        desde: 0, hasta: seleccion.length };
+    }
+    if (!seleccion) {
+      return { inicio, fin, reemplazo: marca + marca, desde: longitud, hasta: longitud };
+    }
+    const partes = formato === "mono" ? [seleccion] : seleccion.split("\n");
+    const conFormato = (parte) => parte.trim().length > longitud * 2 &&
+      parte.trim().startsWith(marca) && parte.trim().endsWith(marca);
+    const quitar = partes.filter((parte) => parte.trim()).every(conFormato);
+    const reemplazo = partes.map((parte) => parte.replace(/(\S[\s\S]*\S|\S)/, (contenido) =>
+      quitar ? contenido.slice(longitud, -longitud) : conFormato(contenido) ? contenido : marca + contenido + marca
+    )).join("\n");
+    return { inicio, fin, reemplazo, desde: 0, hasta: reemplazo.length };
+  }
+
+  const prefijo = PREFIJOS_FORMATO_WHATSAPP[formato];
+  if (!prefijo) return null;
+  const inicioLinea = inicio === 0 ? 0 : texto.lastIndexOf("\n", inicio - 1) + 1;
+  const salto = texto.indexOf("\n", fin > inicio && texto[fin - 1] === "\n" ? fin - 1 : fin);
+  const finLinea = salto < 0 ? texto.length : salto;
+  const lineas = texto.slice(inicioLinea, finLinea).split("\n");
+  const quitar = lineas.some(Boolean) && lineas.filter(Boolean).every((linea) => prefijo.test(linea));
+  let numero = 0;
+  const reemplazo = lineas.map((linea) => {
+    if (!linea && lineas.length > 1) return linea;
+    if (quitar) return linea.replace(prefijo, "");
+    const marcaLinea = formato === "numerada" ? ++numero + ". " : formato === "cita" ? "> " : "- ";
+    return marcaLinea + linea.replace(/^(?:[-*] |>\s|\d+\. )/, "");
+  }).join("\n");
+  const cursor = Math.max(0, Math.min(reemplazo.length, inicio - inicioLinea + reemplazo.length - (finLinea - inicioLinea)));
+  return { inicio: inicioLinea, fin: finLinea, reemplazo,
+    desde: seleccion ? 0 : cursor, hasta: seleccion ? reemplazo.length : cursor };
 }
 
 function crearItemPlantilla(p) {
@@ -1694,7 +1748,7 @@ function actualizarBotonesSegunEstado(p) {
   const puedeEliminar = PUEDE_ELIMINAR_PLANTILLAS && puedeEditarEsta(p) &&
     (editable || esRegistroMetaFallido(p)) && !esPlantillaProtegida(p);
   const puedeRevisar = p && ap === "pendiente" && puedeAprobarPlantillas();
-  document.querySelectorAll(".wildcards").forEach((el) => { el.hidden = !puedeGuardar; });
+  document.querySelectorAll(".wildcards, #formatoMensaje").forEach((el) => { el.hidden = !puedeGuardar; });
   const puedeGuardarArea = p && PUEDE_EDITAR_PLANTILLAS && puedeEditarEsta(p) &&
     !esPlantillaProtegida(p);
   btnGuardar.hidden = !(puedeGuardar || puedeGuardarArea);
@@ -2461,6 +2515,18 @@ document.querySelectorAll(".chip").forEach((chip) => {
     inpMensaje.setSelectionRange(nuevaPos, nuevaPos);
     refrescarEditor();
   });
+});
+
+$("#formatoMensaje")?.addEventListener("click", (evento) => {
+  const boton = evento.target.closest("button[data-formato]");
+  if (!boton || inpMensaje.disabled || inpMensaje.readOnly) return;
+  const cambio = editarFormatoWhatsApp(inpMensaje.value, inpMensaje.selectionStart,
+    inpMensaje.selectionEnd, boton.dataset.formato);
+  if (!cambio) return;
+  inpMensaje.setRangeText(cambio.reemplazo, cambio.inicio, cambio.fin);
+  inpMensaje.focus();
+  inpMensaje.setSelectionRange(cambio.inicio + cambio.desde, cambio.inicio + cambio.hasta);
+  inpMensaje.dispatchEvent(new Event("input", { bubbles: true }));
 });
 
 inpNombre.addEventListener("input", () => {
