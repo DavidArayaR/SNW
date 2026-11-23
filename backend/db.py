@@ -1349,6 +1349,13 @@ def asegurar_tabla_config() -> None:
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
             )
             cur.execute(
+                "CREATE TABLE IF NOT EXISTS pacientes_sincronizaciones_diarias ("
+                " fecha DATE PRIMARY KEY,"
+                " sincronizacion_id BIGINT UNSIGNED NOT NULL UNIQUE,"
+                " FOREIGN KEY (sincronizacion_id) REFERENCES pacientes_sincronizaciones(id) ON DELETE CASCADE"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+            cur.execute(
                 "CREATE TABLE IF NOT EXISTS whatsapp_avisos_unicos ("
                 "  telefono VARCHAR(32) NOT NULL,"
                 "  tipo VARCHAR(32) NOT NULL,"

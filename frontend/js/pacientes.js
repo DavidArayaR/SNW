@@ -1072,18 +1072,25 @@ async function cargarHistorialSincronizaciones(pagina) {
     const fecha = new Intl.DateTimeFormat("es-CL", {
       dateStyle: "short", timeStyle: "short", timeZone: "America/Santiago",
     });
-    $("#filasHistorialSincronizaciones").innerHTML = historial.items.map((evento) =>
-      evento.bases.map((base, indice) => {
-        const momento = indice === 0
-          ? `<td rowspan="${evento.bases.length}">${escaparHtml(fecha.format(new Date(evento.fecha)))}</td>`
+    $("#filasHistorialSincronizaciones").innerHTML = historial.items.map((evento) => {
+      const momento = escaparHtml(fecha.format(new Date(evento.fecha)));
+      const tipo = evento.fecha_automatica ? "Automática" : "Manual";
+      const cabecera = `${momento}<br><small>${tipo}</small>`;
+      if (!evento.bases.length) {
+        return `<tr class="sinc-grupo"><td>${cabecera}</td><td colspan="4">Sin bases compatibles para sincronizar.</td></tr>`;
+      }
+      return evento.bases.map((base, indice) => {
+        const celdaFecha = indice === 0
+          ? `<td rowspan="${evento.bases.length}">${cabecera}</td>`
           : "";
-        return `<tr${indice === 0 ? ' class="sinc-grupo"' : ""}>${momento}` +
-          `<th scope="row">${escaparHtml(base.nombre)}</th>` +
+        const clinica = base.clinica ? `<br><small>${escaparHtml(base.clinica)}</small>` : "";
+        return `<tr${indice === 0 ? ' class="sinc-grupo"' : ""}>${celdaFecha}` +
+          `<th scope="row">${escaparHtml(base.nombre)}${clinica}</th>` +
           `<td class="sinc-numero">${numero.format(base.antes.pendientes)} → ${numero.format(base.despues.pendientes)}</td>` +
           `<td class="sinc-numero">${numero.format(base.antes.enviados)} → ${numero.format(base.despues.enviados)}</td>` +
           `<td class="sinc-numero"><strong>${numero.format(base.actualizados)}</strong></td></tr>`;
-      }).join("")
-    ).join("");
+      }).join("");
+    }).join("");
     paginaSincronizaciones = pagina;
     tabla.hidden = !historial.items.length;
     aviso.textContent = historial.items.length ? "" : "No hay sincronizaciones registradas en esta página.";

@@ -2093,7 +2093,9 @@ def sincronizar_pacientes(body: SincronizarPacientesIn, sesion: dict = Depends(s
     if len(claves) < 2:
         raise HTTPException(422, detail="Selecciona al menos dos bases distintas.")
     bases = {}
-    with conectar("produccion") as conn, conn.cursor() as cur:
+    with conectar("produccion") as conn, conn.cursor() as cur, sincronizar_estados.bloquear(cur) as tomado:
+        if not tomado:
+            raise HTTPException(409, detail="Ya hay una sincronización en curso. Inténtalo cuando termine.")
         for clave in sorted(claves):
             if clave == "prod":
                 tabla, lista_id = tabla_pacientes("produccion"), None
@@ -10185,6 +10187,7 @@ async def _arrancar_scheduler_programados() -> None:
     except Exception as exc:
         log_error("preparar esquema de retención de datos", exc)
     asyncio.create_task(_loop_retencion_datos())
+    asyncio.create_task(sincronizar_estados.loop_diario())
     asyncio.create_task(prepago.loop_recordatorios())
     asyncio.create_task(_loop_programados())
     asyncio.create_task(_loop_ventanas_consulta())

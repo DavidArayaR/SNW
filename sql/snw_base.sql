@@ -80,6 +80,12 @@ CREATE TABLE IF NOT EXISTS pacientes_sincronizaciones (
   INDEX idx_pacientes_sinc_creado (creado)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS pacientes_sincronizaciones_diarias (
+  fecha DATE PRIMARY KEY,
+  sincronizacion_id BIGINT UNSIGNED NOT NULL UNIQUE,
+  FOREIGN KEY (sincronizacion_id) REFERENCES pacientes_sincronizaciones(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS log_envios (
   id INT AUTO_INCREMENT PRIMARY KEY,
   envio_id INT DEFAULT NULL,
