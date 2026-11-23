@@ -4325,8 +4325,6 @@ if (inpProgPorcentajeEl) inpProgPorcentajeEl.addEventListener("input", actualiza
 
 async function cargarProgramados(mostrarFeedback = false) {
   const lista = $("#listaProgramados");
-  // La lista y el texto de cupo deben reflejar la misma fotografía de reservas.
-  await poblarFormProg(true);
   if (!lista) return;
   // Si ya hay datos, se conservan visibles mientras se actualiza (con
   // animación); solo se muestra "Cargando…" la primera vez.
@@ -4335,7 +4333,7 @@ async function cargarProgramados(mostrarFeedback = false) {
   else marcarProgsActualizando(true);
   try {
     const res = await fetch("api/notificaciones/programados", {
-      headers: authHeaders(), cache: "no-store",
+      headers: authHeaders(), cache: "no-store", signal: AbortSignal.timeout(15000),
     });
     if (res.status === 401) { window.snwSesionExpirada(); return; }
     if (!res.ok) throw new Error();
@@ -4343,10 +4341,12 @@ async function cargarProgramados(mostrarFeedback = false) {
     progsPrev = new Map(programados.map((p) => [p.id, p.estado]));
     renderProgramados();
     if (mostrarFeedback) toast("Envíos programados actualizados correctamente.");
-  } catch {
-    console.error("[app.js cargarProgramados()]");
+  } catch (error) {
+    console.error("[app.js cargarProgramados()]", error);
     marcarProgsActualizando(false);
-    if (primera) lista.innerHTML = `<p class="field__hint">No se pudieron cargar.</p>`;
+    if (primera) lista.innerHTML = `<p class="field__hint">No se pudieron cargar. Pulsa Actualizar para reintentar.</p>`;
+  } finally {
+    if (tabMsg === "programados") poblarFormProg(true);
   }
 }
 
@@ -4804,7 +4804,9 @@ Promise.all([cargaInicialCentrosEmisores, cargaInicialPlantillas]).then(() => {
   parametros.delete("centro");
   history.replaceState(null, "", `${location.pathname}?${parametros.toString()}`);
 });
-cargarProgramados().then(() => {
-  if (tabMsg === "programados") revisarProgs();
-});
+if (tabMsg === "programados") {
+  cargarProgramados().then(() => {
+    if (tabMsg === "programados") revisarProgs();
+  });
+}
 setInterval(revisarPlantillasEnSegundoPlano, 30000);

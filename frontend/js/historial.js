@@ -167,13 +167,16 @@ async function cargarEnProgreso(mostrarFeedback = false) {
   let items;
   try {
     const r = await fetch("api/notificaciones/envios-en-progreso", {
-      headers: authHeaders(), cache: "no-store",
+      headers: authHeaders(), cache: "no-store", signal: AbortSignal.timeout(15000),
     });
     if (r.status === 401) { window.snwSesionExpirada(); return; }
     if (!r.ok) throw new Error();
     items = await r.json();
-  } catch {
-    console.error("[historial.js cargarEnProgreso()]");
+  } catch (error) {
+    console.error("[historial.js cargarEnProgreso()]", error);
+    if (firmaProgreso === null && !lista.children.length) {
+      lista.innerHTML = '<p class="field__hint">No se pudo cargar el progreso. Pulsa Actualizar para reintentar.</p>';
+    }
     return; // se conserva lo último mostrado, sin mensajes ni saltos
   } finally {
     cargandoEnProgreso = false;

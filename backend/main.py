@@ -7154,18 +7154,18 @@ def _rate_servicio(tarifa: dict | None, periodo: str) -> float:
             or (tarifa.get("authentication") if tarifa else None) or 0.0)
 
 
-def _costo_estimado_por_clave(clave: str, total: int) -> dict | None:
+def _costo_estimado_por_clave(clave: str, total: int, *, tarifas=None) -> dict | None:
     """Costo aproximado de enviar `total` mensajes de esta plantilla, en la
     moneda de facturación de la cuenta (rate card CLP vigente en su fecha).
     Los mensajes de servicio usan `_rate_servicio` (tarifa explícita o la de
     utility como respaldo, desde el 01-10-2026).
     None si no hay tarifas descargadas o la plantilla no mapea a categoría
     (texto libre sin clave conocida)."""
-    cat = _categorias_por_clave().get(clave)
+    categorias = _categorias_por_clave() if tarifas is None else tarifas[0]
+    cat = categorias.get(clave)
     if not cat:
         return None
-    moneda = _moneda_cuenta()
-    vig = _tarifa_vigente(_tarifas_guardadas(moneda) or _tarifas_guardadas("USD"))
+    moneda, vig = _tarifa_base_estimacion() if tarifas is None else tarifas[1:]
     if cat == "service":
         rate = _rate_servicio(vig, time.strftime("%Y-%m-%d"))
     else:
@@ -7179,6 +7179,15 @@ def _costo_estimado_por_clave(clave: str, total: int) -> dict | None:
         "total": total,
         "costo": math.ceil(float(rate) * total),
     }
+
+
+def _tarifas_para_estimacion(plantillas=None):
+    return (_categorias_por_clave(plantillas), *_tarifa_base_estimacion())
+
+
+def _tarifa_base_estimacion():
+    moneda = _moneda_cuenta()
+    return moneda, _tarifa_vigente(_tarifas_guardadas(moneda) or _tarifas_guardadas("USD"))
 
 
 def _precio_reagendamiento(plantilla: dict, fecha: datetime.date | None = None) -> dict:
@@ -8785,24 +8794,25 @@ def envios_en_progreso(sesion: dict = Depends(exigir("mensajeria"))):
     mias = set(sesion.get("area_ids") or [])
     ahora_mono = time.monotonic()
 
-    def _area_nombre(area_id):
-        if area_id is None:
-            return ""
-        try:
-            _a = servicio_areas.obtener_area(int(area_id))
-        except (TypeError, ValueError):
-            return ""
-        return (_a.get("nombre_visible") if _a else "") or ""
-
     items = []
-    prog_vivos = []
+    with JOBS_LOCK:
+        jobs = {jid: dict(j) for jid, j in JOBS.items() if j.get("estado") in ESTADOS_ENVIO_EN_CURSO}
+    areas_jobs = sorted({j["area_id"] for j in jobs.values() if j.get("area_id") is not None})
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT * FROM envios_programados"
-            " WHERE estado IN ('aprobado', 'enviando')"
-            " ORDER BY programado_para, id"
+            "SELECT p.*, a.nombre_visible AS area_nombre FROM envios_programados p"
+            " LEFT JOIN areas a ON a.id=p.area_id"
+            " WHERE p.estado IN ('aprobado', 'enviando')"
+            " ORDER BY p.programado_para, p.id"
         )
         prog_vivos = cur.fetchall()
+        nombres_areas = {f["area_id"]: f["area_nombre"] or "" for f in prog_vivos if f.get("area_id") is not None}
+        faltantes = [ident for ident in areas_jobs if ident not in nombres_areas]
+        if faltantes:
+            marcadores = ", ".join("%s" for _ in faltantes)
+            cur.execute(f"SELECT id, nombre_visible FROM areas WHERE id IN ({marcadores})", tuple(faltantes))
+            nombres_areas.update({f["id"]: f["nombre_visible"] for f in cur.fetchall()})
+    centros = catalogo_centros(incluir_inactivas=True) if prog_vivos or _es_privilegiado(sesion) else {}
     jobs_reclamados: set[str] = set()
     for f in prog_vivos:
         if not _prog_visible(sesion, f):
@@ -8814,34 +8824,27 @@ def envios_en_progreso(sesion: dict = Depends(exigir("mensajeria"))):
             jobs_reclamados.add(str(f["job_id"]))
         total = enviados = fallidos = 0
         estado = f.get("estado") or ""
-        with JOBS_LOCK:
-            job = JOBS.get(f["job_id"]) if f.get("job_id") else None
-            vivo = dict(job) if job and job.get("estado") in ESTADOS_ENVIO_EN_CURSO else None
+        vivo = jobs.get(f.get("job_id"))
         if vivo:
             total, enviados, fallidos = vivo.get("total", 0), vivo.get("enviados", 0), vivo.get("fallidos", 0)
             estado = vivo.get("estado") or estado
-        pc = _prog_a_respuesta(f, sesion)
         items.append({
             "origen": "programado", "id": f["id"], "job_id": f.get("job_id") or "",
             "centro_codigo": f.get("centro_codigo"),
-            "centro": catalogo_centros(incluir_inactivas=True).get(f.get("centro_codigo"), "Emisor histórico no identificado"),
+            "centro": centros.get(f.get("centro_codigo"), "Emisor histórico no identificado"),
             "numero_emisor": f.get("numero_emisor"),
-            "puede_cancelar": pc["puede_cancelar"],
+            "puede_cancelar": _puede_cancelar_programado(f, sesion),
             "puede_pausar": bool(vivo and _puede_controlar_job(sesion, vivo)),
             "plantilla": f.get("plantilla_nombre") or "", "estado": estado,
             "total": total, "enviados": enviados, "fallidos": fallidos,
             "aceptados_ultimo_segundo": _aceptados_job_ultimo_segundo(vivo, ahora_mono),
             "quien_envio": f.get("creador_nombre") or f.get("creador") or "",
             "quien_aprobo": f.get("decidido_por") or "",
-            "base": f.get("tabla") or "", "area": _area_nombre(f.get("area_id")),
+            "base": f.get("tabla") or "", "area": f.get("area_nombre") or "",
             "programado_para": f["programado_para"].strftime("%d-%m-%Y %H:%M") if f.get("programado_para") else "",
         })
 
-    with JOBS_LOCK:
-        jobs = list(JOBS.items())
-    for job_id, job in jobs:
-        if job.get("estado") not in ESTADOS_ENVIO_EN_CURSO:
-            continue
+    for job_id, job in jobs.items():
         if job.get("ambiente") == "desarrollo" and job.get("area_id") is None \
                 and not _es_privilegiado(sesion):
             continue
@@ -8865,12 +8868,11 @@ def envios_en_progreso(sesion: dict = Depends(exigir("mensajeria"))):
             "quien_envio": job.get("nombre_enviador") or job.get("usuario") or "",
             "quien_aprobo": "",
             "base": job.get("base", job.get("ambiente")) or "",
-            "area": _area_nombre(job.get("area_id")), "programado_para": "",
+            "area": nombres_areas.get(job.get("area_id"), ""), "programado_para": "",
         })
     # Reagendamientos no utilizan JOBS: su avance vive en tablas compartidas.
     # Mantener la misma visibilidad que la gestión de pacientes de reagendamiento.
     if _es_privilegiado(sesion):
-        centros = catalogo_centros(incluir_inactivas=True)
         for lote in reagendar_batches.en_progreso():
             items.append({
                 "origen": "reagendamiento", "id": lote["id"], "job_id": "",
@@ -9153,8 +9155,13 @@ def _puede_cancelar_programado(f: dict, sesion: dict) -> bool:
     )
 
 
-def _prog_a_respuesta(f: dict, sesion: dict, preelegidos: int | None = None) -> dict:
-    esp = servicio_areas.obtener_area(f["area_id"]) if f.get("area_id") is not None else None
+def _prog_a_respuesta(f: dict, sesion: dict, preelegidos: int | None = None, *, centros=None, costos=None) -> dict:
+    nombre_area = f.get("area_nombre") or ""
+    if "area_nombre" not in f and f.get("area_id") is not None:
+        esp = servicio_areas.obtener_area(f["area_id"])
+        nombre_area = (esp or {}).get("nombre_visible") or ""
+    if centros is None:
+        centros = catalogo_centros(incluir_inactivas=True)
     priv = _es_privilegiado(sesion)
     es_sup = sesion.get("rol") == "supervisor"
     puede_decidir = f["estado"] == "pendiente" and (
@@ -9167,15 +9174,15 @@ def _prog_a_respuesta(f: dict, sesion: dict, preelegidos: int | None = None) -> 
     costo = None
     if puede_ver_costo and f["estado"] in ("pendiente", "aprobado", "enviando"):
         costo = _prog_costo_estimado(f, plantilla_nombre=f.get("plantilla_nombre") or "",
-                                     elegibles=preelegidos)
+                                     elegibles=preelegidos, costos=costos)
     return {
         "id": f["id"], "area_id": f.get("area_id"),
         "reservo_lista_id": f.get("reservo_lista_id"),
         "base_nombre": f.get("reservo_base_nombre") or f.get("tabla") or "",
         "centro_codigo": f.get("centro_codigo"),
-        "centro": catalogo_centros(incluir_inactivas=True).get(f.get("centro_codigo"), "Emisor histórico no identificado"),
+        "centro": centros.get(f.get("centro_codigo"), "Emisor histórico no identificado"),
         "numero_emisor": f.get("numero_emisor"),
-        "area": (esp.get("nombre_visible") if esp else ""),
+        "area": nombre_area,
         "tabla": f.get("reservo_base_nombre") or f.get("tabla") or "",
         "ambiente": f.get("ambiente") or "produccion",
         "plantilla_id": f.get("plantilla_id"), "plantilla": f.get("plantilla_nombre") or "",
@@ -9193,7 +9200,7 @@ def _prog_a_respuesta(f: dict, sesion: dict, preelegidos: int | None = None) -> 
 
 
 def _prog_costo_estimado(f: dict, plantilla_nombre: str = "",
-                         elegibles: int | None = None) -> dict | None:
+                         elegibles: int | None = None, *, costos=None) -> dict | None:
     """Costo aproximado: destinatarios preelegidos o, si no se conocen,
     elegibles de la tabla. En desarrollo se incluyen todos los estados; en
     producción solo pendientes. Ninguno incluye opt-out ni bajas."""
@@ -9211,10 +9218,16 @@ def _prog_costo_estimado(f: dict, plantilla_nombre: str = "",
             # sobre toda la base cuando se configuró una cantidad menor.
             if f.get("limite") is not None:
                 elegibles = min(elegibles, max(0, int(f["limite"])))
-        plantilla = next((p for p in leer_plantillas() if p.get("id") == f.get("plantilla_id")), None)
+        if costos is None:
+            plantillas = leer_plantillas()
+            tarifas = _tarifas_para_estimacion(plantillas)
+            plantilla = next((p for p in plantillas if p.get("id") == f.get("plantilla_id")), None)
+        else:
+            plantillas_por_id, tarifas = costos
+            plantilla = plantillas_por_id.get(f.get("plantilla_id"))
         if plantilla is None:
             return None
-        costo = _costo_estimado_por_clave(plantilla.get("clave", ""), elegibles)
+        costo = _costo_estimado_por_clave(plantilla.get("clave", ""), elegibles, tarifas=tarifas)
         if not costo:
             return None
         costo["elegibles"] = elegibles
@@ -9509,8 +9522,9 @@ def listar_programados(sesion: dict = Depends(exigir("mensajeria"))):
     # envío lejano en el futuro tapa los nuevos).
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT p.*,b.nombre AS reservo_base_nombre FROM envios_programados p"
+            "SELECT p.*,b.nombre AS reservo_base_nombre,a.nombre_visible AS area_nombre FROM envios_programados p"
             " LEFT JOIN reservo_bases_contacto b ON b.id=p.reservo_lista_id"
+            " LEFT JOIN areas a ON a.id=p.area_id"
             " ORDER BY p.creado DESC,p.id DESC LIMIT 200"
         )
         filas = cur.fetchall()
@@ -9519,7 +9533,18 @@ def listar_programados(sesion: dict = Depends(exigir("mensajeria"))):
     visibles = [f for f in filas if _prog_visible(sesion, f)]
     # Cuántos pacientes quedaron preelegidos en cada uno (una sola consulta).
     conteo = _conteo_preelegidos([f["id"] for f in visibles])
-    return [_prog_a_respuesta(f, sesion, preelegidos=conteo.get(f["id"], 0)) for f in visibles]
+    centros = catalogo_centros(incluir_inactivas=True) if visibles else {}
+    costos = None
+    if (_es_privilegiado(sesion) or sesion.get("rol") == "supervisor") and any(
+            f["estado"] in ("pendiente", "aprobado", "enviando") for f in visibles):
+        try:
+            plantillas = leer_plantillas()
+            costos = ({p["id"]: p for p in plantillas}, _tarifas_para_estimacion(plantillas))
+        except Exception as exc:
+            log_error("costos de la lista de programados", exc)
+            costos = ({}, None)
+    return [_prog_a_respuesta(f, sesion, preelegidos=conteo.get(f["id"], 0),
+                              centros=centros, costos=costos) for f in visibles]
 
 
 def _conteo_preelegidos(prog_ids: list[int]) -> dict[int, int]:
@@ -12477,7 +12502,7 @@ def descargar_tarifa_csv(sesion: dict = Depends(solo_admin)):
 _CATS_FACTURABLES = ("marketing", "utility", "authentication")
 
 
-def _categorias_por_clave() -> dict:
+def _categorias_por_clave(plantillas=None) -> dict:
     """clave de plantilla -> categoría facturable de Meta.
 
     Incluye plantillas que se envían como *template* aprobado (tienen un
@@ -12490,7 +12515,7 @@ def _categorias_por_clave() -> dict:
     mensajes se siguen excluyendo del costo en `estadisticas_costos`.
     """
     m = {}
-    for p in leer_plantillas():
+    for p in (leer_plantillas() if plantillas is None else plantillas):
         cat = (p.get("whatsapp_template_categoria") or "").strip().lower()
         tiene_template = bool((p.get("whatsapp_template") or "").strip())
         if p.get("clave") and tiene_template and cat in _CATS_FACTURABLES:
