@@ -9142,6 +9142,17 @@ def _prog_es_base_desarrollo(f: dict) -> bool:
     return f.get("ambiente") == "desarrollo" and f.get("area_id") is None
 
 
+def _puede_cancelar_programado(f: dict, sesion: dict) -> bool:
+    # Pendiente solo se acepta o rechaza; cancelar aplica una vez aprobado.
+    if f["estado"] != "aprobado" or not tiene_permiso(sesion, "envios_cancelar"):
+        return False
+    return _es_privilegiado(sesion) or (
+        f.get("area_id") in (sesion.get("area_ids") or []) and
+        (sesion.get("rol") == "supervisor" or (sesion.get("usuario") or "").strip().lower()
+         == (f.get("creador") or "").strip().lower())
+    )
+
+
 def _prog_a_respuesta(f: dict, sesion: dict, preelegidos: int | None = None) -> dict:
     esp = servicio_areas.obtener_area(f["area_id"]) if f.get("area_id") is not None else None
     priv = _es_privilegiado(sesion)
@@ -9149,15 +9160,6 @@ def _prog_a_respuesta(f: dict, sesion: dict, preelegidos: int | None = None) -> 
     puede_decidir = f["estado"] == "pendiente" and (
         priv or (tiene_permiso(sesion, "envios_decidir") and f.get("area_id") is not None
                  and f["area_id"] in (sesion.get("area_ids") or [])))
-    puede_cancelar = False
-    # Pendiente solo se acepta o rechaza; cancelar aplica una vez aprobado.
-    if f["estado"] == "aprobado" and tiene_permiso(sesion, "envios_cancelar"):
-        if priv:
-            puede_cancelar = True
-        elif f.get("area_id") in (sesion.get("area_ids") or []) and (
-                es_sup or (sesion.get("usuario") or "").strip().lower()
-                == (f.get("creador") or "").strip().lower()):
-            puede_cancelar = True
     # Costo aproximado solo para admin/dev/supervisor y mientras el envío
     # todavía no se ejecutó. Se cobra cuando el envío se realice.
     puede_ver_costo = priv or es_sup
@@ -9184,7 +9186,7 @@ def _prog_a_respuesta(f: dict, sesion: dict, preelegidos: int | None = None) -> 
         "creado": f["creado"].strftime("%d-%m-%Y %H:%M") if f.get("creado") else "",
         "decidido_por": f.get("decidido_por") or "", "motivo": f.get("motivo") or "",
         "job_id": f.get("job_id") or "",
-         "puede_decidir": puede_decidir, "puede_cancelar": puede_cancelar,
+         "puede_decidir": puede_decidir, "puede_cancelar": _puede_cancelar_programado(f, sesion),
          "puede_ver_preelegidos": puede_ver_preelegidos,
          "puede_ver_costo": puede_ver_costo, "costo": costo,
     }
@@ -10376,18 +10378,19 @@ def _presentar_historial(filas: list[dict], sesion: dict, limite: int | None = N
     for fila in filas:
         if fila.get("id") in resumenes_reagendar:
             fila.update(resumenes_reagendar[fila["id"]])
+    ids_lote = {f["id"] for f in filas if not f.get("_sin_lote")}
     with JOBS_LOCK:
         trabajos = {j.get("envio_id"): (jid, dict(j))
-                    for jid, j in JOBS.items() if j.get("envio_id")}
+                    for jid, j in JOBS.items() if j.get("envio_id") in ids_lote}
     pendientes = {p.get("envio_id") for p in PENDIENTES.values()
-                  if p.get("estado") == "pendiente" and p.get("envio_id")}
+                  if p.get("estado") == "pendiente" and p.get("envio_id") in ids_lote}
+    centros = catalogo_centros(incluir_inactivas=True) if filas else {}
     for f in filas:
         f["centro"] = ("Clínica simulada" if f.get("base_datos") == "simulacion" else
-                       catalogo_centros(incluir_inactivas=True).get(f.get("centro_codigo"), "Emisor histórico no identificado"))
+                       centros.get(f.get("centro_codigo"), "Emisor histórico no identificado"))
         orden = f.pop("_orden", None)
         if f.pop("_sin_lote", False):
-            pc = _prog_a_respuesta(f, sesion)
-            f["puede_cancelar"] = pc["puede_cancelar"]
+            f["puede_cancelar"] = _puede_cancelar_programado(f, sesion)
             if f.get("estado") == "enviando":
                 f["estado"] = "en_progreso"
             f["id"] = f"prog-{f['id']}"
@@ -10566,6 +10569,34 @@ def _fuentes_historial_pagina(sesion: dict, ambiente: str, area_id: int | None,
                           + (" WHERE " + " AND ".join(cond_p) if cond_p else ""))
         argumentos.extend(args_p)
     return " UNION ALL ".join(sql_partes), tuple(argumentos)
+
+
+def bases_filtro_historial(sesion: dict = Depends(exigir("historial"))) -> list[dict]:
+    """Devuelve solo las etiquetas y claves que necesita el filtro."""
+    privilegiado = _es_privilegiado(sesion)
+    ids = tuple(sesion.get("area_ids") or ())
+    if not privilegiado and not ids:
+        return []
+    with conectar() as conn, conn.cursor() as cur:
+        filtro = "" if privilegiado else " WHERE id IN (" + ", ".join(["%s"] * len(ids)) + ")"
+        cur.execute(
+            "SELECT nombre_tabla_base AS tabla, CONCAT(nombre_visible, ' (', nombre_tabla_base, ')') AS nombre"
+            " FROM areas" + filtro + " ORDER BY nombre_visible",
+            () if privilegiado else ids,
+        )
+        bases = list(cur.fetchall())
+        if privilegiado:
+            cur.execute(
+                "SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE()"
+                " AND TABLE_NAME='reservo_bases_contacto' AND COLUMN_NAME='area_id'"
+            )
+            if cur.fetchone():
+                cur.execute("SELECT nombre AS tabla, nombre FROM reservo_bases_contacto"
+                            " WHERE area_id IS NULL ORDER BY nombre")
+                bases.extend(cur.fetchall())
+            bases[:0] = [{"tabla": "pacientes_dev", "nombre": "Desarrollo (pacientes_dev)"},
+                         {"tabla": "pacientes_prod", "nombre": "Producción (pacientes_prod)"}]
+    return bases
 
 
 def listar_historial_pagina(q: str = Query("", max_length=100),

@@ -15,6 +15,7 @@ RUTAS = (
     ("/api/notificaciones/jobs/{job_id}/reanudar", "POST", "reanudar_job", None),
     ("/api/notificaciones/historial", "GET", "listar_historial", None),
     ("/api/notificaciones/historial/pagina", "GET", "listar_historial_pagina", None),
+    ("/api/notificaciones/historial/bases", "GET", "bases_filtro_historial", None),
     ("/api/notificaciones/historial/{envio_id}/detalle", "GET", "detalle_historial", None),
     ("/api/notificaciones/historial/{envio_id}/registros/{registro_id}/mensajes", "GET", "mensajes_historial_reservo", None),
     ("/api/notificaciones/historial/{envio_id}/registros/{registro_id}/audios/transcribir", "POST", "transcribir_audio_historial_reservo", None),

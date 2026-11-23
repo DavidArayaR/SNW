@@ -275,7 +275,6 @@ let filtroEntregaDetalle = "todos";
 const seleccionFallidos = new Set();
 let pacienteMsgActual = null; // { id, ambiente, interesado }
 
-let basesHist = [];
 const selBaseHist = $("#selBaseHist");
 const selOrigenHist = $("#selOrigenHist");
 const selCentroHist = $("#selCentroHist");
@@ -314,55 +313,25 @@ if (selOrigenHist) {
   });
 }
 
-// Selector único de base de datos: admin/dev ven todas (legacy dev/prod +
-// tablas de áreas); el resto solo las tablas de sus áreas asignadas.
-const ES_PRIV_HIST = !!window.snwEsPrivilegiado;
-
 async function cargarBasesHist() {
   if (!selBaseHist) return;
-  let areas = [];
-  let listasReservo = [];
+  let bases;
   try {
-    const r = await fetch("api/areas/mias", { headers: authHeaders(), cache: "no-store" });
-    if (r.ok) areas = await r.json();
-  } catch {
-    console.error("[historial.js cargarBasesHist()]");
-    areas = [];
-  }
-  if (ES_PRIV_HIST) {
-    try {
-      const r = await fetch("api/reservo/bases", { headers: authHeaders(), cache: "no-store" });
-      if (r.ok) listasReservo = (await r.json()).items || [];
-    } catch {
-      console.error("[historial.js cargarBasesHist() Reservo]");
-    }
-  }
-  basesHist = [];
-  if (ES_PRIV_HIST) {
-    basesHist.push(
-      { tabla: "pacientes_dev", nombre: "Desarrollo (pacientes_dev)" },
-      { tabla: "pacientes_prod", nombre: "Producción (pacientes_prod)" },
-    );
-  }
-  for (const a of areas) {
-    if (a.nombre_tabla_base) {
-      basesHist.push({
-        tabla: a.nombre_tabla_base,
-        nombre: `${a.nombre_visible} (${a.nombre_tabla_base})`,
-      });
-    }
-  }
-  for (const base of listasReservo) {
-    if (base.area_id) continue;
-    if (base.nombre) basesHist.push({
-      tabla: base.nombre,
-      nombre: `${base.nombre} · ${base.clinica_nombre || base.clinica_codigo} (${Number(base.total || 0)} pacientes)`,
+    const respuesta = await fetch(`${API_HISTORIAL}/bases`, {
+      headers: authHeaders(), cache: "no-store", signal: AbortSignal.timeout(15000),
     });
+    if (respuesta.status === 401) { window.snwSesionExpirada(); return; }
+    if (!respuesta.ok) throw new Error("No se pudieron cargar las bases del historial.");
+    bases = await respuesta.json();
+  } catch (error) {
+    console.error("[historial.js cargarBasesHist()]", error);
+    return;
   }
+
   const guardada = localStorage.getItem("snw_base_historial") || "todos";
   selBaseHist.innerHTML = `<option value="todos">Todas</option>` +
-    basesHist.map((b) => `<option value="${escaparHtml(b.tabla)}">${escaparHtml(b.nombre)}</option>`).join("");
-  if (guardada !== "todos" && basesHist.some((b) => b.tabla === guardada)) {
+    bases.map((b) => `<option value="${escaparHtml(b.tabla)}">${escaparHtml(b.nombre)}</option>`).join("");
+  if (guardada !== "todos" && bases.some((b) => b.tabla === guardada)) {
     selBaseHist.value = guardada;
   } else {
     selBaseHist.value = "todos";
@@ -447,7 +416,11 @@ async function cargar(mantenerPagina = false, mostrarFeedback = false, mostrarCa
   const control = new AbortController();
   controlCargaHistorial = control;
   if (!mantenerPagina) paginaHist = 1;
-  const inicioCarga = performance.now();
+  let tiempoAgotado = false;
+  const temporizador = setTimeout(() => {
+    tiempoAgotado = true;
+    control.abort();
+  }, 20000);
   tablaCargandoHist.hidden = false;
   tablaHistorialWrap.classList.add("is-loading");
   tablaHistorialEl.setAttribute("aria-busy", "true");
@@ -495,8 +468,6 @@ async function cargar(mantenerPagina = false, mostrarFeedback = false, mostrarCa
     } while (true);
     tablaCargandoHistTexto.textContent =
       `Cargando historial… página ${paginaHist} de ${totalPaginasHist(totalHistorial)}`;
-    const restante = 250 - (performance.now() - inicioCarga);
-    if (restante > 0) await new Promise((resolver) => setTimeout(resolver, restante));
     if (secuencia !== cargaHistSecuencia) return;
     registros = respuesta.registros || [];
     consultaHistorialAnterior = claveConsulta;
@@ -504,10 +475,12 @@ async function cargar(mantenerPagina = false, mostrarFeedback = false, mostrarCa
     if (mostrarFeedback) toast("Historial actualizado correctamente.");
   } catch (err) {
     if (secuencia !== cargaHistSecuencia) return;
-    if (err?.name === "AbortError") return;
-    console.error("[historial.js cargar()]");
+    if (err?.name === "AbortError" && !tiempoAgotado) return;
+    console.error("[historial.js cargar()]", err);
     if (mostrarCarga || !registros.length) {
-      vacioEl.textContent = "No se pudo actualizar el historial. Inténtalo de nuevo.";
+      vacioEl.textContent = tiempoAgotado
+        ? "El historial tardó demasiado. Pulsa Actualizar para reintentar."
+        : "No se pudo actualizar el historial. Inténtalo de nuevo.";
       vacioEl.hidden = false;
       contadorEl.textContent = "—";
       $("#pagInfoHist").textContent = "No disponible";
@@ -517,6 +490,7 @@ async function cargar(mantenerPagina = false, mostrarFeedback = false, mostrarCa
     if (mostrarCarga || !mantenerPagina) toast("Error al conectar con el servidor.", "error");
     pintarPaginadorHist(totalHistorial);
   } finally {
+    clearTimeout(temporizador);
     if (secuencia === cargaHistSecuencia) {
       controlCargaHistorial = null;
       tablaCargandoHist.hidden = true;
@@ -1475,6 +1449,11 @@ if (panelCCLogEl) {
 tablaCargandoHist.hidden = false;
 tablaHistorialWrap.classList.add("is-loading");
 tablaHistorialEl.setAttribute("aria-busy", "true");
-(async () => { await cargarBasesHist(); cargar(); })();
-cargarLogCC();
-cargarEnProgreso();
+(async () => {
+  const bases = cargarBasesHist();
+  const baseGuardada = localStorage.getItem("snw_base_historial");
+  if (baseGuardada && baseGuardada !== "todos") await bases;
+  await cargar();
+  cargarEnProgreso();
+  cargarLogCC();
+})();
