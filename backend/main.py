@@ -2,7 +2,7 @@
 
 import datetime
 import contextvars
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from concurrent.futures import ThreadPoolExecutor
 import csv as _csv
 import hashlib
 import math
@@ -7703,9 +7703,6 @@ def _procesar_job_api_concurrente(job_id: str, canal: MotorApiOficial) -> None:
             # una baja recibida mientras esperaba no debe salir a Meta.
             if not activo():
                 return
-            if esta_suprimido(d["telefono"]):
-                fallido(d, "Número suprimido")
-                return
             if not _paciente_habilitado_antes_de_enviar(
                     d["id"], d["telefono"], amb, tabla, emisor, programado_id=job.get("programado_id")):
                 fallido(d, "Paciente no disponible: reserva, baja, envío anterior o registro modificado")
@@ -7764,43 +7761,34 @@ def _procesar_job_api_concurrente(job_id: str, canal: MotorApiOficial) -> None:
                                   tabla=tabla_area, whatsapp_message_id=message_id if ok else None)
         if ok:
             limpiar_interes_paciente(d["id"], amb, tabla=tabla_area)
-        else:
-            log_error(f"procesar_job {job_id}: envío rechazado: {error}")
-
     siguiente = 0
-    futuros = set()
+    asignacion = threading.Lock()
+
+    def consumir_destinatarios() -> None:
+        nonlocal siguiente
+        with canal.reutilizar_ciclo():
+            while not detener.is_set() and not job.get("cancelado"):
+                with asignacion:
+                    if siguiente >= len(destinatarios):
+                        return
+                    destinatario = destinatarios[siguiente]
+                    siguiente += 1
+                try:
+                    trabajador(destinatario)
+                except Exception as exc:
+                    log_error(f"procesar_job {job_id}: trabajador", exc)
+                    job["detalle"] = ("Envío detenido por un error interno. Revisa el historial del lote "
+                                      "y verifica los mensajes ya aceptados antes de reintentar.")
+                    detener.set()
+                    return
+
     with canal.servicio.cliente_compartido_envio(continuar=activo):
         with ThreadPoolExecutor(max_workers=trabajadores) as pool:
-            while True:
-                while siguiente < len(destinatarios) \
-                        and len(futuros) < trabajadores \
-                        and not job.get("pausado") and not job.get("cancelado") \
-                        and not detener.is_set():
-                    d = destinatarios[siguiente]
-                    siguiente += 1
-                    # ThreadPoolExecutor no propaga ContextVar automáticamente.
-                    # Copiamos el contexto para que stdout/stderr del worker
-                    # quede dentro del log de la acción de envío correspondiente.
-                    contexto_worker = contextvars.copy_context()
-                    futuros.add(pool.submit(contexto_worker.run, trabajador, d))
-                if not futuros:
-                    if siguiente >= len(destinatarios):
-                        break
-                    if job.get("pausado") and not job.get("cancelado") and not detener.is_set():
-                        job["estado"] = "pausado"
-                        time.sleep(0.2)
-                        continue
-                    break
-                terminados, futuros = wait(futuros, timeout=0.2, return_when=FIRST_COMPLETED)
-                for futuro in terminados:
-                    try:
-                        futuro.result()
-                    except Exception as exc:
-                        log_error(f"procesar_job {job_id}: trabajador", exc)
-                        job["detalle"] = ("Envío detenido por un error interno. Revisa el historial del lote "
-                                          "y verifica los mensajes ya aceptados antes de reintentar.")
-                        detener.set()
-                # Los trabajadores ya iniciados se drenan incluso si hay error.
+            # El contexto enlaza los errores del trabajador con el log del lote.
+            futuros = [pool.submit(contextvars.copy_context().run, consumir_destinatarios)
+                       for _ in range(min(trabajadores, len(destinatarios)))]
+            for futuro in futuros:
+                futuro.result()
     job["actual"] = ""
     if detener.is_set():
         job["estado"] = "error"
@@ -8783,6 +8771,12 @@ def _aceptados_job_ultimo_segundo(job: dict | None, ahora: float) -> int:
     return sum(ahora - 1 < t <= ahora for t in job.get("aceptados_ultimos") or ())
 
 
+def _ritmo_job_10s(job: dict | None, ahora: float) -> float:
+    if not job or job.get("estado") != "en_proceso":
+        return 0.0
+    return sum(ahora - 10 < marca <= ahora for marca in job.get("aceptados_ultimos") or ()) / 10
+
+
 def envios_en_progreso(sesion: dict = Depends(exigir("mensajeria"))):
     """Jobs manuales, programados activos y lotes de reagendamiento iniciados.
 
@@ -8838,6 +8832,7 @@ def envios_en_progreso(sesion: dict = Depends(exigir("mensajeria"))):
             "plantilla": f.get("plantilla_nombre") or "", "estado": estado,
             "total": total, "enviados": enviados, "fallidos": fallidos,
             "aceptados_ultimo_segundo": _aceptados_job_ultimo_segundo(vivo, ahora_mono),
+            "ritmo_mps_10s": _ritmo_job_10s(vivo, ahora_mono),
             "quien_envio": f.get("creador_nombre") or f.get("creador") or "",
             "quien_aprobo": f.get("decidido_por") or "",
             "base": f.get("tabla") or "", "area": f.get("area_nombre") or "",
@@ -8865,6 +8860,7 @@ def envios_en_progreso(sesion: dict = Depends(exigir("mensajeria"))):
             "total": job.get("total", 0), "enviados": job.get("enviados", 0),
             "fallidos": job.get("fallidos", 0),
             "aceptados_ultimo_segundo": _aceptados_job_ultimo_segundo(job, ahora_mono),
+            "ritmo_mps_10s": _ritmo_job_10s(job, ahora_mono),
             "quien_envio": job.get("nombre_enviador") or job.get("usuario") or "",
             "quien_aprobo": "",
             "base": job.get("base", job.get("ambiente")) or "",

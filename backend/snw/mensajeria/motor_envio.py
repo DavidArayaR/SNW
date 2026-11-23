@@ -1,5 +1,9 @@
-from db import log_error
+import asyncio
+import threading
+from contextlib import contextmanager
+
 import httpx
+from db import log_error
 
 from snw.whatsapp.whatsapp_service import WhatsAppService, ResultadoEnvioIncierto, EnvioInterrumpido
 from snw.seguridad.supresion import esta_bloqueado_para_envio, esta_suprimido  # compatibilidad con integraciones existentes
@@ -29,12 +33,23 @@ class MotorSimulado:
 
 class MotorApiOficial:
     nombre = "api_oficial"
+    _ciclo_trabajador = threading.local()
 
     def __init__(self, phone_number_id: str | None = None):
         self.servicio = WhatsAppService(phone_number_id=phone_number_id)
 
     def disponible(self) -> bool:
         return self.servicio.configurada()
+
+    @contextmanager
+    def reutilizar_ciclo(self):
+        """Reutiliza el loop y sus hilos de E/S durante un lote."""
+        with asyncio.Runner() as ciclo:
+            self._ciclo_trabajador.actual = ciclo
+            try:
+                yield
+            finally:
+                del self._ciclo_trabajador.actual
 
     def enviar(self, telefono: str, mensaje: str, plantilla: dict | None = None,
                variables: dict | None = None, *, permitir_aviso_baja: bool = False):
@@ -43,15 +58,13 @@ class MotorApiOficial:
         Si la plantilla lleva 'whatsapp_template' configurado se envía como
         template aprobado; si no, texto libre dentro de la ventana de 24h.
         """
-        import asyncio
-
         try:
-            if esta_bloqueado_para_envio(telefono, permitir_aviso_baja=permitir_aviso_baja):
-                return False, None, "Paciente excluido por su preferencia de contacto"
-            ok, message_id, error, _ = asyncio.run(
-                self.servicio.enviar(telefono, mensaje, plantilla=plantilla, variables=variables,
-                                     permitir_aviso_baja=permitir_aviso_baja)
-            )
+            # WhatsAppService comprueba la supresión y las bajas para cada envío.
+            ciclo = getattr(self._ciclo_trabajador, "actual", None)
+            ejecutar = ciclo.run if ciclo is not None else asyncio.run
+            ok, message_id, error, _ = ejecutar(self.servicio.enviar(
+                telefono, mensaje, plantilla=plantilla, variables=variables,
+                permitir_aviso_baja=permitir_aviso_baja))
         except EnvioInterrumpido:
             raise
         except (httpx.TransportError, ResultadoEnvioIncierto) as e:

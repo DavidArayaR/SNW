@@ -66,8 +66,8 @@ function progEnProgresoHtml(it) {
       ? `<div class="prog-item__meta">Enviados: ${it.enviados || 0} · Errores: ${it.fallidos || 0} · Omitidos: ${it.invalidos || 0}</div>`
       : "") +
     (it.job_id && ["en_proceso", "pausado"].includes(it.estado)
-      ? `<div class="prog-item__ritmo">Ritmo real: <strong>${it.aceptados_ultimo_segundo || 0} mensajes/s</strong>` +
-        `<span> (aceptados por Meta en los últimos 1 s)</span></div>`
+      ? `<div class="prog-item__ritmo">Ritmo real: <strong>${Number(it.ritmo_mps_10s ?? it.aceptados_ultimo_segundo ?? 0).toLocaleString("es-CL")} mensajes/s</strong>` +
+        `<span> (promedio de aceptación de Meta en 10 s)</span></div>`
       : "") +
     ((controlaPausa || cancelaJob || cancelaProg)
       ? `<div class="prog-item__acciones">` +
@@ -119,7 +119,7 @@ async function cambiarPausaEnProgreso(btn) {
 }
 
 function firmaItemProgreso(it) {
-  return `${it.origen}:${it.id ?? it.job_id}:${it.estado}:${it.enviados || 0}:${it.fallidos || 0}:${it.invalidos || 0}:${it.total || 0}:${it.aceptados_ultimo_segundo || 0}`;
+  return `${it.origen}:${it.id ?? it.job_id}:${it.estado}:${it.enviados || 0}:${it.fallidos || 0}:${it.invalidos || 0}:${it.total || 0}:${it.ritmo_mps_10s ?? it.aceptados_ultimo_segundo ?? 0}`;
 }
 
 function asegurarContenedorProgreso(lista) {
