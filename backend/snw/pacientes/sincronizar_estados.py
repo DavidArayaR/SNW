@@ -172,7 +172,43 @@ def _bases_por_clinica(cur) -> dict:
     return grupos
 
 
-def _ejecutar_diaria(fecha: dt.date, permitir_primera: bool) -> bool:
+def _hubo_envios_de_campana(cur, fecha: dt.date) -> bool:
+    dia_siguiente = fecha + dt.timedelta(days=1)
+    # El historial manual usa la hora local del servidor, mientras que
+    # programado_para guarda la hora chilena elegida en el formulario.
+    limites_locales = tuple(dt.datetime.combine(dia, dt.time.min, _CHILE).astimezone().replace(tzinfo=None)
+                            for dia in (fecha, dia_siguiente))
+    cur.execute(
+        "SELECT 1 FROM log_envios l JOIN envios e ON e.id=l.envio_id"
+        " WHERE e.programado_id IS NULL AND l.fecha_hora >= %s AND l.fecha_hora < %s"
+        " AND e.base_datos NOT IN ('paciente_reagendar','pacientes_dev','simulacion')"
+        " AND l.whatsapp_message_id IS NOT NULL AND l.whatsapp_message_id<>'' LIMIT 1",
+        limites_locales,
+    )
+    if cur.fetchone():
+        return True
+    cur.execute(
+        "SELECT 1 FROM envios_programados p JOIN envios e ON e.programado_id=p.id"
+        " JOIN log_envios l ON l.envio_id=e.id"
+        " WHERE p.ambiente='produccion' AND p.programado_para >= %s AND p.programado_para < %s"
+        " AND e.base_datos NOT IN ('paciente_reagendar','pacientes_dev','simulacion')"
+        " AND l.whatsapp_message_id IS NOT NULL AND l.whatsapp_message_id<>'' LIMIT 1",
+        (fecha, dia_siguiente),
+    )
+    return cur.fetchone() is not None
+
+
+def _queda_programado_del_dia(cur, fecha: dt.date) -> bool:
+    cur.execute(
+        "SELECT 1 FROM envios_programados WHERE ambiente='produccion'"
+        " AND estado IN ('aprobado','enviando')"
+        " AND programado_para >= %s AND programado_para < %s LIMIT 1",
+        (fecha, fecha + dt.timedelta(days=1)),
+    )
+    return cur.fetchone() is not None
+
+
+def _ejecutar_diaria(fecha: dt.date, permitir_primera: bool, *, dia_abierto: bool = False) -> bool:
     """Procesa como máximo una clínica por turno y conserva el avance diario."""
     with conectar() as conn, conn.cursor() as cur, bloquear(cur) as tomado:
         if not tomado:
@@ -186,9 +222,13 @@ def _ejecutar_diaria(fecha: dt.date, permitir_primera: bool) -> bool:
         ultima = cur.fetchone()
         if (not ultima and not permitir_primera) or (ultima and ultima["finalizada"] and ultima["fecha"] >= fecha):
             return True
+        activa = ultima if ultima and not ultima["finalizada"] else None
+        if activa is None and not _hubo_envios_de_campana(cur, fecha):
+            # La primera consulta puede llegar antes que el último envío.
+            # Un programado atrasado sigue atribuido a su fecha prevista.
+            return not dia_abierto and not _queda_programado_del_dia(cur, fecha)
         if segundos_de_espera(cur):
             return False
-        activa = ultima if ultima and not ultima["finalizada"] else None
         fecha_activa = activa["fecha"] if activa else fecha
         detalle = json.loads(activa["bases"]) if activa else []
         completadas = {base["clinica"] for base in detalle}
@@ -230,7 +270,8 @@ async def loop_diario() -> None:
         if fecha != revisada:
             try:
                 with accion_de_error("sincronización diaria de pacientes"):
-                    if await asyncio.to_thread(_ejecutar_diaria, fecha, permitir_primera):
+                    if await asyncio.to_thread(_ejecutar_diaria, fecha, permitir_primera,
+                                               dia_abierto=fecha == ahora.date()):
                         revisada = fecha
             except Exception as exc:
                 log_error("sincronización diaria de pacientes", exc, solo_tipo=True)
