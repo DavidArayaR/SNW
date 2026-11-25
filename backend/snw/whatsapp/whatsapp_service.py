@@ -2307,7 +2307,7 @@ class WhatsAppService:
                     for sql, params in (
                         (f"UPDATE {p['tabla']} SET no_interesado = 1, interesado = 0 WHERE {match}", (p["id"], telefono)),
                         (f"UPDATE {p['tabla']} SET interes_plantilla_clave = %s, interes_fecha = NOW() WHERE {match}",
-                         (clave_oferta, telefono)),
+                         (clave_oferta, p["id"], telefono)),
                     ):
                         try:
                             cur.execute(sql, params)
