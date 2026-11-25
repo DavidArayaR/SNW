@@ -10251,6 +10251,14 @@ async def _arrancar_scheduler_programados() -> None:
             print("[RESERVO] Worker inactivo: falta instalar el esquema de Pacientes Reservo.",
                   flush=True)
 
+_HISTORIAL_LOTE_VISIBLE = (
+    "(e.programado_id IS NULL OR e.estado <> 'cancelado' OR COALESCE(e.enviados, 0) > 0"
+    " OR EXISTS (SELECT 1 FROM log_envios l WHERE l.envio_id = e.id"
+    " AND (l.estado_envio = 'enviado' OR l.whatsapp_message_id IS NOT NULL)))"
+)
+_HISTORIAL_PROGRAMADO_SIN_CANCELAR = "p.estado <> 'cancelado'"
+
+
 def listar_historial(q: str | None = Query(None), estado: str | None = Query(None),
                      ambiente: str = Query("produccion"),
                      area_id: int | None = Query(None),
@@ -10271,12 +10279,14 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
     tab_col = "tabla_pacientes" if "tabla_pacientes" in cols_env else "NULL AS tabla_pacientes"
     prog_col = "programado_id" if "programado_id" in cols_env else "NULL AS programado_id"
     prog_fecha = ("(SELECT p.programado_para FROM envios_programados p"
-                  " WHERE p.id = envios.programado_id) AS fecha_prevista"
+                  " WHERE p.id = e.programado_id) AS fecha_prevista"
                   if "programado_id" in cols_env else "NULL AS fecha_prevista")
     sql = ("SELECT id, base_datos, plantilla_clave, plantilla_nombre, total_pacientes,"
            f" enviados, fallidos, invalidos, estado, {com_col}, {esp_col}, {tab_col},"
-           f" {prog_col}, {prog_fecha}, centro_codigo, numero_emisor, fecha_hora FROM envios")
-    condiciones: list[str] = ["NOT EXISTS (SELECT 1 FROM reagendar_envios_agrupados ag WHERE ag.envio_id=envios.id)"]
+           f" {prog_col}, {prog_fecha}, centro_codigo, numero_emisor, fecha_hora FROM envios e")
+    condiciones: list[str] = ["NOT EXISTS (SELECT 1 FROM reagendar_envios_agrupados ag WHERE ag.envio_id=e.id)"]
+    if "programado_id" in cols_env:
+        condiciones.append(_HISTORIAL_LOTE_VISIBLE)
     args: list = []
     base_reservo = _base_reservo_por_nombre(tabla) if tabla else None
     if centro != "todos":
@@ -10371,10 +10381,10 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
     # Los programados con lote ejecutado ya están en `envios`; no duplicarlos.
     if origen in ("todos", "programado"):
         with conectar() as conn, conn.cursor() as cur:
-            sin_lote = (" WHERE NOT EXISTS (SELECT 1 FROM envios e WHERE e.programado_id = p.id)"
+            sin_lote = (" AND NOT EXISTS (SELECT 1 FROM envios e WHERE e.programado_id = p.id)"
                         if "programado_id" in cols_env else "")
             cur.execute(
-                "SELECT p.* FROM envios_programados p"
+                f"SELECT p.* FROM envios_programados p WHERE {_HISTORIAL_PROGRAMADO_SIN_CANCELAR}"
                 + sin_lote + " ORDER BY p.programado_para DESC, p.id DESC LIMIT 300"
             )
             programados = list(cur.fetchall() or [])
@@ -10518,6 +10528,8 @@ def _fuentes_historial_pagina(sesion: dict, ambiente: str, area_id: int | None,
 
     if origen != "programado" or "programado_id" in cols_env:
         cond_e, args_e = ["NOT EXISTS (SELECT 1 FROM reagendar_envios_agrupados ag WHERE ag.envio_id=e.id)"], []
+        if "programado_id" in cols_env and origen not in ("manual", "reagendamiento"):
+            cond_e.append(_HISTORIAL_LOTE_VISIBLE)
         if origen == "reagendamiento":
             cond_e.append("e.base_datos = 'paciente_reagendar'")
         elif origen in ("manual", "programado"):
@@ -10565,7 +10577,7 @@ def _fuentes_historial_pagina(sesion: dict, ambiente: str, area_id: int | None,
         argumentos.extend(args_e)
 
     if origen in ("todos", "programado"):
-        cond_p, args_p = [], []
+        cond_p, args_p = [_HISTORIAL_PROGRAMADO_SIN_CANCELAR], []
         if centro != "todos":
             cond_p.append("p.centro_codigo = %s")
             args_p.append(centro)
