@@ -268,12 +268,19 @@ body[data-pagina="configuracion"] #secciones {
   background: var(--panel-2);
   padding: 14px;
 }
+.config-patrones__acciones {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin-block-end: 12px;
+}
 .config-campo .config-patrones__toggle {
   display: inline-flex;
   align-items: center;
   gap: 9px;
   width: fit-content;
-  margin: 0 0 12px;
+  margin: 0;
   color: var(--texto);
   cursor: pointer;
 }

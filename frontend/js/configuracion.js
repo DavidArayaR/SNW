@@ -340,7 +340,9 @@ function htmlEditorPatrones(clave, valor) {
       `<p class="config-patrones__error" data-error-patron="${motivo}" hidden></p></div>`;
   }).join("");
   return `<div class="config-patrones" data-config-patrones="${clave}" data-modo="${obj ? "facil" : "json"}">` +
+    `<div class="config-patrones__acciones">` +
     `<label class="config-patrones__toggle"><input type="checkbox" data-pegar-json${obj ? "" : " checked"}> Pegar JSON</label>` +
+    `<button type="button" class="btn btn--ghost" data-copiar-patrones><i class="fa-solid fa-copy" aria-hidden="true"></i> Copiar JSON</button></div>` +
     (esBot ? "" : `<div class="config-patrones__exportar">` +
       `<label for="corpusExportar">Corpus para revisar</label>` +
       `<select id="corpusExportar" data-corpus-origen><option value="completo">Mensajes completos</option>` +
@@ -356,6 +358,19 @@ function htmlEditorPatrones(clave, valor) {
       `<textarea id="${clave}_json_raw" data-patrones-raw rows="12" spellcheck="false">${escaparHtml(obj ? JSON.stringify(obj, null, 2) : valor)}</textarea>` +
       `<p class="config-patrones__error" data-error-json hidden></p></div>` +
     `<textarea id="cf_${clave}" data-clave="${clave}" hidden>${escaparHtml(valor)}</textarea></div>`;
+}
+
+async function copiarJsonPatrones(editor) {
+  if (editor.classList.contains("config-patrones--invalido")) return;
+  const valor = editor.querySelector("[data-clave]").value;
+  const patrones = leerPatrones(valor, editor.dataset.configPatrones);
+  if (!patrones) return;
+  try {
+    await navigator.clipboard.writeText(JSON.stringify(patrones, null, 2));
+    toast("JSON copiado al portapapeles.");
+  } catch {
+    toast("No se pudo copiar el JSON. Puedes copiarlo desde «Pegar JSON».", "error");
+  }
 }
 
 async function descargarCorpus(wrap) {
@@ -428,6 +443,7 @@ function actualizarEditorPatrones(wrap) {
     if (frases.length) obj[motivo] = frases;
   }
   editor.classList.toggle("config-patrones--invalido", !valido);
+  editor.querySelector("[data-copiar-patrones]").disabled = !valido;
   editor.querySelector("[data-clave]").value = JSON.stringify(obj);
   editor.querySelector("pre").textContent = JSON.stringify(obj, null, 2);
   editor.querySelector("[data-patrones-raw]").value = JSON.stringify(obj, null, 2);
@@ -451,6 +467,7 @@ function actualizarJsonPatrones(wrap) {
   error.hidden = !mensaje;
   raw.setAttribute("aria-invalid", mensaje ? "true" : "false");
   editor.classList.toggle("config-patrones--invalido", !!mensaje);
+  editor.querySelector("[data-copiar-patrones]").disabled = !!mensaje;
   editor.querySelector("[data-clave]").value = raw.value.trim();
   marcarCambios();
 }
@@ -938,6 +955,8 @@ function render(secciones) {
       input.addEventListener("input", marcarCambios);
       input.addEventListener("change", marcarCambios);
       if (c.clave in CATEGORIAS_PATRONES && wrap.querySelector(".config-patrones")) {
+        const editor = wrap.querySelector(".config-patrones");
+        editor.querySelector("[data-copiar-patrones]").addEventListener("click", () => copiarJsonPatrones(editor));
         wrap.querySelector("[data-descargar-corpus]")?.addEventListener("click", () => descargarCorpus(wrap));
         wrap.querySelectorAll("[data-patron]").forEach((textarea) =>
           textarea.addEventListener("input", () => actualizarEditorPatrones(wrap)));
