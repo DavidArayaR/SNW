@@ -10270,9 +10270,9 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
     esp_col = "area_id" if "area_id" in cols_env else "NULL AS area_id"
     tab_col = "tabla_pacientes" if "tabla_pacientes" in cols_env else "NULL AS tabla_pacientes"
     prog_col = "programado_id" if "programado_id" in cols_env else "NULL AS programado_id"
-    prog_fecha = ("(SELECT p.creado FROM envios_programados p"
-                  " WHERE p.id = envios.programado_id) AS programado_creado"
-                  if "programado_id" in cols_env else "NULL AS programado_creado")
+    prog_fecha = ("(SELECT p.programado_para FROM envios_programados p"
+                  " WHERE p.id = envios.programado_id) AS fecha_prevista"
+                  if "programado_id" in cols_env else "NULL AS fecha_prevista")
     sql = ("SELECT id, base_datos, plantilla_clave, plantilla_nombre, total_pacientes,"
            f" enviados, fallidos, invalidos, estado, {com_col}, {esp_col}, {tab_col},"
            f" {prog_col}, {prog_fecha}, centro_codigo, numero_emisor, fecha_hora FROM envios")
@@ -10357,7 +10357,7 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
 
     if condiciones:
         sql += " WHERE " + " AND ".join(condiciones)
-    sql += " ORDER BY id DESC LIMIT 300"
+    sql += " ORDER BY COALESCE(fecha_prevista, fecha_hora) DESC, id DESC LIMIT 300"
 
     with conectar(ambiente) as conn, conn.cursor() as cur:
         cur.execute(sql, tuple(args) or None)
@@ -10365,7 +10365,7 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
 
     for f in filas:
         fecha_lote = f.pop("fecha_hora")
-        f["_orden"] = f.pop("programado_creado", None) or fecha_lote
+        f["_orden"] = f.pop("fecha_prevista", None) or fecha_lote
         f["origen"] = "programado" if f.pop("programado_id", None) is not None else "manual"
 
     # Los programados con lote ejecutado ya están en `envios`; no duplicarlos.
@@ -10375,7 +10375,7 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
                         if "programado_id" in cols_env else "")
             cur.execute(
                 "SELECT p.* FROM envios_programados p"
-                + sin_lote + " ORDER BY p.creado DESC, p.id DESC LIMIT 300"
+                + sin_lote + " ORDER BY p.programado_para DESC, p.id DESC LIMIT 300"
             )
             programados = list(cur.fetchall() or [])
         for g in programados:
@@ -10397,7 +10397,7 @@ def listar_historial(q: str | None = Query(None), estado: str | None = Query(Non
                 if qq not in (g.get("tabla") or "").lower() \
                         and qq not in (g.get("plantilla_nombre") or "").lower():
                     continue
-            g["_orden"] = g.get("creado") or g.get("programado_para")
+            g["_orden"] = g.get("programado_para")
             g["origen"] = "programado"
             g["_sin_lote"] = True
             filas.append(g)
@@ -10554,7 +10554,7 @@ def _fuentes_historial_pagina(sesion: dict, ambiente: str, area_id: int | None,
                           " OR e.plantilla_nombre LIKE %s)")
             args_e.extend((like, like, like))
         if "programado_id" in cols_env and origen not in ("manual", "reagendamiento"):
-            fecha_e = "COALESCE(pp.creado, e.fecha_hora)"
+            fecha_e = "COALESCE(pp.programado_para, e.fecha_hora)"
             join_e = " LEFT JOIN envios_programados pp ON pp.id = e.programado_id"
         else:
             fecha_e = "e.fecha_hora"
@@ -10600,7 +10600,7 @@ def _fuentes_historial_pagina(sesion: dict, ambiente: str, area_id: int | None,
             cond_p.append("(p.tabla LIKE %s OR p.plantilla_nombre LIKE %s)")
             args_p.extend((like, like))
         sql_partes.append("SELECT 1 AS tipo, p.id AS id,"
-                          " COALESCE(p.creado, p.programado_para) AS fecha_orden"
+                          " p.programado_para AS fecha_orden"
                           " FROM envios_programados p"
                           + (" WHERE " + " AND ".join(cond_p) if cond_p else ""))
         argumentos.extend(args_p)
@@ -10665,9 +10665,9 @@ def listar_historial_pagina(q: str = Query("", max_length=100),
             esp_col = "area_id" if "area_id" in cols_env else "NULL AS area_id"
             tab_col = "tabla_pacientes" if "tabla_pacientes" in cols_env else "NULL AS tabla_pacientes"
             prog_col = "programado_id" if "programado_id" in cols_env else "NULL AS programado_id"
-            prog_fecha = ("(SELECT p.creado FROM envios_programados p"
-                          " WHERE p.id = envios.programado_id) AS programado_creado"
-                          if "programado_id" in cols_env else "NULL AS programado_creado")
+            prog_fecha = ("(SELECT p.programado_para FROM envios_programados p"
+                          " WHERE p.id = envios.programado_id) AS fecha_prevista"
+                          if "programado_id" in cols_env else "NULL AS fecha_prevista")
             marcadores = ", ".join("%s" for _ in ids_e)
             cur.execute("SELECT id, base_datos, plantilla_clave, plantilla_nombre, total_pacientes,"
                         f" enviados, fallidos, invalidos, estado, {com_col}, {esp_col}, {tab_col},"
@@ -10675,7 +10675,7 @@ def listar_historial_pagina(q: str = Query("", max_length=100),
                         f" WHERE id IN ({marcadores})", tuple(ids_e))
             for f in cur.fetchall() or []:
                 fecha = f.pop("fecha_hora")
-                f["_orden"] = f.pop("programado_creado", None) or fecha
+                f["_orden"] = f.pop("fecha_prevista", None) or fecha
                 f["origen"] = "programado" if f.pop("programado_id", None) is not None else "manual"
                 por_clave[(0, int(f["id"]))] = f
         if ids_p:
@@ -10684,7 +10684,7 @@ def listar_historial_pagina(q: str = Query("", max_length=100),
             for g in cur.fetchall() or []:
                 if not _prog_visible(sesion, g):
                     continue
-                g["_orden"] = g.get("creado") or g.get("programado_para")
+                g["_orden"] = g.get("programado_para")
                 g["origen"] = "programado"
                 g["_sin_lote"] = True
                 por_clave[(1, int(g["id"]))] = g
