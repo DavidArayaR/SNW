@@ -1356,6 +1356,14 @@ class WhatsAppService:
         hubo_retract = False
         hubo_baja = False
         hubo_interes = False
+
+        def registrar_baja(accion, mensaje_id=None):
+            nonlocal hubo_baja
+            opciones = {"mensaje_id": mensaje_id} if mensaje_id else {}
+            registrada = self._registrar_baja(telefono, aviso=False, **opciones)
+            hubo_baja = registrada or hubo_baja
+            acciones.append(accion if registrada else "baja_error")
+
         for mensaje in valor.get("messages", []):
             tipo = mensaje.get("type", "")
             texto = ""
@@ -1416,9 +1424,7 @@ class WhatsAppService:
                     acciones.append("eliminacion_solicitada")
                     return acciones
                 # No borrar sin el aviso previo que explica las consecuencias.
-                self._registrar_baja(telefono, aviso=False)
-                hubo_baja = True
-                acciones.append("baja_sin_aviso_de_eliminacion")
+                registrar_baja("baja_sin_aviso_de_eliminacion")
                 continue
 
             # El mensaje íntegro se guarda separado de su huella técnica para
@@ -1434,7 +1440,8 @@ class WhatsAppService:
                 catalogo = patrones_configurados(config_get("call_center_patrones_consulta", "{}"))
                 bots = patrones_bot_configurados(config_get("call_center_patrones_bot", "{}"))
                 clasificacion = clasificar(cuerpo, catalogo, patrones_bot=bots)
-            if clasificacion and clasificacion.automatizacion != "SIN_EVIDENCIA_AUTOMATIZACION":
+            if (clasificacion and boton != BOTON_TEXTO_BAJA.casefold()
+                    and clasificacion.automatizacion != "SIN_EVIDENCIA_AUTOMATIZACION"):
                 # No reactivar bajas, marcar interés, derivar ni contestar a una
                 # posible autorespuesta. El original permanece en el historial.
                 info = self._registrar_respuesta(telefono, cuerpo, mensaje.get("timestamp"),
@@ -1455,6 +1462,8 @@ class WhatsAppService:
                     log_error("al_detectar_insulto", exc)
             accion_payload = next((accion for accion, payload in ACCIONES_BOTON_TEMPLATE.items()
                                    if es_boton and extra == payload), None)
+            if es_boton and extra == BOTON_ID_BAJA_INSULTO:
+                accion_payload = "baja"
             interes = es_mensaje_interes(cuerpo) if accion_payload is None else accion_payload == "interes"
             baja = ((self._es_baja(texto) or self._es_baja(extra)) if accion_payload is None
                     else accion_payload == "baja")
@@ -1491,17 +1500,13 @@ class WhatsAppService:
                 except Exception as exc:
                     log_error("al_respuesta_reagendar", exc)
             if reagendar == "gestionado":
-                if fue_baja:
-                    # El flujo de reagendamiento ya registró su interacción;
-                    # sincroniza también la huella global y las otras bases.
-                    self._registrar_baja(telefono, aviso=False)
-                    hubo_baja = True
-                    acciones.append("baja_global")
                 info = self._registrar_respuesta(telefono, cuerpo, mensaje.get("timestamp"),
                                                  mensaje_id=mensaje.get("id"),
                                                  referencia_meta_id=(mensaje.get("context") or {}).get("id"),
                                                  gestionada_reagendar=True)
                 acciones.append(f"respuesta_{info}")
+                if fue_baja:
+                    registrar_baja("baja_global", mensaje.get("id"))
                 acciones.append("reagendar_gestionado")
                 continue
 
@@ -1536,6 +1541,10 @@ class WhatsAppService:
                                              referencia_meta_id=(mensaje.get("context") or {}).get("id"))
             acciones.append(f"respuesta_{info}")
 
+            if fue_baja:
+                registrar_baja("baja_boton" if es_boton else "baja", mensaje.get("id"))
+                continue
+
             if es_boton and re.fullmatch(r"snw_tpl_opciones_\d+", extra or ""):
                 if callable(al_mostrar_opciones):
                     try:
@@ -1547,11 +1556,7 @@ class WhatsAppService:
             if tipo == "interactive" and (mensaje.get("interactive") or {}).get("type") == "list_reply":
                 coincidencia = re.fullmatch(r"snw_lista_(\d+)_([0-9a-f]{12})_(\d+)", extra or "")
                 if coincidencia:
-                    if fue_baja:
-                        self._registrar_baja(telefono, aviso=False)
-                        hubo_baja = True
-                        acciones.append("baja_lista")
-                    elif callable(al_responder_opcion):
+                    if callable(al_responder_opcion):
                         try:
                             al_responder_opcion(telefono, int(coincidencia[1]), coincidencia[2],
                                                int(coincidencia[3]), mensaje.get("id"))
@@ -1656,13 +1661,6 @@ class WhatsAppService:
                 self._registrar_no_interes(telefono)
                 acciones.append("no_interes_boton")
                 continue
-            if es_boton and (accion_payload == "baja" or
-                            (accion_payload is None and boton == BOTON_TEXTO_BAJA.casefold())):
-                self._registrar_baja(telefono, aviso=False)
-                hubo_baja = True
-                acciones.append("baja_boton")
-                continue
-
             if interes:
                 # El interés manda: si el paciente se había dado de baja y ahora
                 # dice que le interesa, se revierte la baja.
@@ -1680,20 +1678,12 @@ class WhatsAppService:
                             al_detectar_interes(telefono)
                     except Exception as e:
                         log_error(f"al_detectar_interes({telefono})", e)
-            elif baja:
-                self._registrar_baja(telefono, aviso=False)
-                hubo_baja = True
-                acciones.append("baja")
             elif no_interes:
                 self._registrar_no_interes(telefono)
                 acciones.append("no_interes")
 
-        # Avisos decididos con el estado opt-out FINAL del evento:
-        #  - termina de baja habiéndolo estado al inicio   -> nada (baja repetida).
-        #  - termina de baja sin estarlo al inicio         -> despedida (baja nueva).
-        #  - termina reactivado tras una retractación      -> "bienvenido de vuelta".
-        #  - algún interés en el evento                    -> solo la respuesta de
-        #    call center (ya programada arriba), sin avisos.
+        # El aviso requiere una baja guardada y aún activa al final del evento.
+        # Para números reales se conserva el control de avisos repetidos.
         opt_out_final = self._estaba_opt_out(telefono)
         if opt_out_final:
             if hubo_baja and (numero_prueba or exento or not oferta_eliminacion_enviada(telefono)):
@@ -2056,80 +2046,78 @@ class WhatsAppService:
         return "registrada"
 
     def _registrar_baja(self, telefono: str, aviso: bool | None = None,
-                       simulada: bool = False) -> None:
-        match = _TEL_MATCH.format(col="telefono")
+                       simulada: bool = False, *, mensaje_id: str | None = None) -> bool:
         try:
-            from snw.reagendamiento.paciente_reagendar import marcar_opt_out_reagendar
-            with conectar() as conn, conn.cursor() as cur:
-                huella, huella_activa = bloquear_huella_baja(cur, telefono)
-                huellas_temporales = [] if huella_activa else [huella]
-                cur.execute("SELECT estado FROM supresion_telefonos"
-                            " WHERE huella=%s FOR UPDATE", (huella,))
-                supresion = cur.fetchone()
-                if supresion and supresion.get("estado") != "exento":
-                    limpiar_cerrojos_baja_inactivos(cur, huellas_temporales)
-                    conn.commit()
-                    return
-                marcar_opt_out_reagendar(telefono, True, cur=cur)
-                pacientes = self._pacientes_con_tel(cur, telefono)
-                # Si ya estaba de baja, esto es un webhook repetido (Meta
-                # garantiza entrega "al menos una vez", no exactamente una) o
-                # una baja repetida — no es una baja nueva, así que por defecto
-                # no se reenvía el aviso de despedida.
-                ya_de_baja = huella_activa or bool(pacientes) and all(
-                    p.get("whatsapp_opt_out") for p in pacientes)
-                if not simulada:
-                    activar_huella_baja(cur, huella)
-                    huellas_temporales.clear()
-                if simulada:
-                    # Marcador reversible, sin crear huella de supresión real.
-                    # Evita que un aviso de baja encolado salga después de ELIMINAR.
-                    cur.execute("INSERT INTO whatsapp_avisos_unicos (telefono, tipo)"
-                                " VALUES (%s, 'eliminacion_simulada')"
-                                " ON DUPLICATE KEY UPDATE enviado = NOW()", (telefono,))
-                for p in pacientes:
-                    cur.execute(f"UPDATE {p['tabla']} SET whatsapp_opt_out = 1 WHERE {match}", (telefono,))
-                    # Baja pedida con sus propias palabras por WhatsApp: queda
-                    # bloqueada para edición manual hasta que el paciente se
-                    # retracte (ver _registrar_interes / _registrar_retractacion).
-                    try:
-                        cur.execute(f"UPDATE {p['tabla']} SET opt_out_explicito = 1 WHERE {match}", (telefono,))
-                    except Exception:
-                        pass  # esquema sin la columna
-                    # Al darse de baja se quita la marca de interés (si la tenía).
-                    try:
-                        cur.execute(f"UPDATE {p['tabla']} SET interesado = 0, no_interesado = 0 WHERE {match}", (telefono,))
-                    except Exception:
-                        pass  # esquema sin la columna
-                    cond_t, args_t = self._cond_tabla(p["tabla"])
-                    cur.execute(
-                        "UPDATE log_envios SET respuesta = 'baja'"
-                        f" WHERE paciente_id = %s {cond_t} ORDER BY id DESC LIMIT 1",
-                        (p["id"], *args_t),
-                    )
-                if not ya_de_baja and (simulada or es_numero_prueba(telefono)):
-                    # Solo las pruebas pueden repetir el ciclo de avisos. En
-                    # números reales, conservar 'reintegro' evita respuestas
-                    # automáticas en cada alternancia entre baja y alta.
-                    cur.execute("DELETE FROM whatsapp_avisos_unicos"
-                                " WHERE telefono = %s AND tipo = 'reintegro'", (telefono,))
-                cur.execute("DELETE FROM campania_consultas WHERE telefono = %s", (telefono,))
-                limpiar_cerrojos_baja_inactivos(cur, huellas_temporales)
-                conn.commit()
-        except Exception as e:
-            log_error(f"_registrar_baja({telefono})", e)
-            return
-        if aviso is True:
-            enviar = True
-        elif aviso is False:
-            enviar = False
-        else:
-            enviar = not ya_de_baja
-        if enviar and callable(al_detectar_baja):
+            ya_de_baja = _reintentar_deadlock(self._guardar_baja, telefono, simulada, mensaje_id)
+        except Exception as exc:
+            log_error("webhook: no se pudo guardar la baja de WhatsApp", exc)
+            return False
+        if ya_de_baja is None:  # Supresión permanente activa.
+            return False
+        if (aviso if aviso is not None else not ya_de_baja) and callable(al_detectar_baja):
             try:
                 al_detectar_baja(telefono)
-            except Exception as e:
-                log_error(f"al_detectar_baja({telefono})", e)
+            except Exception as exc:
+                log_error("al_detectar_baja", exc)
+        return True
+
+    def _guardar_baja(self, telefono: str, simulada: bool, mensaje_id: str | None) -> bool | None:
+        match = _TEL_MATCH.format(col="telefono")
+        from snw.reagendamiento.paciente_reagendar import marcar_opt_out_reagendar
+        with conectar() as conn, conn.cursor() as cur:
+            huella, huella_activa = bloquear_huella_baja(cur, telefono)
+            huellas_temporales = [] if huella_activa else [huella]
+            cur.execute("SELECT estado FROM supresion_telefonos"
+                        " WHERE huella=%s FOR UPDATE", (huella,))
+            supresion = cur.fetchone()
+            if supresion and supresion.get("estado") != "exento":
+                limpiar_cerrojos_baja_inactivos(cur, huellas_temporales)
+                conn.commit()
+                return None
+            marcar_opt_out_reagendar(telefono, True, cur=cur)
+            pacientes = self._pacientes_con_tel(cur, telefono, todas=True)
+            # Si ya estaba de baja, esto es un webhook repetido (Meta
+            # garantiza entrega "al menos una vez", no exactamente una) o
+            # una baja repetida — no es una baja nueva, así que por defecto
+            # no se reenvía el aviso de despedida.
+            ya_de_baja = huella_activa or bool(pacientes) and all(
+                p.get("whatsapp_opt_out") for p in pacientes)
+            if not simulada:
+                activar_huella_baja(cur, huella)
+                huellas_temporales.clear()
+            if simulada:
+                # Marcador reversible, sin crear huella de supresión real.
+                # Evita que un aviso de baja encolado salga después de ELIMINAR.
+                cur.execute("INSERT INTO whatsapp_avisos_unicos (telefono, tipo)"
+                            " VALUES (%s, 'eliminacion_simulada')"
+                            " ON DUPLICATE KEY UPDATE enviado = NOW()", (telefono,))
+            for p in sorted(pacientes, key=lambda ficha: (ficha["tabla"], ficha["id"])):
+                filtro = f"WHERE id = %s AND {match}"
+                params = (p["id"], telefono)
+                cur.execute(f"UPDATE {p['tabla']} SET whatsapp_opt_out = 1 {filtro}", params)
+                # Solo se admite la ausencia de columnas de esquemas antiguos.
+                for campo in ("opt_out_explicito = 1", "interesado = 0", "no_interesado = 0"):
+                    try:
+                        cur.execute(f"UPDATE {p['tabla']} SET {campo} {filtro}", params)
+                    except MySQLError as exc:
+                        if not exc.args or exc.args[0] != 1054:
+                            raise
+            if mensaje_id:
+                cur.execute(
+                    "UPDATE log_envios SET respuesta = 'baja'"
+                    " WHERE whatsapp_message_id = %s AND plantilla_clave = 'respuesta'",
+                    (mensaje_id,),
+                )
+            if not ya_de_baja and (simulada or es_numero_prueba(telefono)):
+                # Solo las pruebas pueden repetir el ciclo de avisos. En
+                # números reales, conservar 'reintegro' evita respuestas
+                # automáticas en cada alternancia entre baja y alta.
+                cur.execute("DELETE FROM whatsapp_avisos_unicos"
+                            " WHERE telefono = %s AND tipo = 'reintegro'", (telefono,))
+            cur.execute("DELETE FROM campania_consultas WHERE telefono = %s", (telefono,))
+            limpiar_cerrojos_baja_inactivos(cur, huellas_temporales)
+            conn.commit()
+        return ya_de_baja
 
     def _registrar_retractacion(self, telefono: str, aviso: bool | None = None) -> None:
         """El paciente escribe estando dado de baja: se reactivan sus
