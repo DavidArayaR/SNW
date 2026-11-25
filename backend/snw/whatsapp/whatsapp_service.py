@@ -1843,7 +1843,7 @@ class WhatsAppService:
             return f"AND COALESCE({pref}tabla_pacientes, '') IN ('', %s)", (tabla,)
         return f"AND {pref}tabla_pacientes = %s", (tabla,)
 
-    def _pacientes_con_tel(self, cur, telefono: str) -> list[dict]:
+    def _pacientes_con_tel(self, cur, telefono: str, *, todas: bool = False) -> list[dict]:
         """Filas (id, nombre, telefono, whatsapp_opt_out, tabla) de los
         pacientes cuyo teléfono coincide, en las tablas legacy y en las de
         areas. log_envios es compartida."""
@@ -1852,7 +1852,8 @@ class WhatsAppService:
         errores = []
         for t in self._tablas_pac():
             try:
-                limite = "" if t == "reservo_lista_pacientes" else " LIMIT 1"
+                varias_fichas = todas or t == "reservo_lista_pacientes"
+                limite = "" if varias_fichas else " LIMIT 1"
                 if t == "reservo_lista_pacientes":
                     cur.execute(
                         "SELECT p.id, p.nombre, p.telefono, p.whatsapp_opt_out, p.lista_id,"
@@ -1861,7 +1862,7 @@ class WhatsAppService:
                         f" WHERE {_TEL_MATCH.format(col='p.telefono')}", (telefono,))
                 else:
                     cur.execute(
-                        f"SELECT id, nombre, telefono, whatsapp_opt_out FROM {t} WHERE {match}{limite}",
+                        f"SELECT id, nombre, telefono, whatsapp_opt_out FROM {t} WHERE {match} ORDER BY id{limite}",
                         (telefono,),
                     )
             except Exception as exc:
@@ -1874,7 +1875,7 @@ class WhatsAppService:
                 errores.append(type(exc).__name__)
                 log_error(f"webhook: error al consultar base de pacientes ({t})", exc)
                 continue
-            filas = cur.fetchall() if t == "reservo_lista_pacientes" else [cur.fetchone()]
+            filas = cur.fetchall() if varias_fichas else [cur.fetchone()]
             for row in filas:
                 if row:
                     row["tabla"] = t
@@ -1995,20 +1996,19 @@ class WhatsAppService:
                         log_error("webhook: respuesta contextual con varias bases posibles"
                                   f" (centro={emisor.get('codigo') or 'desconocido'})")
                     return "sin_base_inequivoca"
-            for p in pacientes:
+            for p in sorted(pacientes, key=lambda ficha: (ficha["tabla"], ficha["id"])):
                 if not automatica:
-                    cur.execute(f"UPDATE {p['tabla']} SET estado = 'enviado' WHERE {match}", (telefono,))
-                # Una respuesta real deja sin efecto una corrección manual previa.
-                if not automatica:
+                    filtro = f"id = %s AND {match}"
+                    args = (p["id"], telefono)
                     try:
                         cur.execute(
-                            f"UPDATE {p['tabla']} SET respuesta_manual = NULL"
-                            f" WHERE {match} AND respuesta_manual IS NOT NULL",
-                            (telefono,),
+                            f"UPDATE {p['tabla']} SET estado = 'enviado', respuesta_manual = NULL WHERE {filtro}",
+                            args,
                         )
                     except MySQLError as exc:
                         if not exc.args or exc.args[0] != 1054:
                             raise
+                        cur.execute(f"UPDATE {p['tabla']} SET estado = 'enviado' WHERE {filtro}", args)
                 # El mismo teléfono puede estar en varias bases. Cada una
                 # necesita su propia señal para la ficha y estadísticas.
                 esp = servicio_areas.area_por_tabla(p["tabla"])
@@ -2216,7 +2216,7 @@ class WhatsAppService:
             log_error("_registrar_interes", exc, solo_tipo=True)
 
     def _guardar_interes(self, telefono: str) -> None:
-        match = _TEL_MATCH.format(col="telefono")
+        match = "id = %s AND " + _TEL_MATCH.format(col="telefono")
         from snw.reagendamiento.paciente_reagendar import marcar_opt_out_reagendar
         with conectar() as conn, conn.cursor() as cur:
             huella, huella_activa = bloquear_huella_baja(cur, telefono)
@@ -2229,7 +2229,7 @@ class WhatsAppService:
                 conn.commit()
                 return
             marcar_opt_out_reagendar(telefono, False, cur=cur)
-            pacientes = self._pacientes_con_tel(cur, telefono)
+            pacientes = self._pacientes_con_tel(cur, telefono, todas=True)
             if not pacientes:
                 if huella_activa:
                     retirar_huella_baja(cur, huella)
@@ -2238,14 +2238,14 @@ class WhatsAppService:
                 return
             if huella_activa:
                 retirar_huella_baja(cur, huella)
-            for p in pacientes:
+            for p in sorted(pacientes, key=lambda ficha: (ficha['tabla'], ficha['id'])):
                 clave_oferta = self._ultima_plantilla_ofertada(cur, p["id"], p["tabla"])
                 venia_de_baja = bool(p.get("whatsapp_opt_out"))
                 for sql, params in (
-                    (f"UPDATE {p['tabla']} SET interesado = 1, no_interesado = 0 WHERE {match}", (telefono,)),
-                    (f"UPDATE {p['tabla']} SET whatsapp_opt_out = 0 WHERE {match}", (telefono,)),
+                    (f"UPDATE {p['tabla']} SET interesado = 1, no_interesado = 0 WHERE {match}", (p["id"], telefono)),
+                    (f"UPDATE {p['tabla']} SET whatsapp_opt_out = 0 WHERE {match}", (p["id"], telefono)),
                     # El propio paciente se retracta: se libera el bloqueo.
-                    (f"UPDATE {p['tabla']} SET opt_out_explicito = 0 WHERE {match}", (telefono,)),
+                    (f"UPDATE {p['tabla']} SET opt_out_explicito = 0 WHERE {match}", (p["id"], telefono)),
                     (f"UPDATE {p['tabla']} SET interes_plantilla_clave = %s, interes_fecha = NOW() WHERE {match}",
                      (clave_oferta, telefono)),
                 ):
@@ -2259,7 +2259,7 @@ class WhatsAppService:
                 # necesita ese dato de trazabilidad.
                 if venia_de_baja:
                     try:
-                        cur.execute(f"UPDATE {p['tabla']} SET ultimo_reintegro = NOW() WHERE {match}", (telefono,))
+                        cur.execute(f"UPDATE {p['tabla']} SET ultimo_reintegro = NOW() WHERE {match}", (p["id"], telefono))
                     except MySQLError as exc:
                         if not exc.args or exc.args[0] != 1054:
                             raise
@@ -2296,16 +2296,16 @@ class WhatsAppService:
             log_error("webhook: no se pudo guardar «No me interesa»", exc, solo_tipo=True)
 
     def _guardar_no_interes(self, telefono: str) -> None:
-        match = _TEL_MATCH.format(col="telefono")
+        match = "id = %s AND " + _TEL_MATCH.format(col="telefono")
         with conectar() as conn, conn.cursor() as cur:
             try:
-                pacientes = self._pacientes_con_tel(cur, telefono)
+                pacientes = self._pacientes_con_tel(cur, telefono, todas=True)
                 if not pacientes:
                     return
-                for p in pacientes:
+                for p in sorted(pacientes, key=lambda ficha: (ficha['tabla'], ficha['id'])):
                     clave_oferta = self._ultima_plantilla_ofertada(cur, p["id"], p["tabla"])
                     for sql, params in (
-                        (f"UPDATE {p['tabla']} SET no_interesado = 1, interesado = 0 WHERE {match}", (telefono,)),
+                        (f"UPDATE {p['tabla']} SET no_interesado = 1, interesado = 0 WHERE {match}", (p["id"], telefono)),
                         (f"UPDATE {p['tabla']} SET interes_plantilla_clave = %s, interes_fecha = NOW() WHERE {match}",
                          (clave_oferta, telefono)),
                     ):

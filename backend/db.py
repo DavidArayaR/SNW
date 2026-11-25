@@ -1668,6 +1668,14 @@ def asegurar_tabla_config() -> None:
             if not (cur.fetchone() or {}).get("n"):
                 cur.execute("ALTER TABLE log_envios ADD INDEX idx_log_resp_tel_fecha"
                             " (numero_telefono, fecha_hora)")
+            cur.execute(
+                "SELECT COUNT(*) AS n FROM information_schema.STATISTICS"
+                " WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='log_envios'"
+                " AND INDEX_NAME='idx_log_wa_message_id'"
+            )
+            if not (cur.fetchone() or {}).get("n"):
+                cur.execute("ALTER TABLE log_envios ADD INDEX idx_log_wa_message_id"
+                            " (whatsapp_message_id(191))")
 
             cur.execute("CREATE TABLE IF NOT EXISTS envios_simulaciones ("
                         " solicitud_id CHAR(36) PRIMARY KEY, usuario VARCHAR(150) NOT NULL,"
