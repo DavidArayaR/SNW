@@ -9,6 +9,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from difflib import get_close_matches
+from functools import lru_cache
 
 from snw.whatsapp.deteccion_ofensas import DeteccionOfensa, detectar_ofensa
 
@@ -76,11 +77,13 @@ def contiene_insulto(texto: str) -> bool:
     return detectar_ofensa(texto).categoria == "INSULTO_DIRECTO"
 
 
-def detectar_automatizacion(texto: str) -> tuple[str, tuple[str, ...]]:
+def detectar_automatizacion(texto: str, patrones_bot: frozenset[str] = frozenset()) -> tuple[str, tuple[str, ...]]:
     """Evidencia lingüística, nunca confirmación técnica del origen del mensaje."""
     t = normalizar(texto)
     if not t:
         return "SIN_EVIDENCIA_AUTOMATIZACION", ()
+    if t in patrones_bot:
+        return "AUTOMATICO_ALTA_CONFIANZA", ("patron_bot_configurado",)
     indicadores = tuple(nombre for nombre, patron in (
         ("declaracion_automatica", _BOT_EXPLICITO),
         ("saludo_institucional", _BOT_INSTITUCIONAL),
@@ -117,9 +120,9 @@ def es_pregunta_de_precio(texto: str) -> bool:
     ))
 
 
-def tipo_consulta_entrante(texto: str, catalogo=None) -> str | None:
+def tipo_consulta_entrante(texto: str, catalogo=None, *, patrones_bot: frozenset[str] = frozenset()) -> str | None:
     """Separa preguntas con contenido, solicitudes de ayuda y texto incidental."""
-    clasificacion = clasificar(texto, catalogo)
+    clasificacion = clasificar(texto, catalogo, patrones_bot=patrones_bot)
     if (clasificacion.automatizacion != "SIN_EVIDENCIA_AUTOMATIZACION"
             or clasificacion.confirma or clasificacion.cancela):
         return None
@@ -186,9 +189,29 @@ def patrones_configurados(valor: str) -> dict[str, tuple[str, ...]]:
     return resultado
 
 
-def clasificar(texto: str, catalogo: dict[str, tuple[str, ...]] | None = None) -> Clasificacion:
+def frase_bot_valida(frase) -> bool:
+    return (isinstance(frase, str) and 4 <= len(frase.strip()) <= 500
+            and bool(normalizar(frase))
+            and not re.search(r"@|[0-9](?:[\s.()+-]*[0-9]){6}", frase))
+
+
+@lru_cache(maxsize=4)
+def patrones_bot_configurados(valor: str) -> frozenset[str]:
+    """Compara mensajes completos normalizados para evitar coincidencias incidentales."""
+    try:
+        raw = json.loads(valor or "{}")
+    except (TypeError, ValueError):
+        return frozenset()
+    frases = raw.get("BOT") if isinstance(raw, dict) else None
+    if not isinstance(frases, list):
+        return frozenset()
+    return frozenset(normalizar(frase) for frase in frases if frase_bot_valida(frase))
+
+
+def clasificar(texto: str, catalogo: dict[str, tuple[str, ...]] | None = None,
+               *, patrones_bot: frozenset[str] = frozenset()) -> Clasificacion:
     t = normalizar(texto)
-    automatizacion, indicadores = detectar_automatizacion(texto)
+    automatizacion, indicadores = detectar_automatizacion(texto, patrones_bot)
     ofensa = detectar_ofensa(texto, automatica=automatizacion != "SIN_EVIDENCIA_AUTOMATIZACION")
     if not t or _NO_DERIVAR.fullmatch(t):
         return Clasificacion(automatizacion=automatizacion, indicadores=indicadores,

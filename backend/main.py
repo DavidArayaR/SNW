@@ -32,6 +32,7 @@ from snw.whatsapp import audio_transcripcion
 from snw.whatsapp import consultas_ventana, respuestas_manuales
 from snw.reportes import estadisticas_envio
 from snw.whatsapp.intenciones_call_center import (detectar_automatizacion, es_pregunta_de_precio,
+                                    frase_bot_valida, patrones_bot_configurados,
                                     patrones_configurados, tipo_consulta_entrante)
 from snw.mensajeria import reservas_programadas, simulacion_envio
 import pymysql
@@ -3428,7 +3429,8 @@ def _programar_consulta_entrante(telefono, texto, mensaje_id, referencia):
     if not emisor or not mensaje_id:
         return "sin_campania"
     catalogo = patrones_configurados(config_get("call_center_patrones_consulta", "{}"))
-    if not tipo_consulta_entrante(texto, catalogo):
+    bots = patrones_bot_configurados(config_get("call_center_patrones_bot", "{}"))
+    if not tipo_consulta_entrante(texto, catalogo, patrones_bot=bots):
         return "sin_consulta"
     programada = consultas_ventana.programar(
         emisor["phoneNumberId"], normalizar_telefono(telefono) or telefono, mensaje_id, referencia)
@@ -3447,9 +3449,10 @@ def _resolver_ventana_consulta(ventana):
     if servicio._estaba_opt_out(telefono):
         return
     catalogo = patrones_configurados(config_get("call_center_patrones_consulta", "{}"))
+    bots = patrones_bot_configurados(config_get("call_center_patrones_bot", "{}"))
     mensajes = [m for m in ventana["mensajes"] if m["tipo"] != "text" or
-                detectar_automatizacion(m["texto"] or "")[0] == "SIN_EVIDENCIA_AUTOMATIZACION"]
-    consultas = [(m, tipo_consulta_entrante(m["texto"] or "", catalogo))
+                detectar_automatizacion(m["texto"] or "", bots)[0] == "SIN_EVIDENCIA_AUTOMATIZACION"]
+    consultas = [(m, tipo_consulta_entrante(m["texto"] or "", catalogo, patrones_bot=bots))
                  for m in mensajes if m["tipo"] == "text"
                  and not whatsapp_service.es_solo_saludo_o_estado(m["texto"] or "")]
     elegida = next((m for m, tipo in consultas if tipo == "consulta"), None)
@@ -5844,6 +5847,8 @@ _CONFIG_SECCIONES = [
         "campos": [
             {"clave": "call_center_patrones_consulta", "etiqueta": "Patrones de consulta (JSON)", "tipo": "textarea",
              "ayuda": "Usa una frase por línea en el editor sencillo o marca «Pegar JSON». Se validan antes de activarse; no incluyas datos de pacientes."},
+            {"clave": "call_center_patrones_bot", "etiqueta": "Patrones de bots", "tipo": "textarea",
+             "ayuda": "Agrega un mensaje automático completo por línea o usa «Pegar JSON». SNW compara el mensaje completo sin distinguir tildes, mayúsculas ni signos. Omite los datos de pacientes."},
         ],
     },
 ]
@@ -6781,6 +6786,16 @@ def actualizar_configuracion_completa(body: ConfigTodoIn, sesion: dict = Depends
             # Conservar el texto original para editarlo; el clasificador
             # normaliza una copia al comparar las respuestas recibidas.
             v = json.dumps(catalogo_patrones, ensure_ascii=False)
+        if clave == "call_center_patrones_bot":
+            try:
+                catalogo_bots = json.loads(v or "{}")
+            except ValueError:
+                raise HTTPException(422, detail="Los patrones de bots deben ser JSON válido.")
+            if (not isinstance(catalogo_bots, dict) or any(
+                    tipo != "BOT" or not isinstance(frases, list) or not all(map(frase_bot_valida, frases))
+                    for tipo, frases in catalogo_bots.items())):
+                raise HTTPException(422, detail="Usa la categoría BOT y mensajes de 4 a 500 caracteres sin teléfonos ni correos.")
+            v = json.dumps(catalogo_bots, ensure_ascii=False)
         if clave in ("smtp_tls", "wa_rate_limit_activo", "anti_flip_flop_dev"):
             v = "true" if v.lower() in ("true", "1", "on", "si", "sí") else "false"
         if clave == "reagendar_envio_activo":

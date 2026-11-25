@@ -111,20 +111,23 @@ document.querySelectorAll("[data-config-tab]").forEach((boton) => {
 });
 window.addEventListener("resize", posicionarIndicadorConfig);
 
-const CATEGORIAS_PATRONES = [
-  ["CONSULTA_HORAS", "Horas y citas"],
-  ["CONSULTA_MEDICO", "Profesionales de salud"],
-  ["CONSULTA_PRECIOS", "Precios"],
-  ["SOLICITA_CONTACTO", "Solicitud de contacto"],
-  ["SOLICITA_INFORMACION", "Solicitud de información"],
-  ["CONSULTA_AMBIGUA", "Consultas generales"],
-];
+const CATEGORIAS_PATRONES = {
+  call_center_patrones_consulta: [
+    ["CONSULTA_HORAS", "Horas y citas"],
+    ["CONSULTA_MEDICO", "Profesionales de salud"],
+    ["CONSULTA_PRECIOS", "Precios"],
+    ["SOLICITA_CONTACTO", "Solicitud de contacto"],
+    ["SOLICITA_INFORMACION", "Solicitud de información"],
+    ["CONSULTA_AMBIGUA", "Consultas generales"],
+  ],
+  call_center_patrones_bot: [["BOT", "Mensajes automáticos"]],
+};
 
-function leerPatrones(valor) {
+function leerPatrones(valor, clavePatrones) {
   try {
     const obj = JSON.parse(valor || "{}");
     if (!obj || typeof obj !== "object" || Array.isArray(obj)) return null;
-    const conocidas = new Set(CATEGORIAS_PATRONES.map(([clave]) => clave));
+    const conocidas = new Set(CATEGORIAS_PATRONES[clavePatrones].map(([clave]) => clave));
     if (Object.entries(obj).some(([clave, frases]) =>
       !conocidas.has(clave) || !Array.isArray(frases) || frases.some((f) => typeof f !== "string"))) return null;
     return obj;
@@ -318,38 +321,39 @@ function prepararEditorReagendar(wrap, valor) {
   });
 }
 
-function patronesEquivalentes(a, b) {
-  const primero = leerPatrones(a);
-  const segundo = leerPatrones(b);
+function patronesEquivalentes(a, b, clavePatrones) {
+  const primero = leerPatrones(a, clavePatrones);
+  const segundo = leerPatrones(b, clavePatrones);
   if (!primero || !segundo) return a.trim() === b.trim();
-  return CATEGORIAS_PATRONES.every(([clave]) =>
+  return CATEGORIAS_PATRONES[clavePatrones].every(([clave]) =>
     JSON.stringify(primero[clave] || []) === JSON.stringify(segundo[clave] || []));
 }
 
 function htmlEditorPatrones(clave, valor) {
-  const obj = leerPatrones(valor);
-  const grupos = CATEGORIAS_PATRONES.map(([motivo, titulo]) => {
-    const id = `patrones_${motivo}`;
+  const obj = leerPatrones(valor, clave);
+  const esBot = clave === "call_center_patrones_bot";
+  const grupos = CATEGORIAS_PATRONES[clave].map(([motivo, titulo]) => {
+    const id = `${clave}_${motivo}`;
     return `<div class="config-patrones__grupo">` +
       `<label for="${id}">${escaparHtml(titulo)} <span class="config-patrones__contador" data-contador-patron="${motivo}">0 frases</span></label>` +
-      `<textarea id="${id}" data-patron="${motivo}" rows="3" placeholder="Una frase por línea" spellcheck="true">${escaparHtml((obj?.[motivo] || []).join("\n"))}</textarea>` +
+      `<textarea id="${id}" data-patron="${motivo}" rows="3" placeholder="${esBot ? "Ej.: El equipo se comunicará contigo al retomar la atención" : "Una frase por línea"}" spellcheck="true">${escaparHtml(frasesPatronesParaEditar(obj?.[motivo] || [], motivo))}</textarea>` +
       `<p class="config-patrones__error" data-error-patron="${motivo}" hidden></p></div>`;
   }).join("");
-  return `<div class="config-patrones" data-modo="${obj ? "facil" : "json"}">` +
+  return `<div class="config-patrones" data-config-patrones="${clave}" data-modo="${obj ? "facil" : "json"}">` +
     `<label class="config-patrones__toggle"><input type="checkbox" data-pegar-json${obj ? "" : " checked"}> Pegar JSON</label>` +
-    `<div class="config-patrones__exportar">` +
+    (esBot ? "" : `<div class="config-patrones__exportar">` +
       `<label for="corpusExportar">Corpus para revisar</label>` +
       `<select id="corpusExportar" data-corpus-origen><option value="completo">Mensajes completos</option>` +
       `<option value="desidentificado">Mensajes desidentificados (legado)</option><option value="ambos">Ambos corpus</option></select>` +
       `<button type="button" class="btn btn--ghost" data-descargar-corpus><i class="fa-solid fa-download" aria-hidden="true"></i> Descargar corpus CSV</button>` +
-      `<p class="field__hint">Completa la columna tipo_respuesta para clasificar los mensajes y preparar tus patrones del JSON. La descarga no modifica los patrones.</p></div>` +
+      `<p class="field__hint">Completa la columna tipo_respuesta para clasificar los mensajes y preparar tus patrones del JSON. La descarga no modifica los patrones.</p></div>`) +
     `<div class="config-patrones__facil"${obj ? "" : " hidden"}>` +
-      `<p class="config-patrones__intro">Escribe una frase por línea en la categoría correspondiente.</p>` +
+      `<p class="config-patrones__intro">${esBot ? "Escribe un mensaje completo por línea." : "Escribe una frase por línea en la categoría correspondiente."}</p>` +
       `<div class="config-patrones__grupos">${grupos}</div>` +
       `<details class="config-patrones__vista"><summary>Ver JSON que se guardará</summary><pre></pre></details></div>` +
     `<div class="config-patrones__raw"${obj ? " hidden" : ""}>` +
-      `<label for="patrones_json_raw">Pega o edita el JSON completo</label>` +
-      `<textarea id="patrones_json_raw" data-patrones-raw rows="12" spellcheck="false">${escaparHtml(obj ? JSON.stringify(obj, null, 2) : valor)}</textarea>` +
+      `<label for="${clave}_json_raw">Pega o edita el JSON completo</label>` +
+      `<textarea id="${clave}_json_raw" data-patrones-raw rows="12" spellcheck="false">${escaparHtml(obj ? JSON.stringify(obj, null, 2) : valor)}</textarea>` +
       `<p class="config-patrones__error" data-error-json hidden></p></div>` +
     `<textarea id="cf_${clave}" data-clave="${clave}" hidden>${escaparHtml(valor)}</textarea></div>`;
 }
@@ -389,17 +393,33 @@ async function descargarCorpus(wrap) {
   }
 }
 
+function frasesPatronesParaEditar(frases, motivo) {
+  return (motivo === "BOT" ? frases.map((frase) => frase.replace(/\s+/g, " ").trim()) : frases).join("\n");
+}
+
+function errorFrasesPatrones(frases, motivo) {
+  if (motivo === "BOT") {
+    return frases.some((frase) => {
+      const texto = frase.trim();
+      const longitud = Array.from(texto).length;
+      return longitud < 4 || longitud > 500 || !/[a-z0-9]/i.test(texto.normalize("NFKD")) ||
+        /@|[0-9](?:[\s.()+-]*[0-9]){6}/.test(texto);
+    }) ? "Usa mensajes de 4 a 500 caracteres sin teléfonos ni correos." : "";
+  }
+  return frases.some((frase) => frase.length < 4 || frase.length > 80 || /[\d@]/.test(frase))
+    ? "Cada frase debe tener entre 4 y 80 caracteres, sin números ni @." : "";
+}
+
 function actualizarEditorPatrones(wrap) {
   const editor = wrap.querySelector(".config-patrones");
   if (!editor) return;
   const obj = {};
   let valido = true;
-  for (const [motivo] of CATEGORIAS_PATRONES) {
+  for (const [motivo] of CATEGORIAS_PATRONES[editor.dataset.configPatrones]) {
     const textarea = editor.querySelector(`[data-patron="${motivo}"]`);
     const frases = textarea.value.split(/\r?\n/).map((f) => f.trim()).filter(Boolean);
     const error = editor.querySelector(`[data-error-patron="${motivo}"]`);
-    const mensaje = frases.some((f) => f.length < 4 || f.length > 80 || /[\d@]/.test(f))
-        ? "Cada frase debe tener entre 4 y 80 caracteres, sin números ni @." : "";
+    const mensaje = errorFrasesPatrones(frases, motivo);
     error.textContent = mensaje;
     error.hidden = !mensaje;
     textarea.setAttribute("aria-invalid", mensaje ? "true" : "false");
@@ -417,14 +437,12 @@ function actualizarEditorPatrones(wrap) {
 function actualizarJsonPatrones(wrap) {
   const editor = wrap.querySelector(".config-patrones");
   const raw = editor.querySelector("[data-patrones-raw]");
-  const obj = leerPatrones(raw.value);
+  const obj = leerPatrones(raw.value, editor.dataset.configPatrones);
   let mensaje = !obj ? "JSON inválido: usa un objeto con las categorías conocidas y listas de frases." : "";
   if (obj && !mensaje) {
-    for (const [motivo] of CATEGORIAS_PATRONES) {
+    for (const [motivo] of CATEGORIAS_PATRONES[editor.dataset.configPatrones]) {
       const frases = obj[motivo] || [];
-      if (frases.some((f) => f.length < 4 || f.length > 80 || /[\d@]/.test(f))) {
-        mensaje = `${motivo}: cada frase debe tener entre 4 y 80 caracteres, sin números ni @.`;
-      }
+      mensaje = errorFrasesPatrones(frases, motivo);
       if (mensaje) break;
     }
   }
@@ -447,14 +465,14 @@ function cambiarModoPatrones(wrap) {
     actualizarJsonPatrones(wrap);
     return;
   }
-  const obj = leerPatrones(editor.querySelector("[data-patrones-raw]").value);
+  const obj = leerPatrones(editor.querySelector("[data-patrones-raw]").value, editor.dataset.configPatrones);
   if (!obj || editor.classList.contains("config-patrones--invalido")) {
     check.checked = true;
     toast("Corrige el JSON antes de volver al editor sencillo.", "error");
     return;
   }
-  for (const [motivo] of CATEGORIAS_PATRONES) {
-    editor.querySelector(`[data-patron="${motivo}"]`).value = (obj[motivo] || []).join("\n");
+  for (const [motivo] of CATEGORIAS_PATRONES[editor.dataset.configPatrones]) {
+    editor.querySelector(`[data-patron="${motivo}"]`).value = frasesPatronesParaEditar(obj[motivo] || [], motivo);
   }
   editor.dataset.modo = "facil";
   editor.querySelector(".config-patrones__facil").hidden = false;
@@ -464,13 +482,13 @@ function cambiarModoPatrones(wrap) {
 
 function restaurarPatrones(wrap, valor) {
   const editor = wrap.querySelector(".config-patrones");
-  const obj = leerPatrones(valor);
+  const obj = leerPatrones(valor, editor.dataset.configPatrones);
   editor.querySelector("[data-patrones-raw]").value = obj ? JSON.stringify(obj, null, 2) : valor;
   if (!obj) editor.querySelector("[data-pegar-json]").checked = true;
   if (obj) {
     editor.classList.remove("config-patrones--invalido");
-    for (const [motivo] of CATEGORIAS_PATRONES) {
-      editor.querySelector(`[data-patron="${motivo}"]`).value = (obj[motivo] || []).join("\n");
+    for (const [motivo] of CATEGORIAS_PATRONES[editor.dataset.configPatrones]) {
+      editor.querySelector(`[data-patron="${motivo}"]`).value = frasesPatronesParaEditar(obj[motivo] || [], motivo);
     }
   }
   cambiarModoPatrones(wrap);
@@ -875,13 +893,13 @@ function render(secciones) {
         ? c.clave.slice(0, -"_RESERVO_API_TOKEN".length) : null;
       const wrap = document.createElement("div");
       wrap.className = "field config-campo" +
-        (c.clave === "call_center_patrones_consulta" ? " config-campo--patrones" : "") +
+        (c.clave in CATEGORIAS_PATRONES ? " config-campo--patrones" : "") +
         (CLAVES_REAGENDAR.includes(c.clave) ? " config-campo--reagendar" : "");
 
       const id = "cf_" + c.clave;
       let control = "";
 
-      if (c.clave === "call_center_patrones_consulta") {
+      if (c.clave in CATEGORIAS_PATRONES) {
         control = htmlEditorPatrones(c.clave, val);
       } else if (CLAVES_REAGENDAR.includes(c.clave)) {
         control = htmlEditorReagendar(c.clave, val);
@@ -907,7 +925,7 @@ function render(secciones) {
       }
 
       wrap.innerHTML =
-        `<label${c.clave === "call_center_patrones_consulta" || CLAVES_REAGENDAR.includes(c.clave) ? "" : ` for="${id}"`}>${escaparHtml(c.etiqueta)} <span class="config-clave">${c.clave}</span></label>` +
+        `<label${c.clave in CATEGORIAS_PATRONES || CLAVES_REAGENDAR.includes(c.clave) ? "" : ` for="${id}"`}>${escaparHtml(c.etiqueta)} <span class="config-clave">${c.clave}</span></label>` +
         control +
         (codigoTokenReservo
           ? `<span class="config-reservo-token-estado ${tokensReservoConfigurados[codigoTokenReservo] ? "config-reservo-token-estado--ok" : "config-reservo-token-estado--faltante"}" data-reservo-token-estado="${escaparAtributo(codigoTokenReservo)}">${tokensReservoConfigurados[codigoTokenReservo] ? "Configurado correctamente" : "Sin configurar"}</span>`
@@ -919,8 +937,8 @@ function render(secciones) {
       campos[c.clave] = { def: c, input };
       input.addEventListener("input", marcarCambios);
       input.addEventListener("change", marcarCambios);
-      if (c.clave === "call_center_patrones_consulta" && wrap.querySelector(".config-patrones")) {
-        wrap.querySelector("[data-descargar-corpus]").addEventListener("click", () => descargarCorpus(wrap));
+      if (c.clave in CATEGORIAS_PATRONES && wrap.querySelector(".config-patrones")) {
+        wrap.querySelector("[data-descargar-corpus]")?.addEventListener("click", () => descargarCorpus(wrap));
         wrap.querySelectorAll("[data-patron]").forEach((textarea) =>
           textarea.addEventListener("input", () => actualizarEditorPatrones(wrap)));
         wrap.querySelector("[data-patrones-raw]").addEventListener("input", () => actualizarJsonPatrones(wrap));
@@ -1101,7 +1119,7 @@ function diff() {
   for (const clave of Object.keys(campos)) {
     const nuevo = String(valorActual(clave));
     const viejo = String(valores[clave] ?? "");
-    if (clave === "call_center_patrones_consulta" ? !patronesEquivalentes(nuevo, viejo)
+    if (clave in CATEGORIAS_PATRONES ? !patronesEquivalentes(nuevo, viejo, clave)
         : CLAVES_REAGENDAR.includes(clave) ? !mapasEquivalentes(nuevo, viejo)
         : nuevo.trim() !== viejo.trim()) {
       cambios[clave] = nuevo.trim();
@@ -1180,7 +1198,7 @@ async function guardar() {
       const v = valores[clave] ?? "";
       if (input.type === "checkbox") input.checked = String(v).toLowerCase() === "true";
       else input.value = v;
-      if (clave === "call_center_patrones_consulta" && input.closest(".config-patrones")) {
+      if (clave in CATEGORIAS_PATRONES && input.closest(".config-patrones")) {
         restaurarPatrones(input.closest(".config-campo"), v);
       }
       if (CLAVES_REAGENDAR.includes(clave)) restaurarMapaReagendar(input.closest(".config-campo"), v);
@@ -1207,7 +1225,7 @@ function descartar() {
     const v = valores[clave] ?? "";
     if (input.type === "checkbox") input.checked = String(v).toLowerCase() === "true";
     else input.value = v;
-    if (clave === "call_center_patrones_consulta" && input.closest(".config-patrones")) {
+    if (clave in CATEGORIAS_PATRONES && input.closest(".config-patrones")) {
       restaurarPatrones(input.closest(".config-campo"), v);
     }
     if (CLAVES_REAGENDAR.includes(clave)) restaurarMapaReagendar(input.closest(".config-campo"), v);

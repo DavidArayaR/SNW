@@ -465,6 +465,7 @@ CONFIG_DEFAULTS = {
         "y envía el mensaje preparado para que una persona pueda atenderte."
     ),
     "call_center_patrones_consulta": "{}",
+    "call_center_patrones_bot": "{}",
     # Correo (confirmación de envíos en producción)
     "smtp_host": "",
     "smtp_port": "587",

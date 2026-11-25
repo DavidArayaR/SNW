@@ -29,7 +29,9 @@ from snw.whatsapp.whatsapp_channels import (CENTROS, EMISOR_WEBHOOK, catalogo_ce
                                app_id_centro, credenciales_centro, listar_canales, resolver_phone_id)
 from snw.whatsapp.whatsapp_channel_verification import verificar_canal_meta
 from snw.whatsapp.corpus_respuestas import guardar_mensaje_completo
-from snw.whatsapp.intenciones_call_center import clasificar, normalizar as normalizar_intencion, patrones_configurados
+from snw.whatsapp.intenciones_call_center import (
+    clasificar, normalizar as normalizar_intencion, patrones_bot_configurados, patrones_configurados,
+)
 from snw.mensajeria.plantilla_media import obtener_media, ruta_media
 from snw.mensajeria.plantilla_revision import (botones_para_meta, presentar_plantilla,
                                variables_del_cuerpo, version_opciones)
@@ -1427,8 +1429,11 @@ class WhatsAppService:
             # el texto exacto conserva compatibilidad con botones antiguos.
             es_boton = tipo in ("button", "interactive")
             boton = (texto or "").strip().casefold()
-            clasificacion = clasificar(cuerpo, patrones_configurados(
-                config_get("call_center_patrones_consulta", "{}"))) if tipo == "text" else None
+            clasificacion = None
+            if tipo == "text":
+                catalogo = patrones_configurados(config_get("call_center_patrones_consulta", "{}"))
+                bots = patrones_bot_configurados(config_get("call_center_patrones_bot", "{}"))
+                clasificacion = clasificar(cuerpo, catalogo, patrones_bot=bots)
             if clasificacion and clasificacion.automatizacion != "SIN_EVIDENCIA_AUTOMATIZACION":
                 # No reactivar bajas, marcar interés, derivar ni contestar a una
                 # posible autorespuesta. El original permanece en el historial.
@@ -2023,7 +2028,8 @@ class WhatsAppService:
                 )
                 respuesta_id = cur.lastrowid
                 try:
-                    clasificacion = clasificar(texto)
+                    bots = patrones_bot_configurados(config_get("call_center_patrones_bot", "{}"))
+                    clasificacion = clasificar(texto, patrones_bot=bots)
                     ofensa = clasificacion.ofensa
                     detalle = json.dumps({
                         "categoria": ofensa.categoria,
